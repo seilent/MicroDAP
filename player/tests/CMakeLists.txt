@@ -103,3 +103,39 @@ add_test(NAME screenshot-motion
 )
 casdap_test_env(screenshot-motion)
 set_property(TEST screenshot-motion APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-components-portrait
+    COMMAND casdap-player --screenshot components --size 640x960 --out ${shots}/components-640x960.png
+)
+casdap_test_env(screenshot-components-portrait)
+set_property(TEST screenshot-components-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-components-landscape
+    COMMAND casdap-player --screenshot components --size 1920x1080 --out ${shots}/components-1920x1080.png
+)
+casdap_test_env(screenshot-components-landscape)
+set_property(TEST screenshot-components-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-overlays-portrait
+    COMMAND casdap-player --screenshot overlays --size 640x960 --out ${shots}/overlays-640x960.png
+)
+casdap_test_env(screenshot-overlays-portrait)
+set_property(TEST screenshot-overlays-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-overlays-landscape
+    COMMAND casdap-player --screenshot overlays --size 1920x1080 --out ${shots}/overlays-1920x1080.png
+)
+casdap_test_env(screenshot-overlays-landscape)
+set_property(TEST screenshot-overlays-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-volume-portrait
+    COMMAND casdap-player --screenshot volume --size 640x960 --out ${shots}/volume-640x960.png
+)
+casdap_test_env(screenshot-volume-portrait)
+set_property(TEST screenshot-volume-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-volume-landscape
+    COMMAND casdap-player --screenshot volume --size 1920x1080 --out ${shots}/volume-1920x1080.png
+)
+casdap_test_env(screenshot-volume-landscape)
+set_property(TEST screenshot-volume-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")

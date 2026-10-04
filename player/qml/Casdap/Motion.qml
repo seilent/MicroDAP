@@ -16,6 +16,10 @@ QtObject {
         return 1 - (Math.exp(6 * (1 - t)) - 1) / (Math.exp(6) - 1)
     }
 
+    function expOut6Inverse(v: real): real {
+        return 1 - Math.log(1 + (1 - v) * (Math.exp(6) - 1)) / 6
+    }
+
     function expIn6(t: real): real {
         return (Math.exp(6 * t) - 1) / (Math.exp(6) - 1)
     }
@@ -147,4 +151,6 @@ QtObject {
     readonly property int saverDrift: 18000
     readonly property real saverDriftFrom: 8
     readonly property real saverDriftTo: -27
+
+    readonly property int inOutSine: Easing.InOutSine
 }

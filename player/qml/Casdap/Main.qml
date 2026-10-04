@@ -45,7 +45,25 @@ Window {
         anchors.fill: parent
         sourceComponent: root.shotScreen === "specimen" ? specimenComponent
             : root.shotScreen === "motion" ? motionComponent
+            : root.shotScreen === "components" ? componentsComponent
+            : root.shotScreen === "overlays" ? overlaysComponent
+            : root.shotScreen === "volume" ? volumeComponent
             : null
+    }
+
+    Component {
+        id: componentsComponent
+        ComponentsShot {}
+    }
+
+    Component {
+        id: overlaysComponent
+        OverlaysShot {}
+    }
+
+    Component {
+        id: volumeComponent
+        VolumeShot {}
     }
 
     Component {

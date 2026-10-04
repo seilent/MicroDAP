@@ -56,6 +56,9 @@ const QStringList &screens()
         QStringLiteral("blank"),
         QStringLiteral("specimen"),
         QStringLiteral("motion"),
+        QStringLiteral("components"),
+        QStringLiteral("overlays"),
+        QStringLiteral("volume"),
     };
     return names;
 }

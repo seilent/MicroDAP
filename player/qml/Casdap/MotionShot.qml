@@ -35,7 +35,7 @@ Item {
                     height: Ui.px(Ui.rowHeight)
 
                     Text {
-                        y: Ui.px(4)
+                        y: Ui.px(Ui.rowTextInset)
                         text: "Track " + (row.index + 1)
                         color: Ui.white(row.index === 0 ? Ui.listPrimary.alpha : Ui.listPrimary.alphaDim)
                         font: Ui.font(Ui.listPrimary)
@@ -43,7 +43,7 @@ Item {
 
                     Text {
                         anchors.bottom: parent.bottom
-                        anchors.bottomMargin: Ui.px(4)
+                        anchors.bottomMargin: Ui.px(Ui.rowTextInset)
                         text: "Artist " + (row.index + 1)
                         color: Ui.white(Ui.listSecondary.alpha)
                         font: Ui.font(Ui.listSecondary)

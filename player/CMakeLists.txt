@@ -74,6 +74,24 @@ set(casdap_qml
     qml/Casdap/PressScale.qml
     qml/Casdap/Specimen.qml
     qml/Casdap/MotionShot.qml
+    qml/Casdap/components/Glyph.qml
+    qml/Casdap/components/Ring.qml
+    qml/Casdap/components/CroppedHeader.qml
+    qml/Casdap/components/PivotStrip.qml
+    qml/Casdap/components/ListRow.qml
+    qml/Casdap/components/Tile.qml
+    qml/Casdap/components/LetterTile.qml
+    qml/Casdap/components/Backdrop.qml
+    qml/Casdap/components/StatusStrip.qml
+    qml/Casdap/components/Sheet.qml
+    qml/Casdap/components/Dialog.qml
+    qml/Casdap/components/Toast.qml
+    qml/Casdap/components/VolumeOverlay.qml
+    qml/Casdap/components/JumpLetter.qml
+    qml/Casdap/GlyphPaths.js
+    qml/Casdap/ComponentsShot.qml
+    qml/Casdap/OverlaysShot.qml
+    qml/Casdap/VolumeShot.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)

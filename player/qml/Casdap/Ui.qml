@@ -171,7 +171,14 @@ QtObject {
     readonly property real tileL: 116
     readonly property real tileLGutter: 8
     readonly property real letterTileBorder: 1
+    readonly property real letterInsetX: 6
+    readonly property real letterInsetBaseline: 8
     readonly property real rowHeight: 40
+    readonly property real rowTextInset: 4
+    readonly property real rowRing: 20
+    readonly property real songIndent: 24
+    readonly property real playingDot: 4
+    readonly property real playingDotOffset: 6
     readonly property real detailRow: 124
     readonly property real settingsPitch: 43
     readonly property real backRing: 64
@@ -216,4 +223,14 @@ QtObject {
     readonly property real glyphStroke: 4
     readonly property real ringStrokeFocused: 4
     readonly property real ringStrokeIdle: 3
+    readonly property real ringArcStart: -90
+
+    readonly property real overlayPlusY: 72
+    readonly property real overlayNumberBaseline: 160
+    readonly property real overlayMinusOffset: 72
+    readonly property real overlayBottomMargin: 24
+    readonly property real overlayTextPitch: 18
+    readonly property real overlayLit: 1.0
+    readonly property real overlayDim: 0.4
+    readonly property real batteryLowPercent: 10
 }

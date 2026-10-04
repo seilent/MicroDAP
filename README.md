@@ -57,6 +57,15 @@ with a 100 ms easeIn `contentY` tween per step; LT/RT move one page of whole row
 `FocusBar` is the 2 u white bar at `HUB_EDGE - 8` spanning the row, following in 100 ms sine.
 `PressScale` scales its item to 0.96 while A is held, 100 ms linear each way.
 
+Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
+32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, an accent arc
+from `Ui.ringArcStart`, and runs the F4 swap (scale 0.7 to 1 in 400 ms, opacity in 200 ms) on every
+glyph change after the first one. `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
+`Ring` and `FocusBar` take `animated` (default true); cleared, every Behavior is off and a running
+swap jumps to its end. `Backdrop` pauses its loops while `paused`, `screenOff` or not `visible`.
+`Toast.show()` during the exit restarts the entrance from the strip's current position. The volume
+overlay ring is `focused` inside the 0.4 group, so it reads at 0.4 (O20).
+
 Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg]`,
 offscreen, software renderer. Screens: `blank`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
