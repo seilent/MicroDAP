@@ -4,7 +4,8 @@ Console As DAP. A music player session and Bluetooth A2DP receiver for Linux gam
 shipped as a systemd-sysext overlay for [Armada](https://github.com/armada-os/armada).
 
 Status: prototype. The session, the switch units, the Guide preserving pad mapping and the boot
-guard exist. Player, hold daemon, receiver and screen off state are not written yet.
+guard exist and run on an AYANEO Pocket MICRO 2. Player, hold daemon, receiver and screen off state
+are not written yet.
 
 ## Layout
 
