@@ -18,8 +18,14 @@ add_library(casdapcore STATIC
     src/core/Library.h
     src/core/Models.cpp
     src/core/Models.h
+    src/core/Player.cpp
+    src/core/Player.h
+    src/core/Queue.cpp
+    src/core/Queue.h
     src/core/Scanner.cpp
     src/core/Scanner.h
+    src/core/State.cpp
+    src/core/State.h
     src/core/Version.cpp
     src/core/Version.h
 )

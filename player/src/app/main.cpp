@@ -1,5 +1,7 @@
 #include "Library.h"
+#include "Player.h"
 #include "Screenshot.h"
+#include "State.h"
 #include "Version.h"
 
 #include <QCommandLineParser>
@@ -7,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QStandardPaths>
 #include <QTextStream>
 
@@ -43,6 +46,7 @@ int main(int argc, char *argv[])
         if (std::strcmp(argv[i], "--scan-only") == 0 && !qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
             qputenv("QT_QPA_PLATFORM", "offscreen");
     }
+    casdap::initGStreamer(argc, argv);
 
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("casdap-player"));
@@ -84,7 +88,15 @@ int main(int argc, char *argv[])
         return scanOnly(parser.positionalArguments().value(0, music));
     }
 
+    casdap::Library library;
+    casdap::Player player(&library);
+    casdap::State state(&player);
+    state.installSignalHandlers();
+    state.load();
+
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
+    engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");
