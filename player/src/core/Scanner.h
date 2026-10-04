@@ -1,9 +1,12 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
 #include <QList>
 #include <QString>
 #include <QStringList>
+
+#include <atomic>
 
 class QDir;
 class QFileInfo;
@@ -49,7 +52,8 @@ class Scanner
 public:
     explicit Scanner(const QString &artDir);
 
-    ScanResult scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot);
+    ScanResult scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot,
+                    const std::atomic_bool *cancel = nullptr);
 
     static bool isAudioFile(const QString &path);
     static QString albumKey(const QString &album, const QString &albumArtist);
@@ -57,7 +61,7 @@ public:
 private:
     TrackInfo read(const QFileInfo &info, const FileStamp &stamp);
     QString resolveArt(TagLib::File *file, const QString &key, const QDir &dir);
-    QString writeArt(const QString &key, const QByteArray &data, const QString &mime);
+    QString writeArt(const QByteArray &data, const QString &mime);
     QString folderArt(const QDir &dir);
 
     QString m_artDir;

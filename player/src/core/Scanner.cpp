@@ -1,21 +1,16 @@
 #include "Scanner.h"
 
-#include <taglib/attachedpictureframe.h>
 #include <taglib/audioproperties.h>
 #include <taglib/fileref.h>
-#include <taglib/flacfile.h>
-#include <taglib/flacpicture.h>
-#include <taglib/id3v2tag.h>
-#include <taglib/mp4coverart.h>
-#include <taglib/mp4file.h>
-#include <taglib/mp4item.h>
-#include <taglib/mp4tag.h>
-#include <taglib/mpegfile.h>
 #include <taglib/tag.h>
 #include <taglib/tbytevector.h>
+#include <taglib/tfile.h>
+#include <taglib/tlist.h>
+#include <taglib/tmap.h>
 #include <taglib/tpropertymap.h>
 #include <taglib/tstring.h>
 #include <taglib/tstringlist.h>
+#include <taglib/tvariant.h>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -79,45 +74,41 @@ FileStamp stampOf(const QFileInfo &info)
     return {info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch(), info.size()};
 }
 
+bool cancelled(const std::atomic_bool *cancel)
+{
+    return cancel && cancel->load(std::memory_order_relaxed);
+}
+
+QString rootPrefix(const QString &root)
+{
+    const QString path = QDir(root).absolutePath();
+    return path.endsWith(QLatin1Char('/')) ? path : path + QLatin1Char('/');
+}
+
 std::optional<Picture> embeddedPicture(TagLib::File *file)
 {
-    if (auto *flac = dynamic_cast<TagLib::FLAC::File *>(file)) {
-        const TagLib::List<TagLib::FLAC::Picture *> pictures = flac->pictureList();
-        if (pictures.isEmpty())
-            return std::nullopt;
-        const TagLib::FLAC::Picture *picture = pictures.front();
-        return Picture{toBytes(picture->data()), fromTag(picture->mimeType())};
-    }
-    if (auto *mpeg = dynamic_cast<TagLib::MPEG::File *>(file)) {
-        TagLib::ID3v2::Tag *tag = mpeg->ID3v2Tag();
-        if (!tag)
-            return std::nullopt;
-        const TagLib::ID3v2::FrameList frames = tag->frameList("APIC");
-        for (TagLib::ID3v2::Frame *frame : frames) {
-            if (auto *apic = dynamic_cast<TagLib::ID3v2::AttachedPictureFrame *>(frame))
-                return Picture{toBytes(apic->picture()), fromTag(apic->mimeType())};
-        }
+    const TagLib::List<TagLib::VariantMap> pictures = file->complexProperties("PICTURE");
+    if (pictures.isEmpty())
         return std::nullopt;
+
+    const TagLib::VariantMap *chosen = &pictures.front();
+    for (const TagLib::VariantMap &picture : pictures) {
+        if (picture.value("pictureType").toString() == "Front Cover") {
+            chosen = &picture;
+            break;
+        }
     }
-    if (auto *mp4 = dynamic_cast<TagLib::MP4::File *>(file)) {
-        TagLib::MP4::Tag *tag = mp4->tag();
-        if (!tag || !tag->contains("covr"))
-            return std::nullopt;
-        const TagLib::MP4::CoverArtList covers = tag->item("covr").toCoverArtList();
-        if (covers.isEmpty())
-            return std::nullopt;
-        const TagLib::MP4::CoverArt &cover = covers.front();
-        const bool png = cover.format() == TagLib::MP4::CoverArt::PNG;
-        return Picture{toBytes(cover.data()),
-                       png ? QStringLiteral("image/png") : QStringLiteral("image/jpeg")};
-    }
-    return std::nullopt;
+
+    const QByteArray data = toBytes(chosen->value("data").toByteVector());
+    if (data.isEmpty())
+        return std::nullopt;
+    return Picture{data, fromTag(chosen->value("mimeType").toString())};
 }
 
 }
 
 Scanner::Scanner(const QString &artDir)
-    : m_artDir(artDir)
+    : m_artDir(QDir::cleanPath(artDir))
 {
 }
 
@@ -131,17 +122,26 @@ QString Scanner::albumKey(const QString &album, const QString &albumArtist)
     return album + QLatin1Char('\n') + albumArtist;
 }
 
-ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot)
+ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot,
+                         const std::atomic_bool *cancel)
 {
     m_art.clear();
     m_folderArt.clear();
 
     ScanResult result;
     QSet<QString> seen;
+    QStringList prefixes;
     for (const QString &root : roots) {
+        const QFileInfo rootInfo(root);
+        if (!rootInfo.isDir() || !rootInfo.isReadable())
+            continue;
+        prefixes.append(rootPrefix(root));
+
         QDirIterator it(root, QDir::Files | QDir::Readable | QDir::NoDotAndDotDot,
                         QDirIterator::Subdirectories);
         while (it.hasNext()) {
+            if (cancelled(cancel))
+                return ScanResult();
             const QFileInfo info = it.nextFileInfo();
             const QString path = info.absoluteFilePath();
             if (!isAudioFile(path) || seen.contains(path))
@@ -164,8 +164,14 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
     }
 
     for (auto it = snapshot.cbegin(); it != snapshot.cend(); ++it) {
-        if (!seen.contains(it.key()))
-            result.removed.append(it.key());
+        if (seen.contains(it.key()))
+            continue;
+        for (const QString &prefix : prefixes) {
+            if (it.key().startsWith(prefix)) {
+                result.removed.append(it.key());
+                break;
+            }
+        }
     }
     return result;
 }
@@ -221,7 +227,7 @@ QString Scanner::resolveArt(TagLib::File *file, const QString &key, const QDir &
     QString path;
     if (file) {
         if (const std::optional<Picture> picture = embeddedPicture(file))
-            path = writeArt(key, picture->data, picture->mime);
+            path = writeArt(picture->data, picture->mime);
     }
     if (path.isEmpty())
         path = folderArt(dir);
@@ -230,13 +236,13 @@ QString Scanner::resolveArt(TagLib::File *file, const QString &key, const QDir &
     return path;
 }
 
-QString Scanner::writeArt(const QString &key, const QByteArray &data, const QString &mime)
+QString Scanner::writeArt(const QByteArray &data, const QString &mime)
 {
     if (data.isEmpty())
         return {};
     const bool png = mime.compare(QLatin1StringView("image/png"), Qt::CaseInsensitive) == 0;
     const QString hash = QString::fromLatin1(
-        QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex());
+        QCryptographicHash::hash(data, QCryptographicHash::Sha1).toHex());
     const QString path = m_artDir + QLatin1Char('/') + hash
                          + (png ? QStringLiteral(".png") : QStringLiteral(".jpg"));
     if (QFileInfo::exists(path))

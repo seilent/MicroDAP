@@ -27,7 +27,13 @@ int scanOnly(const QString &dir)
 
     QElapsedTimer timer;
     timer.start();
-    QObject::connect(&library, &casdap::Library::scanned, &library, [&library, &timer](int, int, int) {
+    QObject::connect(&library, &casdap::Library::scanned, &library,
+                     [&library, &timer](int, int, int, bool ok) {
+        if (!ok) {
+            QTextStream(stderr) << "casdap-player: scan failed\n";
+            QCoreApplication::exit(1);
+            return;
+        }
         const QVariantMap counts = library.counts();
         QTextStream(stdout) << "scanned " << counts.value(QStringLiteral("tracks")).toInt()
                             << " tracks, " << counts.value(QStringLiteral("albums")).toInt()

@@ -8,7 +8,7 @@
 #include <QStringList>
 #include <QVariantMap>
 
-class QThread;
+#include <atomic>
 
 namespace casdap {
 
@@ -21,9 +21,11 @@ class Library : public QObject
 public:
     explicit Library(QObject *parent = nullptr);
     Library(const QString &dbPath, QObject *parent = nullptr);
+    Library(const QString &dbPath, const QString &artDir, QObject *parent = nullptr);
     ~Library() override;
 
     static QString defaultDbPath();
+    static QString defaultArtDir();
 
     bool isOpen() const;
     QString dbPath() const;
@@ -45,7 +47,7 @@ signals:
     void changed();
     void historyChanged();
     void ratingChanged(qint64 trackId, int rating);
-    void scanned(int added, int updated, int removed);
+    void scanned(int added, int updated, int removed, bool ok);
 
 private:
     void open();
@@ -57,12 +59,13 @@ private:
     qint64 ensureAlbum(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums);
     bool removeTrack(const QString &path);
     bool prune();
+    void pruneArt();
 
     QString m_dbPath;
     QString m_artDir;
     QString m_connection;
     QSqlDatabase m_db;
-    QThread *m_thread = nullptr;
+    std::atomic_bool m_cancel{false};
     bool m_scanning = false;
     bool m_hasPending = false;
     QStringList m_pendingRoots;

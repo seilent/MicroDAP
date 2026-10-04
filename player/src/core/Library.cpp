@@ -2,7 +2,9 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -17,8 +19,9 @@ namespace {
 
 std::atomic_int connectionCounter{0};
 
+constexpr int schemaVersion = 1;
+
 const char *const schema[] = {
-    "PRAGMA foreign_keys = ON",
     "CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
     "CREATE TABLE IF NOT EXISTS genres(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
     "CREATE TABLE IF NOT EXISTS albums(id INTEGER PRIMARY KEY, title TEXT NOT NULL, "
@@ -30,10 +33,13 @@ const char *const schema[] = {
     "track_no INTEGER, disc_no INTEGER, year INTEGER, genre TEXT NOT NULL DEFAULT '', "
     "duration_ms INTEGER, added INTEGER NOT NULL, rating INTEGER NOT NULL DEFAULT 0)",
     "CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id)",
+    "CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist)",
+    "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre)",
     "CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY, "
     "track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, "
     "played_at INTEGER NOT NULL)",
     "CREATE INDEX IF NOT EXISTS history_played ON history(played_at)",
+    "CREATE INDEX IF NOT EXISTS history_track ON history(track_id)",
     "CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS playlist_items("
     "playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE, "
@@ -42,6 +48,7 @@ const char *const schema[] = {
     "PRIMARY KEY(playlist_id, pos))",
     "CREATE TABLE IF NOT EXISTS pins(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, "
     "ref_id INTEGER NOT NULL, pos INTEGER NOT NULL)",
+    "PRAGMA user_version = 1",
 };
 
 const char *const pruneStatements[] = {
@@ -82,15 +89,19 @@ bool run(const QSqlDatabase &db, const char *sql)
 }
 
 Library::Library(QObject *parent)
-    : Library(defaultDbPath(), parent)
+    : Library(defaultDbPath(), defaultArtDir(), parent)
 {
 }
 
 Library::Library(const QString &dbPath, QObject *parent)
+    : Library(dbPath, defaultArtDir(), parent)
+{
+}
+
+Library::Library(const QString &dbPath, const QString &artDir, QObject *parent)
     : QObject(parent)
     , m_dbPath(dbPath)
-    , m_artDir(QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
-               + QStringLiteral("/casdap/art"))
+    , m_artDir(QDir::cleanPath(artDir))
     , m_connection(QStringLiteral("casdap-library-%1").arg(connectionCounter.fetch_add(1)))
 {
     open();
@@ -98,8 +109,10 @@ Library::Library(const QString &dbPath, QObject *parent)
 
 Library::~Library()
 {
-    if (m_thread)
-        m_thread->wait();
+    m_cancel.store(true);
+    const QList<QThread *> threads = findChildren<QThread *>();
+    for (QThread *thread : threads)
+        thread->wait();
     m_db.close();
     m_db = QSqlDatabase();
     QSqlDatabase::removeDatabase(m_connection);
@@ -111,6 +124,12 @@ QString Library::defaultDbPath()
            + QStringLiteral("/casdap/library.db");
 }
 
+QString Library::defaultArtDir()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
+           + QStringLiteral("/casdap/art");
+}
+
 void Library::open()
 {
     QDir().mkpath(QFileInfo(m_dbPath).absolutePath());
@@ -120,8 +139,17 @@ void Library::open()
         qWarning() << "casdap library: cannot open" << m_dbPath << m_db.lastError().text();
         return;
     }
-    for (const char *sql : schema)
-        run(m_db, sql);
+    run(m_db, "PRAGMA foreign_keys = ON");
+
+    QSqlQuery version(QStringLiteral("PRAGMA user_version"), m_db);
+    const int current = version.next() ? version.value(0).toInt() : 0;
+    if (current == 0) {
+        for (const char *sql : schema)
+            run(m_db, sql);
+    } else if (current != schemaVersion) {
+        qWarning() << "casdap library: unsupported schema version" << current << "in" << m_dbPath;
+        m_db.close();
+    }
 }
 
 bool Library::isOpen() const
@@ -186,7 +214,7 @@ QHash<QString, FileStamp> Library::snapshot() const
 void Library::rescan(const QStringList &roots)
 {
     if (!m_db.isOpen()) {
-        emit scanned(0, 0, 0);
+        emit scanned(0, 0, 0, false);
         return;
     }
     if (m_scanning) {
@@ -198,20 +226,16 @@ void Library::rescan(const QStringList &roots)
 
     const QHash<QString, FileStamp> snap = snapshot();
     const QString artDir = m_artDir;
-    QThread *thread = QThread::create([this, roots, snap, artDir] {
+    const std::atomic_bool *cancel = &m_cancel;
+    QThread *thread = QThread::create([this, roots, snap, artDir, cancel] {
         Scanner scanner(artDir);
-        ScanResult result = scanner.scan(roots, snap);
+        ScanResult result = scanner.scan(roots, snap, cancel);
         QMetaObject::invokeMethod(
             this, [this, result = std::move(result)] { finishScan(result); },
             Qt::QueuedConnection);
     });
     thread->setParent(this);
-    connect(thread, &QThread::finished, this, [this, thread] {
-        if (m_thread == thread)
-            m_thread = nullptr;
-        thread->deleteLater();
-    });
-    m_thread = thread;
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
 }
 
@@ -230,16 +254,23 @@ void Library::finishScan(const ScanResult &result)
     ok = ok && prune();
     if (ok)
         ok = m_db.commit();
-    if (!ok) {
+    if (ok) {
+        pruneArt();
+    } else {
         qWarning() << "casdap library: scan apply failed" << m_db.lastError().text();
         m_db.rollback();
     }
 
     setScanning(false);
-    emit countsChanged();
-    emit changed();
-    emit scanned(static_cast<int>(result.added.size()), static_cast<int>(result.updated.size()),
-                 static_cast<int>(result.removed.size()));
+    if (ok) {
+        emit countsChanged();
+        emit changed();
+        emit scanned(static_cast<int>(result.added.size()),
+                     static_cast<int>(result.updated.size()),
+                     static_cast<int>(result.removed.size()), true);
+    } else {
+        emit scanned(0, 0, 0, false);
+    }
 
     if (m_hasPending) {
         m_hasPending = false;
@@ -251,17 +282,8 @@ void Library::finishScan(const ScanResult &result)
 qint64 Library::ensureAlbum(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums)
 {
     const QString key = Scanner::albumKey(track.album, track.albumArtist);
-    if (const auto cached = albums.constFind(key); cached != albums.cend()) {
-        if (!track.artPath.isEmpty()) {
-            QSqlQuery update(m_db);
-            update.prepare(QStringLiteral("UPDATE albums SET art_path = ? WHERE id = ?"));
-            update.addBindValue(track.artPath);
-            update.addBindValue(*cached);
-            if (!run(update))
-                return -1;
-        }
+    if (const auto cached = albums.constFind(key); cached != albums.cend())
         return *cached;
-    }
 
     QSqlQuery insert(m_db);
     insert.prepare(QStringLiteral(
@@ -342,6 +364,36 @@ bool Library::prune()
             return false;
     }
     return true;
+}
+
+void Library::pruneArt()
+{
+    QSet<QString> referenced;
+    QList<qint64> missing;
+    QSqlQuery query(QStringLiteral("SELECT id, art_path FROM albums WHERE art_path IS NOT NULL"),
+                    m_db);
+    while (query.next()) {
+        const QString path = query.value(1).toString();
+        if (QFileInfo::exists(path))
+            referenced.insert(path);
+        else
+            missing.append(query.value(0).toLongLong());
+    }
+    query.finish();
+
+    for (qint64 id : missing) {
+        QSqlQuery update(m_db);
+        update.prepare(QStringLiteral("UPDATE albums SET art_path = NULL WHERE id = ?"));
+        update.addBindValue(id);
+        run(update);
+    }
+
+    const QFileInfoList files = QDir(m_artDir).entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+    for (const QFileInfo &file : files) {
+        const QString path = file.absoluteFilePath();
+        if (!referenced.contains(path))
+            QFile::remove(path);
+    }
 }
 
 void Library::addHistory(qint64 trackId, const QDateTime &playedAt)

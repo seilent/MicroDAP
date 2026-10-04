@@ -126,7 +126,8 @@ void PlayerTest::initTestCase()
     m_music = m_dir.path() + QStringLiteral("/music");
     QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC), m_music));
 
-    m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"));
+    m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
+                                          m_dir.path() + QStringLiteral("/art"));
     QVERIFY(m_library->isOpen());
     QSignalSpy spy(m_library.get(), &Library::scanned);
     m_library->rescan({m_music});
