@@ -117,8 +117,12 @@ classifies each press by the running session. Hold 1 s in game mode starts `casd
 Steam shows its shortcut overlay just before. While a title runs the first hold is ignored and a
 second hold within 3 s switches. Hold in casdap starts `casdap-switch-back.service`, tap sends
 `PlayPause` to `org.mpris.MediaPlayer2.casdap`. In Plasma a hold switches; in any other session it
-logs. `CASDAP_HOTKEYD_DRY_RUN=1` (runtime drop-in under `~/.config/systemd/user/`) logs `would:`
-lines instead of acting.
+logs. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
+list override `CASDAP_HOTKEYD_VOLUME_NAMES=a:b`, read with their own `evtest` streams) step
+`wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@` by 5% per press and autorepeat and emit
+`org.casdap.Hotkeys.VolumeChanged(d)` at `/org/casdap/Hotkeys` with the level from `wpctl get-volume`;
+in every other session they are left to Steam. `CASDAP_HOTKEYD_DRY_RUN=1` (runtime drop-in under
+`~/.config/systemd/user/`) logs `would:` lines instead of acting.
 
 ## Guard
 

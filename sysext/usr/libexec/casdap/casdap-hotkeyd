@@ -5,6 +5,7 @@ LONG_MS="${CASDAP_HOTKEYD_LONG_MS:-1000}"
 CONFIRM_MS="${CASDAP_HOTKEYD_CONFIRM_MS:-3000}"
 DEVICE_WAIT_SEC="${CASDAP_HOTKEYD_DEVICE_WAIT_SEC:-15}"
 DEVICE_NAME="${CASDAP_HOTKEYD_DEVICE_NAME:-InputPlumber Keyboard}"
+VOLUME_NAMES="${CASDAP_HOTKEYD_VOLUME_NAMES-gpio-keys:pm8941_resin}"
 DRY_RUN="${CASDAP_HOTKEYD_DRY_RUN:-0}"
 KEY="${CASDAP_HOTKEYD_KEY:-KEY_F13}"
 DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
@@ -27,7 +28,7 @@ key_device() {
     for dev in "${DEV_INPUT}"/event*; do
         [[ -e "${dev}" ]] || continue
         name=$(cat "${SYS_INPUT}/$(basename "${dev}")/device/name" 2>/dev/null) || continue
-        [[ "${name}" == "${DEVICE_NAME}" ]] || continue
+        [[ "${name}" == "$1" ]] || continue
         printf '%s\n' "${dev}"
         return 0
     done
@@ -37,11 +38,34 @@ key_device() {
 wait_for_key_device() {
     local waited=0
     while :; do
-        key_device && return 0
+        key_device "${DEVICE_NAME}" && return 0
         (( waited >= DEVICE_WAIT_SEC )) && return 1
         sleep 1
         waited=$((waited + 1))
     done
+}
+
+volume_devices() {
+    local names name dev
+    IFS=: read -r -a names <<< "${VOLUME_NAMES}"
+    for name in "${names[@]}"; do
+        [[ -n "${name}" ]] || continue
+        if dev=$(key_device "${name}"); then
+            printf '%s\n' "${dev}"
+        else
+            log "volume node ${name} not found"
+        fi
+    done
+}
+
+event_stream() {
+    local dev pids=()
+    for dev in "$@"; do
+        evtest "${dev}" 2>/dev/null &
+        pids+=($!)
+    done
+    wait -n
+    kill "${pids[@]}" 2>/dev/null
 }
 
 session_state() {
@@ -59,6 +83,8 @@ title_running() { pgrep -f 'SteamLaunch AppId=' >/dev/null 2>&1; }
 plasma_running() { pgrep -x plasmashell >/dev/null 2>&1; }
 
 last_hold_ms=0
+vol_key=
+vol_session=
 
 on_tap() {
     case "$1" in
@@ -95,8 +121,24 @@ on_hold() {
     esac
 }
 
+on_volume() {
+    local dir=$1 value=$2 label level rest
+    if [[ "${value}" == 1 || "${dir}" != "${vol_key}" ]]; then
+        vol_key=${dir}
+        vol_session=$(session_state)
+    fi
+    [[ "${vol_session}" == casdap ]] || return 0
+    run wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "5%${dir}"
+    read -r label level rest < <(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
+    if [[ "${label:-}" != Volume: || -z "${level:-}" ]]; then
+        log "wpctl get-volume gave no level"
+        return 0
+    fi
+    run busctl --user emit /org/casdap/Hotkeys org.casdap.Hotkeys VolumeChanged d "${level}"
+}
+
 main() {
-    local dev line read_result state press_ms rem session
+    local dev vol_devs line read_result state press_ms rem session
 
     trap 'exit 0' INT TERM
 
@@ -104,9 +146,10 @@ main() {
         log "${DEVICE_NAME} not found after ${DEVICE_WAIT_SEC} s"
         return 0
     }
+    mapfile -t vol_devs < <(volume_devices)
 
-    log "watching ${dev} for ${KEY}, hold ${LONG_MS} ms, dry run ${DRY_RUN}"
-    exec 3< <(evtest "${dev}" 2>/dev/null)
+    log "watching ${dev} for ${KEY}, volume on ${vol_devs[*]:-none}, hold ${LONG_MS} ms, dry run ${DRY_RUN}"
+    exec 3< <(event_stream "${dev}" "${vol_devs[@]}")
     state=idle
     press_ms=0
     session=
@@ -149,6 +192,12 @@ main() {
                     held) on_tap "${session}" ;;
                 esac
                 state=idle
+                ;;
+            *"(KEY_VOLUMEUP), value "[12])
+                on_volume + "${line##*value }"
+                ;;
+            *"(KEY_VOLUMEDOWN), value "[12])
+                on_volume - "${line##*value }"
                 ;;
         esac
     done
