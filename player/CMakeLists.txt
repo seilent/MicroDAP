@@ -18,6 +18,8 @@ add_library(casdapcore STATIC
     src/core/Library.h
     src/core/Models.cpp
     src/core/Models.h
+    src/core/Mpris.cpp
+    src/core/Mpris.h
     src/core/Player.cpp
     src/core/Player.h
     src/core/Queue.cpp
@@ -28,6 +30,8 @@ add_library(casdapcore STATIC
     src/core/State.h
     src/core/Version.cpp
     src/core/Version.h
+    dbus/org.mpris.MediaPlayer2.xml
+    dbus/org.mpris.MediaPlayer2.Player.xml
 )
 target_include_directories(casdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_definitions(casdapcore PRIVATE CASDAP_VERSION="${PROJECT_VERSION}")

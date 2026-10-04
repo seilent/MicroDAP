@@ -1,10 +1,12 @@
 #include "Library.h"
+#include "Mpris.h"
 #include "Player.h"
 #include "Screenshot.h"
 #include "State.h"
 #include "Version.h"
 
 #include <QCommandLineParser>
+#include <QDBusConnection>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QGuiApplication>
@@ -99,6 +101,7 @@ int main(int argc, char *argv[])
     casdap::State state(&player);
     state.installSignalHandlers();
     state.load();
+    casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
