@@ -1,0 +1,39 @@
+#!/usr/bin/bash
+set -eu
+
+cd "$(dirname "$0")/.."
+
+device="${1:?usage: dev-loop user@host [--input]}"
+shift
+input=
+for arg in "$@"; do
+    case "${arg}" in
+        --input) input=input ;;
+        *) echo "dev-loop: unknown flag ${arg}" >&2; exit 1 ;;
+    esac
+done
+
+manifest=dist/usr/share/casdap/build-manifest
+[[ -r "${manifest}" ]] || { echo "dev-loop: ${manifest} missing, run just dist" >&2; exit 1; }
+
+state=$(build/device-state "${device}")
+field() { sed -n "s/^$1=//p" <<<"$2"; }
+
+mismatch=0
+for key in IMAGE_VERSION VERSION_ID BASE_IMAGE; do
+    built=$(field "${key}" "$(<"${manifest}")")
+    running=$(field "${key}" "${state}")
+    if [[ "${built}" != "${running}" ]]; then
+        echo "dev-loop: ${key} built=${built} device=${running}" >&2
+        mismatch=1
+    fi
+done
+if (( mismatch )); then
+    echo "dev-loop: dist was built against another image, run just base && just dist" >&2
+    exit 1
+fi
+
+rsync -a --delete dist/ "${device}:/tmp/casdap/"
+rsync -a build/device-apply "${device}:/tmp/casdap-apply"
+ssh -t "${device}" sudo bash /tmp/casdap-apply ${input}
+ssh "${device}" 'export XDG_RUNTIME_DIR=/run/user/$(id -u); systemctl --user daemon-reload; systemctl --user try-restart casdap-hotkeyd.service 2>/dev/null || true'

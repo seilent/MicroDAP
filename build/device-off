@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+set -eu
+
+systemctl stop casdap-guard.service 2>/dev/null || true
+systemd-sysext unmerge || true
+rm -rf /var/lib/extensions/casdap /run/casdap
+systemctl daemon-reload
+systemctl restart polkit inputplumber.service
+systemctl start armada-controller-type.service
+systemd-sysext status
