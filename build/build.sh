@@ -32,6 +32,8 @@ for p in $(find patches -type f -name '*.patch' | sort); do
     (cd "${dist}" && patch --no-backup-if-mismatch -p1 < "../${p}")
 done
 
+build/fonts.sh build/cache/fonts "${dist}"
+
 if [[ -f player/CMakeLists.txt ]]; then
     cmake -S player -B build/player -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
     cmake --build build/player

@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 set -eu
 
-pins="glibc libstdc++ libgcc qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire"
+pins="glibc libstdc++ libgcc qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire taglib"
 negativo17=https://negativo17.org/repos/fedora-multimedia.repo
 negativo17_file=/etc/yum.repos.d/negativo17-fedora-multimedia.repo
 koji=https://kojipkgs.fedoraproject.org/packages
@@ -49,11 +49,11 @@ pinned() {
 
 before=$(snapshot)
 
-dnf_install cmake ninja-build meson patch squashfs-tools jq git
+dnf_install cmake ninja-build meson patch squashfs-tools jq git unzip
 
 pinned libstdc++ gcc gcc-c++ cpp libstdc++-devel
 pinned glibc glibc-devel
-for name in qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire; do
+for name in qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire taglib; do
     pinned "${name}" "${name}-devel"
 done
 

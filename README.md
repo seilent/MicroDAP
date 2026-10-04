@@ -28,7 +28,7 @@ The three patched files (`/usr/libexec/armada/session-control`,
 The builder container is `FROM` the exact Armada image the device runs, pinned by digest in
 `build/base.env`. Compilers and `-devel` packages are installed at the EVR of the runtime already in
 the image (`gcc`, `gcc-c++`, `libstdc++-devel` at the `libstdc++` EVR, `glibc-devel` at the `glibc`
-EVR, `qt6-qtbase`, `qt6-qtdeclarative`, `gstreamer1`, `SDL3`, `pipewire` `-devel` at their runtime
+EVR, `qt6-qtbase`, `qt6-qtdeclarative`, `gstreamer1`, `SDL3`, `pipewire`, `taglib` `-devel` at their runtime
 EVR), falling back to koji when the mirrors moved on and to negativo17 when the runtime package came
 from there. `toolchain.sh` fails the image build if any pinned runtime package changed. Build host
 is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a login.
@@ -38,7 +38,7 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | Recipe | Does |
 |---|---|
 | `just base` | Reads `IMAGE_VERSION`, `VERSION_ID` and the booted image digest from the device into `build/base.env`. |
-| `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, writes `version` and `build-manifest`. |
+| `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, installs the Selawik 1.01 TTFs (`build/fonts.sh`, sha256 pinned, cached in `build/cache/`) to `usr/share/fonts/casdap/`, writes `version` and `build-manifest`. |
 | `just build` | `dist` plus `casdap-<ver>-armada<VERSION_ID>-arm64.raw` (squashfs, zstd). |
 | `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
