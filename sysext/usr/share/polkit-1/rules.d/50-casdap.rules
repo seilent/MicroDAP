@@ -12,6 +12,9 @@ polkit.addRule(function(action, subject) {
     if (unit == "casdap-switch.service" || unit == "casdap-switch-back.service") {
         return polkit.Result.YES;
     }
+    if (unit == "armada-controller-type.service") {
+        return polkit.Result.YES;
+    }
     if (/^casdap-priv@[a-z0-9-]+\.service$/.test(unit)) {
         return polkit.Result.YES;
     }

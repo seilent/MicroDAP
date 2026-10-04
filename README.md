@@ -70,8 +70,13 @@ name has an owner. `switch-gamemode` stops `gamescope-session-plus@casdap.servic
 Every boot still resets to game mode.
 
 Polkit boundary: any process running as `armada` may start `casdap-switch.service`,
-`casdap-switch-back.service` and `casdap-priv@<verb>.service`. The verbs are fixed words;
-`casdap-priv` exits 1 on anything else.
+`casdap-switch-back.service`, `casdap-priv@<verb>.service` and `armada-controller-type.service`.
+The verbs are fixed words; `casdap-priv` exits 1 on anything else.
+
+Pad target: `casdap-pad.service` (user unit, `PartOf=` the casdap session) sets every InputPlumber
+composite device to `xb360` plus `keyboard` through `SetTargetDevices`, so SDL players see an Xbox
+pad. On session stop it starts `armada-controller-type.service`, which restores the configured type.
+InputPlumber's own polkit rule grants its actions to group `wheel`, which `armada` is in.
 
 ## Input
 

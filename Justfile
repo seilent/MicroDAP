@@ -36,3 +36,4 @@ test:
     CASDAP_BASE_ROOT={{base_root}} bash tests/session-control-test.sh
     bash tests/priv-test.sh
     bash tests/hotkeyd-test.sh
+    bash tests/pad-test.sh
