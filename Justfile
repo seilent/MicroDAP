@@ -37,3 +37,9 @@ test:
     bash tests/priv-test.sh
     bash tests/hotkeyd-test.sh
     bash tests/pad-test.sh
+    just test-player
+
+test-player:
+    if ! command -v podman >/dev/null || ! podman image exists {{builder}}; then echo "skip: no builder image"; exit 0; fi; \
+    [[ -f build/player/CTestTestfile.cmake ]] || { echo "test-player: run just dist first" >&2; exit 1; }; \
+    podman run --rm --platform {{platform}} -v "$PWD":/work:Z -w /work/build/player {{builder}} ctest --output-on-failure

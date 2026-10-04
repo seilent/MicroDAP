@@ -1,0 +1,20 @@
+string(REPLACE "." "\\." version_regex "${PROJECT_VERSION}")
+set(shots ${CMAKE_CURRENT_BINARY_DIR}/shots)
+file(MAKE_DIRECTORY ${shots})
+
+add_test(NAME version COMMAND casdap-player --version)
+set_tests_properties(version PROPERTIES PASS_REGULAR_EXPRESSION "^casdap-player ${version_regex}")
+casdap_test_env(version)
+
+add_test(NAME screenshot-blank
+    COMMAND casdap-player --screenshot blank --size 640x960 --out ${shots}/blank-640x960.png
+)
+set_tests_properties(screenshot-blank PROPERTIES FIXTURES_SETUP shot-blank)
+casdap_test_env(screenshot-blank)
+
+qt_add_executable(tst_shot core/tst_shot.cpp)
+target_compile_definitions(tst_shot PRIVATE CASDAP_SHOT_PNG="${shots}/blank-640x960.png")
+target_link_libraries(tst_shot PRIVATE Qt6::Gui Qt6::Test)
+add_test(NAME screenshot-check COMMAND tst_shot)
+set_tests_properties(screenshot-check PROPERTIES FIXTURES_REQUIRED shot-blank)
+casdap_test_env(screenshot-check)
