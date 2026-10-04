@@ -14,6 +14,12 @@ find_package(SDL3 REQUIRED CONFIG)
 qt_standard_project_setup(REQUIRES 6.11)
 
 add_library(casdapcore STATIC
+    src/core/Library.cpp
+    src/core/Library.h
+    src/core/Models.cpp
+    src/core/Models.h
+    src/core/Scanner.cpp
+    src/core/Scanner.h
     src/core/Version.cpp
     src/core/Version.h
 )

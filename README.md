@@ -15,7 +15,7 @@ screen off state are not written yet.
 | `patches/<class>/<path>.patch` | Patches against files of the Armada image. `armada/` Armada scripts, `generic/` InputPlumber profile, `pm2/` Pocket MICRO 2 capability map. |
 | `build/` | `base.env` (pinned image), `Containerfile`, `toolchain.sh`, `build.sh`, device scripts for the dev loop. |
 | `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. |
-| `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`. |
+| `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`. Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures). |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
 The three patched files (`/usr/libexec/armada/session-control`,

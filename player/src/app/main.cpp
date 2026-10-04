@@ -1,13 +1,49 @@
+#include "Library.h"
 #include "Screenshot.h"
 #include "Version.h"
 
 #include <QCommandLineParser>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QStandardPaths>
 #include <QTextStream>
+
+#include <cstring>
+
+namespace {
+
+int scanOnly(const QString &dir)
+{
+    casdap::Library library;
+    if (!library.isOpen()) {
+        QTextStream(stderr) << "casdap-player: cannot open " << library.dbPath() << '\n';
+        return 1;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    QObject::connect(&library, &casdap::Library::scanned, &library, [&library, &timer](int, int, int) {
+        const QVariantMap counts = library.counts();
+        QTextStream(stdout) << "scanned " << counts.value(QStringLiteral("tracks")).toInt()
+                            << " tracks, " << counts.value(QStringLiteral("albums")).toInt()
+                            << " albums in " << timer.elapsed() << " ms\n";
+        QCoreApplication::exit(0);
+    });
+    library.rescan({QDir(dir).absolutePath()});
+    return QCoreApplication::exec();
+}
+
+}
 
 int main(int argc, char *argv[])
 {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--scan-only") == 0 && !qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("casdap-player"));
     QGuiApplication::setApplicationVersion(casdap::version());
@@ -25,7 +61,12 @@ int main(int argc, char *argv[])
     const QCommandLineOption outOption(QStringLiteral("out"),
                                        QStringLiteral("PNG path for --screenshot."),
                                        QStringLiteral("png"));
-    parser.addOptions({versionOption, screenshotOption, sizeOption, outOption});
+    const QCommandLineOption scanOnlyOption(QStringLiteral("scan-only"),
+                                            QStringLiteral("Scan [dir] into the library and exit."));
+    parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, scanOnlyOption});
+    parser.addPositionalArgument(QStringLiteral("dir"),
+                                 QStringLiteral("Directory for --scan-only, default ~/Music."),
+                                 QStringLiteral("[dir]"));
     parser.process(app);
 
     if (parser.isSet(versionOption)) {
@@ -37,6 +78,11 @@ int main(int argc, char *argv[])
     if (parser.isSet(screenshotOption))
         return casdap::screenshot(parser.value(screenshotOption), parser.value(sizeOption),
                                   parser.value(outOption));
+
+    if (parser.isSet(scanOnlyOption)) {
+        const QString music = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+        return scanOnly(parser.positionalArguments().value(0, music));
+    }
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
