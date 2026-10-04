@@ -1,0 +1,144 @@
+--- a/usr/libexec/armada/session-control
++++ b/usr/libexec/armada/session-control
+@@ -6,11 +6,39 @@
+ set -euo pipefail
+ 
+ STEAMOS_MANAGER_STATE=/var/home/armada/.config/steamos-manager/state.toml
++SDDM_CONF_DIR="${ARMADA_SDDM_CONF_DIR:-/etc/sddm.conf.d}"
++SESSION_USER=armada
++SESSION_UID=1000
++SESSION_RUNTIME_DIR="${ARMADA_SESSION_RUNTIME_DIR:-/run/user/${SESSION_UID}}"
++SESSION_BUS="${SESSION_RUNTIME_DIR}/bus"
++
++as_user() {
++    sudo -u "${SESSION_USER}" env \
++        XDG_RUNTIME_DIR="${SESSION_RUNTIME_DIR}" \
++        DBUS_SESSION_BUS_ADDRESS="unix:path=${SESSION_BUS}" \
++        "$@"
++}
++
++user_unit_active() {
++    as_user systemctl --user is-active --quiet "$1"
++}
++
++user_session() {
++    loginctl list-sessions -o json 2>/dev/null \
++        | jq -r --arg user "${SESSION_USER}" \
++            '[.[] | select(.user == $user and .seat == "seat0")] | first | .session // empty'
++}
++
++session_ended() {
++    local sessions state
++    sessions=$(loginctl list-sessions -o json) || return 1
++    state=$(jq -r --arg id "$1" '.[] | select(.session == $id) | .state' <<<"${sessions}")
++    [[ -z "${state}" || "${state}" == closing ]]
++}
+ 
+ logout_plasma() {
+-    local user=armada
+-    local uid=1000
+-    local bus="/run/user/${uid}/bus"
++    local user="${SESSION_USER}"
++    local bus="${SESSION_BUS}"
+     local qdbus=
+ 
+     [[ -S "${bus}" ]] || return 1
+@@ -28,11 +56,59 @@
+     [[ -n "${qdbus}" ]] || return 1
+ 
+     sudo -Eu "${user}" env \
+-        XDG_RUNTIME_DIR="/run/user/${uid}" \
++        XDG_RUNTIME_DIR="${SESSION_RUNTIME_DIR}" \
++        DBUS_SESSION_BUS_ADDRESS="unix:path=${bus}" \
++        busctl --user status org.kde.Shutdown >/dev/null 2>&1 || return 1
++
++    sudo -Eu "${user}" env \
++        XDG_RUNTIME_DIR="${SESSION_RUNTIME_DIR}" \
+         DBUS_SESSION_BUS_ADDRESS="unix:path=${bus}" \
+         "${qdbus}" org.kde.Shutdown /Shutdown org.kde.Shutdown.logout
+ }
+ 
++shutdown_steam() {
++    local home steam_dir session waited
++
++    [[ -S "${SESSION_BUS}" ]] || return 1
++    user_unit_active gamescope-session-plus@steam.service || return 1
++
++    home=$(getent passwd "${SESSION_USER}" | cut -d: -f6)
++    steam_dir="${home}/.local/share/Steam/steamrtarm64"
++    [[ -x "${steam_dir}/steam" ]] || return 1
++    session=$(user_session) || session=
++    [[ -n "${session}" ]] || return 1
++
++    logger -t casdap-switch -- "steam -shutdown HOME=${home} XDG_RUNTIME_DIR=${SESSION_RUNTIME_DIR} session=${session}"
++    sudo -u "${SESSION_USER}" env \
++        HOME="${home}" \
++        XDG_RUNTIME_DIR="${SESSION_RUNTIME_DIR}" \
++        DBUS_SESSION_BUS_ADDRESS="unix:path=${SESSION_BUS}" \
++        LD_LIBRARY_PATH="${steam_dir}" \
++        "${steam_dir}/steam" -shutdown || return 1
++
++    waited=0
++    while user_unit_active gamescope-session-plus@steam.service; do
++        (( waited >= 20 )) && return 1
++        sleep 1
++        waited=$((waited + 1))
++    done
++
++    waited=0
++    until session_ended "${session}"; do
++        (( waited >= 10 )) && return 1
++        sleep 1
++        waited=$((waited + 1))
++        user_unit_active gamescope-session-plus@steam.service && return 1
++    done
++    return 0
++}
++
++stop_casdap() {
++    [[ -S "${SESSION_BUS}" ]] || return 1
++    user_unit_active gamescope-session-plus@casdap.service || return 1
++    as_user systemctl --user stop gamescope-session-plus@casdap.service
++}
++
+ desktop_session=armada-plasma.desktop
+ if [[ -r "${STEAMOS_MANAGER_STATE}" ]]; then
+     state_session=$(sed -n 's/^desktop_session[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "${STEAMOS_MANAGER_STATE}")
+@@ -42,19 +118,31 @@
+ case "${1:-}" in
+     switch-desktop|default-desktop)   session=$desktop_session ;;
+     switch-gamemode|default-gamemode) session=gamescope-session-steam.desktop ;;
+-    *) echo "usage: $0 {switch-desktop|switch-gamemode|default-gamemode|default-desktop}" >&2; exit 1 ;;
++    switch-casdap|default-casdap)     session=casdap.desktop ;;
++    *) echo "usage: $0 {switch-desktop|switch-gamemode|switch-casdap|default-gamemode|default-desktop|default-casdap}" >&2; exit 1 ;;
+ esac
+ 
+-printf '[Autologin]\nSession=%s\n' "${session}" > /etc/sddm.conf.d/zz-holo-autologin.conf
+-rm -f /etc/sddm.conf.d/zz-steamos-autologin.conf
++printf '[Autologin]\nSession=%s\n' "${session}" > "${SDDM_CONF_DIR}/zz-holo-autologin.conf"
++rm -f "${SDDM_CONF_DIR}/zz-steamos-autologin.conf"
+ systemctl reset-failed sddm.service 2>/dev/null || true
+ 
+ if [[ "${1}" == default-* ]]; then
+     exit 0
+ fi
+ 
+-if [[ "${1}" == "switch-gamemode" ]] && logout_plasma; then
+-    exit 0
+-fi
++case "${1}" in
++    switch-gamemode|switch-desktop)
++        if stop_casdap; then exit 0; fi ;;
++esac
++
++case "${1}" in
++    switch-gamemode|switch-casdap)
++        if logout_plasma; then exit 0; fi ;;
++esac
++
++case "${1}" in
++    switch-casdap|switch-desktop)
++        if shutdown_steam; then exit 0; fi ;;
++esac
+ 
+ systemctl --no-block restart sddm.service

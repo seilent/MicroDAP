@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+set -eu
+
+sysfs="${CASDAP_SYSFS:-/sys}"
+
+backlight() {
+    local bl
+    for bl in "${sysfs}"/class/backlight/*/bl_power; do
+        [[ -w "${bl}" ]] || continue
+        echo "$1" > "${bl}"
+    done
+    return 0
+}
+
+case "${1:-}" in
+    bt-class-headphones) btmgmt class 4 24 ;;
+    bt-class-default)    btmgmt class 0 0 ;;
+    backlight-off)       backlight 4 ;;
+    backlight-on)        backlight 0 ;;
+    *) exit 1 ;;
+esac

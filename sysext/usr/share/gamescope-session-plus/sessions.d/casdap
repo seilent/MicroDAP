@@ -1,0 +1,9 @@
+#! /bin/bash
+
+short_session_recover() {
+    systemctl --no-block start casdap-switch-back.service
+}
+
+export QT_QPA_PLATFORM=xcb
+export GAMESCOPE_FALLBACK_APPID=0x43415344
+export CLIENTCMD=/usr/bin/casdap-player

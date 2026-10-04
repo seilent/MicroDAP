@@ -1,0 +1,6 @@
+[Unit]
+Description=CASDAP privileged helper %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/casdap/casdap-priv %i

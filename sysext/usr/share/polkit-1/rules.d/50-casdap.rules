@@ -1,0 +1,19 @@
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.systemd1.manage-units") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (subject.user != "armada") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (action.lookup("verb") != "start") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var unit = action.lookup("unit");
+    if (unit == "casdap-switch.service" || unit == "casdap-switch-back.service") {
+        return polkit.Result.YES;
+    }
+    if (/^casdap-priv@[a-z0-9-]+\.service$/.test(unit)) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});
