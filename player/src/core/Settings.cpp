@@ -1,5 +1,6 @@
 #include "Settings.h"
 
+#include <QCoreApplication>
 #include <QStandardPaths>
 
 namespace casdap {
@@ -58,7 +59,17 @@ Settings::Settings(const QString &path, QObject *parent)
     : QObject(parent)
     , m_settings(path, QSettings::IniFormat)
 {
+    m_syncTimer.setSingleShot(true);
+    m_syncTimer.setInterval(syncDelayMs);
+    connect(&m_syncTimer, &QTimer::timeout, this, &Settings::sync);
+    if (QCoreApplication *app = QCoreApplication::instance())
+        connect(app, &QCoreApplication::aboutToQuit, this, &Settings::sync);
     load();
+}
+
+Settings::~Settings()
+{
+    sync();
 }
 
 QString Settings::defaultPath()
@@ -120,8 +131,7 @@ void Settings::setOutput(const QString &output)
     if (!outputs().contains(output) || m_output == output)
         return;
     m_output = output;
-    m_settings.setValue(keyOutput(), m_output);
-    sync();
+    store(keyOutput(), m_output);
     emit outputChanged();
 }
 
@@ -136,8 +146,7 @@ void Settings::setRoots(const QStringList &roots)
     if (m_roots == value)
         return;
     m_roots = value;
-    m_settings.setValue(keyRoots(), m_roots);
-    sync();
+    store(keyRoots(), m_roots);
     emit rootsChanged();
 }
 
@@ -152,8 +161,7 @@ void Settings::setAccent(const QString &accent)
     if (!accents().contains(value) || m_accent == value)
         return;
     m_accent = value;
-    m_settings.setValue(keyAccent(), m_accent);
-    sync();
+    store(keyAccent(), m_accent);
     emit accentChanged();
 }
 
@@ -168,8 +176,7 @@ void Settings::setScale(double scale)
     if (qFuzzyCompare(m_scale, value))
         return;
     m_scale = value;
-    m_settings.setValue(keyScale(), m_scale);
-    sync();
+    store(keyScale(), m_scale);
     emit scaleChanged();
 }
 
@@ -183,8 +190,7 @@ void Settings::setPocketControls(bool on)
     if (m_pocketControls == on)
         return;
     m_pocketControls = on;
-    m_settings.setValue(keyPocketControls(), m_pocketControls);
-    sync();
+    store(keyPocketControls(), m_pocketControls);
     emit pocketControlsChanged();
 }
 
@@ -199,13 +205,24 @@ void Settings::setSaverSeconds(int seconds)
     if (m_saverSeconds == value)
         return;
     m_saverSeconds = value;
-    m_settings.setValue(keySaverSeconds(), m_saverSeconds);
-    sync();
+    store(keySaverSeconds(), m_saverSeconds);
     emit saverSecondsChanged();
+}
+
+void Settings::store(const QString &key, const QVariant &value)
+{
+    m_dirty.insert(key, value);
+    m_syncTimer.start();
 }
 
 void Settings::sync()
 {
+    m_syncTimer.stop();
+    if (m_dirty.isEmpty())
+        return;
+    for (auto it = m_dirty.cbegin(); it != m_dirty.cend(); ++it)
+        m_settings.setValue(it.key(), it.value());
+    m_dirty.clear();
     m_settings.sync();
 }
 

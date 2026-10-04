@@ -11,6 +11,8 @@
 
 #include <gst/gst.h>
 
+class QSocketNotifier;
+
 namespace casdap {
 
 class BluezModel;
@@ -79,6 +81,7 @@ private:
         Queue::Repeat repeat = Queue::Off;
         int last = -1;
         QList<int> pending;
+        bool stale = false;
     };
 
     static void aboutToFinish(GstElement *element, gpointer data);
@@ -97,6 +100,11 @@ private:
     void setPosition(qint64 ms);
     void updateDuration();
     void syncChain();
+    void onCountChanged();
+    void onRowsAboutToBeRemoved(const QModelIndex &parent, int first, int last);
+    void onRowsInserted(const QModelIndex &parent, int first, int last);
+    void onRowsMoved(const QModelIndex &parent, int start, int end,
+                     const QModelIndex &destination, int row);
     void addHistoryNow();
     void onTransportActiveChanged();
 
@@ -106,7 +114,7 @@ private:
     GstElement *m_playbin = nullptr;
     GstBus *m_bus = nullptr;
     gulong m_aboutToFinishId = 0;
-    QTimer m_busTimer;
+    QSocketNotifier *m_busNotifier = nullptr;
     QTimer m_positionTimer;
     Status m_status = Stopped;
     qint64 m_position = 0;
@@ -115,6 +123,8 @@ private:
     bool m_prerolled = false;
     bool m_historyCounted = true;
     int m_errorStreak = 0;
+    bool m_removingCurrent = false;
+    int m_removeTarget = -1;
     QMutex m_chainMutex;
     Chain m_chain;
 };

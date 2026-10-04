@@ -44,12 +44,7 @@ bool MprisRootAdaptor::hasTrackList() const
 
 QString MprisRootAdaptor::identity() const
 {
-    return QStringLiteral("casdap");
-}
-
-QString MprisRootAdaptor::desktopEntry() const
-{
-    return QStringLiteral("casdap");
+    return QStringLiteral("CASDAP");
 }
 
 QStringList MprisRootAdaptor::supportedUriSchemes() const
@@ -202,9 +197,12 @@ Mpris::Mpris(Player *player, const QDBusConnection &bus, QObject *parent)
     , m_root(new MprisRootAdaptor(this))
     , m_playerAdaptor(new MprisPlayerAdaptor(this))
 {
+    m_metadataTimer.setSingleShot(true);
+    m_metadataTimer.setInterval(0);
+    connect(&m_metadataTimer, &QTimer::timeout, this, &Mpris::notifyMetadata);
     connect(m_player, &Player::statusChanged, this, &Mpris::notifyStatus);
-    connect(m_player, &Player::currentChanged, this, &Mpris::notifyMetadata);
-    connect(m_player, &Player::durationChanged, this, &Mpris::notifyMetadata);
+    connect(m_player, &Player::currentChanged, this, &Mpris::scheduleMetadata);
+    connect(m_player, &Player::durationChanged, this, &Mpris::scheduleMetadata);
     connect(m_player->queue(), &Queue::shuffleChanged, this, &Mpris::notifyShuffle);
     connect(m_player->queue(), &Queue::repeatChanged, this, &Mpris::notifyLoopStatus);
 
@@ -313,8 +311,10 @@ void Mpris::setLoopStatus(const QString &status)
         m_player->queue()->setRepeat(Queue::One);
     else if (status == QLatin1String("Playlist"))
         m_player->queue()->setRepeat(Queue::All);
-    else
+    else {
         qWarning() << "casdap mpris: unknown LoopStatus" << status;
+        notifyLoopStatus();
+    }
 }
 
 bool Mpris::shuffle() const
@@ -458,6 +458,11 @@ void Mpris::notifyStatus()
 void Mpris::notifyMetadata()
 {
     emitPropertiesChanged(playerInterface(), {{QStringLiteral("Metadata"), metadata()}});
+}
+
+void Mpris::scheduleMetadata()
+{
+    m_metadataTimer.start();
 }
 
 void Mpris::notifyShuffle()

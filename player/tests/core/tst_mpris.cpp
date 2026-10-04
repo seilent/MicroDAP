@@ -215,8 +215,8 @@ void MprisTest::registered()
 
 void MprisTest::identity()
 {
-    QCOMPARE(m_root->property("Identity").toString(), QStringLiteral("casdap"));
-    QCOMPARE(m_root->property("DesktopEntry").toString(), QStringLiteral("casdap"));
+    QCOMPARE(m_root->property("Identity").toString(), QStringLiteral("CASDAP"));
+    QVERIFY(!m_root->property("DesktopEntry").isValid());
     QCOMPARE(m_root->property("CanQuit").toBool(), false);
     QCOMPARE(m_root->property("CanRaise").toBool(), false);
     QCOMPARE(m_root->property("HasTrackList").toBool(), false);
@@ -304,6 +304,13 @@ void MprisTest::loopStatus()
 {
     QCOMPARE(m_remote->property("LoopStatus").toString(), QStringLiteral("None"));
     m_remote->setProperty("LoopStatus", QStringLiteral("Track"));
+    QCOMPARE(m_player->queue()->repeat(), Queue::One);
+    QCOMPARE(m_remote->property("LoopStatus").toString(), QStringLiteral("Track"));
+    QTRY_VERIFY_WITH_TIMEOUT(sawChange(QStringLiteral("LoopStatus"), QStringLiteral("Track")),
+                             busTimeoutMs);
+
+    m_changes.clear();
+    m_remote->setProperty("LoopStatus", QStringLiteral("Bogus"));
     QCOMPARE(m_player->queue()->repeat(), Queue::One);
     QCOMPARE(m_remote->property("LoopStatus").toString(), QStringLiteral("Track"));
     QTRY_VERIFY_WITH_TIMEOUT(sawChange(QStringLiteral("LoopStatus"), QStringLiteral("Track")),

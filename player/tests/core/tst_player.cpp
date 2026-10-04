@@ -96,6 +96,8 @@ private slots:
     void queueOrder();
     void queueEdits();
     void gapless();
+    void removeBeforeCurrent();
+    void removeCurrent();
     void repeatOne();
     void shuffleOrder();
     void previousGoesBack();
@@ -263,6 +265,84 @@ void PlayerTest::gapless()
                     {m_tracks.at(1).id})
                  .toInt(),
              1);
+}
+
+void PlayerTest::removeBeforeCurrent()
+{
+    Player player;
+    QVERIFY(player.isValid());
+    QSignalSpy started(&player, &Player::trackStarted);
+    QSignalSpy eos(&player, &Player::endOfStream);
+
+    player.restore(m_tracks, 1, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 1);
+
+    player.queue()->remove(0);
+    QCOMPARE(player.queue()->count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(player.status(), Player::Paused);
+    QCOMPARE(started.count(), 1);
+
+    player.playPause();
+    QCOMPARE(player.status(), Player::Playing);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(started.at(1).at(0).toInt(), 1);
+    QCOMPARE(player.queue()->entry(1).path, m_tracks.at(2).path);
+
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    QCOMPARE(started.count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 1);
+}
+
+void PlayerTest::removeCurrent()
+{
+    Player player;
+    QVERIFY(player.isValid());
+    QSignalSpy started(&player, &Player::trackStarted);
+
+    player.restore(m_tracks, 0, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 0);
+
+    player.queue()->remove(0);
+    QCOMPARE(player.status(), Player::Paused);
+    QCOMPARE(player.queue()->count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(started.at(1).at(0).toInt(), 0);
+    QCOMPARE(player.current().value(QStringLiteral("path")).toString(), m_tracks.at(1).path);
+
+    player.queue()->remove(1);
+    QCOMPARE(player.queue()->count(), 1);
+    QCOMPARE(player.status(), Player::Paused);
+    QTest::qWait(100);
+    QCOMPARE(started.count(), 2);
+
+    player.queue()->remove(0);
+    QCOMPARE(player.status(), Player::Stopped);
+    QCOMPARE(player.queue()->count(), 0);
+    QCOMPARE(player.queue()->currentIndex(), -1);
+
+    player.queue()->setRepeat(Queue::All);
+    player.restore(m_tracks, 2, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 3, playTimeoutMs);
+    QCOMPARE(started.at(2).at(0).toInt(), 2);
+
+    player.queue()->remove(2);
+    QCOMPARE(player.queue()->count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(player.status(), Player::Paused);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 4, playTimeoutMs);
+    QCOMPARE(started.at(3).at(0).toInt(), 0);
+    QCOMPARE(player.current().value(QStringLiteral("path")).toString(), m_tracks.at(0).path);
+
+    player.stop();
+    player.queue()->remove(0);
+    QCOMPARE(player.status(), Player::Stopped);
+    QCOMPARE(player.queue()->count(), 1);
+    QTest::qWait(100);
+    QCOMPARE(started.count(), 4);
 }
 
 void PlayerTest::repeatOne()

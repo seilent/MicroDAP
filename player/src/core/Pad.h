@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <atomic>
 
 namespace casdap {
 
@@ -40,7 +41,9 @@ public:
     static constexpr int ActionCount = Back + 1;
     static constexpr int RepeatInitialMs = 300;
     static constexpr int RepeatIntervalMs = 80;
-    static constexpr int PumpIntervalMs = 4;
+    static constexpr int PumpIntervalMs = 16;
+    static constexpr int PocketPumpIntervalMs = 50;
+    static constexpr int DetectIntervalMs = 1000;
 
     explicit Pad(QObject *parent = nullptr);
     ~Pad() override;
@@ -63,7 +66,11 @@ signals:
     void connectedChanged();
 
 private:
+    static bool SDLCALL eventWatch(void *userdata, SDL_Event *event);
+
     void pump();
+    int pumpInterval() const;
+    void updatePump();
     void repeatTick();
     void addGamepad(SDL_JoystickID id);
     void removeGamepad(SDL_JoystickID id);
@@ -86,6 +93,8 @@ private:
     bool m_pocketControls = false;
     QTimer m_pump;
     QTimer m_repeat;
+    std::atomic_bool m_pumpQueued{false};
+    bool m_pumping = false;
     int m_repeatAction = -1;
     QHash<SDL_JoystickID, SDL_Gamepad *> m_pads;
     std::array<bool, ActionCount> m_down{};

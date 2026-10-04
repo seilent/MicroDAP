@@ -4,6 +4,8 @@
 #include <QSettings>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
+#include <QVariantMap>
 
 namespace casdap {
 
@@ -23,9 +25,11 @@ public:
     static constexpr double maxScale = 1.4;
     static constexpr int minSaverSeconds = 10;
     static constexpr int maxSaverSeconds = 300;
+    static constexpr int syncDelayMs = 500;
 
     explicit Settings(QObject *parent = nullptr);
     explicit Settings(const QString &path, QObject *parent = nullptr);
+    ~Settings() override;
 
     static QString defaultPath();
     static QStringList outputs();
@@ -59,8 +63,11 @@ signals:
 
 private:
     void load();
+    void store(const QString &key, const QVariant &value);
 
     QSettings m_settings;
+    QTimer m_syncTimer;
+    QVariantMap m_dirty;
     QString m_output;
     QStringList m_roots;
     QString m_accent;

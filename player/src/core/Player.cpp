@@ -6,15 +6,34 @@
 #include <QDebug>
 #include <QFile>
 #include <QMutexLocker>
+#include <QSocketNotifier>
+
+#include <utility>
 
 namespace casdap {
 
 namespace {
 
-constexpr int busIntervalMs = 20;
 constexpr int positionIntervalMs = 250;
 constexpr qint64 restartThresholdMs = 3000;
 constexpr guint audioOnlyFlags = 0x2;
+
+int remapMoved(int r, int start, int end, int row)
+{
+    const int n = end - start + 1;
+    if (row > end) {
+        if (r >= start && r <= end)
+            return r - start + row - n;
+        if (r > end && r < row)
+            return r - n;
+        return r;
+    }
+    if (r >= start && r <= end)
+        return r - start + row;
+    if (r >= row && r < start)
+        return r + n;
+    return r;
+}
 
 }
 
@@ -45,27 +64,33 @@ Player::Player(Library *library, QObject *parent)
         }
         g_clear_error(&err);
         m_bus = gst_element_get_bus(m_playbin);
+        GPollFD fd;
+        gst_bus_get_pollfd(m_bus, &fd);
+        m_busNotifier = new QSocketNotifier(fd.fd, QSocketNotifier::Read, this);
+        connect(m_busNotifier, &QSocketNotifier::activated, this, &Player::pollBus);
         m_aboutToFinishId = g_signal_connect(m_playbin, "about-to-finish",
                                              G_CALLBACK(&Player::aboutToFinish), this);
     }
 
-    m_busTimer.setInterval(busIntervalMs);
-    connect(&m_busTimer, &QTimer::timeout, this, &Player::pollBus);
     m_positionTimer.setInterval(positionIntervalMs);
     connect(&m_positionTimer, &QTimer::timeout, this, &Player::pollPosition);
 
-    connect(m_queue, &Queue::countChanged, this, &Player::syncChain);
+    connect(m_queue, &Queue::countChanged, this, &Player::onCountChanged);
     connect(m_queue, &Queue::indexChanged, this, &Player::syncChain);
     connect(m_queue, &Queue::shuffleChanged, this, &Player::syncChain);
     connect(m_queue, &Queue::repeatChanged, this, &Player::syncChain);
-    connect(m_queue, &QAbstractItemModel::rowsMoved, this, &Player::syncChain);
+    connect(m_queue, &QAbstractItemModel::rowsAboutToBeRemoved, this,
+            &Player::onRowsAboutToBeRemoved);
+    connect(m_queue, &QAbstractItemModel::rowsInserted, this, &Player::onRowsInserted);
+    connect(m_queue, &QAbstractItemModel::rowsMoved, this, &Player::onRowsMoved);
     connect(m_queue, &Queue::countChanged, this, &Player::currentChanged);
     connect(m_queue, &Queue::indexChanged, this, &Player::currentChanged);
 }
 
 Player::~Player()
 {
-    m_busTimer.stop();
+    delete m_busNotifier;
+    m_busNotifier = nullptr;
     m_positionTimer.stop();
     if (m_playbin) {
         if (m_aboutToFinishId)
@@ -177,6 +202,87 @@ void Player::syncChain()
     m_chain.order = m_queue->order();
     m_chain.shuffle = m_queue->shuffle();
     m_chain.repeat = m_queue->repeat();
+    if (m_chain.pending.isEmpty())
+        m_chain.last = m_queue->currentIndex();
+}
+
+void Player::onCountChanged()
+{
+    syncChain();
+    if (!m_removingCurrent)
+        return;
+    m_removingCurrent = false;
+    if (m_status == Stopped)
+        return;
+    if (m_removeTarget < 0) {
+        stop();
+        return;
+    }
+    startAt(m_removeTarget, m_status == Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+}
+
+void Player::onRowsAboutToBeRemoved(const QModelIndex &, int first, int last)
+{
+    const int n = last - first + 1;
+    {
+        QMutexLocker lock(&m_chainMutex);
+        bool hit = false;
+        for (int row : std::as_const(m_chain.pending))
+            hit = hit || (row >= first && row <= last);
+        if (hit) {
+            m_chain.pending.clear();
+            m_chain.stale = true;
+        } else {
+            for (int &row : m_chain.pending) {
+                if (row > last)
+                    row -= n;
+            }
+        }
+        if (m_chain.last > last)
+            m_chain.last -= n;
+    }
+
+    const int current = m_queue->currentIndex();
+    if (current < first || current > last)
+        return;
+    m_removingCurrent = true;
+    m_removeTarget = -1;
+    const int count = m_queue->count();
+    const QList<int> order = m_queue->order();
+    int row = current;
+    for (int i = 0; i <= count; ++i) {
+        row = Queue::nextOf(row, count, order, m_queue->shuffle(), m_queue->repeat(), true);
+        if (row < 0 || row < first || row > last)
+            break;
+    }
+    if (row >= first && row <= last)
+        row = -1;
+    if (row >= 0)
+        m_removeTarget = row > last ? row - n : row;
+}
+
+void Player::onRowsInserted(const QModelIndex &, int first, int last)
+{
+    const int n = last - first + 1;
+    QMutexLocker lock(&m_chainMutex);
+    for (int &row : m_chain.pending) {
+        if (row >= first)
+            row += n;
+    }
+    if (m_chain.last >= first)
+        m_chain.last += n;
+}
+
+void Player::onRowsMoved(const QModelIndex &, int start, int end, const QModelIndex &, int row)
+{
+    {
+        QMutexLocker lock(&m_chainMutex);
+        for (int &pending : m_chain.pending)
+            pending = remapMoved(pending, start, end, row);
+        if (m_chain.last >= 0)
+            m_chain.last = remapMoved(m_chain.last, start, end, row);
+    }
+    syncChain();
 }
 
 void Player::setUri(const QString &path)
@@ -192,7 +298,6 @@ void Player::setUri(const QString &path)
 
 void Player::setNull()
 {
-    m_busTimer.stop();
     m_positionTimer.stop();
     if (m_playbin)
         gst_element_set_state(m_playbin, GST_STATE_NULL);
@@ -202,6 +307,7 @@ void Player::setNull()
     }
     QMutexLocker lock(&m_chainMutex);
     m_chain.pending.clear();
+    m_chain.stale = false;
     m_prerolled = false;
     m_pendingSeek = -1;
 }
@@ -223,7 +329,6 @@ void Player::startAt(int index, GstState target)
     setPosition(0);
     setUri(m_queue->entry(index).path);
     gst_element_set_state(m_playbin, target);
-    m_busTimer.start();
     setStatus(target == GST_STATE_PLAYING ? Playing : Paused);
     emit currentChanged();
 }
@@ -415,10 +520,21 @@ void Player::pollPosition()
 void Player::handleStreamStart()
 {
     int index = -1;
+    bool stale = false;
     {
         QMutexLocker lock(&m_chainMutex);
         if (!m_chain.pending.isEmpty())
             index = m_chain.pending.takeFirst();
+        else
+            stale = std::exchange(m_chain.stale, false);
+    }
+    if (stale) {
+        const int following = m_queue->nextIndex(false);
+        if (following < 0)
+            stop();
+        else
+            startAt(following, m_status == Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+        return;
     }
     if (index >= 0 && index < m_queue->count())
         m_queue->setCurrentIndex(index);

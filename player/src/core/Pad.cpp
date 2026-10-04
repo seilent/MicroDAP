@@ -1,5 +1,7 @@
 #include "Pad.h"
 
+#include <QMetaObject>
+#include <QThread>
 #include <QtGlobal>
 
 #include <cstdio>
@@ -68,24 +70,35 @@ Pad::Pad(QObject *parent)
         qWarning("casdap pad: SDL_Init failed: %s", SDL_GetError());
         return;
     }
-    m_pump.setTimerType(Qt::PreciseTimer);
-    m_pump.setInterval(PumpIntervalMs);
     connect(&m_pump, &QTimer::timeout, this, &Pad::pump);
     m_repeat.setTimerType(Qt::PreciseTimer);
     connect(&m_repeat, &QTimer::timeout, this, &Pad::repeatTick);
-    m_pump.start();
+    SDL_AddEventWatch(&Pad::eventWatch, this);
+    pump();
+    updatePump();
 }
 
 Pad::~Pad()
 {
     if (!m_valid)
         return;
+    SDL_RemoveEventWatch(&Pad::eventWatch, this);
     m_pump.stop();
     m_repeat.stop();
     for (SDL_Gamepad *pad : std::as_const(m_pads))
         SDL_CloseGamepad(pad);
     m_pads.clear();
-    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    SDL_Quit();
+}
+
+bool SDLCALL Pad::eventWatch(void *userdata, SDL_Event *)
+{
+    auto *self = static_cast<Pad *>(userdata);
+    if (QThread::currentThread() == self->thread() && self->m_pumping)
+        return true;
+    if (!self->m_pumpQueued.exchange(true))
+        QMetaObject::invokeMethod(self, &Pad::pump, Qt::QueuedConnection);
+    return true;
 }
 
 bool Pad::isValid() const
@@ -102,6 +115,8 @@ void Pad::setScreenOff(bool off)
 {
     if (m_screenOff == off)
         return;
+    if (!off && m_valid)
+        pump();
     m_screenOff = off;
     if (off) {
         for (int i = 0; i < ActionCount; ++i) {
@@ -114,6 +129,7 @@ void Pad::setScreenOff(bool off)
         if (m_repeatAction >= 0 && !allowed(static_cast<Action>(m_repeatAction)))
             stopRepeat();
     }
+    updatePump();
     emit screenOffChanged();
 }
 
@@ -127,6 +143,7 @@ void Pad::setPocketControls(bool on)
     if (m_pocketControls == on)
         return;
     m_pocketControls = on;
+    updatePump();
     emit pocketControlsChanged();
 }
 
@@ -147,8 +164,31 @@ QString Pad::actionName(Action a) const
     return QString::fromLatin1(actionNames[a]);
 }
 
+int Pad::pumpInterval() const
+{
+    if (m_screenOff)
+        return m_pocketControls && !m_pads.isEmpty() ? PocketPumpIntervalMs : 0;
+    return m_pads.isEmpty() ? DetectIntervalMs : PumpIntervalMs;
+}
+
+void Pad::updatePump()
+{
+    if (!m_valid)
+        return;
+    const int interval = pumpInterval();
+    if (interval <= 0) {
+        m_pump.stop();
+        return;
+    }
+    if (m_pump.isActive() && m_pump.interval() == interval)
+        return;
+    m_pump.start(interval);
+}
+
 void Pad::pump()
 {
+    m_pumpQueued.store(false);
+    m_pumping = true;
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
@@ -169,6 +209,7 @@ void Pad::pump()
             break;
         }
     }
+    m_pumping = false;
 }
 
 void Pad::repeatTick()
@@ -196,8 +237,10 @@ void Pad::addGamepad(SDL_JoystickID id)
         const char *name = SDL_GetGamepadName(pad);
         std::fprintf(stderr, "pad: added %u %s\n", static_cast<unsigned>(id), name ? name : "unnamed");
     }
-    if (m_pads.size() == 1)
+    if (m_pads.size() == 1) {
+        updatePump();
         emit connectedChanged();
+    }
 }
 
 void Pad::removeGamepad(SDL_JoystickID id)
@@ -208,8 +251,9 @@ void Pad::removeGamepad(SDL_JoystickID id)
     SDL_CloseGamepad(pad);
     if (m_log)
         std::fprintf(stderr, "pad: removed %u\n", static_cast<unsigned>(id));
+    resetState();
     if (m_pads.isEmpty()) {
-        resetState();
+        updatePump();
         emit connectedChanged();
     }
 }

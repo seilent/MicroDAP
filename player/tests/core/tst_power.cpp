@@ -278,10 +278,12 @@ void PowerTest::verbs()
     QCOMPARE(logLines(), 4);
 
     qputenv("CASDAP_VERB_DIR", m_emptyDir.toUtf8());
-    QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
-    QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
+    QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
+    QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
     QCOMPARE(logLines(), 4);
     qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
+    QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 5, busTimeoutMs);
 }
 
 void PowerTest::drift()
@@ -322,6 +324,8 @@ void PowerTest::settingsPersist()
         QSignalSpy scaleSpy(&settings, &Settings::scaleChanged);
         settings.setScale(1.1);
         QCOMPARE(scaleSpy.count(), 1);
+        QVERIFY(!QFile::exists(path));
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(path), Settings::syncDelayMs + busTimeoutMs);
         settings.setScale(1.1);
         QCOMPARE(scaleSpy.count(), 1);
         settings.setScale(9.0);

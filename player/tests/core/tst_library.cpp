@@ -112,6 +112,14 @@ QString sha1Name(const QByteArray &data)
            + QStringLiteral(".png");
 }
 
+bool writeBytes(const QString &path, const QByteArray &data)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    return file.write(data) == data.size();
+}
+
 }
 
 class LibraryTest : public QObject
@@ -135,6 +143,7 @@ private slots:
     void removed();
     void missingRoot();
     void artContent();
+    void pruneArtForeign();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -558,6 +567,52 @@ void LibraryTest::artContent()
                     {QStringLiteral("アルバム二")})
                  .toInt(),
              1);
+}
+
+void LibraryTest::pruneArtForeign()
+{
+    const QString artDir = m_library->artDir();
+    QVERIFY(QDir(artDir).exists());
+    const QString kept = artPathOf(QStringLiteral("Album One"));
+    QVERIFY(QFileInfo::exists(kept));
+
+    const QString foreign = artDir + QStringLiteral("/notes.txt");
+    const QString lookalike = artDir + QStringLiteral("/cover.png");
+    const QString shortHash = artDir + QStringLiteral("/") + QString(39, QLatin1Char('a'))
+                              + QStringLiteral(".png");
+    const QString upper = artDir + QStringLiteral("/") + QString(40, QLatin1Char('A'))
+                          + QStringLiteral(".png");
+    const QString stalePng = artDir + QStringLiteral("/") + QString(40, QLatin1Char('b'))
+                             + QStringLiteral(".png");
+    const QString staleJpg = artDir + QStringLiteral("/") + QString(40, QLatin1Char('c'))
+                             + QStringLiteral(".jpg");
+    QVERIFY(writeBytes(foreign, QByteArrayLiteral("notes")));
+    QVERIFY(writeBytes(lookalike, QByteArrayLiteral("png")));
+    QVERIFY(writeBytes(shortHash, QByteArrayLiteral("png")));
+    QVERIFY(writeBytes(upper, QByteArrayLiteral("png")));
+    QVERIFY(writeBytes(stalePng, QByteArrayLiteral("png")));
+    QVERIFY(writeBytes(staleJpg, QByteArrayLiteral("jpg")));
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added, 0);
+    QCOMPARE(updated, 0);
+    QCOMPARE(removed, 0);
+
+    QVERIFY(QFileInfo::exists(kept));
+    QVERIFY(QFileInfo::exists(foreign));
+    QVERIFY(QFileInfo::exists(lookalike));
+    QVERIFY(QFileInfo::exists(shortHash));
+    QVERIFY(QFileInfo::exists(upper));
+    QVERIFY(!QFileInfo::exists(stalePng));
+    QVERIFY(!QFileInfo::exists(staleJpg));
+
+    QVERIFY(QFile::remove(foreign));
+    QVERIFY(QFile::remove(lookalike));
+    QVERIFY(QFile::remove(shortHash));
+    QVERIFY(QFile::remove(upper));
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)

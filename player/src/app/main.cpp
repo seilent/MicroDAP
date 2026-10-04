@@ -20,6 +20,7 @@
 #include <QTextStream>
 
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -106,8 +107,11 @@ int main(int argc, char *argv[])
     casdap::Settings settings;
     casdap::Library library;
     casdap::Player player(&library);
-    casdap::FakeBluezModel bluez;
-    player.setBluez(&bluez);
+    std::unique_ptr<casdap::FakeBluezModel> bluez;
+    if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1) {
+        bluez = std::make_unique<casdap::FakeBluezModel>();
+        player.setBluez(bluez.get());
+    }
     casdap::State state(&player);
     state.installSignalHandlers();
     state.load();
@@ -123,7 +127,8 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);
     engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);
-    engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"), &bluez);
+    engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"),
+                                             static_cast<QObject *>(bluez.get()));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");

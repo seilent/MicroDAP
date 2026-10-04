@@ -62,6 +62,12 @@ State::~State()
 {
     if (m_fds[0] >= 0) {
         signalFd.store(-1, std::memory_order_relaxed);
+        struct sigaction action {};
+        action.sa_handler = SIG_DFL;
+        sigemptyset(&action.sa_mask);
+        ::sigaction(SIGTERM, &action, nullptr);
+        ::sigaction(SIGINT, &action, nullptr);
+        ::sigaction(SIGHUP, &action, nullptr);
         ::close(m_fds[0]);
     }
     if (m_fds[1] >= 0)
@@ -190,8 +196,10 @@ void State::onSignal()
     const ssize_t count = ::read(m_fds[1], &byte, 1);
     (void)count;
     m_notifier->setEnabled(false);
-    saveNow();
-    QCoreApplication::quit();
+    if (QCoreApplication::instance())
+        QCoreApplication::quit();
+    else
+        saveNow();
 }
 
 }

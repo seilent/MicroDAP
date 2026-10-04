@@ -42,9 +42,6 @@ add_library(casdapcore STATIC
     src/core/StatusModel.h
     src/core/Version.cpp
     src/core/Version.h
-    dbus/org.casdap.Player.xml
-    dbus/org.mpris.MediaPlayer2.xml
-    dbus/org.mpris.MediaPlayer2.Player.xml
 )
 target_include_directories(casdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_definitions(casdapcore PRIVATE CASDAP_VERSION="${PROJECT_VERSION}")
@@ -55,6 +52,13 @@ target_link_libraries(casdapcore PUBLIC
     PkgConfig::GST
     PkgConfig::TAGLIB
     SDL3::SDL3
+)
+
+install(FILES
+    dbus/org.casdap.Player.xml
+    dbus/org.mpris.MediaPlayer2.xml
+    dbus/org.mpris.MediaPlayer2.Player.xml
+    DESTINATION share/dbus-1/interfaces
 )
 
 set(casdap_qml

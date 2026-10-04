@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QVariant>
 #include <QVariantMap>
 
@@ -24,7 +25,6 @@ class MprisRootAdaptor : public QDBusAbstractAdaptor
     Q_PROPERTY(bool CanRaise READ canRaise CONSTANT)
     Q_PROPERTY(bool HasTrackList READ hasTrackList CONSTANT)
     Q_PROPERTY(QString Identity READ identity CONSTANT)
-    Q_PROPERTY(QString DesktopEntry READ desktopEntry CONSTANT)
     Q_PROPERTY(QStringList SupportedUriSchemes READ supportedUriSchemes CONSTANT)
     Q_PROPERTY(QStringList SupportedMimeTypes READ supportedMimeTypes CONSTANT)
 
@@ -35,7 +35,6 @@ public:
     bool canRaise() const;
     bool hasTrackList() const;
     QString identity() const;
-    QString desktopEntry() const;
     QStringList supportedUriSchemes() const;
     QStringList supportedMimeTypes() const;
 
@@ -136,6 +135,7 @@ public:
 private:
     void notifyStatus();
     void notifyMetadata();
+    void scheduleMetadata();
     void notifyShuffle();
     void notifyLoopStatus();
     void emitPropertiesChanged(const QString &interface, const QVariantMap &changed);
@@ -146,6 +146,7 @@ private:
     QDBusConnection m_bus;
     MprisRootAdaptor *m_root;
     MprisPlayerAdaptor *m_playerAdaptor;
+    QTimer m_metadataTimer;
     bool m_registered = false;
 };
 

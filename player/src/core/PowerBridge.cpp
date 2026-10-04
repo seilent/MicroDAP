@@ -203,11 +203,12 @@ bool PowerBridge::runVerb(const QString &verb)
     if (!dir.isEmpty())
         program = dir + QLatin1Char('/') + program;
     qInfo() << "casdap power: verb" << verb << program << command;
-    if (!QProcess::startDetached(program, command) && !m_failedVerbs.contains(verb)) {
+    const bool started = QProcess::startDetached(program, command);
+    if (!started && !m_failedVerbs.contains(verb)) {
         m_failedVerbs.insert(verb);
         qWarning() << "casdap power: cannot start" << program << "for" << verb;
     }
-    return true;
+    return started;
 }
 
 void PowerBridge::reloadDrift()

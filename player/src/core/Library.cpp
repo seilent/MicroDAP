@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -84,6 +85,12 @@ bool run(const QSqlDatabase &db, const char *sql)
         return true;
     qWarning() << "casdap library:" << query.lastError().text() << QLatin1StringView(sql);
     return false;
+}
+
+const QRegularExpression &artNamePattern()
+{
+    static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{40}\\.(png|jpg)$"));
+    return pattern;
 }
 
 }
@@ -391,7 +398,7 @@ void Library::pruneArt()
     const QFileInfoList files = QDir(m_artDir).entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
     for (const QFileInfo &file : files) {
         const QString path = file.absoluteFilePath();
-        if (!referenced.contains(path))
+        if (!referenced.contains(path) && artNamePattern().match(file.fileName()).hasMatch())
             QFile::remove(path);
     }
 }
