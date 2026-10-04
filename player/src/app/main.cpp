@@ -77,9 +77,12 @@ int main(int argc, char *argv[])
     const QCommandLineOption outOption(QStringLiteral("out"),
                                        QStringLiteral("PNG path for --screenshot."),
                                        QStringLiteral("png"));
+    const QCommandLineOption angleOption(QStringLiteral("angle"),
+                                         QStringLiteral("Turnstile angle in degrees for --screenshot motion."),
+                                         QStringLiteral("deg"), QStringLiteral("40"));
     const QCommandLineOption scanOnlyOption(QStringLiteral("scan-only"),
                                             QStringLiteral("Scan [dir] into the library and exit."));
-    parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, scanOnlyOption});
+    parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, angleOption, scanOnlyOption});
     parser.addPositionalArgument(QStringLiteral("dir"),
                                  QStringLiteral("Directory for --scan-only, default ~/Music."),
                                  QStringLiteral("[dir]"));
@@ -93,7 +96,7 @@ int main(int argc, char *argv[])
 
     if (parser.isSet(screenshotOption))
         return casdap::screenshot(parser.value(screenshotOption), parser.value(sizeOption),
-                                  parser.value(outOption));
+                                  parser.value(outOption), parser.value(angleOption).toDouble());
 
     if (parser.isSet(scanOnlyOption)) {
         const QString music = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);

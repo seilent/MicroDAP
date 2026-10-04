@@ -76,3 +76,30 @@ add_test(NAME bluez COMMAND tst_bluez)
 set_tests_properties(bluez PROPERTIES FIXTURES_REQUIRED library-fixtures)
 casdap_test_env(bluez)
 set_property(TEST bluez APPEND PROPERTY ENVIRONMENT "CASDAP_AUDIO_SINK=fakesink sync=true")
+
+set(CASDAP_TEST_FONT_DIR ${CMAKE_SOURCE_DIR}/../dist/usr/share/fonts/casdap CACHE PATH "Selawik TTF directory for the qml tests and specimen shots")
+
+qt_add_executable(tst_qml qml/tst_qml.cpp)
+target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
+target_link_libraries(tst_qml PRIVATE casdapuiplugin Qt6::Gui Qt6::Quick Qt6::QuickTest)
+add_test(NAME qml COMMAND tst_qml)
+casdap_test_env(qml)
+set_property(TEST qml APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-specimen-portrait
+    COMMAND casdap-player --screenshot specimen --size 640x960 --out ${shots}/specimen-640x960.png
+)
+casdap_test_env(screenshot-specimen-portrait)
+set_property(TEST screenshot-specimen-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-specimen-landscape
+    COMMAND casdap-player --screenshot specimen --size 1920x1080 --out ${shots}/specimen-1920x1080.png
+)
+casdap_test_env(screenshot-specimen-landscape)
+set_property(TEST screenshot-specimen-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-motion
+    COMMAND casdap-player --screenshot motion --size 640x960 --angle 40 --out ${shots}/motion-640x960.png
+)
+casdap_test_env(screenshot-motion)
+set_property(TEST screenshot-motion APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")

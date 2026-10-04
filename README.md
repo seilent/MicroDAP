@@ -24,6 +24,32 @@ The three patched files (`/usr/libexec/armada/session-control`,
 `build.sh` copies each base file out of the pinned image, records its sha256 in
 `usr/share/casdap/shadow-base.sha256`, applies the patch with `patch -p1` and fails on any reject.
 
+## Player UI
+
+QML module `Casdap`, built as the static library `casdapui` and linked into `casdap-player` and the
+QML test runner `tst_qml`. `Ui` (singleton) holds the scale and every token: the Zune HD canvas is
+272 x 480 u, `u = min(w/272, h/480) * s` portrait (`h >= w`), `min(w/480, h/272) * s` landscape,
+`s` the user scale 0.8 to `sMax` in 0.1 steps (`sMax` 1.1 at 640x960, 1.0 at 960x640, 1080x1920 and
+1920x1080). `canvasW`, `canvasH` are the window in u; `px(v)` and `fontPx(v)` (12 px floor) convert.
+Type roles are objects (`size`, `style`, `caps`, `alpha`, `tracking`), `font(role)` builds the
+`Qt.font` with family Selawik and the face picked by `styleName` (fontconfig reports Light and
+Semilight both at weight 50). The five Selawik TTFs load through `FontLoader` from `CASDAP_FONT_DIR`
+(default `/usr/share/fonts/casdap`, read by the `Env` singleton); `fontsReady` reports all five.
+`Main.qml` writes `Ui.windowW` and `Ui.windowH` on every resize, so a new surface size reflows
+without restart. `Motion` (singleton) holds the curves (`expOut6`, `expIn6`, `expIn1`, `expIn15` as
+functions on a linear 0..1 progress, `decel` and `strip` as `Easing.BezierSpline` arrays, Qt stand
+ins for the shell curves) and every duration. `Turnstile` applies the `Matrix4x4` page rotation about
+a hinge with perspective `d = 2.3 * width` px. `PageStack` runs the exit animation (250 ms, expIn6)
+to its end before the enter animation (350 ms, expOut6) starts, keeps the incoming page at opacity 0
+and visible meanwhile, reports `inputLocked` and `phase`, and `completeAll()` jumps a running
+transition to its end state.
+
+Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg]`,
+offscreen, software renderer. Screens: `blank`, `specimen` (every type role in its weight, labeled
+with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
+`CASDAP_TEST_FONT_DIR` (default `../dist/usr/share/fonts/casdap`) feeds `CASDAP_FONT_DIR` to the QML
+tests and the specimen shots; font dependent QML cases skip when the directory is empty.
+
 ## Builder
 
 The builder container is `FROM` the exact Armada image the device runs, pinned by digest in

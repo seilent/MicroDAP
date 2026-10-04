@@ -57,19 +57,40 @@ target_link_libraries(casdapcore PUBLIC
     SDL3::SDL3
 )
 
+set(casdap_qml
+    qml/Casdap/Main.qml
+    qml/Casdap/Ui.qml
+    qml/Casdap/Motion.qml
+    qml/Casdap/Turnstile.qml
+    qml/Casdap/PageStack.qml
+    qml/Casdap/Specimen.qml
+    qml/Casdap/MotionShot.qml
+)
+foreach(file IN LISTS casdap_qml)
+    get_filename_component(alias ${file} NAME)
+    set_source_files_properties(${file} PROPERTIES QT_RESOURCE_ALIAS ${alias})
+endforeach()
+set_source_files_properties(qml/Casdap/Ui.qml qml/Casdap/Motion.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
+qt_add_library(casdapui STATIC)
+qt_add_qml_module(casdapui
+    URI Casdap
+    VERSION 1.0
+    RESOURCE_PREFIX /qt/qml
+    QML_FILES ${casdap_qml}
+    SOURCES
+        src/ui/Env.cpp
+        src/ui/Env.h
+)
+target_include_directories(casdapui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/ui)
+target_link_libraries(casdapui PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+
 qt_add_executable(casdap-player
     src/app/main.cpp
     src/app/Screenshot.cpp
     src/app/Screenshot.h
 )
-set_source_files_properties(qml/Casdap/Main.qml PROPERTIES QT_RESOURCE_ALIAS Main.qml)
-qt_add_qml_module(casdap-player
-    URI Casdap
-    VERSION 1.0
-    RESOURCE_PREFIX /qt/qml
-    QML_FILES qml/Casdap/Main.qml
-)
-target_link_libraries(casdap-player PRIVATE casdapcore Qt6::Gui Qt6::Quick)
+target_link_libraries(casdap-player PRIVATE casdapcore casdapuiplugin Qt6::Gui Qt6::Quick)
 
 install(TARGETS casdap-player RUNTIME DESTINATION bin)
 

@@ -7,6 +7,7 @@
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QTextStream>
 #include <QTimer>
 
@@ -49,12 +50,22 @@ void grab(QQuickWindow *window, const QString &out)
     QCoreApplication::exit(0);
 }
 
+const QStringList &screens()
+{
+    static const QStringList names{
+        QStringLiteral("blank"),
+        QStringLiteral("specimen"),
+        QStringLiteral("motion"),
+    };
+    return names;
 }
 
-int screenshot(const QString &screen, const QString &size, const QString &out)
+}
+
+int screenshot(const QString &screen, const QString &size, const QString &out, double angle)
 {
-    if (screen != QLatin1StringView("blank")) {
-        fail(QStringLiteral("unknown screen %1").arg(screen));
+    if (!screens().contains(screen)) {
+        fail(QStringLiteral("unknown screen %1, expected one of %2").arg(screen, screens().join(QLatin1Char(' '))));
         return 2;
     }
 
@@ -75,6 +86,8 @@ int screenshot(const QString &screen, const QString &size, const QString &out)
     QQmlApplicationEngine engine;
     engine.setInitialProperties({
         {QStringLiteral("screenshot"), true},
+        {QStringLiteral("shotScreen"), screen},
+        {QStringLiteral("shotAngle"), angle},
         {QStringLiteral("shotWidth"), width},
         {QStringLiteral("shotHeight"), height},
     });
