@@ -1,0 +1,159 @@
+#!/usr/bin/bash
+set -uo pipefail
+
+LONG_MS="${CASDAP_HOTKEYD_LONG_MS:-1000}"
+CONFIRM_MS="${CASDAP_HOTKEYD_CONFIRM_MS:-3000}"
+DEVICE_WAIT_SEC="${CASDAP_HOTKEYD_DEVICE_WAIT_SEC:-15}"
+DEVICE_NAME="${CASDAP_HOTKEYD_DEVICE_NAME:-InputPlumber Keyboard}"
+DRY_RUN="${CASDAP_HOTKEYD_DRY_RUN:-0}"
+KEY="${CASDAP_HOTKEYD_KEY:-KEY_F13}"
+DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
+SYS_INPUT="${CASDAP_SYS_INPUT:-/sys/class/input}"
+
+log() { logger -t casdap-hotkeyd -- "$*"; }
+
+now_ms() { date +%s%3N; }
+
+run() {
+    if [[ "${DRY_RUN}" == 1 ]]; then
+        log "would: $*"
+        return 0
+    fi
+    "$@" || log "failed: $* (rc=$?)"
+}
+
+key_device() {
+    local dev name
+    for dev in "${DEV_INPUT}"/event*; do
+        [[ -e "${dev}" ]] || continue
+        name=$(cat "${SYS_INPUT}/$(basename "${dev}")/device/name" 2>/dev/null) || continue
+        [[ "${name}" == "${DEVICE_NAME}" ]] || continue
+        printf '%s\n' "${dev}"
+        return 0
+    done
+    return 1
+}
+
+wait_for_key_device() {
+    local waited=0
+    while :; do
+        key_device && return 0
+        (( waited >= DEVICE_WAIT_SEC )) && return 1
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
+session_state() {
+    if systemctl --user is-active --quiet gamescope-session-plus@casdap.service; then
+        echo casdap
+    elif systemctl --user is-active --quiet gamescope-session-plus@steam.service; then
+        echo game
+    else
+        echo other
+    fi
+}
+
+title_running() { pgrep -f 'SteamLaunch AppId=' >/dev/null 2>&1; }
+
+plasma_running() { pgrep -x plasmashell >/dev/null 2>&1; }
+
+last_hold_ms=0
+
+on_tap() {
+    case "$1" in
+        casdap) run busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause ;;
+        *) log "tap in ${1}, ignored" ;;
+    esac
+}
+
+on_hold() {
+    local now
+    case "$1" in
+        game)
+            if title_running; then
+                now=$(now_ms)
+                if (( now - last_hold_ms > CONFIRM_MS )); then
+                    last_hold_ms=${now}
+                    log "hold ignored, title running, hold again within $((CONFIRM_MS / 1000)) s to switch"
+                    return 0
+                fi
+            fi
+            last_hold_ms=0
+            run systemctl start casdap-switch.service
+            ;;
+        casdap)
+            run systemctl start casdap-switch-back.service
+            ;;
+        other)
+            if plasma_running; then
+                run systemctl start casdap-switch.service
+            else
+                log "hold in an unknown session, ignored"
+            fi
+            ;;
+    esac
+}
+
+main() {
+    local dev line read_result state press_ms rem session
+
+    trap 'exit 0' INT TERM
+
+    dev=$(wait_for_key_device) || {
+        log "${DEVICE_NAME} not found after ${DEVICE_WAIT_SEC} s"
+        return 0
+    }
+
+    log "watching ${dev} for ${KEY}, hold ${LONG_MS} ms, dry run ${DRY_RUN}"
+    exec 3< <(evtest "${dev}" 2>/dev/null)
+    state=idle
+    press_ms=0
+    session=
+
+    while :; do
+        read_result=0
+        case "${state}" in
+            held)
+                rem=$((LONG_MS - ($(now_ms) - press_ms)))
+                if (( rem <= 0 )); then
+                    log "hold in ${session}"
+                    on_hold "${session}"
+                    state=draining
+                    continue
+                fi
+                IFS= read -r -u 3 -t "$(printf '%d.%03d' $((rem / 1000)) $((rem % 1000)))" line 2>/dev/null \
+                    || read_result=$?
+                ;;
+            *)
+                IFS= read -r -u 3 line 2>/dev/null || read_result=$?
+                ;;
+        esac
+
+        if (( read_result > 128 )) && [[ "${state}" == held ]]; then
+            continue
+        elif (( read_result != 0 )); then
+            log "event stream ended"
+            return 1
+        fi
+
+        case "${line}" in
+            *"(${KEY}), value 1"*)
+                [[ "${state}" == idle ]] || continue
+                press_ms=$(now_ms)
+                session=$(session_state)
+                state=held
+                ;;
+            *"(${KEY}), value 0"*)
+                case "${state}" in
+                    held) on_tap "${session}" ;;
+                esac
+                state=idle
+                ;;
+        esac
+    done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

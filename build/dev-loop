@@ -36,4 +36,4 @@ fi
 rsync -a --delete dist/ "${device}:/tmp/casdap/"
 rsync -a build/device-apply "${device}:/tmp/casdap-apply"
 ssh -t "${device}" sudo bash /tmp/casdap-apply ${input}
-ssh "${device}" 'export XDG_RUNTIME_DIR=/run/user/$(id -u); systemctl --user daemon-reload; systemctl --user try-restart casdap-hotkeyd.service 2>/dev/null || true'
+ssh "${device}" 'export XDG_RUNTIME_DIR=/run/user/$(id -u); systemctl --user daemon-reload; systemctl --user restart casdap-hotkeyd.service'

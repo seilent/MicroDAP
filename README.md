@@ -3,8 +3,8 @@
 Console As DAP. A music player session and Bluetooth A2DP receiver for Linux gaming handhelds,
 shipped as a systemd-sysext overlay for [Armada](https://github.com/armada-os/armada).
 
-Status: prototype. The session, the switch units, the Guide preserving pad mapping and the boot
-guard exist and run on an AYANEO Pocket MICRO 2. Player, hold daemon, receiver and screen off state
+Status: prototype. The session, the switch units, the Guide preserving pad mapping, the hold daemon
+and the boot guard exist and run on an AYANEO Pocket MICRO 2. Player, receiver and screen off state
 are not written yet.
 
 ## Layout
@@ -14,7 +14,7 @@ are not written yet.
 | `sysext/` | Static overlay, copied into `dist/` as is. `/usr` only, nothing under `/etc`. |
 | `patches/<class>/<path>.patch` | Patches against files of the Armada image. `armada/` Armada scripts, `generic/` InputPlumber profile, `pm2/` Pocket MICRO 2 capability map. |
 | `build/` | `base.env` (pinned image), `Containerfile`, `toolchain.sh`, `build.sh`, device scripts for the dev loop. |
-| `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`. |
+| `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`. |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
 The three patched files (`/usr/libexec/armada/session-control`,
@@ -43,7 +43,7 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
-| `just test` | `tests/session-control-test.sh` and `tests/priv-test.sh`. Needs the stock `session-control` at `CASDAP_BASE_ROOT/usr/libexec/armada/` (defaults to `/`, else `../armada/system_files`). |
+| `just test` | `tests/session-control-test.sh`, `tests/priv-test.sh`, `tests/hotkeyd-test.sh`. Needs the stock `session-control` at `CASDAP_BASE_ROOT/usr/libexec/armada/` (defaults to `/`, else `../armada/system_files`). |
 
 `CASDAP_DEVICE` overrides `armada@pm2`. Root steps on the device run through `ssh -t`
 and `sudo`. Run the dev loop from game mode or ssh, not from inside the casdap session.
@@ -77,8 +77,15 @@ Polkit boundary: any process running as `armada` may start `casdap-switch.servic
 
 The pad guide button (`BTN_MODE`) maps to `KeyF13` in the Pocket MICRO 2 capability map; the
 default InputPlumber profile maps `KeyF13` to Guide plus `KeyF13`, so Steam keeps its menu and a
-daemon can read F13 on the `InputPlumber Keyboard` node. A 1 s hold shows Steam's shortcut overlay
-before the switch. F13 does not flow during stick calibration.
+daemon can read F13 on the `InputPlumber Keyboard` node. F13 does not flow during stick calibration.
+
+`casdap-hotkeyd` (user unit, `Upholds=` from `default.target.d`) reads that node with `evtest` and
+classifies each press by the running session. Hold 1 s in game mode starts `casdap-switch.service`;
+Steam shows its shortcut overlay just before. While a title runs the first hold is ignored and a
+second hold within 3 s switches. Hold in casdap starts `casdap-switch-back.service`, tap sends
+`PlayPause` to `org.mpris.MediaPlayer2.casdap`. In Plasma a hold switches; in any other session it
+logs. `CASDAP_HOTKEYD_DRY_RUN=1` (runtime drop-in under `~/.config/systemd/user/`) logs `would:`
+lines instead of acting.
 
 ## Guard
 

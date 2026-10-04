@@ -1,0 +1,8 @@
+[Unit]
+Description=CASDAP pad guide hold daemon
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/libexec/casdap/casdap-hotkeyd
+Restart=always
+RestartSec=1
