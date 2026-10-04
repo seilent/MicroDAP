@@ -67,10 +67,18 @@ EOF
 
 cat > "${T}/bin/loginctl" <<'EOF'
 #!/usr/bin/bash
-case "$(pop sessions)" in
-    active)  echo '[{"session":"1","uid":969,"user":"sddm","seat":"seat0","state":"online"},{"session":"16","uid":1000,"user":"armada","seat":"seat0","state":"active"},{"session":"7","uid":1000,"user":"armada","seat":null,"state":"active"}]' ;;
-    closing) echo '[{"session":"16","uid":1000,"user":"armada","seat":"seat0","state":"closing"},{"session":"7","uid":1000,"user":"armada","seat":null,"state":"active"}]' ;;
-    gone)    echo '[{"session":"7","uid":1000,"user":"armada","seat":null,"state":"active"},{"session":"19","uid":1000,"user":"armada","seat":"seat0","state":"active"}]' ;;
+echo "loginctl $*" >> "${STATE}/calls"
+case "$1" in
+    list-sessions)
+        [[ "$2" == --json=short ]] || { echo "loginctl: unexpected $*" >&2; exit 99; }
+        echo '[{"session":"1","uid":969,"user":"sddm","seat":"seat0","class":"user"},{"session":"16","uid":1000,"user":"armada","seat":"seat0","class":"user"},{"session":"7","uid":1000,"user":"armada","seat":null,"class":"user"}]' ;;
+    show-session)
+        [[ "$5" == 16 ]] || { echo "loginctl: unexpected $*" >&2; exit 99; }
+        case "$(pop sessions)" in
+            active)  echo active ;;
+            closing) echo closing ;;
+            gone)    echo "Could not get properties: No session '16' known" >&2; exit 1 ;;
+        esac ;;
 esac
 EOF
 
@@ -145,7 +153,7 @@ sddm_restart="systemctl --no-block restart sddm.service"
 steam_shutdown="/steam -shutdown"
 casdap_stop="systemctl --user stop gamescope-session-plus@casdap.service"
 
-setup "switch-casdap from game mode" "active inactive" inactive 0 "active gone"
+setup "switch-casdap from game mode" "active inactive" inactive 0 gone
 run switch-casdap
 expect_rc 0
 expect_session casdap.desktop
@@ -214,7 +222,7 @@ expect_rc 0
 expect_no_call "${steam_shutdown}"
 expect_call "${sddm_restart}"
 
-setup "switch-casdap session closing" "active inactive" inactive 0 "active closing"
+setup "switch-casdap session closing" "active inactive" inactive 0 closing
 run switch-casdap
 expect_rc 0
 expect_call "${steam_shutdown}"

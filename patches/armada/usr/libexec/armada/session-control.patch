@@ -1,6 +1,6 @@
 --- a/usr/libexec/armada/session-control
 +++ b/usr/libexec/armada/session-control
-@@ -6,11 +6,39 @@
+@@ -6,11 +6,38 @@
  set -euo pipefail
  
  STEAMOS_MANAGER_STATE=/var/home/armada/.config/steamos-manager/state.toml
@@ -22,16 +22,15 @@
 +}
 +
 +user_session() {
-+    loginctl list-sessions -o json 2>/dev/null \
++    loginctl list-sessions --json=short 2>/dev/null \
 +        | jq -r --arg user "${SESSION_USER}" \
 +            '[.[] | select(.user == $user and .seat == "seat0")] | first | .session // empty'
 +}
 +
 +session_ended() {
-+    local sessions state
-+    sessions=$(loginctl list-sessions -o json) || return 1
-+    state=$(jq -r --arg id "$1" '.[] | select(.session == $id) | .state' <<<"${sessions}")
-+    [[ -z "${state}" || "${state}" == closing ]]
++    local state
++    state=$(loginctl show-session -p State --value "$1" 2>&1) || true
++    [[ "${state}" == *"No session"* || "${state}" == closing ]]
 +}
  
  logout_plasma() {
