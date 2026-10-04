@@ -129,6 +129,8 @@ QtObject {
     property color accent: "#FA2A55"
     readonly property color accentBright: "#FF4D79"
     readonly property real focusBorder: 2
+    readonly property real focusBarWidth: 2
+    readonly property real focusBarOffset: 8
 
     function white(alpha: real): color {
         return Qt.rgba(1, 1, 1, alpha)

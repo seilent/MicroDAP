@@ -67,6 +67,11 @@ set(casdap_qml
     qml/Casdap/Motion.qml
     qml/Casdap/Turnstile.qml
     qml/Casdap/PageStack.qml
+    qml/Casdap/Page.qml
+    qml/Casdap/PadRouter.qml
+    qml/Casdap/FocusBar.qml
+    qml/Casdap/FocusList.qml
+    qml/Casdap/PressScale.qml
     qml/Casdap/Specimen.qml
     qml/Casdap/MotionShot.qml
 )

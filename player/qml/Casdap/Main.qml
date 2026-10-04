@@ -23,6 +23,24 @@ Window {
         Ui.windowH = root.height
     }
 
+    PageStack {
+        id: pages
+
+        anchors.fill: parent
+        visible: !root.screenshot
+    }
+
+    PadRouter {
+        id: router
+
+        anchors.fill: parent
+        stack: pages
+        pad: typeof Pad === "undefined" ? null : Pad
+        player: typeof Player === "undefined" ? null : Player
+        screenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
+        pocketControls: typeof Settings === "undefined" ? false : Settings.pocketControls
+    }
+
     Loader {
         anchors.fill: parent
         sourceComponent: root.shotScreen === "specimen" ? specimenComponent

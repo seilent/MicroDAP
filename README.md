@@ -44,6 +44,19 @@ to its end before the enter animation (350 ms, expOut6) starts, keeps the incomi
 and visible meanwhile, reports `inputLocked` and `phase`, and `completeAll()` jumps a running
 transition to its end state.
 
+`Pad` is a context property; `PadRouter` turns its actions into names (`up down left right a b x y
+lb rb lt rt start back`) and hands each to the top page of the `PageStack` through
+`handleAction(name, repeat)`, dropping it while a transition runs. Unhandled `start` emits
+`nowPlaying()`, unhandled `back` emits `view()`; with the screen off and pocket controls on, `lb`,
+`rb` and `start` call `Player.previous`, `next`, `playPause` and no page sees them. Keyboard fallback
+on the same router: arrows, Return A, Escape or Backspace B, X, Y, Q and E for LB and RB, PageUp and
+PageDown for LT and RT, Space Start, Tab Back/View; key autorepeat counts only for directions.
+`Page` is the screen base: one `focusIndex`, A emits `activated(index)`, B pops, up/down and LT/RT go
+to its `FocusList` when set. `FocusList` keeps the focused row inside `[CONTENT_TOP, H - ROW_HEIGHT]`
+with a 100 ms easeIn `contentY` tween per step; LT/RT move one page of whole rows in 500 ms easeIn.
+`FocusBar` is the 2 u white bar at `HUB_EDGE - 8` spanning the row, following in 100 ms sine.
+`PressScale` scales its item to 0.96 while A is held, 100 ms linear each way.
+
 Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg]`,
 offscreen, software renderer. Screens: `blank`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var

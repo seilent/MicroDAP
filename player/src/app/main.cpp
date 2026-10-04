@@ -1,6 +1,7 @@
 #include "FakeBluezModel.h"
 #include "Library.h"
 #include "Mpris.h"
+#include "Pad.h"
 #include "Player.h"
 #include "PowerBridge.h"
 #include "Screenshot.h"
@@ -120,10 +121,17 @@ int main(int argc, char *argv[])
     casdap::StatusModel status;
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status,
                      [&power, &status] { status.setActive(!power.screenOff()); });
+    casdap::Pad pad;
+    pad.setPocketControls(settings.pocketControls());
+    QObject::connect(&settings, &casdap::Settings::pocketControlsChanged, &pad,
+                     [&settings, &pad] { pad.setPocketControls(settings.pocketControls()); });
+    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &pad,
+                     [&power, &pad] { pad.setScreenOff(power.screenOff()); });
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
+    engine.rootContext()->setContextProperty(QStringLiteral("Pad"), &pad);
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);
     engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);
