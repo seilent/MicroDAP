@@ -1,5 +1,6 @@
 #include "Player.h"
 
+#include "BluezModel.h"
 #include "Library.h"
 
 #include <QDebug>
@@ -116,6 +117,31 @@ Library *Player::library() const
 bool Player::isValid() const
 {
     return m_playbin != nullptr;
+}
+
+BluezModel *Player::bluez() const
+{
+    return m_bluez;
+}
+
+void Player::setBluez(BluezModel *bluez)
+{
+    if (m_bluez == bluez)
+        return;
+    if (m_bluez)
+        disconnect(m_bluez, nullptr, this, nullptr);
+    m_bluez = bluez;
+    if (!m_bluez)
+        return;
+    connect(m_bluez, &BluezModel::transportActiveChanged, this, &Player::onTransportActiveChanged);
+    connect(m_bluez, &QObject::destroyed, this, [this] { m_bluez = nullptr; });
+    onTransportActiveChanged();
+}
+
+void Player::onTransportActiveChanged()
+{
+    if (m_bluez && m_bluez->transportActive())
+        pause();
 }
 
 void Player::aboutToFinish(GstElement *element, gpointer data)

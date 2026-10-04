@@ -14,22 +14,35 @@ find_package(SDL3 REQUIRED CONFIG)
 qt_standard_project_setup(REQUIRES 6.11)
 
 add_library(casdapcore STATIC
+    src/core/BluezModel.cpp
+    src/core/BluezModel.h
+    src/core/FakeBluezModel.cpp
+    src/core/FakeBluezModel.h
     src/core/Library.cpp
     src/core/Library.h
     src/core/Models.cpp
     src/core/Models.h
     src/core/Mpris.cpp
     src/core/Mpris.h
+    src/core/Pad.cpp
+    src/core/Pad.h
     src/core/Player.cpp
     src/core/Player.h
+    src/core/PowerBridge.cpp
+    src/core/PowerBridge.h
     src/core/Queue.cpp
     src/core/Queue.h
     src/core/Scanner.cpp
     src/core/Scanner.h
+    src/core/Settings.cpp
+    src/core/Settings.h
     src/core/State.cpp
     src/core/State.h
+    src/core/StatusModel.cpp
+    src/core/StatusModel.h
     src/core/Version.cpp
     src/core/Version.h
+    dbus/org.casdap.Player.xml
     dbus/org.mpris.MediaPlayer2.xml
     dbus/org.mpris.MediaPlayer2.Player.xml
 )

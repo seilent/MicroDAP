@@ -1,8 +1,12 @@
+#include "FakeBluezModel.h"
 #include "Library.h"
 #include "Mpris.h"
 #include "Player.h"
+#include "PowerBridge.h"
 #include "Screenshot.h"
+#include "Settings.h"
 #include "State.h"
+#include "StatusModel.h"
 #include "Version.h"
 
 #include <QCommandLineParser>
@@ -96,16 +100,27 @@ int main(int argc, char *argv[])
         return scanOnly(parser.positionalArguments().value(0, music));
     }
 
+    casdap::Settings settings;
     casdap::Library library;
     casdap::Player player(&library);
+    casdap::FakeBluezModel bluez;
+    player.setBluez(&bluez);
     casdap::State state(&player);
     state.installSignalHandlers();
     state.load();
     casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
+    casdap::PowerBridge power(&player, QDBusConnection::sessionBus());
+    casdap::StatusModel status;
+    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status,
+                     [&power, &status] { status.setActive(!power.screenOff()); });
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
+    engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
+    engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);
+    engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);
+    engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"), &bluez);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");

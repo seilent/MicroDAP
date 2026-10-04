@@ -1,0 +1,15 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.casdap.Player">
+    <method name="SetScreenOff">
+      <arg name="off" type="b" direction="in"/>
+    </method>
+    <method name="ShowPowerMenu"/>
+    <property name="ScreenOff" type="b" access="read"/>
+    <property name="PlaybackStatus" type="s" access="read"/>
+    <signal name="ScreenOffChanged">
+      <arg name="screenOff" type="b"/>
+    </signal>
+  </interface>
+</node>

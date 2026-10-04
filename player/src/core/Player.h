@@ -13,6 +13,7 @@
 
 namespace casdap {
 
+class BluezModel;
 class Library;
 
 void initGStreamer(int &argc, char **argv);
@@ -44,6 +45,8 @@ public:
     Queue *queue() const;
     Library *library() const;
     bool isValid() const;
+    BluezModel *bluez() const;
+    void setBluez(BluezModel *bluez);
 
     void play(const QList<QueueEntry> &entries, int start = 0);
     void restore(const QList<QueueEntry> &entries, int index, qint64 positionMs);
@@ -95,9 +98,11 @@ private:
     void updateDuration();
     void syncChain();
     void addHistoryNow();
+    void onTransportActiveChanged();
 
     Library *m_library;
     Queue *m_queue;
+    BluezModel *m_bluez = nullptr;
     GstElement *m_playbin = nullptr;
     GstBus *m_bus = nullptr;
     gulong m_aboutToFinishId = 0;
