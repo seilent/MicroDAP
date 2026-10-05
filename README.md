@@ -109,7 +109,7 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just base` | Reads `IMAGE_VERSION`, `VERSION_ID` and the booted image digest from the device into `build/base.env`. |
 | `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, installs the Selawik 1.01 TTFs (`build/fonts.sh`, sha256 pinned, cached in `build/cache/`) to `usr/share/fonts/casdap/`, writes `version` and `build-manifest`. |
 | `just build` | `dist` plus `casdap-<ver>-armada<VERSION_ID>-arm64.raw` (squashfs, zstd). |
-| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`. |
+| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`, and restarts the user `pipewire pipewire-pulse wireplumber` when a file under `usr/share/pipewire/` changed. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just test-player` | ctest of `build/player` inside the builder (after `just dist`); prints `skip: no builder image` where the image is absent. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
@@ -202,6 +202,14 @@ game mode no agent runs and a paired phone cannot connect; in Plasma
 bluedevil prompts. `CASDAP_BT_SYSTEM_BUS` (bus address) and `CASDAP_BT_DEVICE_ENV` override the
 system bus and the `device-env` path for tests.
 
+## Audio
+
+`pipewire.conf.d/50-casdap-rates.conf` sets `default.clock.allowed-rates` to 44100, 48000, 88200, 96000,
+176400 and 192000 for the whole daemon while casdap is merged; `default.clock.rate` stays 48000. With only
+one stream active, the graph and the PCM switch to that stream's rate when the sink starts. A concurrent
+48 kHz stream keeps the graph at 48000 and the other stream is resampled. PipeWire reads the fragment at
+start.
+
 ## Guard
 
 `casdap-guard.service` runs at boot (`Upholds=` from `multi-user.target.d`) and after every dev loop.
@@ -233,7 +241,8 @@ the release notes and in `usr/share/casdap/build-manifest`.
 
 Install: pick the asset matching `VERSION_ID` in `/etc/os-release`, write it to
 `/var/lib/extensions/casdap.raw`, then `systemd-sysext refresh`, `systemctl restart polkit
-inputplumber casdap-guard`, `systemctl start armada-controller-type.service`. The inputplumber
+inputplumber casdap-guard`, `systemctl start armada-controller-type.service`, then as the user
+`systemctl --user restart pipewire pipewire-pulse wireplumber` (or log in again). The inputplumber
 restart drops the controller for a moment; run it outside a game. Uninstall: delete the file, run the
 same commands. Nothing under `/etc` to clean.
 
