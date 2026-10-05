@@ -1,5 +1,6 @@
 #include "FakeBluezModel.h"
 #include "Library.h"
+#include "Models.h"
 #include "Mpris.h"
 #include "Pad.h"
 #include "Player.h"
@@ -84,7 +85,17 @@ int main(int argc, char *argv[])
                                          QStringLiteral("deg"), QStringLiteral("40"));
     const QCommandLineOption scanOnlyOption(QStringLiteral("scan-only"),
                                             QStringLiteral("Scan [dir] into the library and exit."));
-    parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, angleOption, scanOnlyOption});
+    const QCommandLineOption bluezOption(QStringLiteral("bluez"),
+                                         QStringLiteral("Fake Bluez preset for --screenshot: off, connected, active, pairing."),
+                                         QStringLiteral("preset"));
+    const QCommandLineOption stateOption(QStringLiteral("state"),
+                                         QStringLiteral("Fixture state for --screenshot, default browse."),
+                                         QStringLiteral("name"));
+    const QCommandLineOption libraryOption(QStringLiteral("library"),
+                                           QStringLiteral("Music directory scanned into a temporary library for --screenshot."),
+                                           QStringLiteral("dir"));
+    parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, angleOption, scanOnlyOption,
+                       bluezOption, stateOption, libraryOption});
     parser.addPositionalArgument(QStringLiteral("dir"),
                                  QStringLiteral("Directory for --scan-only, default ~/Music."),
                                  QStringLiteral("[dir]"));
@@ -96,9 +107,17 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    if (parser.isSet(screenshotOption))
-        return casdap::screenshot(parser.value(screenshotOption), parser.value(sizeOption),
-                                  parser.value(outOption), parser.value(angleOption).toDouble());
+    if (parser.isSet(screenshotOption)) {
+        casdap::ScreenshotOptions options;
+        options.screen = parser.value(screenshotOption);
+        options.size = parser.value(sizeOption);
+        options.out = parser.value(outOption);
+        options.angle = parser.value(angleOption).toDouble();
+        options.bluez = parser.value(bluezOption);
+        options.state = parser.value(stateOption);
+        options.library = parser.value(libraryOption);
+        return casdap::screenshot(options);
+    }
 
     if (parser.isSet(scanOnlyOption)) {
         const QString music = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
@@ -107,6 +126,9 @@ int main(int argc, char *argv[])
 
     casdap::Settings settings;
     casdap::Library library;
+    casdap::HistoryModel historyRecent(&library);
+    casdap::HistoryModel historyNew(&library);
+    historyNew.setMode(casdap::HistoryModel::New);
     casdap::Player player(&library);
     std::unique_ptr<casdap::FakeBluezModel> bluez;
     if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1) {
@@ -130,6 +152,8 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
+    engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"), &historyRecent);
+    engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"), &historyNew);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
     engine.rootContext()->setContextProperty(QStringLiteral("Pad"), &pad);
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);

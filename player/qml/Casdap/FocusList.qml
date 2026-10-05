@@ -22,7 +22,7 @@ ListView {
     currentIndex: -1
     keyNavigationEnabled: false
     boundsBehavior: Flickable.StopAtBounds
-    cacheBuffer: Math.ceil(list.height)
+    cacheBuffer: Math.max(0, Math.ceil(list.height))
     clip: true
 
     NumberAnimation {

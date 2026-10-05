@@ -4,6 +4,17 @@
 
 namespace casdap {
 
-int screenshot(const QString &screen, const QString &size, const QString &out, double angle);
+struct ScreenshotOptions
+{
+    QString screen;
+    QString size;
+    QString out;
+    double angle = 40;
+    QString bluez;
+    QString state;
+    QString library;
+};
+
+int screenshot(const ScreenshotOptions &options);
 
 }

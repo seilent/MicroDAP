@@ -92,6 +92,9 @@ set(casdap_qml
     qml/Casdap/ComponentsShot.qml
     qml/Casdap/OverlaysShot.qml
     qml/Casdap/VolumeShot.qml
+    qml/Casdap/HomeShot.qml
+    qml/Casdap/screens/Home.qml
+    qml/Casdap/screens/Quickplay.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)

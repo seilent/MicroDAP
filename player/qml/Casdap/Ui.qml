@@ -51,7 +51,8 @@ QtObject {
     readonly property var hubHeader: ({ name: "hubHeader", size: 160, style: "Light", caps: Font.AllLowercase, alpha: 0.4, tracking: -1.0, cropped: true, sample: "music" })
     readonly property var homeItem: ({ name: "homeItem", size: 34, style: "Light", caps: Font.AllLowercase, alpha: 1.0, alphaDim: 0.6, tracking: -0.5, sample: "music" })
     readonly property var homeSubtitle: ({ name: "homeSubtitle", size: 8, style: "Regular", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "artists albums songs" })
-    readonly property var quickplayHeader: ({ name: "quickplayHeader", size: 14, style: "Light", caps: Font.MixedCase, alpha: 0.6, tracking: -0.5, sample: "Pins" })
+    readonly property var quickplayHeader: ({ name: "quickplayHeader", size: 34, style: "Light", caps: Font.MixedCase, alpha: 0.6, tracking: -0.5, sample: "Pins" })
+    readonly property var quickplayHint: ({ name: "quickplayHint", size: 11, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, tracking: -0.5, sample: "press x on an item" })
     readonly property var pivotActive: ({ name: "pivotActive", size: 22, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, tracking: -0.5, sample: "albums" })
     readonly property var pivotInactive: ({ name: "pivotInactive", size: 22, style: "Light", caps: Font.AllUppercase, alpha: 0.4, tracking: -0.5, sample: "songs" })
     readonly property var sectionLabel: ({ name: "sectionLabel", size: 8, style: "Regular", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "in collection" })
@@ -84,7 +85,7 @@ QtObject {
     readonly property var watermark: ({ name: "watermark", size: 14, style: "Regular", caps: Font.AllLowercase, alpha: 0.08, tracking: -0.5, sample: "casdap" })
 
     readonly property var roleList: [
-        ui.hubHeader, ui.homeItem, ui.homeSubtitle, ui.quickplayHeader, ui.pivotActive, ui.pivotInactive,
+        ui.hubHeader, ui.homeItem, ui.homeSubtitle, ui.quickplayHeader, ui.quickplayHint, ui.pivotActive, ui.pivotInactive,
         ui.sectionLabel, ui.listPrimary, ui.listPlaylist, ui.listSecondary, ui.listCount, ui.detailTitle,
         ui.detailSub, ui.gridCaption, ui.letterGlyph, ui.settingsItem, ui.settingsValue, ui.npArtist,
         ui.npAlbum, ui.npTitle, ui.npNext, ui.time, ui.overlayNumber, ui.overlayLabel, ui.toastArtist,
@@ -233,4 +234,19 @@ QtObject {
     readonly property real overlayLit: 1.0
     readonly property real overlayDim: 0.4
     readonly property real batteryLowPercent: 10
+
+    readonly property real capHeight: 0.70
+    readonly property real xHeight: 0.476
+    readonly property real qpEdge: 60
+    readonly property real qpTile: 77
+    readonly property real qpGutter: 2
+    readonly property real qpW: ui.qpEdge + 2 * ui.qpTile + ui.qpGutter
+    readonly property real qpFirstBaseline: 35
+    readonly property real qpContentDrop: 5
+    readonly property real qpSectionGap: 70
+    readonly property real qpHintDrop: 16
+    readonly property real qpHintPitch: 11
+    readonly property real qpHintW: 140
+    readonly property real qpTilePad: 5
+    readonly property real homeMenuXLandscape: 240
 }

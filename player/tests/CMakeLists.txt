@@ -139,3 +139,39 @@ add_test(NAME screenshot-volume-landscape
 )
 casdap_test_env(screenshot-volume-landscape)
 set_property(TEST screenshot-volume-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-home-portrait
+    COMMAND casdap-player --screenshot home --size 640x960 --out ${shots}/home-640x960.png
+)
+casdap_test_env(screenshot-home-portrait)
+set_property(TEST screenshot-home-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-home-landscape
+    COMMAND casdap-player --screenshot home --size 1920x1080 --out ${shots}/home-1920x1080.png
+)
+casdap_test_env(screenshot-home-landscape)
+set_property(TEST screenshot-home-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-home-bluez-portrait
+    COMMAND casdap-player --screenshot home --size 640x960 --bluez connected --out ${shots}/home-bluez-640x960.png
+)
+casdap_test_env(screenshot-home-bluez-portrait)
+set_property(TEST screenshot-home-bluez-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-home-bluez-landscape
+    COMMAND casdap-player --screenshot home --size 1920x1080 --bluez connected --out ${shots}/home-bluez-1920x1080.png
+)
+casdap_test_env(screenshot-home-bluez-landscape)
+set_property(TEST screenshot-home-bluez-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-quickplay-portrait
+    COMMAND casdap-player --screenshot quickplay --size 640x960 --out ${shots}/quickplay-640x960.png
+)
+casdap_test_env(screenshot-quickplay-portrait)
+set_property(TEST screenshot-quickplay-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-quickplay-landscape
+    COMMAND casdap-player --screenshot quickplay --size 1920x1080 --out ${shots}/quickplay-1920x1080.png
+)
+casdap_test_env(screenshot-quickplay-landscape)
+set_property(TEST screenshot-quickplay-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")

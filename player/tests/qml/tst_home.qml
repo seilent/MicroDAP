@@ -1,0 +1,475 @@
+import QtQuick
+import QtTest
+import Casdap
+
+TestCase {
+    id: tc
+
+    name: "Home"
+    when: windowShown
+    visible: true
+    width: 640
+    height: 960
+
+    readonly property real canvasW: 320
+    readonly property real canvasH: 480
+
+    PageStack {
+        id: pages
+
+        width: 640
+        height: 960
+    }
+
+    PadRouter {
+        id: router
+
+        width: 640
+        height: 960
+        stack: pages
+    }
+
+    ListModel {
+        id: history
+    }
+
+    ListModel {
+        id: fresh
+    }
+
+    ListModel {
+        id: pins
+    }
+
+    QtObject {
+        id: phone
+
+        property bool connected: true
+        property string deviceName: "Pixel 8"
+    }
+
+    QtObject {
+        id: counters
+
+        property var navigated: []
+        property int bluetoothOpens: 0
+        property var played: []
+        property var pinned: []
+        property int shuffles: 0
+    }
+
+    Component {
+        id: homeComponent
+
+        Home {
+            id: home
+
+            historyModel: history
+            newModel: fresh
+            pinsModel: pins
+            onNavigate: (name) => counters.navigated = counters.navigated.concat([name])
+            onNowPlayingBluetooth: counters.bluetoothOpens++
+            onPlayRequested: (entry) => counters.played = counters.played.concat([entry])
+            onPinRequested: (entry, pin) => counters.pinned = counters.pinned.concat([{ entry: entry, pin: pin }])
+            onShuffleAll: counters.shuffles++
+        }
+    }
+
+    function fill(model, prefix, n) {
+        model.clear()
+        for (let i = 0; i < n; i++)
+            model.append({ id: i + 1, title: prefix + " " + (i + 1), subtitle: "Artist " + (i + 1), artPath: "" })
+    }
+
+    function init() {
+        Ui.userScale = 1.0
+        Ui.windowW = 640
+        Ui.windowH = 960
+        pages.clear()
+        pages.animate = false
+        fill(history, "History", 6)
+        fill(fresh, "New", 2)
+        pins.clear()
+        counters.navigated = []
+        counters.bluetoothOpens = 0
+        counters.played = []
+        counters.pinned = []
+        counters.shuffles = 0
+    }
+
+    function open(properties) {
+        const page = pages.push(homeComponent, properties === undefined ? { animated: false } : properties)
+        page.quickplay.layout()
+        return page
+    }
+
+    function test_canvas() {
+        compare(Ui.u, 2)
+        compare(Ui.canvasW, tc.canvasW)
+        compare(Ui.canvasH, tc.canvasH)
+    }
+
+    function test_item_baselines() {
+        const page = open()
+        compare(page.menuRepeater.count, 5)
+        const names = ["music", "bluetooth", "playlists", "history", "settings"]
+        for (let i = 0; i < 5; i++) {
+            const item = page.menuItem(i)
+            verify(item !== null)
+            compare(item.modelData.name, names[i])
+            fuzzyCompare(item.labelBaseline, Ui.px(48 + 55 * i), 0.5)
+            fuzzyCompare(item.x, Ui.px(70), 0.01)
+            compare(item.opacity, 1)
+        }
+        compare(page.menuItem(0).subtitle, "artists albums songs genres playlists")
+        compare(page.menuItem(1).subtitle, "phone pairing")
+        compare(page.menuItem(2).subtitle, "")
+        compare(page.menuItem(3).subtitle, "recent new")
+        compare(page.menuItem(4).subtitle, "")
+        const first = page.menuItem(0)
+        fuzzyCompare(first.subtitleBaseline, first.labelBaseline + Ui.px(8 + 0.7 * 8), 0.5)
+    }
+
+    function test_focus_treatment() {
+        const page = open()
+        compare(page.focusIndex, 0)
+        compare(page.ring.width, Ui.px(35))
+        fuzzyCompare(page.ring.x + page.ring.width / 2, Ui.px(42), 0.01)
+        fuzzyCompare(page.ring.y + page.ring.height / 2, Ui.px(48) - Ui.px(0.7 * 34 / 2), 0.01)
+        compare(page.ring.glyph, "play")
+        const focusedColor = Ui.white(1.0)
+        const dimColor = Ui.white(0.6)
+        compare(Qt.colorEqual(page.menuItem(0).labelItem.color, focusedColor), true)
+        compare(Qt.colorEqual(page.menuItem(1).labelItem.color, dimColor), true)
+        verify(router.dispatch("down", false))
+        compare(page.focusIndex, 1)
+        fuzzyCompare(page.ring.y + page.ring.height / 2, Ui.px(48 + 55) - Ui.px(0.7 * 34 / 2), 0.01)
+        compare(Qt.colorEqual(page.menuItem(1).labelItem.color, focusedColor), true)
+        compare(Qt.colorEqual(page.menuItem(0).labelItem.color, dimColor), true)
+        for (let i = 0; i < 10; i++)
+            router.dispatch("down", false)
+        compare(page.focusIndex, 4)
+        router.dispatch("up", false)
+        compare(page.focusIndex, 3)
+    }
+
+    function test_ring_follows_animated() {
+        const page = open({ animated: true })
+        page.completeAll()
+        const start = page.ring.y
+        router.dispatch("down", false)
+        verify(page.ring.y < start + Ui.px(55))
+        tryCompare(page.ring, "y", start + Ui.px(55), 1000)
+    }
+
+    function test_quickplay_peek() {
+        const page = open()
+        compare(page.quickplayPanel.width, Ui.px(216))
+        compare(page.quickplayPanel.x, -Ui.px(216 - 56))
+        compare(page.quickplayPanel.x + page.quickplayPanel.width, Ui.px(56))
+        fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-6)
+        compare(page.menuPanel.x, 0)
+        compare(page.menuPanel.scale, 1)
+        compare(page.menuPanel.opacity, 1)
+        compare(page.menuPanel.angle, 0)
+        compare(page.quickplay.active, false)
+    }
+
+    function test_t6_end_state() {
+        const page = open()
+        verify(router.dispatch("left", false))
+        compare(page.quickplayShown, true)
+        compare(page.pan, 1)
+        fuzzyCompare(page.menuPanel.x, Ui.px(tc.canvasW - 84), 0.01)
+        fuzzyCompare(page.menuPanel.y, Ui.px(94), 0.01)
+        fuzzyCompare(page.menuPanel.scale, 0.44, 1e-6)
+        fuzzyCompare(page.menuPanel.opacity, 0.6, 1e-6)
+        fuzzyCompare(page.menuPanel.angle, -12, 1e-6)
+        compare(page.menuPanel.transformOrigin, Item.TopLeft)
+        fuzzyCompare(page.menuPanel.hinge, page.menuPanel.width * 0.44, 0.01)
+        compare(page.quickplayPanel.x, 0)
+        fuzzyCompare(page.quickplayPanel.opacity, 1, 1e-6)
+        compare(page.quickplay.active, true)
+        verify(router.dispatch("b", false))
+        compare(page.quickplayShown, false)
+        compare(page.pan, 0)
+        compare(page.menuPanel.x, 0)
+        compare(page.menuPanel.y, 0)
+        compare(page.menuPanel.scale, 1)
+        compare(page.menuPanel.hinge, page.menuPanel.width)
+    }
+
+    function test_t6_animated() {
+        const page = open({ animated: true })
+        page.completeAll()
+        router.dispatch("back", false)
+        compare(page.quickplayShown, true)
+        verify(page.panning)
+        verify(page.pan < 1)
+        tryCompare(page, "pan", 1, 1500)
+        fuzzyCompare(page.menuPanel.x, Ui.px(tc.canvasW - 84), 0.01)
+        fuzzyCompare(page.menuPanel.y, Ui.px(94), 0.01)
+        router.dispatch("rb", false)
+        compare(page.quickplayShown, false)
+        tryCompare(page, "pan", 0, 1500)
+        router.dispatch("lb", false)
+        compare(page.quickplayShown, true)
+        page.completeAll()
+        compare(page.pan, 1)
+    }
+
+    function test_column_rules() {
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        compare(qp.count, 8)
+        compare(qp.focusIndex, 0)
+        verify(router.dispatch("left", false))
+        compare(qp.focusIndex, 0)
+        compare(page.quickplayShown, true)
+        verify(router.dispatch("right", false))
+        compare(qp.focusIndex, 1)
+        compare(page.quickplayShown, true)
+        verify(router.dispatch("right", false))
+        compare(page.quickplayShown, false)
+        router.dispatch("left", false)
+        compare(qp.focusIndex, 1)
+        verify(router.dispatch("down", false))
+        compare(qp.focusIndex, 3)
+        verify(router.dispatch("down", false))
+        compare(qp.focusIndex, 5)
+        verify(router.dispatch("down", false))
+        compare(qp.focusIndex, 7)
+        verify(router.dispatch("down", false))
+        compare(qp.focusIndex, 7)
+        verify(router.dispatch("left", false))
+        compare(qp.focusIndex, 6)
+        verify(router.dispatch("up", false))
+        compare(qp.focusIndex, 4)
+        verify(router.dispatch("up", false))
+        compare(qp.focusIndex, 2)
+        verify(router.dispatch("up", false))
+        compare(qp.focusIndex, 0)
+        verify(router.dispatch("up", false))
+        compare(qp.focusIndex, 0)
+    }
+
+    function test_tile_geometry() {
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        const first = qp.tileAt(0)
+        const second = qp.tileAt(1)
+        const third = qp.tileAt(2)
+        verify(first !== null)
+        compare(first.width, Ui.px(77))
+        compare(first.height, Ui.px(77))
+        compare(second.x - first.x, Ui.px(77 + 2))
+        compare(third.y - first.y, Ui.px(77 + 2))
+        fuzzyCompare(first.mapToItem(qp, 0, 0).x, Ui.px(60), 0.01)
+        fuzzyCompare(qp.pinsHeader.mapToItem(qp, 0, 0).x, Ui.px(60), 0.01)
+        compare(first.focused, true)
+        compare(second.focused, false)
+        compare(first.captioned, false)
+        compare(first.entry.section, "history")
+        compare(first.entry.id, 1)
+        compare(first.entry.title, "History 1")
+        compare(qp.tileAt(6).entry.section, "new")
+        compare(qp.pinsHeader.text, "Pins")
+        compare(qp.historyHeader.text, "History")
+        compare(qp.emptyText.visible, true)
+        fuzzyCompare(qp.firstHeaderBaseline, Ui.px(35), 0.5)
+        compare(qp.pinsHeader.font.pixelSize, Ui.fontPx(34))
+        compare(qp.pinsHeader.font.pixelSize, 68)
+        fuzzyCompare(qp.pinsHeader.color.a, 0.6, 1 / 255)
+        compare(qp.emptyText.font.pixelSize, Ui.fontPx(11))
+        compare(qp.emptyText.font.capitalization, Font.AllUppercase)
+        compare(qp.emptyText.width, Ui.px(140))
+        compare(qp.emptyText.lineHeight, Ui.px(11))
+        fuzzyCompare(qp.hintBaseline, Ui.px(35 + 16), 0.5)
+        verify(qp.emptyText.lineCount >= 2)
+        const lastHint = 35 + 16 + 11 * (qp.emptyText.lineCount - 1)
+        fuzzyCompare(qp.secondHeaderBaseline, Ui.px(lastHint + 70), 0.5)
+        fuzzyCompare(first.mapToItem(qp, 0, 0).y, Ui.px(lastHint + 70 + 5), 0.5)
+    }
+
+    function test_scroll_keeps_focus_visible() {
+        fill(history, "History", 20)
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        compare(qp.flick.contentY, 0)
+        for (let i = 0; i < 10; i++)
+            router.dispatch("down", false)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        const item = qp.tileAt(qp.focusIndex)
+        const top = item.mapToItem(qp.flick.contentItem, 0, 0).y - qp.flick.contentY
+        verify(top >= -0.5)
+        verify(top + item.height <= qp.height + 0.5)
+        verify(qp.flick.contentY > 0)
+    }
+
+    function test_a_navigates() {
+        const page = open()
+        router.dispatch("a", false)
+        compare(counters.navigated, ["music"])
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.navigated, ["music", "bluetooth"])
+        for (let i = 0; i < 3; i++)
+            router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.navigated, ["music", "bluetooth", "settings"])
+        router.dispatch("a", true)
+        compare(counters.navigated.length, 3)
+        router.dispatch("y", false)
+        compare(counters.shuffles, 1)
+    }
+
+    function test_a_on_tile_plays() {
+        const page = open()
+        router.dispatch("left", false)
+        router.dispatch("right", false)
+        router.dispatch("a", false)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].section, "history")
+        compare(counters.played[0].id, 2)
+    }
+
+    function test_x_opens_pin_sheet() {
+        const page = open()
+        router.dispatch("left", false)
+        compare(page.sheet.shown, false)
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, true)
+        compare(page.sheet.items, ["pin to quickplay"])
+        compare(page.sheet.title, "History 1")
+        verify(router.dispatch("down", false))
+        compare(page.quickplay.focusIndex, 0)
+        verify(router.dispatch("a", false))
+        compare(counters.pinned.length, 1)
+        compare(counters.pinned[0].pin, true)
+        compare(counters.pinned[0].entry.id, 1)
+        compare(page.sheet.shown, false)
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, true)
+        verify(router.dispatch("b", false))
+        compare(page.sheet.shown, false)
+        compare(page.quickplayShown, true)
+        compare(counters.pinned.length, 1)
+    }
+
+    function test_unpin_sheet_for_pins() {
+        fill(pins, "Pin", 1)
+        const page = open()
+        router.dispatch("left", false)
+        compare(page.quickplay.count, 9)
+        compare(page.quickplay.tileAt(0).entry.section, "pins")
+        compare(page.quickplay.emptyText.visible, false)
+        router.dispatch("x", false)
+        compare(page.sheet.items, ["unpin"])
+        router.dispatch("a", false)
+        compare(counters.pinned[0].pin, false)
+    }
+
+    function test_watermark() {
+        const page = open()
+        compare(page.watermark.text, "casdap")
+        compare(page.watermark.x, Ui.px(16))
+        fuzzyCompare(page.watermark.y + page.watermark.height, page.height - Ui.px(16), 0.5)
+        compare(page.watermark.font.pixelSize, Ui.fontPx(14))
+        compare(page.watermark.font.pixelSize, 28)
+        fuzzyCompare(page.watermark.color.a, 0.08, 1 / 255)
+    }
+
+    function test_phone_connected() {
+        const page = open({ animated: false, bluez: phone })
+        compare(page.bluetoothSubtitle, "Pixel 8")
+        compare(page.menuItem(1).subtitle, "Pixel 8")
+        const qp = page.quickplay
+        compare(qp.phoneTile, true)
+        compare(qp.count, 9)
+        compare(qp.emptyText.visible, false)
+        router.dispatch("left", false)
+        const tile = qp.tileAt(0)
+        verify(tile === qp.phoneItem)
+        compare(tile.entry.phone, true)
+        compare(tile.entry.title, "Pixel 8")
+        compare(tile.width, Ui.px(77))
+        compare(tile.focused, true)
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+        verify(router.dispatch("a", false))
+        compare(counters.bluetoothOpens, 1)
+        compare(counters.played.length, 0)
+        verify(router.dispatch("down", false))
+        compare(qp.focusIndex, 1)
+        compare(qp.tileAt(1).entry.section, "history")
+        phone.connected = false
+        compare(qp.phoneTile, false)
+        compare(qp.count, 8)
+        compare(page.bluetoothSubtitle, "phone pairing")
+        phone.connected = true
+    }
+
+    function test_entrance() {
+        const page = open({ animated: true })
+        const item = page.menuItem(0)
+        verify(item !== null)
+        verify(item.opacity < 1)
+        verify(item.x > Ui.px(70))
+        verify(page.quickplayPanel.opacity < 0.4)
+        tryCompare(item, "opacity", 1, 1500)
+        fuzzyCompare(item.x, Ui.px(70), 0.01)
+        tryCompare(page.menuItem(4), "opacity", 1, 1500)
+        tryCompare(page, "peekEnter", 1, 1500)
+        fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-6)
+        fuzzyCompare(page.ring.opacity, 1, 1e-6)
+    }
+
+    function test_complete_all() {
+        const page = open({ animated: true })
+        router.dispatch("left", false)
+        page.completeAll()
+        compare(page.pan, 1)
+        compare(page.peekEnter, 1)
+        for (let i = 0; i < 5; i++) {
+            compare(page.menuItem(i).opacity, 1)
+            fuzzyCompare(page.menuItem(i).x, Ui.px(70), 0.01)
+        }
+        fuzzyCompare(page.menuPanel.x, Ui.px(tc.canvasW - 84), 0.01)
+        fuzzyCompare(page.menuPanel.y, Ui.px(94), 0.01)
+    }
+
+    function test_start_and_b_on_menu() {
+        const page = open()
+        let nowPlaying = 0
+        const onNowPlaying = function() { nowPlaying++ }
+        router.nowPlaying.connect(onNowPlaying)
+        verify(router.dispatch("start", false))
+        compare(nowPlaying, 1)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+        compare(page.quickplayShown, false)
+        router.nowPlaying.disconnect(onNowPlaying)
+    }
+
+    function test_landscape() {
+        Ui.windowW = 960
+        Ui.windowH = 640
+        const page = pages.push(homeComponent, { animated: false })
+        compare(Ui.landscape, true)
+        compare(page.menuPanel.x, Ui.px(240))
+        compare(page.quickplayPanel.x, 0)
+        fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-6)
+        fuzzyCompare(page.menuItem(1).labelBaseline, Ui.px(48 + 48), 0.5)
+        router.dispatch("left", false)
+        compare(page.quickplayShown, true)
+        compare(page.pan, 0)
+        compare(page.menuPanel.x, Ui.px(240))
+        fuzzyCompare(page.quickplayPanel.opacity, 1, 1e-6)
+        router.dispatch("right", false)
+        router.dispatch("right", false)
+        compare(page.quickplayShown, false)
+    }
+}

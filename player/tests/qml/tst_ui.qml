@@ -91,7 +91,7 @@ TestCase {
     }
 
     function test_roles() {
-        compare(Ui.roleList.length, 34)
+        compare(Ui.roleList.length, 35)
         for (const role of Ui.roleList) {
             verify(role.size > 0, role.name)
             verify(["Light", "Regular", "Bold"].indexOf(role.style) >= 0, role.name)

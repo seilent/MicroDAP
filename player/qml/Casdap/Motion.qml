@@ -78,9 +78,10 @@ QtObject {
 
     readonly property int quickplay: 420
     readonly property real quickplayAngle: -12
-    readonly property real quickplayScale: 0.55
-    readonly property real quickplayAlpha: 0.4
-    readonly property real quickplayMenuInset: 60
+    readonly property real quickplayScale: 0.44
+    readonly property real quickplayAlpha: 0.6
+    readonly property real quickplayMenuInset: 84
+    readonly property real quickplayMenuY: 94
 
     readonly property int nowPlayingIn: 300
     readonly property real nowPlayingScale: 0.9

@@ -66,8 +66,14 @@ swap jumps to its end. `Backdrop` pauses its loops while `paused`, `screenOff` o
 `Toast.show()` during the exit restarts the entrance from the strip's current position. The volume
 overlay ring is `focused` inside the 0.4 group, so it reads at 0.4 (O20).
 
+`Home` is the root page: the menu (`music`, `bluetooth`, `playlists`, `history`, `settings`), with
+Quickplay (`Pins`, `History`, `New`) peeking on the left in portrait. Left or Back/View pans Quickplay
+forward and shrinks the menu to a column on the right; right or B pans back. In landscape both sit side
+by side. X on a Quickplay tile opens the pin sheet. Menu items whose screen does not exist yet log
+`navigate <name>`.
+
 Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg]`,
-offscreen, software renderer. Screens: `blank`, `specimen` (every type role in its weight, labeled
+offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `components`, `overlays`, `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
 `CASDAP_TEST_FONT_DIR` (default `../dist/usr/share/fonts/casdap`) feeds `CASDAP_FONT_DIR` to the QML
 tests and the specimen shots; font dependent QML cases skip when the directory is empty.
