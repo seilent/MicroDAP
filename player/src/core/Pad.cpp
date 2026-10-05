@@ -17,10 +17,6 @@ constexpr double stickExit = 0.35;
 constexpr double triggerEnter = 0.5;
 constexpr double triggerExit = 0.35;
 
-constexpr const char *actionNames[Pad::ActionCount] = {
-    "up", "down", "left", "right", "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "back",
-};
-
 int buttonAction(Uint8 button)
 {
     switch (button) {
@@ -53,15 +49,10 @@ int buttonAction(Uint8 button)
     }
 }
 
-bool isDirection(int a)
-{
-    return a >= Pad::Up && a <= Pad::Right;
-}
-
 }
 
 Pad::Pad(QObject *parent)
-    : QObject(parent)
+    : PadSource(parent)
     , m_log(qEnvironmentVariableIntValue("CASDAP_PAD_LOG") == 1)
 {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -155,13 +146,6 @@ bool Pad::connected() const
 int Pad::gamepadCount() const
 {
     return static_cast<int>(m_pads.size());
-}
-
-QString Pad::actionName(Action a) const
-{
-    if (a < 0 || a >= ActionCount)
-        return {};
-    return QString::fromLatin1(actionNames[a]);
 }
 
 int Pad::pumpInterval() const
@@ -380,7 +364,7 @@ void Pad::emitAction(Action a, bool repeat)
     if (!allowed(a))
         return;
     if (m_log)
-        std::fprintf(stderr, "pad: %s%s\n", actionNames[a], repeat ? " repeat" : "");
+        std::fprintf(stderr, "pad: %s%s\n", label(a), repeat ? " repeat" : "");
     emit action(a, repeat);
 }
 

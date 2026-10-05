@@ -17,8 +17,12 @@ qt_standard_project_setup(REQUIRES 6.11)
 add_library(casdapcore STATIC
     src/core/BluezModel.cpp
     src/core/BluezModel.h
+    src/core/DbusPad.cpp
+    src/core/DbusPad.h
     src/core/FakeBluezModel.cpp
     src/core/FakeBluezModel.h
+    src/core/Intercept.cpp
+    src/core/Intercept.h
     src/core/Library.cpp
     src/core/Library.h
     src/core/Models.cpp
@@ -27,6 +31,7 @@ add_library(casdapcore STATIC
     src/core/Mpris.h
     src/core/Pad.cpp
     src/core/Pad.h
+    src/core/PadSource.h
     src/core/Player.cpp
     src/core/Player.h
     src/core/PowerBridge.cpp

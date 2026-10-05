@@ -1,0 +1,40 @@
+#!/usr/bin/bash
+set -eu
+
+ip=org.shadowblip.InputPlumber
+iface=org.shadowblip.Input.CompositeDevice
+
+composite_devices() {
+    busctl --system tree --list "${ip}" | grep -E '^/org/shadowblip/InputPlumber/CompositeDevice[0-9]*$' || true
+}
+
+set_mode() {
+    local path
+    while read -r path; do
+        [[ -n "${path}" ]] || continue
+        busctl --system set-property "${ip}" "${path}" "${iface}" InterceptMode u "$1" \
+            || logger -t casdap-intercept "set ${path} InterceptMode ${1} failed" || true
+    done < <(composite_devices)
+    return 0
+}
+
+get_mode() {
+    local path value
+    while read -r path; do
+        [[ -n "${path}" ]] || continue
+        value=$(busctl --system get-property "${ip}" "${path}" "${iface}" InterceptMode) || continue
+        if [[ "${value}" == "u 3" ]]; then
+            echo 3
+            return 0
+        fi
+    done < <(composite_devices)
+    echo 0
+}
+
+[[ $# -eq 1 ]] || exit 1
+
+case "$1" in
+    0|3) set_mode "$1" ;;
+    get) get_mode ;;
+    *) exit 1 ;;
+esac

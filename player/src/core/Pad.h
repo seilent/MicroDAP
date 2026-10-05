@@ -1,7 +1,8 @@
 #pragma once
 
+#include "PadSource.h"
+
 #include <QHash>
-#include <QObject>
 #include <QString>
 #include <QTimer>
 
@@ -12,35 +13,11 @@
 
 namespace casdap {
 
-class Pad : public QObject
+class Pad : public PadSource
 {
     Q_OBJECT
-    Q_PROPERTY(bool screenOff READ screenOff WRITE setScreenOff NOTIFY screenOffChanged)
-    Q_PROPERTY(bool pocketControls READ pocketControls WRITE setPocketControls NOTIFY pocketControlsChanged)
-    Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
 
 public:
-    enum Action {
-        Up,
-        Down,
-        Left,
-        Right,
-        A,
-        B,
-        X,
-        Y,
-        LB,
-        RB,
-        LT,
-        RT,
-        Start,
-        Back,
-    };
-    Q_ENUM(Action)
-
-    static constexpr int ActionCount = Back + 1;
-    static constexpr int RepeatInitialMs = 300;
-    static constexpr int RepeatIntervalMs = 80;
     static constexpr int PumpIntervalMs = 16;
     static constexpr int PocketPumpIntervalMs = 50;
     static constexpr int DetectIntervalMs = 1000;
@@ -49,21 +26,12 @@ public:
     ~Pad() override;
 
     bool isValid() const;
-    bool screenOff() const;
-    void setScreenOff(bool off);
-    bool pocketControls() const;
-    void setPocketControls(bool on);
-    bool connected() const;
+    bool screenOff() const override;
+    void setScreenOff(bool off) override;
+    bool pocketControls() const override;
+    void setPocketControls(bool on) override;
+    bool connected() const override;
     int gamepadCount() const;
-    Q_INVOKABLE QString actionName(casdap::Pad::Action action) const;
-
-signals:
-    void action(casdap::Pad::Action action, bool repeat);
-    void pressed(casdap::Pad::Action action);
-    void released(casdap::Pad::Action action);
-    void screenOffChanged();
-    void pocketControlsChanged();
-    void connectedChanged();
 
 private:
     static bool SDLCALL eventWatch(void *userdata, SDL_Event *event);

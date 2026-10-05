@@ -37,6 +37,7 @@ test:
     bash tests/priv-test.sh
     bash tests/hotkeyd-test.sh
     bash tests/pad-test.sh
+    bash tests/intercept-test.sh
     bash tests/bt-test.sh
     just test-player
 

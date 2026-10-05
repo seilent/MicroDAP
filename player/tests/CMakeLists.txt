@@ -86,6 +86,16 @@ else()
 endif()
 casdap_test_env(systembluez)
 
+qt_add_executable(tst_dbuspad core/tst_dbuspad.cpp)
+target_compile_definitions(tst_dbuspad PRIVATE CASDAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py")
+target_link_libraries(tst_dbuspad PRIVATE casdapcore Qt6::DBus Qt6::Test)
+if(DBUS_RUN_SESSION)
+    add_test(NAME dbuspad COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_dbuspad>)
+else()
+    add_test(NAME dbuspad COMMAND tst_dbuspad)
+endif()
+casdap_test_env(dbuspad)
+
 set(CASDAP_TEST_FONT_DIR ${CMAKE_SOURCE_DIR}/../dist/usr/share/fonts/casdap CACHE PATH "Selawik TTF directory for the qml tests and specimen shots")
 
 qt_add_executable(tst_qml qml/tst_qml.cpp)
