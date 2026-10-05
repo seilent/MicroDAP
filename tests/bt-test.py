@@ -422,6 +422,12 @@ class Driver:
         self.check_open('keyboard window after removal', 10)
         self.expect_ok('StopPairing keyboard', self.service.StopPairing)
         self.check_restored('keyboard stop')
+        in_loop(self.fake.flip, phone, 'Connected', dbus.Boolean(False))
+        self.expect_ok('StartPairing(10) known phone', self.service.StartPairing, dbus.UInt32(10))
+        self.check_open('known phone window', 10)
+        in_loop(self.fake.flip, phone, 'Connected', dbus.Boolean(True))
+        self.check(wait_for(lambda: not self.active(), 2), 'window did not close when a paired phone connected')
+        self.check_restored('known phone')
 
     def test_sigterm(self, proc):
         self.expect_ok('StartPairing(10) before SIGTERM', self.service.StartPairing, dbus.UInt32(10))

@@ -189,8 +189,9 @@ value and `Alias` to `ARMADA_DEVICE_NAME` from `device-env` (hostname without it
 pairing request is answered with `org.bluez.Error.Rejected`. `RequestPinCode`, `RequestPasskey`,
 `DisplayPinCode` and `DisplayPasskey` are always rejected. `StopPairing`, the timeout and SIGTERM
 restore the saved values and set `Discoverable=false`. The window also closes that way when the gate
-keeps a device that paired while it was open (journal `pairing window closed: paired <path>`); a
-device the gate removes leaves it open.
+keeps a device that paired while it was open (journal `pairing window closed: paired <path>`) or
+when an already paired A2DP source connects during it (`closed: connected <path>`); a device the
+gate removes leaves it open.
 
 `AuthorizeService` accepts `110b`, `110c`, `110d`, `110e` and rejects every other uuid with a
 `Rejected <uuid> <device>` journal line, so HFP (`111e`, `111f`), HSP (`1108`, `1112`) and HID

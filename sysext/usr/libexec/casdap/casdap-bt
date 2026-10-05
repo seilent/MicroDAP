@@ -259,6 +259,20 @@ class Gate:
         path = str(path)
         if changed.get('Paired') or (path in self.pending and changed.get('ServicesResolved')):
             self.check(path)
+        elif changed.get('Connected') and self.window.active:
+            self.connected(path)
+
+    def connected(self, path):
+        try:
+            obj = self.bus.get_object(BLUEZ, path, introspect=False)
+            props = dbus.Interface(obj, PROPERTIES).GetAll(DEVICE)
+        except dbus.DBusException as e:
+            log(f'gate {path}: {e.get_dbus_name()}')
+            return
+        uuids = [str(u).lower() for u in props.get('UUIDs', [])]
+        if props.get('Paired') and A2DP_SOURCE in uuids:
+            log(f'connected {path}')
+            self.window.close(f'closed: connected {path}')
 
     def check(self, path):
         try:
