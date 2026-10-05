@@ -58,6 +58,7 @@ EOF
 cat > "${T}/bin/wpctl" <<'EOF'
 #!/usr/bin/bash
 echo "wpctl $*" >> "${STATE}/calls"
+[[ "$*" == "set-mute @DEFAULT_AUDIO_SINK@ 0" ]] && rm -f "${STATE}/muted"
 if [[ "$1" == get-volume ]]; then
     if [[ -e "${STATE}/muted" ]]; then
         echo "Volume: 0.40 [MUTED]"
@@ -114,6 +115,7 @@ playpause="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlay
 volup="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
 voldown="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%-"
 getvol="wpctl get-volume @DEFAULT_AUDIO_SINK@"
+unmute="wpctl set-mute @DEFAULT_AUDIO_SINK@ 0"
 emit="busctl --user emit /org/casdap/Hotkeys org.casdap.Hotkeys VolumeChanged d 0.40"
 
 run_case "no device" game 0 0 "press"
@@ -190,25 +192,34 @@ run_case "stream end" game 0 0 "press;sleep 0.05;release"
 expect_log "event stream ended"
 
 run_case "volume up in casdap" casdap 0 0 "" 0 "up;sleep 0.05;up-release"
+expect_call "${unmute}"
 expect_call "${volup}"
 expect_call "${getvol}"
 expect_call "${emit}"
-expect_calls 3
+expect_calls 4
 expect_log "volume on ${T}/dev/event1 ${T}/dev/event2"
 
 run_case "volume down in casdap" casdap 0 0 "" 0 "down;sleep 0.05;down-release"
 expect_call "${voldown}"
+expect_no_call "${unmute}"
 expect_call "${emit}"
 expect_calls 3
 
 run_case "volume up in casdap while muted" casdap 0 0 "" 0 "up;sleep 0.05;up-release" 1
+expect_call "${unmute}"
 expect_call "${emit}"
-expect_calls 3
+[[ -e "${STATE}/muted" ]] && fail "still muted after volume up"
+expect_calls 4
+
+run_case "volume down in casdap while muted" casdap 0 0 "" 0 "down;sleep 0.05;down-release" 1
+expect_no_call "${unmute}"
+[[ -e "${STATE}/muted" ]] || fail "volume down unmuted"
 
 run_case "volume autorepeat keeps the press session" casdap 0 0 "" 0 "up;sleep 0.2;session game;up-repeat;sleep 0.05;up-release;sleep 0.05;up;up-release"
 expect_call_count "${volup}" 2
 expect_call_count "${emit}" 2
-expect_calls 6
+expect_call_count "${unmute}" 2
+expect_calls 8
 
 run_case "volume in game" game 0 0 "" 0 "up;sleep 0.05;up-release;down;sleep 0.05;down-release"
 expect_calls 0
@@ -217,6 +228,7 @@ run_case "volume in other" other 0 0 "" 0 "up;sleep 0.05;up-release"
 expect_calls 0
 
 run_case "volume up in casdap dry run" casdap 0 0 "" 1 "up;sleep 0.05;up-release"
+expect_log "would: ${unmute}"
 expect_log "would: ${volup}"
 expect_log "would: ${emit}"
 expect_call "${getvol}"
@@ -226,7 +238,7 @@ run_case "volume and f13 interleaved" casdap 0 0 "press;sleep 0.1;release" 0 "sl
 expect_call "${playpause}"
 expect_call "${volup}"
 expect_call "${emit}"
-expect_calls 4
+expect_calls 5
 
 if (( failures )); then
     echo "hotkeyd-test: ${failures} failure(s)" >&2
