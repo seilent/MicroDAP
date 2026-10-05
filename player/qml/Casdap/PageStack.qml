@@ -11,6 +11,7 @@ Item {
     readonly property Item incoming: d.incoming
     readonly property Item outgoing: d.outgoing
     readonly property string phase: d.phase
+    readonly property string transitionKind: d.kind
     readonly property bool inputLocked: d.phase !== "idle"
 
     component Holder: Turnstile {
@@ -18,18 +19,24 @@ Item {
 
         property Item content: null
         property bool entering: true
+        property string kind: "turnstile"
+        property string pushKind: "turnstile"
+        property int easingType: Easing.Linear
         property real fromAngle: 0
         property real toAngle: 0
         property int duration: Motion.turnstileIn
         property real progress: 1
         readonly property real elapsed: holder.progress * holder.duration
+        readonly property bool fade: holder.kind === "fade"
 
         anchors.fill: holder.parent
         angle: holder.fromAngle + (holder.toAngle - holder.fromAngle)
             * (holder.entering ? Motion.expOut6(holder.progress) : Motion.expIn6(holder.progress))
-        opacity: holder.entering
-            ? Math.min(1, holder.elapsed / Motion.turnstileInFade)
-            : (holder.elapsed < Motion.turnstileOutHold ? 1 : 0)
+        opacity: holder.fade
+            ? (holder.entering ? holder.progress : 1 - holder.progress)
+            : holder.entering
+                ? Math.min(1, holder.elapsed / Motion.turnstileInFade)
+                : (holder.elapsed < Motion.turnstileOutHold ? 1 : 0)
     }
 
     Component {
@@ -44,21 +51,34 @@ Item {
         property Holder incoming: null
         property bool removeOutgoing: false
         property string phase: "idle"
+        property string kind: "turnstile"
 
-        function begin(from, to, outTo, inFrom, remove) {
+        function enterEasing(holder): int {
+            if (holder.content !== null && holder.content.enterEasing !== undefined)
+                return holder.content.enterEasing
+            return Motion.pop
+        }
+
+        function begin(from, to, outTo, inFrom, remove, kind) {
             d.outgoing = from
             d.incoming = to
             d.removeOutgoing = remove
+            d.kind = kind
+            const fade = kind === "fade"
+            from.kind = kind
             from.entering = false
             from.fromAngle = 0
-            from.toAngle = outTo
-            from.duration = Motion.turnstileOut
+            from.toAngle = fade ? 0 : outTo
+            from.duration = fade ? Motion.nowPlayingFade : Motion.turnstileOut
+            from.easingType = fade ? Motion.pop : Easing.Linear
             from.progress = 0
             from.visible = true
+            to.kind = kind
             to.entering = true
-            to.fromAngle = inFrom
+            to.fromAngle = fade ? 0 : inFrom
             to.toAngle = 0
-            to.duration = Motion.turnstileIn
+            to.duration = fade ? Motion.nowPlayingIn : Motion.turnstileIn
+            to.easingType = fade ? d.enterEasing(to) : Easing.Linear
             to.progress = 0
             to.visible = true
             d.phase = "exit"
@@ -92,7 +112,8 @@ Item {
             property: "progress"
             from: 0
             to: 1
-            duration: Motion.turnstileOut
+            duration: d.outgoing !== null ? d.outgoing.duration : Motion.turnstileOut
+            easing.type: d.outgoing !== null ? d.outgoing.easingType : Easing.Linear
         }
         ScriptAction {
             script: d.showIncoming()
@@ -102,18 +123,22 @@ Item {
             property: "progress"
             from: 0
             to: 1
-            duration: Motion.turnstileIn
+            duration: d.incoming !== null ? d.incoming.duration : Motion.turnstileIn
+            easing.type: d.incoming !== null ? d.incoming.easingType : Easing.Linear
         }
         onFinished: d.finish()
     }
 
-    function push(component, properties) {
+    function push(component, properties, kind) {
         if (d.phase !== "idle")
             root.completeAll()
+        const transitionKind = kind === undefined ? "turnstile" : kind
         const holder = holderComponent.createObject(root)
         const content = component.createObject(holder, properties === undefined ? {} : properties)
         content.anchors.fill = holder
         holder.content = content
+        holder.pushKind = transitionKind
+        holder.kind = transitionKind
         const previous = root.pages.length > 0 ? root.pages[root.pages.length - 1] : null
         root.pages = root.pages.concat([holder])
         if (previous === null || !root.animate) {
@@ -123,7 +148,7 @@ Item {
                 previous.visible = false
             return content
         }
-        d.begin(previous, holder, Motion.turnstileOutAngle, Motion.turnstileInAngle, false)
+        d.begin(previous, holder, Motion.turnstileOutAngle, Motion.turnstileInAngle, false, transitionKind)
         return content
     }
 
@@ -141,7 +166,7 @@ Item {
             top.destroy()
             return
         }
-        d.begin(top, below, Motion.turnstileInAngle, Motion.turnstileOutAngle, true)
+        d.begin(top, below, Motion.turnstileInAngle, Motion.turnstileOutAngle, true, top.pushKind)
     }
 
     function completeAll() {

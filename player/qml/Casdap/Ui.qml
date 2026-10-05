@@ -184,6 +184,7 @@ QtObject {
     readonly property real backRingInset: 4
     readonly property real npTextTop: 117
     readonly property real npAlbumBaseline: 141
+    readonly property real npFromBaseline: 97
     readonly property real npArtTop: 155
     readonly property real npArt: ui.landscape
         ? Math.min(168, ui.canvasH - 106)
@@ -191,15 +192,30 @@ QtObject {
     readonly property real npArtTopLandscape: 72
     readonly property real npColumn: 200
     readonly property real npColumnRight: 216
+    readonly property real npArtistBaselineLandscape: 60
+    readonly property real npAlbumBaselineLandscape: 84
+    readonly property real npTitleBaselineLandscape: 116
+    readonly property real npNextBaselineLandscape: 140
+    readonly property real npProgressGapLandscape: 8
     readonly property real npProgressY: ui.canvasH - 156
     readonly property real npProgressThick: 2
-    readonly property real npTitleY: ui.canvasH - 128
+    readonly property real npTimeDrop: 14
+    readonly property real npTitleY: ui.canvasH - 118
     readonly property real npNextIndent: 40
     readonly property real npNextPitch: 18
+    readonly property int npNextCount: 3
     readonly property real npRing: 32
     readonly property real npRingStroke: 3
     readonly property real npRingY: ui.canvasH - 40
     readonly property var npRingX: [0.13, 0.5, 0.87]
+    readonly property real npBtGlyph: 64
+    readonly property int seekStepMs: 10000
+
+    function npRingCenter(index: int): real {
+        const span = ui.landscape ? ui.canvasW - ui.npColumnRight - ui.edge : ui.canvasW
+        const base = ui.landscape ? ui.npColumnRight : 0
+        return base + span * ui.npRingX[index]
+    }
     readonly property real statusHeight: 12
     readonly property real statusTop: 10
     readonly property real statusGap: 8

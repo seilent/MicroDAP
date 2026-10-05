@@ -76,6 +76,7 @@ const QStringList &screens()
         QStringLiteral("bluetooth"),
         QStringLiteral("prompt"),
         QStringLiteral("hub"),
+        QStringLiteral("nowplaying"),
     };
     return names;
 }

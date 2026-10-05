@@ -141,7 +141,7 @@ TestCase {
         compare(Ui.gutter, 12)
         compare(Ui.npArt, 168)
         compare(Ui.npProgressY, 324)
-        compare(Ui.npTitleY, 352)
+        compare(Ui.npTitleY, 362)
         compare(Ui.npRingY, 440)
         compare(Ui.jumpCols, 5)
         fuzzyCompare(Ui.jumpTile, (320 - 32 - 32) / 5, 1e-6)

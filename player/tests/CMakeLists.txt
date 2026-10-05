@@ -257,3 +257,27 @@ foreach(pivot IN ITEMS artists albums songs genres playlists)
     casdap_test_env(screenshot-hub-${pivot}-landscape)
     set_property(TEST screenshot-hub-${pivot}-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 endforeach()
+
+add_test(NAME screenshot-nowplaying-portrait
+    COMMAND casdap-player --screenshot nowplaying --size 640x960 --out ${shots}/nowplaying-640x960.png
+)
+casdap_test_env(screenshot-nowplaying-portrait)
+set_property(TEST screenshot-nowplaying-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-nowplaying-landscape
+    COMMAND casdap-player --screenshot nowplaying --size 1920x1080 --out ${shots}/nowplaying-1920x1080.png
+)
+casdap_test_env(screenshot-nowplaying-landscape)
+set_property(TEST screenshot-nowplaying-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-nowplaying-bluez-portrait
+    COMMAND casdap-player --screenshot nowplaying --size 640x960 --bluez active --out ${shots}/nowplaying-bluez-640x960.png
+)
+casdap_test_env(screenshot-nowplaying-bluez-portrait)
+set_property(TEST screenshot-nowplaying-bluez-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-nowplaying-bluez-landscape
+    COMMAND casdap-player --screenshot nowplaying --size 1920x1080 --bluez active --out ${shots}/nowplaying-bluez-1920x1080.png
+)
+casdap_test_env(screenshot-nowplaying-bluez-landscape)
+set_property(TEST screenshot-nowplaying-bluez-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")

@@ -42,6 +42,7 @@ QtObject {
     readonly property int pop: Easing.OutExpo
     readonly property int bezierPop: Easing.OutBack
     readonly property int easeIn: Easing.InQuad
+    readonly property int easeOut: Easing.OutQuad
     readonly property int linear: Easing.Linear
     readonly property int bezier: Easing.BezierSpline
 
@@ -85,16 +86,21 @@ QtObject {
 
     readonly property int nowPlayingIn: 300
     readonly property real nowPlayingScale: 0.9
+    readonly property real nowPlayingOriginX: 0.4
+    readonly property real nowPlayingOriginY: 0.5
     readonly property int nowPlayingOut: 250
     readonly property int nowPlayingFade: 300
 
     readonly property int trackHide: 500
     readonly property int trackShow: 400
     readonly property real trackArtScale: 0.8
+    readonly property real trackArtOriginX: 0.2
+    readonly property real trackArtOriginY: 0.5
     readonly property real trackShiftOut: 50
     readonly property real trackShiftIn: -20
 
     readonly property int artistFade: 2000
+    readonly property int variantFade: 380
 
     readonly property int sheet: 380
     readonly property real sheetScrim: 0.55
@@ -129,6 +135,7 @@ QtObject {
     readonly property int idleFade: 380
     readonly property real idleAlpha: 0.4
     readonly property int progress: 250
+    readonly property int elapsedTick: 1000
     readonly property int valueChange: 200
     readonly property real valueDip: 0.2
     readonly property var pulse: [[0, 1], [200, 1], [400, 1.4], [600, 0.8], [800, 1]]

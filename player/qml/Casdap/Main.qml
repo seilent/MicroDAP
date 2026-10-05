@@ -22,11 +22,15 @@ Window {
 
     property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
     property var player: root.screenshot || typeof Player === "undefined" ? null : Player
+    readonly property var status: root.screenshot || typeof StatusModel === "undefined" ? null : StatusModel
     readonly property bool powerScreenOff: root.power !== null && root.power.screenOff === true
     readonly property var bridge: root.screenshot || typeof OverlayBridge === "undefined" ? null : OverlayBridge
     readonly property string topScreen: pages.currentItem !== null ? pages.currentItem.objectName : ""
     readonly property int statusPlaying: 1
     readonly property bool playing: root.player !== null && root.player.status === root.statusPlaying
+    readonly property bool hasTrack: root.player !== null && root.player.current !== undefined && root.player.current !== null
+        && root.player.current.id !== undefined
+    readonly property bool phoneActive: root.bluez !== null && root.bluez.transportActive === true
 
     property bool overlay: root.bridge !== null
     property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
@@ -71,6 +75,16 @@ Window {
             return
         }
         console.info("casdap: navigate " + name)
+    }
+
+    function openNowPlaying() {
+        if (root.topScreen === "nowplaying")
+            return
+        if (!root.hasTrack && !root.phoneActive) {
+            console.info("casdap: now playing empty")
+            return
+        }
+        pages.push(nowPlayingComponent, {}, "fade")
     }
 
     function closeSheets() {
@@ -144,7 +158,7 @@ Window {
         player: typeof Player === "undefined" ? null : Player
         screenOff: root.off
         pocketControls: !root.overlay && (typeof Settings === "undefined" ? false : Settings.pocketControls)
-        onNowPlaying: console.info("casdap: navigate nowplaying")
+        onNowPlaying: root.openNowPlaying()
     }
 
     SwitchPrompt {
@@ -184,7 +198,7 @@ Window {
             historyModel: root.historyRecent
             newModel: root.historyNew
             onNavigate: (name) => root.navigate(name)
-            onNowPlayingBluetooth: console.info("casdap: navigate nowplaying-bluetooth")
+            onNowPlayingBluetooth: root.openNowPlaying()
             onPlayRequested: (entry) => console.info("casdap: play " + entry.section + " " + entry.id)
             onPinRequested: (entry, pin) => console.info("casdap: " + (pin ? "pin " : "unpin ") + entry.section + " " + entry.id)
             onShuffleAll: console.info("casdap: shuffle all")
@@ -199,7 +213,21 @@ Window {
             animated: !root.hidden
             bluez: root.bluez
             screenOff: root.off
-            onOpenNowPlaying: console.info("casdap: navigate nowplaying-bluetooth")
+            onOpenNowPlaying: root.openNowPlaying()
+        }
+    }
+
+    Component {
+        id: nowPlayingComponent
+
+        NowPlaying {
+            objectName: "nowplaying"
+            animated: !root.hidden
+            screenOff: root.off
+            player: root.player
+            bluez: root.bluez
+            status: root.status
+            onOpenQueue: console.info("casdap: navigate queue")
         }
     }
 
@@ -217,7 +245,7 @@ Window {
             player: root.player
             library: root.library
             onOpen: (kind, id) => console.info("casdap: navigate " + kind + " " + id)
-            onNowPlaying: console.info("casdap: navigate nowplaying")
+            onNowPlaying: root.openNowPlaying()
             onJumpRequested: console.info("casdap: navigate jump")
             onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
             onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
@@ -236,7 +264,13 @@ Window {
             : root.shotScreen === "bluetooth" ? bluetoothShotComponent
             : root.shotScreen === "prompt" ? promptShotComponent
             : root.shotScreen === "hub" ? hubShotComponent
+            : root.shotScreen === "nowplaying" ? nowPlayingShotComponent
             : null
+    }
+
+    Component {
+        id: nowPlayingShotComponent
+        NowPlayingShot {}
     }
 
     Component {

@@ -40,8 +40,10 @@ functions on a linear 0..1 progress, `decel` and `strip` as `Easing.BezierSpline
 ins for the shell curves) and every duration. `Turnstile` applies the `Matrix4x4` page rotation about
 a hinge with perspective `d = 2.3 * width` px. `PageStack` runs the exit animation (250 ms, expIn6)
 to its end before the enter animation (350 ms, expOut6) starts, keeps the incoming page at opacity 0
-and visible meanwhile, reports `inputLocked` and `phase`, and `completeAll()` jumps a running
-transition to its end state.
+and visible meanwhile, reports `inputLocked`, `phase` and `transitionKind`, and `completeAll()` jumps a running
+transition to its end state. `push(component, properties, kind)` takes `turnstile` (default) or `fade`:
+`fade` runs the outgoing page opacity 1 to 0 over 300 pop, then the incoming 0 to 1 over 300 with the
+page's `enterEasing` (default pop); `pop()` reverses with the kind the page was pushed with.
 
 `Pad` is a context property; `PadRouter` turns its actions into names (`up down left right a b x y
 lb rb lt rt start back`) and hands each to the top page of the `PageStack` through
@@ -119,10 +121,38 @@ plays, every other verb emits `sheetAction(action, kind, id)` which Main logs. B
 `o` 0 to 1, 220 decel, `min(i, 10) * 50` stagger); a reset during the scan runs it when the scan ends.
 `screenOff` or `animated` false lands the pivot, settles the rows and dismisses the letter.
 
+`NowPlaying` is the `nowplaying` page, pushed with the `fade` kind (T7) by Start on any other page, A on the
+hub's `NOW PLAYING` row, A on the Bluetooth page's transport row and the Quickplay phone tile; Start with
+no current track and no phone transport logs `now playing empty`. Portrait is three stacks on a `Backdrop`
+(the current track's art, L1 pan): back ring (64 u, inset 4, decorative), `StatusStrip` top right (battery
+from `StatusModel`, accent under 10 percent, Bluetooth glyph while a phone is connected, play or pause
+glyph), artist baseline 117 and album 141 at EDGE, art square at y 155 with side `min(168, W - 2 EDGE,
+H - 311)`, progress line at y H - 156 (fill accent from `Player.position`, read every 250 ms; elapsed and
+remaining text under it, refreshed at 1 Hz), title baseline H - 118, the next three queue rows at EDGE + 40
+and 18 u pitch, three rings (shuffle, repeat, rate) centered at 0.13, 0.5 and 0.87 of W on y H - 40.
+Landscape: back ring and art (y 72, side `min(168, H - 106)`) with the progress line 8 u under it in the
+left column, artist 60, album 84, title 116, next rows from 140 at x 216, rings on the same fractions of
+`W - 216 - EDGE` from x 216. Focus starts on the ring row: left and right move it, A toggles the focused
+ring with the F4 swap (`Player.toggleShuffle`, `cycleRepeat`, `rate`), up moves to the title row (2 u bar
+at EDGE - 8) where A emits `openQueue` (Main logs `navigate queue`), down returns. LB and RB skip, X plays
+or pauses, Y and Back/View emit `openQueue`, LT and RT seek 10 s, B and Start pop with the fade kind (T8).
+A track change runs T9 (title, next rows and times out 500 easeOut with the art, in 400 easeIn with the
+art scaling from 0.8 about (0.2, 0.5)); a new art source crossfades the backdrop over 2000 linear and
+restarts its pan (T10). After 5000 ms without input the unfocused rings and the status strip fade to 0.4
+over 380 decel, the focused ring stays at 1.0, the first input only restores them. With
+`BluezModel.transportActive` the page shows the Bluetooth variant: `FROM <PHONE>` at baseline 97, artist,
+album and title from the phone, a 64 u Bluetooth glyph in place of the art, the progress line only while
+`durationMs` is set, `N OF M` in the first next row slot, rings play/pause, shuffle, repeat acting on the
+phone (A on play/pause, X and Start play or pause, LB and RB skip, LT and RT rewind or fast forward until
+release). The variant arrives with the T7 content fade and scale and leaves over 380 decel; local playback
+is paused when the transport goes active and stays paused when it ends. `screenOff` or `animated` false
+lands every animation and stops the timers.
+
 Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg]`,
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
-given, else sample rows), `components`, `overlays`, `volume`, `specimen` (every type role in its weight, labeled
+given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),
+`components`, `overlays`, `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
 `CASDAP_TEST_FONT_DIR` (default `../dist/usr/share/fonts/casdap`) feeds `CASDAP_FONT_DIR` to the QML
 tests and the specimen shots; font dependent QML cases skip when the directory is empty.
