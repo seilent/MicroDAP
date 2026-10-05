@@ -59,6 +59,7 @@ private slots:
     void registered();
     void screenOff();
     void powerMenu();
+    void overlayNotSupported();
     void volume();
     void verbs();
     void drift();
@@ -168,9 +169,16 @@ void PowerTest::registered()
     QVERIFY(xml.value().contains(QStringLiteral("ScreenOff")));
     QVERIFY(xml.value().contains(QStringLiteral("PlaybackStatus")));
     QVERIFY(xml.value().contains(QStringLiteral("ScreenOffChanged")));
+    QVERIFY(xml.value().contains(QStringLiteral("ShowOverlay")));
+    QVERIFY(xml.value().contains(QStringLiteral("HideOverlay")));
+    QVERIFY(xml.value().contains(QStringLiteral("ToggleOverlay")));
+    QVERIFY(xml.value().contains(QStringLiteral("OverlayShown")));
 
     QCOMPARE(m_remote->property("PlaybackStatus").toString(), QStringLiteral("Stopped"));
     QCOMPARE(m_remote->property("ScreenOff").toBool(), false);
+    QCOMPARE(m_remote->property("OverlayShown").toBool(), false);
+    QVERIFY(!m_bridge->overlayMode());
+    QCOMPARE(m_bridge->overlay(), nullptr);
 }
 
 void PowerTest::screenOff()
@@ -210,6 +218,28 @@ void PowerTest::powerMenu()
     QDBusReply<void> reply = m_remote->call(QStringLiteral("ShowPowerMenu"));
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, busTimeoutMs);
+}
+
+void PowerTest::overlayNotSupported()
+{
+    QCOMPARE(PowerBridge::notSupportedError(), QStringLiteral("org.casdap.Error.NotSupported"));
+    for (const char *member : {"ShowOverlay", "HideOverlay", "ToggleOverlay"}) {
+        const QByteArray called = QByteArrayLiteral("casdap power: ") + member;
+        const QByteArray rejected = called + QByteArrayLiteral(" needs overlay mode");
+        QTest::ignoreMessage(QtInfoMsg, called.constData());
+        QTest::ignoreMessage(QtInfoMsg, rejected.constData());
+        QDBusReply<void> reply = m_remote->call(QString::fromLatin1(member));
+        QVERIFY2(!reply.isValid(), member);
+        QCOMPARE(reply.error().name(), PowerBridge::notSupportedError());
+    }
+    QCOMPARE(m_remote->property("OverlayShown").toBool(), false);
+    QVERIFY(!m_bridge->overlayShown());
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowOverlay needs overlay mode");
+    m_bridge->showOverlay();
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: ToggleOverlay needs overlay mode");
+    m_bridge->toggleOverlay();
+    QVERIFY(!m_bridge->overlayShown());
+    QCOMPARE(m_remote->property("ScreenOff").toBool(), false);
 }
 
 void PowerTest::volume()

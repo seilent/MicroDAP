@@ -235,6 +235,25 @@ TestCase {
         tryCompare(page.focusBar, "y", start + Ui.px(55), 1000)
     }
 
+    function test_entrance_plays_at_creation() {
+        const page = open({ animated: true })
+        compare(page.peekEnter, 0)
+        compare(page.barEnter, 0)
+        for (let i = 0; i < page.menuRepeater.count; i++)
+            compare(page.menuRepeater.itemAt(i).enter, 0)
+        tryCompare(page, "peekEnter", 1, 3000)
+        for (let i = 0; i < page.menuRepeater.count; i++)
+            tryCompare(page.menuRepeater.itemAt(i), "enter", 1, 3000)
+        compare(page.barEnter, 1)
+        const rest = open()
+        compare(rest.peekEnter, 1)
+        compare(rest.barEnter, 1)
+        for (let i = 0; i < rest.menuRepeater.count; i++) {
+            compare(rest.menuRepeater.itemAt(i).enter, 1)
+            compare(rest.menuRepeater.itemAt(i).opacity, 1)
+        }
+    }
+
     function test_quickplay_peek() {
         const page = open()
         compare(page.quickplayPanel.width, Ui.px(216))

@@ -11,8 +11,8 @@ Page {
     property bool animated: true
     property bool quickplayShown: false
     property real pan: 0
-    property real peekEnter: home.animated ? 0 : 1
-    property real barEnter: home.animated ? 0 : 1
+    property real peekEnter: 1
+    property real barEnter: 1
     property int playlistCount: -1
 
     readonly property var menu: [
@@ -179,10 +179,10 @@ Page {
     }
 
     Component.onCompleted: {
-        if (home.animated)
-            peekAnim.start()
-        else
-            home.peekEnter = 1
+        if (!home.animated)
+            return
+        home.peekEnter = 0
+        peekAnim.start()
     }
 
     Item {
@@ -252,7 +252,7 @@ Page {
                 readonly property real subtitleBaseline: item.y + sub.y + sub.baselineOffset
                 readonly property Item labelItem: label
                 readonly property Item subtitleItem: sub
-                property real enter: home.animated ? 0 : 1
+                property real enter: 1
 
                 function completeEnter() {
                     enterAnim.complete()
@@ -272,10 +272,10 @@ Page {
                 }
 
                 Component.onCompleted: {
-                    if (home.animated)
-                        enterAnim.start()
-                    else if (item.index === 0)
-                        home.barEnter = 1
+                    if (!home.animated)
+                        return
+                    item.enter = 0
+                    enterAnim.start()
                 }
 
                 SequentialAnimation {

@@ -6,6 +6,7 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusVariant>
 #include <QDebug>
+#include <QTimer>
 #include <QtGlobal>
 
 #include <utility>
@@ -15,6 +16,7 @@ namespace casdap {
 namespace {
 
 constexpr int exitWriteTimeoutMs = 1000;
+constexpr int releaseRetryMs = 1000;
 
 QString propertiesInterface()
 {
@@ -281,7 +283,7 @@ void Intercept::writeAll(uint mode)
         write(path, mode);
 }
 
-void Intercept::write(const QString &path, uint mode)
+void Intercept::write(const QString &path, uint mode, bool retry)
 {
     if (!m_bus.isConnected()) {
         qWarning() << "casdap intercept: bus not connected, skipping" << path << mode;
@@ -289,11 +291,22 @@ void Intercept::write(const QString &path, uint mode)
     }
     auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(setModeCall(path, mode)), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
-            [path, mode](QDBusPendingCallWatcher *finished) {
+            [this, path, mode, retry](QDBusPendingCallWatcher *finished) {
         finished->deleteLater();
         const QDBusMessage reply = finished->reply();
-        if (reply.type() == QDBusMessage::ErrorMessage)
-            qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
+        if (reply.type() != QDBusMessage::ErrorMessage)
+            return;
+        if (mode == ModeNone && !retry) {
+            qWarning() << "casdap intercept: intercept release failed" << path << reply.errorMessage();
+            return;
+        }
+        qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
+        if (mode == ModeNone && !m_shown) {
+            QTimer::singleShot(releaseRetryMs, this, [this, path] {
+                if (!m_shown && m_devices.contains(path))
+                    write(path, ModeNone, false);
+            });
+        }
     });
 }
 

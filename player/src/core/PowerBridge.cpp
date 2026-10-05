@@ -1,5 +1,6 @@
 #include "PowerBridge.h"
 
+#include "OverlayBridge.h"
 #include "Player.h"
 
 #include <QDBusMessage>
@@ -34,16 +35,39 @@ QString PowerBridgeAdaptor::playbackStatus() const
     return m_bridge->playbackStatus();
 }
 
+bool PowerBridgeAdaptor::overlayShown() const
+{
+    return m_bridge->overlayShown();
+}
+
 void PowerBridgeAdaptor::SetScreenOff(bool off)
 {
     qInfo() << "casdap power: SetScreenOff" << off;
-    m_bridge->setScreenOff(off);
+    m_bridge->requestScreenOff(off);
 }
 
 void PowerBridgeAdaptor::ShowPowerMenu()
 {
     qInfo() << "casdap power: ShowPowerMenu";
     m_bridge->requestPowerMenu();
+}
+
+void PowerBridgeAdaptor::ShowOverlay()
+{
+    qInfo() << "casdap power: ShowOverlay";
+    m_bridge->showOverlay();
+}
+
+void PowerBridgeAdaptor::HideOverlay()
+{
+    qInfo() << "casdap power: HideOverlay";
+    m_bridge->hideOverlay();
+}
+
+void PowerBridgeAdaptor::ToggleOverlay()
+{
+    qInfo() << "casdap power: ToggleOverlay";
+    m_bridge->toggleOverlay();
 }
 
 PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *parent)
@@ -112,6 +136,11 @@ QString PowerBridge::hotkeysInterface()
     return QStringLiteral("org.casdap.Hotkeys");
 }
 
+QString PowerBridge::notSupportedError()
+{
+    return QStringLiteral("org.casdap.Error.NotSupported");
+}
+
 QStringList PowerBridge::verbs()
 {
     return {
@@ -149,6 +178,29 @@ bool PowerBridge::isRegistered() const
 Player *PowerBridge::player() const
 {
     return m_player;
+}
+
+OverlayBridge *PowerBridge::overlay() const
+{
+    return m_overlay;
+}
+
+void PowerBridge::setOverlay(OverlayBridge *overlay)
+{
+    if (m_overlay == overlay)
+        return;
+    if (m_overlay)
+        disconnect(m_overlay, nullptr, this, nullptr);
+    m_overlay = overlay;
+    if (!m_overlay)
+        return;
+    connect(m_overlay, &OverlayBridge::shownChanged, this, &PowerBridge::notifyOverlayShown);
+    connect(m_overlay, &QObject::destroyed, this, [this] { m_overlay = nullptr; });
+}
+
+bool PowerBridge::overlayMode() const
+{
+    return m_overlay != nullptr;
 }
 
 bool PowerBridge::screenOff() const
@@ -191,6 +243,11 @@ QString PowerBridge::playbackStatus() const
     return QStringLiteral("Stopped");
 }
 
+bool PowerBridge::overlayShown() const
+{
+    return m_overlay && m_overlay->shown();
+}
+
 bool PowerBridge::runVerb(const QString &verb)
 {
     QStringList command = commandFor(verb);
@@ -230,7 +287,51 @@ void PowerBridge::reloadDrift()
 
 void PowerBridge::requestPowerMenu()
 {
+    if (m_overlay) {
+        qInfo() << "casdap power: ShowPowerMenu ignored in overlay mode";
+        return;
+    }
     emit showPowerMenu();
+}
+
+void PowerBridge::requestScreenOff(bool off)
+{
+    if (m_overlay) {
+        qInfo() << "casdap power: SetScreenOff ignored in overlay mode" << off;
+        return;
+    }
+    setScreenOff(off);
+}
+
+void PowerBridge::showOverlay()
+{
+    if (rejectWithoutOverlay("ShowOverlay"))
+        return;
+    m_overlay->show();
+}
+
+void PowerBridge::hideOverlay()
+{
+    if (rejectWithoutOverlay("HideOverlay"))
+        return;
+    m_overlay->hide();
+}
+
+void PowerBridge::toggleOverlay()
+{
+    if (rejectWithoutOverlay("ToggleOverlay"))
+        return;
+    m_overlay->toggle();
+}
+
+bool PowerBridge::rejectWithoutOverlay(const char *member)
+{
+    if (m_overlay)
+        return false;
+    qInfo() << "casdap power:" << member << "needs overlay mode";
+    if (calledFromDBus())
+        sendErrorReply(notSupportedError(), QString::fromLatin1(member) + QStringLiteral(" needs overlay mode"));
+    return true;
 }
 
 void PowerBridge::onVolumeChanged(double level)
@@ -242,6 +343,11 @@ void PowerBridge::onVolumeChanged(double level)
 void PowerBridge::notifyPlaybackStatus()
 {
     emitPropertiesChanged({{QStringLiteral("PlaybackStatus"), playbackStatus()}});
+}
+
+void PowerBridge::notifyOverlayShown()
+{
+    emitPropertiesChanged({{QStringLiteral("OverlayShown"), overlayShown()}});
 }
 
 void PowerBridge::emitPropertiesChanged(const QVariantMap &changed)

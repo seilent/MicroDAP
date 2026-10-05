@@ -85,6 +85,31 @@ QList<int> startedIndexes(const QSignalSpy &spy)
     return indexes;
 }
 
+bool encodeSine(const QString &path, int seconds)
+{
+    const QString description =
+        QStringLiteral("audiotestsrc num-buffers=%1 wave=sine freq=440 ! audioconvert ! flacenc "
+                       "! filesink location=\"%2\"")
+            .arg(seconds * 44)
+            .arg(path);
+    GError *error = nullptr;
+    GstElement *pipeline = gst_parse_launch(description.toUtf8().constData(), &error);
+    g_clear_error(&error);
+    if (!pipeline)
+        return false;
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstBus *bus = gst_element_get_bus(pipeline);
+    GstMessage *message = gst_bus_timed_pop_filtered(
+        bus, 30 * GST_SECOND, static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+    const bool ok = message && GST_MESSAGE_TYPE(message) == GST_MESSAGE_EOS;
+    if (message)
+        gst_message_unref(message);
+    gst_object_unref(bus);
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_object_unref(pipeline);
+    return ok;
+}
+
 }
 
 class PlayerTest : public QObject
@@ -101,6 +126,7 @@ private slots:
     void repeatOne();
     void shuffleOrder();
     void previousGoesBack();
+    void positionWithoutPoll();
     void rating();
     void stateRoundTrip();
 
@@ -408,6 +434,43 @@ void PlayerTest::previousGoesBack()
 
     player.next();
     QCOMPARE(player.status(), Player::Stopped);
+}
+
+void PlayerTest::positionWithoutPoll()
+{
+    QueueEntry entry;
+    entry.path = m_dir.path() + QStringLiteral("/long.flac");
+    entry.title = QStringLiteral("Long");
+    entry.durationMs = 6000;
+    QVERIFY(encodeSine(entry.path, 6));
+
+    const QByteArray sink = qgetenv("CASDAP_AUDIO_SINK");
+    qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    Player player;
+    qputenv("CASDAP_AUDIO_SINK", sink);
+    QVERIFY(player.isValid());
+    player.setPositionPollEnabled(false);
+    QVERIFY(!player.positionPollEnabled());
+    QSignalSpy started(&player, &Player::trackStarted);
+
+    player.play({entry}, 0);
+    QCOMPARE(player.status(), Player::Playing);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QTest::qWait(600);
+    player.pause();
+    QCOMPARE(player.status(), Player::Paused);
+    QVERIFY(player.position() >= 400);
+
+    player.playPause();
+    QCOMPARE(player.status(), Player::Playing);
+    QTRY_VERIFY_WITH_TIMEOUT(player.position() > 4000, playTimeoutMs);
+    player.previous();
+    QCOMPARE(player.status(), Player::Playing);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player.position() < 1000, playTimeoutMs);
+    QTest::qWait(300);
+    QCOMPARE(started.count(), 1);
+    player.stop();
 }
 
 void PlayerTest::rating()

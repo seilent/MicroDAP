@@ -29,6 +29,8 @@ add_library(casdapcore STATIC
     src/core/Models.h
     src/core/Mpris.cpp
     src/core/Mpris.h
+    src/core/OverlayBridge.cpp
+    src/core/OverlayBridge.h
     src/core/Pad.cpp
     src/core/Pad.h
     src/core/PadSource.h
@@ -55,6 +57,7 @@ target_include_directories(casdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/cor
 target_compile_definitions(casdapcore PRIVATE CASDAP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(casdapcore PUBLIC
     Qt6::Core
+    Qt6::Gui
     Qt6::DBus
     Qt6::Sql
     PkgConfig::GST

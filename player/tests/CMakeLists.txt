@@ -96,6 +96,17 @@ else()
 endif()
 casdap_test_env(dbuspad)
 
+qt_add_executable(tst_overlay core/tst_overlay.cpp)
+target_compile_definitions(tst_overlay PRIVATE CASDAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py")
+target_link_libraries(tst_overlay PRIVATE casdapcore casdapuiplugin Qt6::DBus Qt6::Gui Qt6::Quick Qt6::Test)
+if(DBUS_RUN_SESSION)
+    add_test(NAME overlay COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_overlay>)
+else()
+    add_test(NAME overlay COMMAND tst_overlay)
+endif()
+casdap_test_env(overlay)
+set_property(TEST overlay APPEND PROPERTY ENVIRONMENT "CASDAP_AUDIO_SINK=fakesink sync=false")
+
 set(CASDAP_TEST_FONT_DIR ${CMAKE_SOURCE_DIR}/../dist/usr/share/fonts/casdap CACHE PATH "Selawik TTF directory for the qml tests and specimen shots")
 
 qt_add_executable(tst_qml qml/tst_qml.cpp)

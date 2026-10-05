@@ -28,6 +28,7 @@ class Player : public QObject
     Q_PROPERTY(qint64 duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
     Q_PROPERTY(Queue *queue READ queue CONSTANT)
+    Q_PROPERTY(bool positionPollEnabled READ positionPollEnabled WRITE setPositionPollEnabled NOTIFY positionPollEnabledChanged)
 
 public:
     enum Status {
@@ -49,6 +50,8 @@ public:
     bool isValid() const;
     BluezModel *bluez() const;
     void setBluez(BluezModel *bluez);
+    bool positionPollEnabled() const;
+    void setPositionPollEnabled(bool on);
 
     void play(const QList<QueueEntry> &entries, int start = 0);
     void restore(const QList<QueueEntry> &entries, int index, qint64 positionMs);
@@ -68,6 +71,7 @@ signals:
     void positionChanged();
     void durationChanged();
     void currentChanged();
+    void positionPollEnabledChanged();
     void trackStarted(int index);
     void endOfStream();
     void error(const QString &message);
@@ -116,6 +120,7 @@ private:
     gulong m_aboutToFinishId = 0;
     QSocketNotifier *m_busNotifier = nullptr;
     QTimer m_positionTimer;
+    bool m_positionPoll = true;
     Status m_status = Stopped;
     qint64 m_position = 0;
     qint64 m_duration = 0;

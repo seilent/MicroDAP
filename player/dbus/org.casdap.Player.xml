@@ -6,8 +6,12 @@
       <arg name="off" type="b" direction="in"/>
     </method>
     <method name="ShowPowerMenu"/>
+    <method name="ShowOverlay"/>
+    <method name="HideOverlay"/>
+    <method name="ToggleOverlay"/>
     <property name="ScreenOff" type="b" access="read"/>
     <property name="PlaybackStatus" type="s" access="read"/>
+    <property name="OverlayShown" type="b" access="read"/>
     <signal name="ScreenOffChanged">
       <arg name="screenOff" type="b"/>
     </signal>

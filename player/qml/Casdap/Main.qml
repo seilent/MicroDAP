@@ -17,16 +17,32 @@ Window {
     readonly property bool powerScreenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
     readonly property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
     readonly property var player: root.screenshot || typeof Player === "undefined" ? null : Player
+    readonly property var bridge: root.screenshot || typeof OverlayBridge === "undefined" ? null : OverlayBridge
     readonly property string topScreen: pages.currentItem !== null ? pages.currentItem.objectName : ""
+
+    property bool overlay: root.bridge !== null
+    property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
+    property real overlayFade: root.bridge !== null ? root.bridge.opacity : 1
+    readonly property bool hidden: root.overlay && !root.overlayMapped
+    readonly property bool off: root.powerScreenOff || root.hidden
+    property alias pageStack: pages
+    property alias overlayLayer: overlays
+    property alias background: bg
 
     width: shotWidth
     height: shotHeight
-    visible: true
-    visibility: screenshot ? Window.Windowed : Window.FullScreen
+    visible: !root.overlay
+    visibility: screenshot ? Window.Windowed : root.overlay ? Window.AutomaticVisibility : Window.FullScreen
     color: Ui.bg
 
     onWidthChanged: Ui.windowW = root.width
     onHeightChanged: Ui.windowH = root.height
+    onHiddenChanged: {
+        if (!root.hidden)
+            return
+        pages.completeAll()
+        overlays.completeAll()
+    }
     Component.onCompleted: {
         Ui.windowW = root.width
         Ui.windowH = root.height
@@ -42,11 +58,25 @@ Window {
         console.info("casdap: navigate " + name)
     }
 
+    Binding {
+        target: root.contentItem
+        property: "opacity"
+        value: root.overlayFade
+        when: root.overlay
+    }
+
+    Rectangle {
+        id: bg
+
+        anchors.fill: parent
+        color: Ui.bg
+    }
+
     PageStack {
         id: pages
 
         anchors.fill: parent
-        visible: !root.screenshot
+        visible: !root.screenshot && !root.hidden
     }
 
     PadRouter {
@@ -56,8 +86,8 @@ Window {
         stack: pages
         pad: typeof Pad === "undefined" ? null : Pad
         player: typeof Player === "undefined" ? null : Player
-        screenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
-        pocketControls: typeof Settings === "undefined" ? false : Settings.pocketControls
+        screenOff: root.off
+        pocketControls: !root.overlay && (typeof Settings === "undefined" ? false : Settings.pocketControls)
         onNowPlaying: console.info("casdap: navigate nowplaying")
     }
 
@@ -65,11 +95,11 @@ Window {
         id: overlays
 
         anchors.fill: parent
-        visible: !root.screenshot
+        visible: !root.screenshot && !root.hidden
         power: root.power
         bluez: root.screenshot ? null : root.bluez
         player: root.player
-        screenOff: root.powerScreenOff
+        screenOff: root.off
         topScreen: root.topScreen
     }
 
@@ -78,6 +108,7 @@ Window {
 
         Home {
             objectName: "home"
+            animated: !root.hidden
             bluez: root.bluez
             historyModel: root.historyRecent
             newModel: root.historyNew
@@ -94,8 +125,9 @@ Window {
 
         Bluetooth {
             objectName: "bluetooth"
+            animated: !root.hidden
             bluez: root.bluez
-            screenOff: root.powerScreenOff
+            screenOff: root.off
             onOpenNowPlaying: console.info("casdap: navigate nowplaying-bluetooth")
         }
     }

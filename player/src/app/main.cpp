@@ -1,8 +1,11 @@
 #include "FakeBluezModel.h"
+#include "DbusPad.h"
 #include "Gamescope.h"
+#include "Intercept.h"
 #include "Library.h"
 #include "Models.h"
 #include "Mpris.h"
+#include "OverlayBridge.h"
 #include "Pad.h"
 #include "Player.h"
 #include "PowerBridge.h"
@@ -99,8 +102,10 @@ int main(int argc, char *argv[])
     const QCommandLineOption libraryOption(QStringLiteral("library"),
                                            QStringLiteral("Music directory scanned into a temporary library for --screenshot."),
                                            QStringLiteral("dir"));
+    const QCommandLineOption overlayOption(QStringLiteral("overlay"),
+                                           QStringLiteral("Run as the game mode overlay: hidden window, pad from InputPlumber."));
     parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, angleOption, scanOnlyOption,
-                       bluezOption, stateOption, libraryOption});
+                       bluezOption, stateOption, libraryOption, overlayOption});
     parser.addPositionalArgument(QStringLiteral("dir"),
                                  QStringLiteral("Directory for --scan-only, default ~/Music."),
                                  QStringLiteral("[dir]"));
@@ -148,33 +153,58 @@ int main(int argc, char *argv[])
     casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
     casdap::PowerBridge power(&player, QDBusConnection::sessionBus());
     casdap::StatusModel status;
-    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status,
-                     [&power, &status] { status.setActive(!power.screenOff()); });
-    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, bluez.get(),
-                     [&power, model = bluez.get()] { model->setActive(!power.screenOff()); });
-    casdap::Pad pad;
-    pad.setPocketControls(settings.pocketControls());
-    QObject::connect(&settings, &casdap::Settings::pocketControlsChanged, &pad,
-                     [&settings, &pad] { pad.setPocketControls(settings.pocketControls()); });
-    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &pad,
-                     [&power, &pad] { pad.setScreenOff(power.screenOff()); });
+
+    const bool overlayMode = parser.isSet(overlayOption);
+    std::unique_ptr<casdap::PadSource> pad;
+    std::unique_ptr<casdap::OverlayBridge> overlay;
+    if (overlayMode) {
+        auto dbusPad = std::make_unique<casdap::DbusPad>(casdap::Intercept::bus());
+        overlay = std::make_unique<casdap::OverlayBridge>(dbusPad.get(), &player);
+        power.setOverlay(overlay.get());
+        pad = std::move(dbusPad);
+    } else {
+        pad = std::make_unique<casdap::Pad>();
+    }
+
+    auto applyActive = [&power, &status, model = bluez.get(), bridge = overlay.get()] {
+        const bool active = !power.screenOff() && (!bridge || bridge->mapped());
+        status.setActive(active);
+        model->setActive(active);
+    };
+    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status, applyActive);
+    if (overlay) {
+        QObject::connect(overlay.get(), &casdap::OverlayBridge::mappedChanged, &status, applyActive);
+        applyActive();
+    }
+    pad->setPocketControls(settings.pocketControls());
+    QObject::connect(&settings, &casdap::Settings::pocketControlsChanged, pad.get(),
+                     [&settings, source = pad.get()] { source->setPocketControls(settings.pocketControls()); });
+    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, pad.get(),
+                     [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"), &historyRecent);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"), &historyNew);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
-    engine.rootContext()->setContextProperty(QStringLiteral("Pad"), &pad);
+    engine.rootContext()->setContextProperty(QStringLiteral("Pad"), pad.get());
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);
     engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);
     engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"),
                                              static_cast<QObject *>(bluez.get()));
+    if (overlay)
+        engine.rootContext()->setContextProperty(QStringLiteral("OverlayBridge"), overlay.get());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");
-    if (!engine.rootObjects().isEmpty())
-        casdap::claimGamescopeFocus(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
+    if (!engine.rootObjects().isEmpty()) {
+        auto *root = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
+        if (overlayMode)
+            overlay->setWindow(root, casdap::setOverlayAtoms);
+        else
+            casdap::claimGamescopeFocus(root);
+    }
 
     const QString grabOut = qEnvironmentVariable("CASDAP_GRAB_OUT");
     auto *window = engine.rootObjects().isEmpty()

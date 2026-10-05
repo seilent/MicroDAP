@@ -112,6 +112,11 @@ Player::Status Player::status() const
 
 qint64 Player::position() const
 {
+    if (m_positionPoll || !m_playbin || m_status != Playing)
+        return m_position;
+    gint64 position = 0;
+    if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position) && position >= 0)
+        return position / GST_MSECOND;
     return m_position;
 }
 
@@ -161,6 +166,25 @@ void Player::setBluez(BluezModel *bluez)
     connect(m_bluez, &BluezModel::transportActiveChanged, this, &Player::onTransportActiveChanged);
     connect(m_bluez, &QObject::destroyed, this, [this] { m_bluez = nullptr; });
     onTransportActiveChanged();
+}
+
+bool Player::positionPollEnabled() const
+{
+    return m_positionPoll;
+}
+
+void Player::setPositionPollEnabled(bool on)
+{
+    if (m_positionPoll == on)
+        return;
+    m_positionPoll = on;
+    if (on && m_status == Playing) {
+        pollPosition();
+        m_positionTimer.start();
+    } else {
+        m_positionTimer.stop();
+    }
+    emit positionPollEnabledChanged();
 }
 
 void Player::onTransportActiveChanged()
@@ -381,6 +405,7 @@ void Player::pause()
 {
     if (!m_playbin || m_status != Playing)
         return;
+    pollPosition();
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
     setStatus(Paused);
 }
@@ -404,7 +429,7 @@ void Player::next()
 
 void Player::previous()
 {
-    if (m_position > restartThresholdMs && m_status != Stopped) {
+    if (position() > restartThresholdMs && m_status != Stopped) {
         seek(0);
         return;
     }
@@ -476,7 +501,7 @@ void Player::addHistoryNow()
 
 void Player::setStatus(Status status)
 {
-    if (status == Playing)
+    if (status == Playing && m_positionPoll)
         m_positionTimer.start();
     else
         m_positionTimer.stop();

@@ -52,7 +52,7 @@ private slots:
     void onServiceUnregistered();
 
 private:
-    void write(const QString &path, uint mode);
+    void write(const QString &path, uint mode, bool retry = true);
     void writeAll(uint mode);
     void track(const QString &path, const InterfaceList &interfaces, bool &devices, bool &targets);
 
