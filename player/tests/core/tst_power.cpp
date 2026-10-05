@@ -14,6 +14,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -47,6 +48,14 @@ QString readFile(const QString &path)
     if (!file.open(QIODevice::ReadOnly))
         return {};
     return QString::fromUtf8(file.readAll());
+}
+
+QVariant savedValue(const QString &path, const QString &key)
+{
+    QJsonObject object;
+    if (!State::read(path, object))
+        return {};
+    return object.value(key).toVariant();
 }
 
 }
@@ -84,6 +93,7 @@ private:
     bool sawChange(const QString &name, const QVariant &value) const;
     bool writeStub(const QString &name, const QString &exitCode = QStringLiteral("0"));
     int logLines() const;
+    QVariant savedState(const QString &key) const;
 
     QTemporaryDir m_dir;
     QString m_stubDir;
@@ -92,6 +102,9 @@ private:
     QString m_driftFile;
     QString m_keepFile;
     QString m_bootIdFile;
+    QString m_stateFile;
+    std::unique_ptr<Player> m_player;
+    std::unique_ptr<State> m_state;
     std::unique_ptr<PowerBridge> m_bridge;
     std::unique_ptr<QDBusInterface> m_remote;
     QList<bool> m_screenOffSignals;
@@ -132,6 +145,11 @@ int PowerTest::logLines() const
     return static_cast<int>(readFile(m_log).count(QLatin1Char('\n')));
 }
 
+QVariant PowerTest::savedState(const QString &key) const
+{
+    return savedValue(m_stateFile, key);
+}
+
 void PowerTest::initTestCase()
 {
     QDBusConnection bus = QDBusConnection::sessionBus();
@@ -150,6 +168,7 @@ void PowerTest::initTestCase()
     m_driftFile = m_dir.path() + QStringLiteral("/drift");
     m_keepFile = m_dir.path() + QStringLiteral("/config/casdap/keep");
     m_bootIdFile = m_dir.path() + QStringLiteral("/boot_id");
+    m_stateFile = m_dir.path() + QStringLiteral("/config/casdap/state.json");
     QVERIFY(writeStub(QStringLiteral("casdap-power")));
     QVERIFY(writeStub(QStringLiteral("systemctl")));
     QVERIFY(writeFile(m_driftFile, QStringLiteral("/usr/libexec/armada/session-control\n\n")));
@@ -163,6 +182,11 @@ void PowerTest::initTestCase()
 
     m_bridge = std::make_unique<PowerBridge>(nullptr, bus);
     QVERIFY(m_bridge->isRegistered());
+    QCOMPARE(m_bridge->state(), nullptr);
+    m_player = std::make_unique<Player>();
+    m_state = std::make_unique<State>(m_player.get(), m_stateFile);
+    m_bridge->setState(m_state.get());
+    QCOMPARE(m_bridge->state(), m_state.get());
 
     QVERIFY(bus.connect(PowerBridge::serviceName(), PowerBridge::objectPath(),
                         PowerBridge::interfaceName(), QStringLiteral("ScreenOffChanged"), this,
@@ -275,7 +299,7 @@ void PowerTest::switchPrompt()
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 2, busTimeoutMs);
     QVERIFY(!m_bridge->switching());
-    QVERIFY(!m_bridge->keep()->flag());
+    QVERIFY(!QFile::exists(m_keepFile));
 }
 
 void PowerTest::keepMarker()
@@ -293,26 +317,11 @@ void PowerTest::keepMarker()
     const QString statePath = m_dir.path() + QStringLiteral("/state/state.json");
     Player player;
     State state(&player, statePath);
-    QCOMPARE(state.keep(), nullptr);
     QVERIFY(Keep::write());
     QVERIFY(state.saveExit());
     QVERIFY(QFile::exists(m_keepFile));
-
-    Keep keep;
-    state.setKeep(&keep);
-    QCOMPARE(state.keep(), &keep);
-    QVERIFY(state.saveExit());
-    QVERIFY(!QFile::exists(m_keepFile));
-
-    QSignalSpy flagSpy(&keep, &Keep::flagChanged);
-    keep.setFlag(true);
-    QCOMPARE(flagSpy.count(), 1);
-    keep.setFlag(true);
-    QCOMPARE(flagSpy.count(), 1);
-    QVERIFY(state.saveExit());
-    QCOMPARE(readFile(m_keepFile), QStringLiteral("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n"));
-
-    keep.setFlag(false);
+    QCOMPARE(savedValue(statePath, QStringLiteral("handoff")).toBool(), true);
+    QVERIFY(Keep::clear());
     QVERIFY(state.saveExit());
     QVERIFY(!QFile::exists(m_keepFile));
     QVERIFY(QFile::exists(statePath));
@@ -321,16 +330,16 @@ void PowerTest::keepMarker()
 void PowerTest::keepInBackground()
 {
     QFile::remove(m_log);
+    QFile::remove(m_stateFile);
     QVERIFY(writeStub(QStringLiteral("systemctl")));
     QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
     QSignalSpy switching(m_bridge.get(), &PowerBridge::switchingChanged);
-    QSignalSpy flag(m_bridge->keep(), &Keep::flagChanged);
 
     m_bridge->keepInBackground();
-    QVERIFY(m_bridge->keep()->flag());
     QVERIFY(m_bridge->switching());
     QCOMPARE(switching.count(), 1);
-    QCOMPARE(flag.count(), 1);
+    QCOMPARE(readFile(m_keepFile), QStringLiteral("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n"));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
 
@@ -341,40 +350,39 @@ void PowerTest::keepInBackground()
     QCOMPARE(logLines(), 1);
     QVERIFY(m_bridge->switching());
     QCOMPARE(failed.count(), 0);
-
-    Player player;
-    State state(&player, m_dir.path() + QStringLiteral("/state/keep.json"));
-    state.setKeep(m_bridge->keep());
-    QVERIFY(state.saveExit());
-    QCOMPARE(readFile(m_keepFile), QStringLiteral("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n"));
+    QVERIFY(QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
 
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, PowerBridge::switchTimeoutMs() + busTimeoutMs);
     QVERIFY(!m_bridge->switching());
-    QVERIFY(!m_bridge->keep()->flag());
+    QCOMPARE(switching.count(), 2);
     QVERIFY(!QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
 }
 
 void PowerTest::closeAndSwitch()
 {
     QFile::remove(m_log);
     QVERIFY(Keep::write());
+    QVERIFY(m_state->save(true));
     QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
 
     m_bridge->closeAndSwitch();
-    QVERIFY(!m_bridge->keep()->flag());
     QVERIFY(!QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
     QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
 
-    Player player;
-    State state(&player, m_dir.path() + QStringLiteral("/state/close.json"));
-    state.setKeep(m_bridge->keep());
-    QVERIFY(state.saveExit());
-    QVERIFY(!QFile::exists(m_keepFile));
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: close player");
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: switch already running");
+    m_bridge->closeAndSwitch();
+    QCoreApplication::processEvents();
+    QCOMPARE(logLines(), 1);
 
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, PowerBridge::switchTimeoutMs() + busTimeoutMs);
     QVERIFY(!m_bridge->switching());
+    QVERIFY(!QFile::exists(m_keepFile));
 }
 
 void PowerTest::switchFails()
@@ -384,16 +392,16 @@ void PowerTest::switchFails()
     QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
 
     m_bridge->keepInBackground();
-    QVERIFY(m_bridge->keep()->flag());
+    QVERIFY(QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
     QVERIFY(!m_bridge->switching());
-    QVERIFY(!m_bridge->keep()->flag());
     QVERIFY(!QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
     QCOMPARE(logLines(), 1);
 
     QVERIFY(Keep::write());
     m_bridge->keepInBackground();
-    QVERIFY(m_bridge->keep()->flag());
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, busTimeoutMs);
     QVERIFY(!QFile::exists(m_keepFile));
 
@@ -401,9 +409,33 @@ void PowerTest::switchFails()
     m_bridge->keepInBackground();
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 3, busTimeoutMs);
     QVERIFY(!m_bridge->switching());
-    QVERIFY(!m_bridge->keep()->flag());
+    QVERIFY(!QFile::exists(m_keepFile));
     qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
     QVERIFY(writeStub(QStringLiteral("systemctl")));
+
+    const int lines = logLines();
+    QSignalSpy switching(m_bridge.get(), &PowerBridge::switchingChanged);
+    qputenv("CASDAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/missing")).toUtf8());
+    m_bridge->keepInBackground();
+    QCOMPARE(failed.count(), 4);
+    QCOMPARE(switching.count(), 0);
+    QVERIFY(!m_bridge->switching());
+    QVERIFY(!QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
+    QCoreApplication::processEvents();
+    QCOMPARE(logLines(), lines);
+    qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
+
+    QTest::ignoreMessage(QtWarningMsg, "casdap power: session bus not connected");
+    PowerBridge detached(nullptr, QDBusConnection(QStringLiteral("casdap-no-session-bus")));
+    QCOMPARE(detached.state(), nullptr);
+    QSignalSpy detachedFailed(&detached, &PowerBridge::switchFailed);
+    detached.keepInBackground();
+    QCOMPARE(detachedFailed.count(), 1);
+    QVERIFY(!detached.switching());
+    QVERIFY(!QFile::exists(m_keepFile));
+    QCoreApplication::processEvents();
+    QCOMPARE(logLines(), lines);
 }
 
 void PowerTest::switchStalls()
@@ -418,17 +450,19 @@ void PowerTest::switchStalls()
     QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QCOMPARE(failed.count(), 0);
-    QVERIFY(m_bridge->keep()->flag());
+    QVERIFY(QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 400);
     QVERIFY(!m_bridge->switching());
-    QVERIFY(!m_bridge->keep()->flag());
     QVERIFY(!QFile::exists(m_keepFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
 
     m_bridge->keepInBackground();
-    QVERIFY(m_bridge->keep()->flag());
+    QVERIFY(QFile::exists(m_keepFile));
     QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, busTimeoutMs);
+    QVERIFY(!QFile::exists(m_keepFile));
 }
 
 void PowerTest::overlayNotSupported()

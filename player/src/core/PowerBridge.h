@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Keep.h"
-
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
 #include <QDBusContext>
@@ -18,6 +16,7 @@ namespace casdap {
 class OverlayBridge;
 class Player;
 class PowerBridge;
+class State;
 
 class PowerBridgeAdaptor : public QDBusAbstractAdaptor
 {
@@ -78,7 +77,8 @@ public:
     OverlayBridge *overlay() const;
     void setOverlay(OverlayBridge *overlay);
     bool overlayMode() const;
-    Keep *keep();
+    State *state() const;
+    void setState(State *state);
 
     bool screenOff() const;
     void setScreenOff(bool off);
@@ -129,9 +129,10 @@ private:
     QDBusConnection m_bus;
     PowerBridgeAdaptor *m_adaptor;
     OverlayBridge *m_overlay = nullptr;
-    Keep m_keep;
+    State *m_state = nullptr;
     QProcess *m_switch = nullptr;
     QTimer m_switchTimer;
+    bool m_switching = false;
     bool m_registered = false;
     bool m_screenOff = false;
     int m_volume = 0;

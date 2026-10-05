@@ -21,11 +21,6 @@ QString firstLine(const QString &path)
 
 }
 
-Keep::Keep(QObject *parent)
-    : QObject(parent)
-{
-}
-
 QString Keep::markerPath()
 {
     return qEnvironmentVariable("CASDAP_KEEP_FILE",
@@ -85,24 +80,6 @@ bool Keep::clear()
     }
     qInfo() << "casdap keep: marker removed" << path;
     return true;
-}
-
-bool Keep::flag() const
-{
-    return m_flag;
-}
-
-void Keep::setFlag(bool flag)
-{
-    if (m_flag == flag)
-        return;
-    m_flag = flag;
-    emit flagChanged();
-}
-
-bool Keep::saveExit() const
-{
-    return m_flag ? write() : clear();
 }
 
 }

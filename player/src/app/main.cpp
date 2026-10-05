@@ -161,7 +161,7 @@ int main(int argc, char *argv[])
     }
     if (!overlayMode) {
         casdap::Keep::clear();
-        state.setKeep(power.keep());
+        power.setState(&state);
     }
     casdap::StatusModel status;
 

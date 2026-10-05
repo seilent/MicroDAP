@@ -9,7 +9,6 @@ class QSocketNotifier;
 
 namespace casdap {
 
-class Keep;
 class Player;
 
 class State : public QObject
@@ -23,10 +22,9 @@ public:
 
     static QString defaultPath();
     QString path() const;
-    Keep *keep() const;
-    void setKeep(Keep *keep);
 
     Q_INVOKABLE bool saveNow();
+    bool save(bool handoff);
     bool saveExit();
     void quit();
     bool load();
@@ -38,13 +36,11 @@ public:
     static bool loadInto(Player *player, const QString &path);
 
 private:
-    bool save(bool handoff);
     void onSignal();
     void onStatusChanged();
 
     Player *m_player;
     QString m_path;
-    Keep *m_keep = nullptr;
     QTimer m_timer;
     QSocketNotifier *m_notifier = nullptr;
     int m_fds[2] = {-1, -1};

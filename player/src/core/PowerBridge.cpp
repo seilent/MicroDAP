@@ -1,7 +1,9 @@
 #include "PowerBridge.h"
 
+#include "Keep.h"
 #include "OverlayBridge.h"
 #include "Player.h"
+#include "State.h"
 
 #include <QDBusMessage>
 #include <QDebug>
@@ -224,9 +226,20 @@ bool PowerBridge::overlayMode() const
     return m_overlay != nullptr;
 }
 
-Keep *PowerBridge::keep()
+State *PowerBridge::state() const
 {
-    return &m_keep;
+    return m_state;
+}
+
+void PowerBridge::setState(State *state)
+{
+    if (m_state == state)
+        return;
+    if (m_state)
+        disconnect(m_state, nullptr, this, nullptr);
+    m_state = state;
+    if (m_state)
+        connect(m_state, &QObject::destroyed, this, [this] { m_state = nullptr; });
 }
 
 bool PowerBridge::screenOff() const
@@ -276,7 +289,7 @@ bool PowerBridge::overlayShown() const
 
 bool PowerBridge::switching() const
 {
-    return m_switchTimer.isActive();
+    return m_switching;
 }
 
 QString PowerBridge::programPath(const QString &name) const
@@ -344,24 +357,40 @@ void PowerBridge::requestSwitchPrompt()
 void PowerBridge::keepInBackground()
 {
     qInfo() << "casdap power: keep in background";
-    m_keep.setFlag(true);
+    if (switching()) {
+        qInfo() << "casdap power: switch already running";
+        return;
+    }
+    if (!m_state) {
+        failSwitch(QStringLiteral("no state to hand off"));
+        return;
+    }
+    if (!m_state->save(true)) {
+        failSwitch(QStringLiteral("cannot save the handoff state"));
+        return;
+    }
+    if (!Keep::write()) {
+        failSwitch(QStringLiteral("cannot write the keep marker"));
+        return;
+    }
     startSwitch();
 }
 
 void PowerBridge::closeAndSwitch()
 {
     qInfo() << "casdap power: close player";
-    m_keep.setFlag(false);
+    if (switching()) {
+        qInfo() << "casdap power: switch already running";
+        return;
+    }
+    if (m_state)
+        m_state->save(false);
     Keep::clear();
     startSwitch();
 }
 
 void PowerBridge::startSwitch()
 {
-    if (switching()) {
-        qInfo() << "casdap power: switch already running";
-        return;
-    }
     QStringList command = switchCommand();
     const QString program = programPath(command.takeFirst());
     qInfo() << "casdap power: switch" << program << command;
@@ -369,6 +398,7 @@ void PowerBridge::startSwitch()
     connect(m_switch, &QProcess::finished, this, &PowerBridge::onSwitchFinished);
     connect(m_switch, &QProcess::errorOccurred, this, &PowerBridge::onSwitchError);
     m_switchTimer.start(switchTimeoutMs());
+    m_switching = true;
     emit switchingChanged();
     m_switch->start(program, command);
 }
@@ -398,11 +428,15 @@ void PowerBridge::onSwitchTimeout()
 void PowerBridge::failSwitch(const QString &reason)
 {
     qWarning().noquote() << "casdap power: switch failed," << reason;
+    const bool wasSwitching = m_switching;
+    m_switching = false;
     m_switchTimer.stop();
     dropSwitchProcess();
-    m_keep.setFlag(false);
     Keep::clear();
-    emit switchingChanged();
+    if (m_state)
+        m_state->save(false);
+    if (wasSwitching)
+        emit switchingChanged();
     emit switchFailed();
 }
 
