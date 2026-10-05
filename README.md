@@ -3,7 +3,7 @@
 Console As DAP. A music player session and Bluetooth A2DP receiver for Linux gaming handhelds,
 shipped as a systemd-sysext overlay for [Armada](https://github.com/armada-os/armada).
 
-Status: prototype. The session, the switch units, the Guide preserving pad mapping, the hold daemon,
+Status: prototype. The session, the switch units, the guide button mapping, the hold daemon,
 the pad target, the boot guard and the Bluetooth agent exist and run on an AYANEO Pocket MICRO 2.
 Player and screen off state are not written yet.
 
@@ -18,8 +18,7 @@ Player and screen off state are not written yet.
 | `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`. `bt-test.sh` runs `bt-test.py` under `dbus-run-session` with a fake `org.bluez` (needs `dbus-python` and `python3-gobject`). Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures; `tst_mpris` and `tst_power` run under `dbus-run-session`). |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
-The three patched files (`/usr/libexec/armada/session-control`,
-`/usr/share/inputplumber/profiles/default.yaml`,
+The two patched files (`/usr/libexec/armada/session-control`,
 `/usr/share/inputplumber/capability_maps/ayaneo_pocket_micro2.yaml`) are never checked in whole.
 `build.sh` copies each base file out of the pinned image, records its sha256 in
 `usr/share/casdap/shadow-base.sha256`, applies the patch with `patch -p1` and fails on any reject.
@@ -153,13 +152,13 @@ InputPlumber's own polkit rule grants its actions to group `wheel`, which `armad
 
 ## Input
 
-The pad guide button (`BTN_MODE`) maps to `KeyF13` in the Pocket MICRO 2 capability map; the
-default InputPlumber profile maps `KeyF13` to Guide plus `KeyF13`, so Steam keeps its menu and a
-daemon can read F13 on the `InputPlumber Keyboard` node. F13 does not flow during stick calibration.
+The pad guide button (`BTN_MODE`) maps to `KeyF13` in the Pocket MICRO 2 capability map and reaches
+only the `InputPlumber Keyboard` node; Steam does not see it (the front Home key keeps Guide). F13
+does not flow during stick calibration.
 
 `casdap-hotkeyd` (user unit, `Upholds=` from `default.target.d`) reads that node with `evtest` and
-classifies each press by the running session. Hold 1 s in game mode starts `casdap-switch.service`;
-Steam shows its shortcut overlay just before. While a title runs the first hold is ignored and a
+classifies each press by the running session. Hold 1 s in game mode starts `casdap-switch.service`.
+While a title runs the first hold is ignored and a
 second hold within 3 s switches. Hold in casdap starts `casdap-switch-back.service`, tap sends
 `PlayPause` to `org.mpris.MediaPlayer2.casdap`. In Plasma a hold switches; in any other session it
 logs. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
@@ -223,13 +222,13 @@ in `shadow-base.sha256`; a mismatch logs one warning per file and lists the path
 
 Every Armada release (new digest, `VERSION_ID` or pipewire minor) needs a casdap rebuilt against
 it: `just base && just build`. A casdap built against an older image hides later changes to the
-three patched files while merged; the guard warns about it.
+patched files while merged; the guard warns about it.
 
 ## Known limits
 
 Symptoms of a sysext left unmerged after a bootc upgrade to another `VERSION_ID`:
-`systemd-sysext status` lists nothing or marks casdap incompatible, the pad guide tap opens the
-Steam menu and a hold does nothing, `casdap-switch.service` is unknown to systemd, no `casdap-*`
+`systemd-sysext status` lists nothing or marks casdap incompatible, the pad guide button opens the
+Steam menu (InputPlumber's default Guide translation) and a hold does nothing, `casdap-switch.service` is unknown to systemd, no `casdap-*`
 user units. Fix: install the asset for the new `VERSION_ID`.
 
 The short session tracker `/tmp/chimeraos-short-session-tracker` is shared by every
