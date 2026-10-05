@@ -8,8 +8,16 @@ import sys
 
 import dbus
 import dbus.service
+import gi
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
+
+try:
+    gi.require_version('GLibUnix', '2.0')
+    from gi.repository import GLibUnix
+    unix_signal_add = GLibUnix.signal_add
+except (ImportError, ValueError, AttributeError):
+    unix_signal_add = GLib.unix_signal_add
 
 BLUEZ = 'org.bluez'
 OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager'
@@ -239,9 +247,10 @@ class Agent(dbus.service.Object):
 
 
 class Gate:
-    def __init__(self, bus, adapter):
+    def __init__(self, bus, adapter, window):
         self.bus = bus
         self.adapter = adapter
+        self.window = window
         self.pending = set()
         bus.add_signal_receiver(self.changed, bus_name=BLUEZ, dbus_interface=PROPERTIES,
                                 signal_name='PropertiesChanged', arg0=DEVICE, path_keyword='path')
@@ -269,6 +278,7 @@ class Gate:
         uuids = [str(u).lower() for u in props.get('UUIDs', [])]
         if A2DP_SOURCE in uuids:
             log(f'paired {path}')
+            self.window.close(f'closed: paired {path}')
             return
         log(f'removing {path}, no a2dp source')
         self.adapter.remove_device(path)
@@ -283,7 +293,7 @@ def main():
     adapter.set('Discoverable', dbus.Boolean(False))
     window = Window(session, adapter)
     Agent(system, window)
-    Gate(system, adapter)
+    Gate(system, adapter, window)
     manager = dbus.Interface(system.get_object(BLUEZ, '/org/bluez', introspect=False), AGENT_MANAGER)
     manager.RegisterAgent(dbus.ObjectPath(AGENT_PATH), dbus.String('NoInputNoOutput'))
     manager.RequestDefaultAgent(dbus.ObjectPath(AGENT_PATH))
@@ -306,8 +316,8 @@ def main():
         session.flush()
         loop.quit()
 
-    GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, stop)
-    GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, stop)
+    unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, stop)
+    unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, stop)
     system.watch_name_owner(BLUEZ, owner_changed)
     log(f'agent registered on {adapter.path} as {name.get_name()}')
     loop.run()

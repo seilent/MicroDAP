@@ -392,6 +392,35 @@ class Driver:
         self.check(eir_phone in self.fake.devices, 'phone with a2dp source only after SDP removed')
         self.check(self.fake.removed == [keyboard, late_pad], f'removed {self.fake.removed}')
 
+    def test_paired_closes(self):
+        phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
+        keyboard = ADAPTER_PATH + '/dev_10_00_00_00_00_07'
+        in_loop(self.fake.add_device, phone, [uuid('110a'), uuid('110c'), uuid('110e')])
+        in_loop(self.fake.add_device, keyboard, [uuid('1124'), uuid('1200')])
+        self.fake.signals.clear()
+        self.expect_ok('StartPairing(10) paired', self.service.StartPairing, dbus.UInt32(10))
+        self.check_open('paired window', 10)
+        in_loop(self.fake.flip, phone, 'Paired', dbus.Boolean(True))
+        time.sleep(0.3)
+        self.check(self.active() is True, 'window closed before ServicesResolved')
+        in_loop(self.fake.flip, phone, 'ServicesResolved', dbus.Boolean(True))
+        self.check(wait_for(lambda: not self.active(), 2), 'window did not close on paired phone')
+        self.check(int(self.service_get('PairingRemaining')) == 0, 'PairingRemaining not 0 after paired close')
+        self.check_restored('paired')
+        self.check(phone in self.fake.devices, 'paired phone removed')
+        time.sleep(0.2)
+        actives = [bool(s['PairingActive']) for s in self.fake.signals if 'PairingActive' in s]
+        self.check(actives == [True, False], f'paired PairingActive signals {actives}')
+        self.expect_ok('StartPairing(10) keyboard', self.service.StartPairing, dbus.UInt32(10))
+        self.check_open('keyboard window', 10)
+        in_loop(self.fake.flip, keyboard, 'Paired', dbus.Boolean(True))
+        in_loop(self.fake.flip, keyboard, 'ServicesResolved', dbus.Boolean(True))
+        self.check(wait_for(lambda: keyboard in self.fake.removed, 2), 'keyboard paired in window not removed')
+        time.sleep(0.3)
+        self.check_open('keyboard window after removal', 10)
+        self.expect_ok('StopPairing keyboard', self.service.StopPairing)
+        self.check_restored('keyboard stop')
+
     def test_sigterm(self, proc):
         self.expect_ok('StartPairing(10) before SIGTERM', self.service.StartPairing, dbus.UInt32(10))
         self.check_open('sigterm window', 10)
@@ -434,6 +463,7 @@ def main():
         driver.test_stop()
         driver.test_bounds()
         driver.test_gate()
+        driver.test_paired_closes()
         driver.test_sigterm(proc)
     finally:
         if proc.poll() is None:
@@ -444,6 +474,8 @@ def main():
     driver.check(f'Rejected {uuid("111e")} {PHONE}' in text, 'no Rejected 0000111e journal line')
     driver.check(f'Rejected {uuid("1124")} {PHONE}' in text, 'no Rejected 00001124 journal line')
     driver.check(f'Rejected RequestConfirmation {PHONE}' in text, 'no Rejected RequestConfirmation line')
+    driver.check(f'pairing window closed: paired {ADAPTER_PATH}/dev_10_00_00_00_00_06' in text,
+                 'no pairing window closed: paired line')
     if driver.failures:
         sys.stderr.write(text)
         print(f'bt-test: {driver.failures} failure(s)', file=sys.stderr)
