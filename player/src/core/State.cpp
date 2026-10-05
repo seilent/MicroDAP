@@ -4,6 +4,7 @@
 #include "Queue.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -25,6 +26,7 @@ namespace casdap {
 namespace {
 
 constexpr int saveIntervalMs = 10000;
+constexpr qint64 handoffWindowS = 60;
 
 std::atomic<int> signalFd{-1};
 
@@ -36,6 +38,19 @@ void handleSignal(int)
     const char byte = 1;
     const ssize_t written = ::write(fd, &byte, 1);
     (void)written;
+}
+
+QString statusName(Player::Status status)
+{
+    switch (status) {
+    case Player::Playing:
+        return QStringLiteral("playing");
+    case Player::Paused:
+        return QStringLiteral("paused");
+    case Player::Stopped:
+        break;
+    }
+    return QStringLiteral("stopped");
 }
 
 }
@@ -55,7 +70,7 @@ State::State(Player *player, const QString &path, QObject *parent)
     connect(m_player, &Player::statusChanged, this, &State::onStatusChanged);
     onStatusChanged();
     if (QCoreApplication *app = QCoreApplication::instance())
-        connect(app, &QCoreApplication::aboutToQuit, this, &State::saveNow);
+        connect(app, &QCoreApplication::aboutToQuit, this, &State::saveExit);
 }
 
 State::~State()
@@ -93,7 +108,7 @@ void State::onStatusChanged()
         m_timer.stop();
 }
 
-QJsonObject State::snapshot(const Player *player)
+QJsonObject State::snapshot(const Player *player, bool handoff)
 {
     const Queue *queue = player->queue();
     QJsonArray items;
@@ -105,6 +120,9 @@ QJsonObject State::snapshot(const Player *player)
     object.insert(QStringLiteral("position"), player->position());
     object.insert(QStringLiteral("shuffle"), queue->shuffle());
     object.insert(QStringLiteral("repeat"), static_cast<int>(queue->repeat()));
+    object.insert(QStringLiteral("status"), statusName(player->status()));
+    object.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
+    object.insert(QStringLiteral("handoff"), handoff);
     return object;
 }
 
@@ -132,12 +150,32 @@ bool State::read(const QString &path, QJsonObject &object)
     return true;
 }
 
-bool State::saveNow()
+bool State::save(bool handoff)
 {
-    const bool ok = write(m_path, snapshot(m_player));
+    const bool ok = write(m_path, snapshot(m_player, handoff));
     if (!ok)
         qWarning() << "casdap state: cannot write" << m_path;
     return ok;
+}
+
+bool State::saveNow()
+{
+    return save(false);
+}
+
+bool State::saveExit()
+{
+    return save(true);
+}
+
+void State::quit()
+{
+    saveExit();
+    QCoreApplication *app = QCoreApplication::instance();
+    if (!app)
+        return;
+    disconnect(app, &QCoreApplication::aboutToQuit, this, &State::saveExit);
+    app->quit();
 }
 
 bool State::loadInto(Player *player, const QString &path)
@@ -156,7 +194,13 @@ bool State::loadInto(Player *player, const QString &path)
     queue->setRepeat(static_cast<Queue::Repeat>(qBound(0, repeat, 2)));
     const int index = object.value(QStringLiteral("index")).toInt(0);
     const qint64 position = static_cast<qint64>(object.value(QStringLiteral("position")).toDouble(0));
-    player->restore(entries, index, position);
+    const qint64 savedAt = static_cast<qint64>(object.value(QStringLiteral("savedAt")).toDouble(0));
+    const qint64 age = QDateTime::currentSecsSinceEpoch() - savedAt;
+    const bool playing = object.value(QStringLiteral("handoff")).toBool(false)
+                         && object.value(QStringLiteral("status")).toString()
+                                == QLatin1String("playing")
+                         && age < handoffWindowS;
+    player->restore(entries, index, position, playing);
     return true;
 }
 
@@ -196,10 +240,7 @@ void State::onSignal()
     const ssize_t count = ::read(m_fds[1], &byte, 1);
     (void)count;
     m_notifier->setEnabled(false);
-    if (QCoreApplication::instance())
-        QCoreApplication::quit();
-    else
-        saveNow();
+    quit();
 }
 
 }

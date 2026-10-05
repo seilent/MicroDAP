@@ -363,12 +363,12 @@ void Player::play(const QList<QueueEntry> &entries, int start)
     startAt(m_queue->currentIndex(), GST_STATE_PLAYING);
 }
 
-void Player::restore(const QList<QueueEntry> &entries, int index, qint64 positionMs)
+void Player::restore(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing)
 {
     m_queue->set(entries, index);
     if (m_queue->count() == 0)
         return;
-    startAt(m_queue->currentIndex(), GST_STATE_PAUSED);
+    startAt(m_queue->currentIndex(), playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
     if (positionMs > 0) {
         m_pendingSeek = positionMs;
         setPosition(positionMs);

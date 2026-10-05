@@ -24,15 +24,18 @@ public:
     QString path() const;
 
     Q_INVOKABLE bool saveNow();
+    bool saveExit();
+    void quit();
     bool load();
     void installSignalHandlers();
 
-    static QJsonObject snapshot(const Player *player);
+    static QJsonObject snapshot(const Player *player, bool handoff);
     static bool write(const QString &path, const QJsonObject &object);
     static bool read(const QString &path, QJsonObject &object);
     static bool loadInto(Player *player, const QString &path);
 
 private:
+    bool save(bool handoff);
     void onSignal();
     void onStatusChanged();
 

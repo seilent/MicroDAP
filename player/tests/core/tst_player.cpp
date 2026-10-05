@@ -3,6 +3,8 @@
 #include "Queue.h"
 #include "State.h"
 
+#include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -129,6 +131,7 @@ private slots:
     void positionWithoutPoll();
     void rating();
     void stateRoundTrip();
+    void stateHandoff();
 
 private:
     int historyCount() const;
@@ -538,6 +541,76 @@ void PlayerTest::stateRoundTrip()
     State missing(&empty, m_dir.path() + QStringLiteral("/missing.json"));
     QVERIFY(!missing.load());
     QCOMPARE(empty.queue()->count(), 0);
+}
+
+void PlayerTest::stateHandoff()
+{
+    const QString path = m_dir.path() + QStringLiteral("/handoff/state.json");
+    auto restored = [&path] {
+        Player player;
+        State state(&player, path);
+        return state.load() ? player.status() : Player::Stopped;
+    };
+    auto saved = [&path](const QString &key) {
+        QJsonObject object;
+        State::read(path, object);
+        return object.value(key);
+    };
+
+    {
+        Player player;
+        State state(&player, path);
+        player.play(m_tracks, 1);
+        QCOMPARE(player.status(), Player::Playing);
+        QVERIFY(QMetaObject::invokeMethod(QCoreApplication::instance(), "aboutToQuit"));
+    }
+    QCOMPARE(saved(QStringLiteral("status")).toString(), QStringLiteral("playing"));
+    QCOMPARE(saved(QStringLiteral("handoff")).toBool(), true);
+    QVERIFY(saved(QStringLiteral("savedAt")).toDouble() > 0);
+    QCOMPARE(restored(), Player::Playing);
+
+    {
+        Player player;
+        State state(&player, path);
+        player.play(m_tracks, 1);
+        state.quit();
+    }
+    QCOMPARE(saved(QStringLiteral("handoff")).toBool(), true);
+    QCOMPARE(restored(), Player::Playing);
+
+    {
+        Player player;
+        State state(&player, path);
+        player.play(m_tracks, 1);
+        QVERIFY(state.saveNow());
+    }
+    QCOMPARE(saved(QStringLiteral("status")).toString(), QStringLiteral("playing"));
+    QCOMPARE(saved(QStringLiteral("handoff")).toBool(), false);
+    QCOMPARE(restored(), Player::Paused);
+
+    {
+        Player player;
+        State state(&player, path);
+        player.play(m_tracks, 1);
+        QVERIFY(state.saveExit());
+    }
+    QJsonObject aged;
+    QVERIFY(State::read(path, aged));
+    aged.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch() - 61);
+    QVERIFY(State::write(path, aged));
+    QCOMPARE(restored(), Player::Paused);
+
+    {
+        Player player;
+        State state(&player, path);
+        player.play(m_tracks, 1);
+        player.pause();
+        QCOMPARE(player.status(), Player::Paused);
+        QVERIFY(state.saveExit());
+    }
+    QCOMPARE(saved(QStringLiteral("status")).toString(), QStringLiteral("paused"));
+    QCOMPARE(saved(QStringLiteral("handoff")).toBool(), true);
+    QCOMPARE(restored(), Player::Paused);
 }
 
 QTEST_GUILESS_MAIN(PlayerTest)
