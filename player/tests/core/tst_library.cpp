@@ -231,7 +231,7 @@ void LibraryTest::initTestCase()
     int updated = 0;
     int removed = 0;
     QVERIFY(scan(added, updated, removed));
-    QCOMPARE(added, 7);
+    QCOMPARE(added, 8);
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 0);
     QCOMPARE(scanningSpy.count(), 2);
@@ -242,9 +242,9 @@ void LibraryTest::initTestCase()
 void LibraryTest::counts()
 {
     const QVariantMap counts = m_library->counts();
-    QCOMPARE(counts.value(QStringLiteral("tracks")).toInt(), 7);
+    QCOMPARE(counts.value(QStringLiteral("tracks")).toInt(), 8);
     QCOMPARE(counts.value(QStringLiteral("albums")).toInt(), 3);
-    QCOMPARE(counts.value(QStringLiteral("artists")).toInt(), 4);
+    QCOMPARE(counts.value(QStringLiteral("artists")).toInt(), 6);
     QCOMPARE(counts.value(QStringLiteral("genres")).toInt(), 3);
 }
 
@@ -292,7 +292,7 @@ void LibraryTest::art()
 void LibraryTest::rescanUnchanged()
 {
     const QHash<QString, qint64> before = addedByPath(m_library->database());
-    QCOMPARE(before.size(), 7);
+    QCOMPARE(before.size(), 8);
 
     int added = 0;
     int updated = 0;
@@ -307,7 +307,7 @@ void LibraryTest::rescanUnchanged()
 void LibraryTest::songs()
 {
     SongsModel model(m_library.get());
-    QCOMPARE(model.rowCount(), 7);
+    QCOMPARE(model.rowCount(), 8);
     const int row = model.indexOf(
         scalar(m_library->database(), QStringLiteral("SELECT id FROM tracks WHERE title = ?"),
                {QStringLiteral("One")})
@@ -340,7 +340,7 @@ void LibraryTest::genres()
             .toLongLong());
     QVERIFY(row >= 0);
     QCOMPARE(model.data(model.index(row), LibraryModel::SubtitleRole).toString(),
-             QStringLiteral("3 songs"));
+             QStringLiteral("4 songs"));
     QVERIFY(model.roleNames().value(LibraryModel::TitleRole) == QByteArrayLiteral("name"));
 }
 
@@ -348,18 +348,25 @@ void LibraryTest::artists()
 {
     const QSqlDatabase db = m_library->database();
     ArtistsModel model(m_library.get());
-    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(model.rowCount(), 6);
     QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("アーティスト"));
     QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Artist A"));
     QCOMPARE(model.data(model.index(2), LibraryModel::TitleRole).toString(), QStringLiteral("Artist C"));
-    QCOMPARE(model.data(model.index(3), LibraryModel::TitleRole).toString(), QStringLiteral("The Band"));
-    QCOMPARE(model.data(model.index(3), LibraryModel::SectionRole).toString(), QStringLiteral("B"));
-    QCOMPARE(model.data(model.index(3), LibraryModel::SubtitleRole).toString(),
+    QCOMPARE(model.data(model.index(3), LibraryModel::TitleRole).toString(), QStringLiteral("Artist E"));
+    QCOMPARE(model.data(model.index(4), LibraryModel::TitleRole).toString(), QStringLiteral("Artist F"));
+    QCOMPARE(model.data(model.index(5), LibraryModel::TitleRole).toString(), QStringLiteral("The Band"));
+    QCOMPARE(model.data(model.index(5), LibraryModel::SectionRole).toString(), QStringLiteral("B"));
+    QCOMPARE(model.data(model.index(5), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 1 song"));
     QCOMPARE(model.data(model.index(1), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 3 songs"));
     QCOMPARE(model.data(model.index(2), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 1 song"));
+    QCOMPARE(model.data(model.index(3), LibraryModel::SubtitleRole).toString(),
+             QStringLiteral("1 album, 1 song"));
+    QCOMPARE(model.data(model.index(4), LibraryModel::SubtitleRole).toString(),
+             QStringLiteral("1 album, 1 song"));
+    QCOMPARE(rowOf(model, QStringLiteral("Artist E, Artist F")), -1);
     QVERIFY(!model.data(model.index(1), LibraryModel::ArtPathRole).toString().isEmpty());
     QVERIFY(model.roleNames().value(LibraryModel::TitleRole) == QByteArrayLiteral("name"));
 
@@ -379,7 +386,30 @@ void LibraryTest::artists()
                     {three})
                  .toString(),
              QStringLiteral("Artist C"));
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 8);
+
+    const qint64 four = scalar(db, QStringLiteral("SELECT id FROM tracks WHERE title = ?"),
+                               {QStringLiteral("Four")})
+                            .toLongLong();
+    QVERIFY(four > 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT artist FROM tracks WHERE id = ?"), {four}).toString(),
+             QStringLiteral("Artist E, Artist F"));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists WHERE track_id = ?"),
+                    {four})
+                 .toInt(),
+             2);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT ar.name FROM track_artists ta "
+                                       "JOIN artists ar ON ar.id = ta.artist_id "
+                                       "WHERE ta.track_id = ? AND ta.pos = 0"),
+                    {four})
+                 .toString(),
+             QStringLiteral("Artist E"));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT ar.name FROM track_artists ta "
+                                       "JOIN artists ar ON ar.id = ta.artist_id "
+                                       "WHERE ta.track_id = ? AND ta.pos = 1"),
+                    {four})
+                 .toString(),
+             QStringLiteral("Artist F"));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 10);
 
     const qint64 artistA = model.data(model.index(1), LibraryModel::IdRole).toLongLong();
     const qint64 artistC = model.data(model.index(2), LibraryModel::IdRole).toLongLong();
@@ -410,6 +440,7 @@ void LibraryTest::splitArtists()
     QVERIFY(retag(band, "ALBUM", {QStringLiteral("Split")}));
     QVERIFY(retag(band, "TITLE", {QStringLiteral("Band")}));
     QVERIFY(retag(band, "ARTIST", {QStringLiteral("Earth, Wind & Fire")}));
+    QVERIFY(retag(band, "ALBUMARTIST", {QStringLiteral("earth, wind & fire")}));
 
     int added = 0;
     int updated = 0;
@@ -420,8 +451,10 @@ void LibraryTest::splitArtists()
     QCOMPARE(removed, 0);
 
     ArtistsModel model(m_library.get());
-    QCOMPARE(model.rowCount(), 6);
+    QCOMPARE(model.rowCount(), 8);
     QCOMPARE(rowOf(model, QStringLiteral("Artist A; Artist D")), -1);
+    QCOMPARE(rowOf(model, QStringLiteral("Earth")), -1);
+    QCOMPARE(rowOf(model, QStringLiteral("Wind & Fire")), -1);
     QCOMPARE(subtitleOf(model, QStringLiteral("Artist D")), QStringLiteral("1 album, 1 song"));
     QCOMPARE(subtitleOf(model, QStringLiteral("Earth, Wind & Fire")), QStringLiteral("1 album, 1 song"));
     QCOMPARE(subtitleOf(model, QStringLiteral("Artist A")), QStringLiteral("2 albums, 4 songs"));
@@ -429,6 +462,9 @@ void LibraryTest::splitArtists()
              QStringLiteral("Artist A, Artist D"));
     QCOMPARE(scalar(db, QStringLiteral("SELECT artist FROM tracks WHERE path = ?"), {band}).toString(),
              QStringLiteral("Earth, Wind & Fire"));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT album_artist FROM tracks WHERE path = ?"), {band})
+                 .toString(),
+             QStringLiteral("earth, wind & fire"));
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists WHERE track_id = "
                                        "(SELECT id FROM tracks WHERE path = ?)"),
                     {band})
@@ -440,10 +476,10 @@ void LibraryTest::splitArtists()
     QCOMPARE(added, 0);
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 2);
-    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(model.rowCount(), 6);
     QCOMPARE(rowOf(model, QStringLiteral("Artist D")), -1);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM artists")).toInt(), 4);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 8);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM artists")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 10);
     QCOMPARE(m_library->counts().value(QStringLiteral("albums")).toInt(), 3);
 }
 
@@ -469,21 +505,21 @@ void LibraryTest::migrate()
     const QSqlDatabase db = library.database();
     QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 2);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 0);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 8);
 
     QSignalSpy spy(&library, &Library::scanned);
     library.rescan({m_music});
     QVERIFY(spy.wait(scanTimeoutMs));
     const QList<QVariant> args = spy.takeFirst();
     QCOMPARE(args.at(0).toInt(), 0);
-    QCOMPARE(args.at(1).toInt(), 7);
+    QCOMPARE(args.at(1).toInt(), 8);
     QCOMPARE(args.at(2).toInt(), 0);
     QVERIFY(args.at(3).toBool());
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 0);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 8);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 10);
 
     ArtistsModel model(&library);
-    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(model.rowCount(), 6);
     QCOMPARE(subtitleOf(model, QStringLiteral("Artist C")), QStringLiteral("1 album, 1 song"));
 }
 
@@ -585,7 +621,7 @@ void LibraryTest::removed()
     QCOMPARE(removedCount, 1);
 
     const QSqlDatabase db = m_library->database();
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 7);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE path = ?"), {path}).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), 1);
     QCOMPARE(m_library->counts().value(QStringLiteral("albums")).toInt(), 3);
@@ -607,7 +643,7 @@ void LibraryTest::missingRoot()
     QCOMPARE(added, 1);
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 0);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 8);
 
     const qint64 id = scalar(db, QStringLiteral("SELECT id FROM tracks ORDER BY id DESC LIMIT 1"))
                           .toLongLong();
@@ -628,7 +664,7 @@ void LibraryTest::missingRoot()
     QCOMPARE(added, 0);
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 0);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 8);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE id = ?"), {id}).toInt(), 1);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = ?"), {id}).toInt(), 1);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), history);
@@ -645,7 +681,7 @@ void LibraryTest::missingRoot()
     QCOMPARE(added, 0);
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 1);
-    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 7);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), history - 1);
     QCOMPARE(m_library->counts().value(QStringLiteral("albums")).toInt(), 3);
 }

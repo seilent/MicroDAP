@@ -59,13 +59,21 @@ QString fromTag(const TagLib::String &s)
     return QString::fromUtf8(s.toCString(true)).trimmed();
 }
 
-QStringList splitArtists(const TagLib::StringList &values)
+QStringList splitArtists(const TagLib::StringList &values, const QString &albumArtist)
 {
     QStringList names;
     for (const TagLib::String &value : values) {
         QString text = fromTag(value);
-        text.replace(QStringLiteral(" / "), QStringLiteral("; "));
-        const QStringList parts = text.split(QStringLiteral("; "), Qt::SkipEmptyParts);
+        if (text.isEmpty())
+            continue;
+        QStringList parts;
+        if (!albumArtist.isEmpty() && text.compare(albumArtist, Qt::CaseInsensitive) == 0) {
+            parts.append(text);
+        } else {
+            text.replace(QStringLiteral(" / "), QStringLiteral("; "));
+            text.replace(QStringLiteral(", "), QStringLiteral("; "));
+            parts = text.split(QStringLiteral("; "), Qt::SkipEmptyParts);
+        }
         for (const QString &part : parts) {
             const QString name = part.trimmed();
             if (!name.isEmpty() && !names.contains(name))
@@ -226,9 +234,9 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
         }
     }
 
-    track.artists = splitArtists(artistValues);
+    track.artists = splitArtists(artistValues, track.albumArtist);
     if (track.artists.isEmpty() && tag)
-        track.artists = splitArtists(TagLib::StringList(tag->artist()));
+        track.artists = splitArtists(TagLib::StringList(tag->artist()), track.albumArtist);
     if (track.artists.isEmpty())
         track.artists.append(QStringLiteral("unknown artist"));
     track.artist = track.artists.join(QStringLiteral(", "));

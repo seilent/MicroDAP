@@ -193,7 +193,8 @@ int main(int argc, char *argv[])
     const std::vector<Album> albums = {
         {"Album One", "Album One", "Artist A", 2020, "Electronic", false, true, false,
          {{"01 One.flac", "One", 1, 440}, {"02 Two.flac", "Two", 2, 494},
-          {"03 Three.flac", "Three", 3, 523, {"Artist A", "Artist C"}}}},
+          {"03 Three.flac", "Three", 3, 523, {"Artist A", "Artist C"}},
+          {"04 Four.flac", "Four", 4, 554, {"Artist E, Artist F"}}}},
         {"アルバム二", "アルバム二", "アーティスト", 2021, "J-Pop", false, false, true,
          {{"01 一.flac", "一", 1, 587}, {"02 二.flac", "二", 2, 659}, {"03 三.flac", "三", 3, 698}}},
         {"Single", "Single", "The Band", 2019, "Rock", true, false, false,
