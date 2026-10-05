@@ -125,16 +125,20 @@ ArtistsModel::ArtistsModel(Library *library, QObject *parent)
 QList<LibraryModel::Entry> ArtistsModel::load() const
 {
     QList<Entry> entries;
-    QSqlQuery query(QStringLiteral("SELECT ar.id, ar.name, COUNT(DISTINCT t.album_id), MAX(a.art_path) "
-                                   "FROM artists ar JOIN tracks t ON t.artist = ar.name "
+    QSqlQuery query(QStringLiteral("SELECT ar.id, ar.name, COUNT(DISTINCT t.album_id), "
+                                   "COUNT(DISTINCT t.id), MAX(a.art_path) FROM artists ar "
+                                   "JOIN track_artists ta ON ta.artist_id = ar.id "
+                                   "JOIN tracks t ON t.id = ta.track_id "
                                    "JOIN albums a ON a.id = t.album_id GROUP BY ar.id"),
                     library()->database());
     while (query.next()) {
         Entry entry;
         entry.id = query.value(0).toLongLong();
         entry.title = query.value(1).toString();
-        entry.subtitle = countLabel(query.value(2).toInt(), "album", "albums");
-        entry.artPath = query.value(3).toString();
+        entry.subtitle = countLabel(query.value(2).toInt(), "album", "albums")
+                         + QStringLiteral(", ")
+                         + countLabel(query.value(3).toInt(), "song", "songs");
+        entry.artPath = query.value(4).toString();
         classify(entry, true);
         entries.append(entry);
     }

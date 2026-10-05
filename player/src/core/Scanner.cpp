@@ -59,6 +59,22 @@ QString fromTag(const TagLib::String &s)
     return QString::fromUtf8(s.toCString(true)).trimmed();
 }
 
+QStringList splitArtists(const TagLib::StringList &values)
+{
+    QStringList names;
+    for (const TagLib::String &value : values) {
+        QString text = fromTag(value);
+        text.replace(QStringLiteral(" / "), QStringLiteral("; "));
+        const QStringList parts = text.split(QStringLiteral("; "), Qt::SkipEmptyParts);
+        for (const QString &part : parts) {
+            const QString name = part.trimmed();
+            if (!name.isEmpty() && !names.contains(name))
+                names.append(name);
+        }
+    }
+    return names;
+}
+
 QByteArray toBytes(const TagLib::ByteVector &v)
 {
     return QByteArray(v.data(), static_cast<qsizetype>(v.size()));
@@ -185,10 +201,11 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
 
     const QByteArray name = QFile::encodeName(track.path);
     TagLib::FileRef ref(name.constData(), true, TagLib::AudioProperties::Average);
+    const TagLib::Tag *tag = ref.isNull() ? nullptr : ref.tag();
+    TagLib::StringList artistValues;
     if (!ref.isNull()) {
-        if (const TagLib::Tag *tag = ref.tag()) {
+        if (tag) {
             track.title = fromTag(tag->title());
-            track.artist = fromTag(tag->artist());
             track.album = fromTag(tag->album());
             track.genre = fromTag(tag->genre());
             track.trackNo = static_cast<int>(tag->track());
@@ -198,6 +215,10 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
             track.durationMs = audio->lengthInMilliseconds();
         if (TagLib::File *file = ref.file()) {
             TagLib::PropertyMap map = file->properties();
+            if (map.contains("ARTISTS") && !map["ARTISTS"].isEmpty())
+                artistValues = map["ARTISTS"];
+            else if (map.contains("ARTIST"))
+                artistValues = map["ARTIST"];
             if (map.contains("ALBUMARTIST") && !map["ALBUMARTIST"].isEmpty())
                 track.albumArtist = fromTag(map["ALBUMARTIST"].front());
             if (map.contains("DISCNUMBER") && !map["DISCNUMBER"].isEmpty())
@@ -205,10 +226,15 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
         }
     }
 
+    track.artists = splitArtists(artistValues);
+    if (track.artists.isEmpty() && tag)
+        track.artists = splitArtists(TagLib::StringList(tag->artist()));
+    if (track.artists.isEmpty())
+        track.artists.append(QStringLiteral("unknown artist"));
+    track.artist = track.artists.join(QStringLiteral(", "));
+
     if (track.title.isEmpty())
         track.title = info.completeBaseName();
-    if (track.artist.isEmpty())
-        track.artist = QStringLiteral("unknown artist");
     if (track.album.isEmpty())
         track.album = QStringLiteral("unknown album");
     if (track.albumArtist.isEmpty())

@@ -37,6 +37,7 @@ struct Track
     std::string title;
     int number;
     int freq;
+    std::vector<std::string> artists = {};
 };
 
 struct Album
@@ -108,8 +109,13 @@ bool encode(const fs::path &path, int freq, bool mp3)
 TagLib::PropertyMap propertiesFor(const Album &album, const Track &track)
 {
     TagLib::PropertyMap props;
+    TagLib::StringList artists;
+    if (track.artists.empty())
+        artists.append(utf8(album.artist));
+    for (const std::string &artist : track.artists)
+        artists.append(utf8(artist));
     props["TITLE"] = TagLib::StringList(utf8(track.title));
-    props["ARTIST"] = TagLib::StringList(utf8(album.artist));
+    props["ARTIST"] = artists;
     props["ALBUM"] = TagLib::StringList(utf8(album.title));
     props["ALBUMARTIST"] = TagLib::StringList(utf8(album.artist));
     props["TRACKNUMBER"] = TagLib::StringList(TagLib::String(std::to_string(track.number)));
@@ -186,7 +192,8 @@ int main(int argc, char *argv[])
 
     const std::vector<Album> albums = {
         {"Album One", "Album One", "Artist A", 2020, "Electronic", false, true, false,
-         {{"01 One.flac", "One", 1, 440}, {"02 Two.flac", "Two", 2, 494}, {"03 Three.flac", "Three", 3, 523}}},
+         {{"01 One.flac", "One", 1, 440}, {"02 Two.flac", "Two", 2, 494},
+          {"03 Three.flac", "Three", 3, 523, {"Artist A", "Artist C"}}}},
         {"アルバム二", "アルバム二", "アーティスト", 2021, "J-Pop", false, false, true,
          {{"01 一.flac", "一", 1, 587}, {"02 二.flac", "二", 2, 659}, {"03 三.flac", "三", 3, 698}}},
         {"Single", "Single", "The Band", 2019, "Rock", true, false, false,

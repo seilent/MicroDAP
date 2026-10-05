@@ -20,7 +20,15 @@ namespace {
 
 std::atomic_int connectionCounter{0};
 
-constexpr int schemaVersion = 1;
+constexpr int schemaVersion = 2;
+
+constexpr const char *trackArtistsTable =
+    "CREATE TABLE IF NOT EXISTS track_artists("
+    "track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, "
+    "artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE, "
+    "pos INTEGER NOT NULL, PRIMARY KEY(track_id, pos))";
+constexpr const char *trackArtistsIndex =
+    "CREATE INDEX IF NOT EXISTS track_artists_artist ON track_artists(artist_id)";
 
 const char *const schema[] = {
     "CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
@@ -36,6 +44,8 @@ const char *const schema[] = {
     "CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist)",
     "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre)",
+    trackArtistsTable,
+    trackArtistsIndex,
     "CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY, "
     "track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, "
     "played_at INTEGER NOT NULL)",
@@ -49,13 +59,19 @@ const char *const schema[] = {
     "PRIMARY KEY(playlist_id, pos))",
     "CREATE TABLE IF NOT EXISTS pins(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, "
     "ref_id INTEGER NOT NULL, pos INTEGER NOT NULL)",
-    "PRAGMA user_version = 1",
+    "PRAGMA user_version = 2",
+};
+
+const char *const migrateFrom1[] = {
+    trackArtistsTable,
+    trackArtistsIndex,
+    "UPDATE tracks SET mtime = -1",
+    "PRAGMA user_version = 2",
 };
 
 const char *const pruneStatements[] = {
     "DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)",
-    "INSERT OR IGNORE INTO artists(name) SELECT DISTINCT artist FROM tracks",
-    "DELETE FROM artists WHERE name NOT IN (SELECT DISTINCT artist FROM tracks)",
+    "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)",
     "INSERT OR IGNORE INTO genres(name) SELECT DISTINCT genre FROM tracks WHERE genre <> ''",
     "DELETE FROM genres WHERE name NOT IN (SELECT DISTINCT genre FROM tracks WHERE genre <> '')",
 };
@@ -152,6 +168,9 @@ void Library::open()
     const int current = version.next() ? version.value(0).toInt() : 0;
     if (current == 0) {
         for (const char *sql : schema)
+            run(m_db, sql);
+    } else if (current == 1) {
+        for (const char *sql : migrateFrom1)
             run(m_db, sql);
     } else if (current != schemaVersion) {
         qWarning() << "casdap library: unsupported schema version" << current << "in" << m_dbPath;
@@ -250,12 +269,13 @@ void Library::finishScan(const ScanResult &result)
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     QHash<QString, qint64> albums;
+    QHash<QString, qint64> artists;
 
     bool ok = m_db.transaction();
     for (const TrackInfo &track : result.added)
-        ok = ok && upsertTrack(track, now, albums);
+        ok = ok && upsertTrack(track, now, albums, artists);
     for (const TrackInfo &track : result.updated)
-        ok = ok && upsertTrack(track, now, albums);
+        ok = ok && upsertTrack(track, now, albums, artists);
     for (const QString &path : result.removed)
         ok = ok && removeTrack(path);
     ok = ok && prune();
@@ -325,7 +345,54 @@ qint64 Library::ensureAlbum(const TrackInfo &track, qint64 now, QHash<QString, q
     return id;
 }
 
-bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums)
+qint64 Library::ensureArtist(const QString &name, QHash<QString, qint64> &artists)
+{
+    if (const auto cached = artists.constFind(name); cached != artists.cend())
+        return *cached;
+
+    QSqlQuery insert(m_db);
+    insert.prepare(QStringLiteral("INSERT OR IGNORE INTO artists(name) VALUES(?)"));
+    insert.addBindValue(name);
+    if (!run(insert))
+        return -1;
+
+    QSqlQuery select(m_db);
+    select.prepare(QStringLiteral("SELECT id FROM artists WHERE name = ?"));
+    select.addBindValue(name);
+    if (!run(select) || !select.next())
+        return -1;
+
+    const qint64 id = select.value(0).toLongLong();
+    artists.insert(name, id);
+    return id;
+}
+
+bool Library::linkArtists(qint64 trackId, const QStringList &names, QHash<QString, qint64> &artists)
+{
+    QSqlQuery clear(m_db);
+    clear.prepare(QStringLiteral("DELETE FROM track_artists WHERE track_id = ?"));
+    clear.addBindValue(trackId);
+    if (!run(clear))
+        return false;
+
+    for (qsizetype pos = 0; pos < names.size(); ++pos) {
+        const qint64 artistId = ensureArtist(names.at(pos), artists);
+        if (artistId < 0)
+            return false;
+        QSqlQuery insert(m_db);
+        insert.prepare(QStringLiteral(
+            "INSERT INTO track_artists(track_id, artist_id, pos) VALUES(?, ?, ?)"));
+        insert.addBindValue(trackId);
+        insert.addBindValue(artistId);
+        insert.addBindValue(static_cast<int>(pos));
+        if (!run(insert))
+            return false;
+    }
+    return true;
+}
+
+bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums,
+                          QHash<QString, qint64> &artists)
 {
     const qint64 albumId = ensureAlbum(track, now, albums);
     if (albumId < 0)
@@ -353,7 +420,15 @@ bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qin
     query.addBindValue(track.genre);
     query.addBindValue(track.durationMs);
     query.addBindValue(now);
-    return run(query);
+    if (!run(query))
+        return false;
+
+    QSqlQuery select(m_db);
+    select.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
+    select.addBindValue(track.path);
+    if (!run(select) || !select.next())
+        return false;
+    return linkArtists(select.value(0).toLongLong(), track.artists, artists);
 }
 
 bool Library::removeTrack(const QString &path)
@@ -432,6 +507,37 @@ int Library::rating(qint64 trackId) const
     if (!query.exec() || !query.next())
         return 0;
     return query.value(0).toInt();
+}
+
+QVariantList Library::idColumn(const QString &sql, qint64 bind) const
+{
+    QVariantList ids;
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    query.addBindValue(bind);
+    if (!query.exec())
+        return ids;
+    while (query.next())
+        ids.append(query.value(0).toLongLong());
+    return ids;
+}
+
+QVariantList Library::artistAlbums(qint64 artistId) const
+{
+    return idColumn(QStringLiteral("SELECT a.id FROM albums a WHERE a.id IN "
+                                   "(SELECT t.album_id FROM tracks t "
+                                   "JOIN track_artists ta ON ta.track_id = t.id "
+                                   "WHERE ta.artist_id = ?) ORDER BY a.year, a.title, a.id"),
+                    artistId);
+}
+
+QVariantList Library::artistTracks(qint64 artistId) const
+{
+    return idColumn(QStringLiteral("SELECT t.id FROM tracks t "
+                                   "JOIN track_artists ta ON ta.track_id = t.id "
+                                   "JOIN albums a ON a.id = t.album_id WHERE ta.artist_id = ? "
+                                   "ORDER BY a.year, a.title, a.id, t.disc_no, t.track_no, t.id"),
+                    artistId);
 }
 
 }

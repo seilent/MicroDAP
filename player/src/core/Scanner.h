@@ -30,6 +30,7 @@ struct TrackInfo
     qint64 size = 0;
     QString title;
     QString artist;
+    QStringList artists;
     QString albumArtist;
     QString album;
     QString genre;

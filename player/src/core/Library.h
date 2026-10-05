@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QStringList>
+#include <QVariant>
 #include <QVariantMap>
 
 #include <atomic>
@@ -40,6 +41,8 @@ public:
                                 const QDateTime &playedAt = QDateTime::currentDateTimeUtc());
     Q_INVOKABLE void setRating(qint64 trackId, int rating);
     Q_INVOKABLE int rating(qint64 trackId) const;
+    Q_INVOKABLE QVariantList artistAlbums(qint64 artistId) const;
+    Q_INVOKABLE QVariantList artistTracks(qint64 artistId) const;
 
 signals:
     void scanningChanged();
@@ -55,8 +58,12 @@ private:
     int count(const QString &table) const;
     QHash<QString, FileStamp> snapshot() const;
     void finishScan(const ScanResult &result);
-    bool upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums);
+    bool upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums,
+                     QHash<QString, qint64> &artists);
     qint64 ensureAlbum(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums);
+    qint64 ensureArtist(const QString &name, QHash<QString, qint64> &artists);
+    bool linkArtists(qint64 trackId, const QStringList &names, QHash<QString, qint64> &artists);
+    QVariantList idColumn(const QString &sql, qint64 bind) const;
     bool removeTrack(const QString &path);
     bool prune();
     void pruneArt();
