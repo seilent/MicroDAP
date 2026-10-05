@@ -5,5 +5,5 @@ short_session_recover() {
 }
 
 export QT_QPA_PLATFORM=xcb
-export GAMESCOPE_FALLBACK_APPID=0x43415344
+export CASDAP_GAMESCOPE_APPID=0x43415344
 export CLIENTCMD=/usr/bin/casdap-player
