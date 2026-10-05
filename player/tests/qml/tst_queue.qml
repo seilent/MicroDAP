@@ -1,0 +1,528 @@
+import QtQuick
+import QtTest
+import Casdap
+
+TestCase {
+    id: tc
+
+    name: "QueueScreen"
+    when: windowShown
+    visible: true
+    width: 640
+    height: 960
+
+    PageStack {
+        id: pages
+
+        width: 640
+        height: 960
+    }
+
+    PadRouter {
+        id: router
+
+        width: 640
+        height: 960
+        stack: pages
+        onNowPlaying: counters.nowPlaying++
+    }
+
+    QtObject {
+        id: fakeQueue
+
+        property var rows: []
+        property int count: 0
+        property int index: -1
+        property bool shuffle: false
+        property int repeat: 0
+        property var calls: []
+
+        signal modelReset()
+        signal rowsInserted(var parent, int first, int last)
+        signal rowsRemoved(var parent, int first, int last)
+        signal rowsMoved(var parent, int start, int end, var destination, int row)
+
+        function note(name) {
+            fakeQueue.calls = fakeQueue.calls.concat([name])
+        }
+
+        function get(row) {
+            return fakeQueue.rows[row]
+        }
+
+        function fill(n, current) {
+            const rows = []
+            for (let i = 0; i < n; i++)
+                rows.push({ id: i + 1, title: "Song " + (i + 1), artist: "Artist " + (i + 1), album: "Album", artPath: "", durationMs: 240000 })
+            fakeQueue.rows = rows
+            fakeQueue.count = n
+            fakeQueue.index = n > 0 ? current : -1
+            fakeQueue.modelReset()
+        }
+
+        function remove(row) {
+            fakeQueue.note("remove " + row)
+            if (row < 0 || row >= fakeQueue.rows.length)
+                return
+            const rows = fakeQueue.rows.slice()
+            rows.splice(row, 1)
+            fakeQueue.rows = rows
+            fakeQueue.count = rows.length
+            fakeQueue.rowsRemoved(null, row, row)
+            if (row < fakeQueue.index)
+                fakeQueue.index--
+            else if (row === fakeQueue.index && fakeQueue.index >= rows.length)
+                fakeQueue.index = rows.length - 1
+        }
+
+        function move(from, to) {
+            fakeQueue.note("move " + from + " " + to)
+            const n = fakeQueue.rows.length
+            if (from < 0 || from >= n || to < 0 || to >= n || from === to)
+                return
+            const rows = fakeQueue.rows.slice()
+            const entry = rows.splice(from, 1)[0]
+            rows.splice(to, 0, entry)
+            fakeQueue.rows = rows
+            const cur = fakeQueue.index
+            let next = cur
+            if (cur === from)
+                next = to
+            else if (from < to && cur > from && cur <= to)
+                next = cur - 1
+            else if (to < from && cur >= to && cur < from)
+                next = cur + 1
+            fakeQueue.index = next
+            fakeQueue.rowsMoved(null, from, from, null, to > from ? to + 1 : to)
+        }
+    }
+
+    QtObject {
+        id: fakePlayer
+
+        property int status: 1
+        property var current: ({})
+        property QtObject queue: fakeQueue
+        property var calls: []
+
+        function playAt(index) {
+            fakePlayer.calls = fakePlayer.calls.concat(["playAt " + index])
+            fakeQueue.index = index
+        }
+    }
+
+    QtObject {
+        id: counters
+
+        property int nowPlaying: 0
+    }
+
+    Component {
+        id: queueComponent
+
+        QueueScreen {
+            player: fakePlayer
+        }
+    }
+
+    Component {
+        id: blankComponent
+
+        Page {}
+    }
+
+    function rowAt(index) {
+        tryVerify(() => tc.list().itemAtIndex(index) !== null, 1000)
+        return tc.list().itemAtIndex(index)
+    }
+
+    function list() {
+        return pages.currentItem.list
+    }
+
+    function setWindow(w, h) {
+        Ui.userScale = 1.0
+        Ui.windowW = w
+        Ui.windowH = h
+        pages.width = w
+        pages.height = h
+        router.width = w
+        router.height = h
+    }
+
+    function init() {
+        tc.setWindow(640, 960)
+        pages.clear()
+        pages.animate = false
+        fakeQueue.fill(20, 2)
+        fakeQueue.calls = []
+        fakePlayer.calls = []
+        counters.nowPlaying = 0
+    }
+
+    function open(properties, belowName) {
+        const props = properties === undefined ? {} : properties
+        if (props.animated === undefined)
+            props.animated = false
+        const below = pages.push(blankComponent, {})
+        below.objectName = belowName === undefined ? "nowplaying" : belowName
+        const page = pages.push(queueComponent, props)
+        page.completeAll()
+        page.list.forceLayout()
+        return page
+    }
+
+    function entering(index) {
+        return function() {
+            const row = tc.list().itemAtIndex(index)
+            return row !== null && row.enter < 1
+        }
+    }
+
+    function test_layout_portrait() {
+        const page = open()
+        compare(Ui.u, 2)
+        compare(page.header.text, "queue")
+        compare(page.countItem.text, "3 of 20")
+        compare(page.countItem.font.capitalization, Font.AllUppercase)
+        compare(page.countItem.font.pixelSize, Ui.fontPx(11))
+        compare(page.countItem.x, Ui.px(20))
+        fuzzyCompare(page.countItem.y + page.countItem.baselineOffset, Ui.px(60), 0.5)
+        compare(page.list.y, Ui.px(84))
+        compare(page.list.rowPitch, Ui.px(40))
+        compare(page.list.count, 20)
+        compare(page.rowIndex, 2)
+        compare(page.focusBar.x, Ui.px(20 - 8))
+        compare(page.focusBar.visible, true)
+        fuzzyCompare(page.focusBar.y, Ui.px(84) + 2 * Ui.px(40), 0.01)
+        const first = tc.rowAt(0)
+        compare(first.rowItem.number, "1")
+        compare(first.rowItem.primary, "Song 1")
+        compare(first.rowItem.secondary, "Artist 1")
+        compare(first.rowItem.textX, Ui.px(20 + 24))
+        compare(first.rowItem.playing, false)
+        const playing = tc.rowAt(2)
+        compare(playing.rowItem.number, "3")
+        compare(playing.rowItem.playing, true)
+        compare(playing.rowItem.focused, true)
+        compare(playing.rowItem.primaryColor, Ui.accent)
+        verify(!Qt.colorEqual(first.rowItem.primaryColor, Ui.accent))
+    }
+
+    function test_layout_landscape() {
+        tc.setWindow(1920, 1080)
+        const page = open()
+        compare(Ui.landscape, true)
+        fuzzyCompare(page.countItem.y + page.countItem.baselineOffset, Ui.px(60), 0.5)
+        compare(page.countItem.x, Ui.px(20))
+        compare(page.list.y, Ui.px(84))
+        compare(page.list.rowPitch, Ui.px(40))
+        compare(page.list.width, 1920)
+        compare(page.rowIndex, 2)
+    }
+
+    function test_count_follows_index() {
+        const page = open()
+        fakeQueue.index = 5
+        compare(page.countText, "6 of 20")
+        compare(tc.rowAt(5).rowItem.playing, true)
+        compare(tc.rowAt(2).rowItem.playing, false)
+        fakeQueue.fill(20, 0)
+        compare(page.countText, "1 of 20")
+    }
+
+    function test_navigation_and_play() {
+        const page = open()
+        verify(router.dispatch("down", false))
+        compare(page.rowIndex, 3)
+        verify(router.dispatch("a", false))
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0], "playAt 3")
+        compare(page.countText, "4 of 20")
+        compare(tc.rowAt(3).rowItem.playing, true)
+        verify(router.dispatch("up", false))
+        verify(router.dispatch("up", false))
+        verify(router.dispatch("up", false))
+        compare(page.rowIndex, 0)
+        compare(router.dispatch("up", false), false)
+        verify(router.dispatch("rt", false))
+        compare(page.rowIndex, page.list.pageRows)
+        verify(router.dispatch("lt", false))
+        compare(page.rowIndex, 0)
+        for (let i = 0; i < 25; i++)
+            router.dispatch("down", false)
+        compare(page.rowIndex, 19)
+        compare(router.dispatch("down", false), false)
+    }
+
+    function test_sheet_verbs_per_row() {
+        const page = open()
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "Song 3")
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "move up", "move down"]))
+        verify(router.dispatch("b", false))
+        compare(page.sheet.shown, false)
+        compare(pages.depth, 2)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "move up", "move down"]))
+        router.dispatch("b", false)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "play next", "move up", "move down"]))
+        router.dispatch("b", false)
+        page.list.snapTo(0)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "play next", "move down"]))
+        router.dispatch("b", false)
+        page.list.snapTo(19)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "play next", "move up"]))
+        router.dispatch("b", false)
+    }
+
+    function test_sheet_motion() {
+        const page = open({ animated: true })
+        compare(page.sheet.scrimAlpha, 0.55)
+        fuzzyCompare(page.sheet.scrimColor.a, 0.55, 0.01)
+        compare(page.sheet.duration, 380)
+        router.dispatch("x", false)
+        compare(page.sheet.shown, true)
+        verify(page.sheet.animating)
+        compare(page.sheet.travel, page.sheet.panel.height)
+        verify(page.sheet.panel.y > page.height - page.sheet.panel.height)
+        tryCompare(page.sheet, "progress", 1, 2000)
+        fuzzyCompare(page.sheet.panel.y, page.height - page.sheet.panel.height, 0.01)
+        compare(page.sheet.scrim.opacity, 1)
+        router.dispatch("b", false)
+        tryCompare(page.sheet, "progress", 0, 2000)
+        fuzzyCompare(page.sheet.panel.y, page.height, 0.01)
+        compare(page.sheet.visible, false)
+    }
+
+    function test_y_removes_with_f12() {
+        const page = open({ animated: true })
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        compare(page.rowIndex, 4)
+        compare(tc.rowAt(3).enter, 1)
+        verify(router.dispatch("y", false))
+        compare(fakeQueue.calls[0], "remove 4")
+        compare(fakeQueue.count, 19)
+        compare(page.count, 19)
+        compare(page.rowIndex, 4)
+        compare(page.countText, "3 of 19")
+        tryVerify(tc.entering(4), 1000)
+        compare(tc.rowAt(3).enter, 1)
+        compare(tc.rowAt(4).rowItem.primary, "Song 6")
+        compare(tc.rowAt(4).rowItem.number, "5")
+        const visible = Math.min(9, Math.ceil(page.list.height / page.list.rowPitch))
+        for (let i = 4; i < visible; i++) {
+            const row = tc.rowAt(i)
+            compare(row.stagger, Math.min(i - 4, 10) * 50)
+            verify(row.enter < 1)
+        }
+        const deep = page.list.itemAtIndex(15)
+        if (deep !== null)
+            compare(deep.stagger, 500)
+        tryCompare(tc.rowAt(4), "enter", 1, 2000)
+        tryCompare(tc.rowAt(visible - 1), "enter", 1, 2000)
+        fuzzyCompare(page.list.itemAtIndex(visible - 1).x, 0, 0.01)
+        compare(page.list.itemAtIndex(visible - 1).opacity, 1)
+    }
+
+    function test_remove_playing_row() {
+        const page = open()
+        compare(page.rowIndex, 2)
+        router.dispatch("y", false)
+        compare(fakeQueue.calls[0], "remove 2")
+        compare(fakeQueue.index, 2)
+        compare(page.countText, "3 of 19")
+        compare(tc.rowAt(2).rowItem.primary, "Song 4")
+        compare(tc.rowAt(2).rowItem.playing, true)
+    }
+
+    function test_remove_above_playing() {
+        const page = open()
+        page.list.snapTo(0)
+        router.dispatch("y", false)
+        compare(fakeQueue.index, 1)
+        compare(page.countText, "2 of 19")
+        compare(tc.rowAt(1).rowItem.primary, "Song 3")
+        compare(tc.rowAt(1).rowItem.playing, true)
+    }
+
+    function test_remove_last_keeps_focus_in_range() {
+        const page = open()
+        page.list.snapTo(19)
+        router.dispatch("y", false)
+        compare(page.count, 19)
+        compare(page.rowIndex, 18)
+    }
+
+    function test_move_up_via_sheet() {
+        const page = open({ animated: true })
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        compare(page.sheet.items[page.sheet.focusIndex], "move up")
+        router.dispatch("a", false)
+        compare(page.sheet.shown, false)
+        compare(fakeQueue.calls[0], "move 2 1")
+        compare(fakeQueue.index, 1)
+        compare(page.rowIndex, 1)
+        compare(page.countText, "2 of 20")
+        tryVerify(tc.entering(1), 1000)
+        compare(tc.rowAt(0).enter, 1)
+        compare(tc.rowAt(1).rowItem.primary, "Song 3")
+        compare(tc.rowAt(1).rowItem.playing, true)
+        compare(tc.rowAt(2).rowItem.primary, "Song 2")
+        compare(tc.rowAt(1).stagger, 0)
+        compare(tc.rowAt(2).stagger, 50)
+        tryCompare(tc.rowAt(1), "enter", 1, 2000)
+    }
+
+    function test_move_down_via_sheet() {
+        const page = open({ animated: true })
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        compare(page.sheet.items[page.sheet.focusIndex], "move down")
+        router.dispatch("a", false)
+        compare(fakeQueue.calls[0], "move 2 3")
+        compare(fakeQueue.index, 3)
+        compare(page.rowIndex, 3)
+        compare(page.countText, "4 of 20")
+        tryVerify(tc.entering(2), 1000)
+        compare(tc.rowAt(1).enter, 1)
+        compare(tc.rowAt(2).rowItem.primary, "Song 4")
+        compare(tc.rowAt(3).rowItem.primary, "Song 3")
+        compare(tc.rowAt(3).rowItem.playing, true)
+        compare(tc.rowAt(2).stagger, 0)
+        compare(tc.rowAt(3).stagger, 50)
+    }
+
+    function test_play_next_below_current() {
+        const page = open()
+        page.list.snapTo(6)
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        compare(page.sheet.items[page.sheet.focusIndex], "play next")
+        router.dispatch("a", false)
+        compare(fakeQueue.calls[0], "move 6 3")
+        compare(fakeQueue.index, 2)
+        compare(page.rowIndex, 3)
+        compare(tc.rowAt(3).rowItem.primary, "Song 7")
+        compare(tc.rowAt(4).rowItem.primary, "Song 4")
+    }
+
+    function test_play_next_above_current() {
+        const page = open()
+        page.list.snapTo(0)
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        compare(page.sheet.items[page.sheet.focusIndex], "play next")
+        router.dispatch("a", false)
+        compare(fakeQueue.calls[0], "move 0 2")
+        compare(fakeQueue.index, 1)
+        compare(page.rowIndex, 2)
+        compare(tc.rowAt(1).rowItem.primary, "Song 3")
+        compare(tc.rowAt(1).rowItem.playing, true)
+        compare(tc.rowAt(2).rowItem.primary, "Song 1")
+    }
+
+    function test_remove_via_sheet() {
+        const page = open()
+        router.dispatch("x", false)
+        compare(page.sheet.items[0], "remove")
+        router.dispatch("a", false)
+        compare(fakeQueue.calls[0], "remove 2")
+        compare(page.count, 19)
+    }
+
+    function test_external_insert_runs_f12() {
+        const page = open({ animated: true })
+        const rows = fakeQueue.rows.slice()
+        rows.splice(1, 0, { id: 99, title: "Inserted", artist: "Artist", album: "", artPath: "", durationMs: 1000 })
+        fakeQueue.rows = rows
+        fakeQueue.count = rows.length
+        fakeQueue.rowsInserted(null, 1, 1)
+        compare(page.count, 21)
+        tryVerify(tc.entering(1), 1000)
+        compare(tc.rowAt(0).enter, 1)
+        compare(tc.rowAt(1).rowItem.primary, "Inserted")
+        tryCompare(tc.rowAt(1), "enter", 1, 2000)
+    }
+
+    function test_no_f12_when_not_animated() {
+        const page = open()
+        router.dispatch("y", false)
+        wait(20)
+        compare(tc.rowAt(2).enter, 1)
+        compare(tc.rowAt(5).enter, 1)
+    }
+
+    function test_screen_off_settles() {
+        const page = open({ animated: true })
+        router.dispatch("y", false)
+        tryVerify(tc.entering(2), 1000)
+        router.dispatch("x", false)
+        page.screenOff = true
+        compare(tc.rowAt(2).enter, 1)
+        compare(tc.rowAt(6).enter, 1)
+        compare(page.sheet.animating, false)
+        compare(page.sheet.visible, false)
+    }
+
+    function test_empty_queue() {
+        fakeQueue.fill(0, 0)
+        const page = open()
+        compare(page.countText, "0 of 0")
+        compare(page.list.count, 0)
+        compare(page.focusBar.visible, false)
+        compare(router.dispatch("x", false), true)
+        compare(page.sheet.shown, false)
+        router.dispatch("y", false)
+        router.dispatch("a", false)
+        compare(fakeQueue.calls.length, 0)
+        compare(fakePlayer.calls.length, 0)
+        compare(router.dispatch("up", false), false)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_b_pops() {
+        open()
+        compare(pages.depth, 2)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_start_pops_to_now_playing() {
+        open()
+        compare(pages.depth, 2)
+        verify(router.dispatch("start", false))
+        compare(pages.depth, 1)
+        compare(counters.nowPlaying, 0)
+    }
+
+    function test_start_elsewhere_opens_now_playing() {
+        open({}, "home")
+        verify(router.dispatch("start", false))
+        compare(pages.depth, 2)
+        compare(counters.nowPlaying, 1)
+    }
+
+    function test_turnstile_kind() {
+        pages.animate = true
+        const below = pages.push(blankComponent, {})
+        below.objectName = "nowplaying"
+        pages.push(queueComponent, { animated: true })
+        compare(pages.transitionKind, "turnstile")
+        pages.completeAll()
+        router.dispatch("b", false)
+        compare(pages.transitionKind, "turnstile")
+        pages.completeAll()
+        compare(pages.depth, 1)
+    }
+}

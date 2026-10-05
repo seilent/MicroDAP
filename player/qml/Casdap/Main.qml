@@ -87,6 +87,12 @@ Window {
         pages.push(nowPlayingComponent, {}, "fade")
     }
 
+    function openQueue() {
+        if (root.topScreen === "queue")
+            return
+        pages.push(queueComponent, {})
+    }
+
     function closeSheets() {
         const top = pages.currentItem
         if (top === null || top.sheet === undefined || top.sheet === null)
@@ -227,7 +233,18 @@ Window {
             player: root.player
             bluez: root.bluez
             status: root.status
-            onOpenQueue: console.info("casdap: navigate queue")
+            onOpenQueue: root.openQueue()
+        }
+    }
+
+    Component {
+        id: queueComponent
+
+        QueueScreen {
+            objectName: "queue"
+            animated: !root.hidden
+            screenOff: root.off
+            player: root.player
         }
     }
 
@@ -265,7 +282,13 @@ Window {
             : root.shotScreen === "prompt" ? promptShotComponent
             : root.shotScreen === "hub" ? hubShotComponent
             : root.shotScreen === "nowplaying" ? nowPlayingShotComponent
+            : root.shotScreen === "queue" ? queueShotComponent
             : null
+    }
+
+    Component {
+        id: queueShotComponent
+        QueueShot {}
     }
 
     Component {

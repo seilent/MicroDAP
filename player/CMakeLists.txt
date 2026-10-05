@@ -112,11 +112,13 @@ set(casdap_qml
     qml/Casdap/screens/SwitchPrompt.qml
     qml/Casdap/screens/MusicHub.qml
     qml/Casdap/screens/NowPlaying.qml
+    qml/Casdap/screens/QueueScreen.qml
     qml/Casdap/OverlayLayer.qml
     qml/Casdap/BluetoothShot.qml
     qml/Casdap/PromptShot.qml
     qml/Casdap/HubShot.qml
     qml/Casdap/NowPlayingShot.qml
+    qml/Casdap/QueueShot.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)

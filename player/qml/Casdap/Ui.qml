@@ -179,6 +179,8 @@ QtObject {
     readonly property real playingDotOffset: 6
     readonly property real detailRow: 124
     readonly property real settingsPitch: 43
+    readonly property real queueCountBaseline: 60
+    readonly property real queueRowsTop: 84
     readonly property real backRing: 64
     readonly property real backRingStroke: 4
     readonly property real backRingInset: 4

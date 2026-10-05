@@ -134,7 +134,7 @@ Landscape: back ring and art (y 72, side `min(168, H - 106)`) with the progress 
 left column, artist 60, album 84, title 116, next rows from 140 at x 216, rings on the same fractions of
 `W - 216 - EDGE` from x 216. Focus starts on the ring row: left and right move it, A toggles the focused
 ring with the F4 swap (`Player.toggleShuffle`, `cycleRepeat`, `rate`), up moves to the title row (2 u bar
-at EDGE - 8) where A emits `openQueue` (Main logs `navigate queue`), down returns. LB and RB skip, X plays
+at EDGE - 8) where A emits `openQueue` (Main pushes `QueueScreen`), down returns. LB and RB skip, X plays
 or pauses, Y and Back/View emit `openQueue`, LT and RT seek 10 s, B and Start pop with the fade kind (T8).
 A track change runs T9 (title, next rows and times out 500 easeOut with the art, in 400 easeIn with the
 art scaling from 0.8 about (0.2, 0.5)); a new art source crossfades the backdrop over 2000 linear and
@@ -148,10 +148,28 @@ release). The variant arrives with the T7 content fade and scale and leaves over
 is paused when the transport goes active and stays paused when it ends. `screenOff` or `animated` false
 lands every animation and stops the timers.
 
+`QueueScreen` is the `queue` page, pushed with the default turnstile kind (T11) by `openQueue` from now
+playing (Main skips the push while the top page is already the queue): header `queue`, the count `N OF M`
+(`Player.queue.index + 1` and `count`, `0 OF 0` when empty) in the 11 u upper case count role at HUB_EDGE on
+baseline 60, SONGS style rows (1 based number, title, artist) in a `FocusList` from y 84, the current row
+`playing` (accent title). Both orientations run the same stack. Focus starts on the current row; up/down and
+LT/RT move through the list, A calls `Player.playAt(row)`, Y removes the focused row, X opens the sheet
+(T12) with `remove`, `play next`, `move up`, `move down`; `play next` is absent on the current row and the
+one after it, `move up` on the first row, `move down` on the last. `remove` calls `Queue.remove(row)`
+(removing the current row is handled by the queue, the next track starts), `move up` and `move down` call
+`Queue.move(row, row +- 1)`, `play next` moves the row to right after the current one; a moved row keeps
+focus at its new position, a removed row leaves focus at the same index clamped to the end. Every queue
+change (`rowsInserted`, `rowsRemoved`, `rowsMoved`, `modelReset`) rebuilds the rows and runs F12 from the
+edited index on the visible rows at and below it (`x` -5 to 0, `o` 0 to 1, 220 decel, stagger
+`min(i, 10) * 50` counted from the first affected visible row). B pops with T4; Start pops when the page below
+is now playing, else falls through to the router (which opens now playing). `screenOff` or `animated` false
+settles the rows, the scroll and the sheet.
+
 Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg]`,
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),
+`queue` (a sample queue of 20 with row 3 playing),
 `components`, `overlays`, `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
 `CASDAP_TEST_FONT_DIR` (default `../dist/usr/share/fonts/casdap`) feeds `CASDAP_FONT_DIR` to the QML

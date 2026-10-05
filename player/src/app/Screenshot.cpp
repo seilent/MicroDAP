@@ -77,6 +77,7 @@ const QStringList &screens()
         QStringLiteral("prompt"),
         QStringLiteral("hub"),
         QStringLiteral("nowplaying"),
+        QStringLiteral("queue"),
     };
     return names;
 }

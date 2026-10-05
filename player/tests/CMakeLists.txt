@@ -281,3 +281,15 @@ add_test(NAME screenshot-nowplaying-bluez-landscape
 )
 casdap_test_env(screenshot-nowplaying-bluez-landscape)
 set_property(TEST screenshot-nowplaying-bluez-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-queue-portrait
+    COMMAND casdap-player --screenshot queue --size 640x960 --out ${shots}/queue-640x960.png
+)
+casdap_test_env(screenshot-queue-portrait)
+set_property(TEST screenshot-queue-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-queue-landscape
+    COMMAND casdap-player --screenshot queue --size 1920x1080 --out ${shots}/queue-1920x1080.png
+)
+casdap_test_env(screenshot-queue-landscape)
+set_property(TEST screenshot-queue-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
