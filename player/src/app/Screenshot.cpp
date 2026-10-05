@@ -75,6 +75,19 @@ const QStringList &screens()
         QStringLiteral("quickplay"),
         QStringLiteral("bluetooth"),
         QStringLiteral("prompt"),
+        QStringLiteral("hub"),
+    };
+    return names;
+}
+
+const QStringList &pivots()
+{
+    static const QStringList names{
+        QStringLiteral("artists"),
+        QStringLiteral("albums"),
+        QStringLiteral("songs"),
+        QStringLiteral("genres"),
+        QStringLiteral("playlists"),
     };
     return names;
 }
@@ -149,6 +162,12 @@ int screenshot(const ScreenshotOptions &options)
                  .arg(bluezPreset, FakeBluezModel::presets().join(QLatin1Char(' '))));
         return 2;
     }
+    const QString pivot = options.pivot.isEmpty() ? QStringLiteral("albums") : options.pivot;
+    if (!pivots().contains(pivot)) {
+        fail(QStringLiteral("unknown pivot %1, expected one of %2")
+                 .arg(pivot, pivots().join(QLatin1Char(' '))));
+        return 2;
+    }
 
     int width = 0;
     int height = 0;
@@ -171,6 +190,10 @@ int screenshot(const ScreenshotOptions &options)
     std::unique_ptr<Library> library;
     std::unique_ptr<HistoryModel> recent;
     std::unique_ptr<HistoryModel> fresh;
+    std::unique_ptr<ArtistsModel> artists;
+    std::unique_ptr<AlbumsModel> albums;
+    std::unique_ptr<SongsModel> songs;
+    std::unique_ptr<GenresModel> genres;
     if (!options.library.isEmpty()) {
         tempDir = std::make_unique<QTemporaryDir>();
         if (!tempDir->isValid()) {
@@ -191,6 +214,10 @@ int screenshot(const ScreenshotOptions &options)
         recent = std::make_unique<HistoryModel>(library.get());
         fresh = std::make_unique<HistoryModel>(library.get());
         fresh->setMode(HistoryModel::New);
+        artists = std::make_unique<ArtistsModel>(library.get());
+        albums = std::make_unique<AlbumsModel>(library.get());
+        songs = std::make_unique<SongsModel>(library.get());
+        genres = std::make_unique<GenresModel>(library.get());
     }
 
     QQmlApplicationEngine engine;
@@ -199,10 +226,19 @@ int screenshot(const ScreenshotOptions &options)
                                              static_cast<QObject *>(recent.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"),
                                              static_cast<QObject *>(fresh.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("Artists"),
+                                             static_cast<QObject *>(artists.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("Albums"),
+                                             static_cast<QObject *>(albums.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("Songs"),
+                                             static_cast<QObject *>(songs.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("Genres"),
+                                             static_cast<QObject *>(genres.get()));
     engine.setInitialProperties({
         {QStringLiteral("screenshot"), true},
         {QStringLiteral("shotScreen"), options.screen},
         {QStringLiteral("shotAngle"), options.angle},
+        {QStringLiteral("shotPivot"), pivot},
         {QStringLiteral("shotWidth"), width},
         {QStringLiteral("shotHeight"), height},
     });

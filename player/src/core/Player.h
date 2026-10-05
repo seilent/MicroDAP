@@ -54,6 +54,7 @@ public:
     void setPositionPollEnabled(bool on);
 
     void play(const QList<QueueEntry> &entries, int start = 0);
+    Q_INVOKABLE void playTracks(const QVariantList &trackIds, int start = 0);
     void restore(const QList<QueueEntry> &entries, int index, qint64 positionMs,
                  bool playing = false);
     Q_INVOKABLE void playAt(int index);

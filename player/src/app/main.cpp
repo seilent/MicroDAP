@@ -104,10 +104,13 @@ int main(int argc, char *argv[])
     const QCommandLineOption libraryOption(QStringLiteral("library"),
                                            QStringLiteral("Music directory scanned into a temporary library for --screenshot."),
                                            QStringLiteral("dir"));
+    const QCommandLineOption pivotOption(QStringLiteral("pivot"),
+                                         QStringLiteral("Hub pivot for --screenshot hub: artists, albums, songs, genres, playlists."),
+                                         QStringLiteral("name"), QStringLiteral("albums"));
     const QCommandLineOption overlayOption(QStringLiteral("overlay"),
                                            QStringLiteral("Run as the game mode overlay: hidden window, pad from InputPlumber."));
     parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, angleOption, scanOnlyOption,
-                       bluezOption, stateOption, libraryOption, overlayOption});
+                       bluezOption, stateOption, libraryOption, pivotOption, overlayOption});
     parser.addPositionalArgument(QStringLiteral("dir"),
                                  QStringLiteral("Directory for --scan-only, default ~/Music."),
                                  QStringLiteral("[dir]"));
@@ -128,6 +131,7 @@ int main(int argc, char *argv[])
         options.bluez = parser.value(bluezOption);
         options.state = parser.value(stateOption);
         options.library = parser.value(libraryOption);
+        options.pivot = parser.value(pivotOption);
         return casdap::screenshot(options);
     }
 
@@ -141,6 +145,10 @@ int main(int argc, char *argv[])
     casdap::HistoryModel historyRecent(&library);
     casdap::HistoryModel historyNew(&library);
     historyNew.setMode(casdap::HistoryModel::New);
+    casdap::ArtistsModel artists(&library);
+    casdap::AlbumsModel albums(&library);
+    casdap::SongsModel songs(&library);
+    casdap::GenresModel genres(&library);
     casdap::Player player(&library);
     std::unique_ptr<casdap::BluezModel> bluez;
     if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1)
@@ -196,6 +204,10 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"), &historyRecent);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"), &historyNew);
+    engine.rootContext()->setContextProperty(QStringLiteral("Artists"), &artists);
+    engine.rootContext()->setContextProperty(QStringLiteral("Albums"), &albums);
+    engine.rootContext()->setContextProperty(QStringLiteral("Songs"), &songs);
+    engine.rootContext()->setContextProperty(QStringLiteral("Genres"), &genres);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
     engine.rootContext()->setContextProperty(QStringLiteral("Pad"), pad.get());
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);

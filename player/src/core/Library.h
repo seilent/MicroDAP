@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Queue.h"
 #include "Scanner.h"
 
 #include <QDateTime>
+#include <QList>
 #include <QObject>
 #include <QSqlDatabase>
 #include <QStringList>
@@ -43,6 +45,7 @@ public:
     Q_INVOKABLE int rating(qint64 trackId) const;
     Q_INVOKABLE QVariantList artistAlbums(qint64 artistId) const;
     Q_INVOKABLE QVariantList artistTracks(qint64 artistId) const;
+    QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
 
 signals:
     void scanningChanged();

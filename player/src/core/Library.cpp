@@ -540,4 +540,29 @@ QVariantList Library::artistTracks(qint64 artistId) const
                     artistId);
 }
 
+QList<QueueEntry> Library::queueEntries(const QVariantList &trackIds) const
+{
+    QList<QueueEntry> entries;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT t.id, t.path, t.title, t.artist, a.title, a.art_path, "
+                                 "t.duration_ms FROM tracks t JOIN albums a ON a.id = t.album_id "
+                                 "WHERE t.id = ?"));
+    for (const QVariant &id : trackIds) {
+        query.bindValue(0, id.toLongLong());
+        if (!query.exec() || !query.next())
+            continue;
+        QueueEntry entry;
+        entry.id = query.value(0).toLongLong();
+        entry.path = query.value(1).toString();
+        entry.title = query.value(2).toString();
+        entry.artist = query.value(3).toString();
+        entry.album = query.value(4).toString();
+        entry.artPath = query.value(5).toString();
+        entry.durationMs = query.value(6).toLongLong();
+        entries.append(entry);
+        query.finish();
+    }
+    return entries;
+}
+
 }

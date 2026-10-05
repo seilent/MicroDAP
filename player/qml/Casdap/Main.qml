@@ -6,6 +6,7 @@ Window {
 
     property bool screenshot: false
     property string shotScreen: ""
+    property string shotPivot: "albums"
     property real shotAngle: 40
     property int shotWidth: Screen.width
     property int shotHeight: Screen.height
@@ -13,6 +14,11 @@ Window {
     readonly property var bluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var historyRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
     readonly property var historyNew: typeof HistoryNew === "undefined" ? null : HistoryNew
+    readonly property var artists: typeof Artists === "undefined" ? null : Artists
+    readonly property var albums: typeof Albums === "undefined" ? null : Albums
+    readonly property var songs: typeof Songs === "undefined" ? null : Songs
+    readonly property var genres: typeof Genres === "undefined" ? null : Genres
+    readonly property var library: root.screenshot || typeof Library === "undefined" ? null : Library
 
     property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
     property var player: root.screenshot || typeof Player === "undefined" ? null : Player
@@ -58,6 +64,10 @@ Window {
     function navigate(name: string) {
         if (name === "bluetooth") {
             pages.push(bluetoothComponent, {})
+            return
+        }
+        if (name === "music") {
+            pages.push(hubComponent, {})
             return
         }
         console.info("casdap: navigate " + name)
@@ -193,6 +203,27 @@ Window {
         }
     }
 
+    Component {
+        id: hubComponent
+
+        MusicHub {
+            objectName: "music"
+            animated: !root.hidden
+            screenOff: root.off
+            artistsModel: root.artists
+            albumsModel: root.albums
+            songsModel: root.songs
+            genresModel: root.genres
+            player: root.player
+            library: root.library
+            onOpen: (kind, id) => console.info("casdap: navigate " + kind + " " + id)
+            onNowPlaying: console.info("casdap: navigate nowplaying")
+            onJumpRequested: console.info("casdap: navigate jump")
+            onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
+        }
+    }
+
     Loader {
         anchors.fill: parent
         sourceComponent: root.shotScreen === "specimen" ? specimenComponent
@@ -204,7 +235,15 @@ Window {
             : root.shotScreen === "quickplay" ? quickplayShotComponent
             : root.shotScreen === "bluetooth" ? bluetoothShotComponent
             : root.shotScreen === "prompt" ? promptShotComponent
+            : root.shotScreen === "hub" ? hubShotComponent
             : null
+    }
+
+    Component {
+        id: hubShotComponent
+        HubShot {
+            pivot: root.shotPivot
+        }
     }
 
     Component {

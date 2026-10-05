@@ -113,9 +113,14 @@ set(CASDAP_TEST_FONT_DIR ${CMAKE_SOURCE_DIR}/../dist/usr/share/fonts/casdap CACH
 qt_add_executable(tst_qml qml/tst_qml.cpp)
 target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
 target_link_libraries(tst_qml PRIVATE casdapuiplugin Qt6::Gui Qt6::Quick Qt6::QuickTest)
-add_test(NAME qml COMMAND tst_qml)
-casdap_test_env(qml)
-set_property(TEST qml APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+file(GLOB qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
+foreach(file IN LISTS qml_tests)
+    get_filename_component(stem ${file} NAME_WE)
+    string(REGEX REPLACE "^tst_" "" suite ${stem})
+    add_test(NAME qml-${suite} COMMAND tst_qml -input ${file})
+    casdap_test_env(qml-${suite})
+    set_property(TEST qml-${suite} APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+endforeach()
 
 add_test(NAME screenshot-specimen-portrait
     COMMAND casdap-player --screenshot specimen --size 640x960 --out ${shots}/specimen-640x960.png
@@ -236,3 +241,19 @@ add_test(NAME screenshot-prompt-landscape
 )
 casdap_test_env(screenshot-prompt-landscape)
 set_property(TEST screenshot-prompt-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+foreach(pivot IN ITEMS artists albums songs genres playlists)
+    add_test(NAME screenshot-hub-${pivot}-portrait
+        COMMAND casdap-player --screenshot hub --pivot ${pivot} --size 640x960 --library ${fixtures} --out ${shots}/hub-${pivot}-640x960.png
+    )
+    set_tests_properties(screenshot-hub-${pivot}-portrait PROPERTIES FIXTURES_REQUIRED library-fixtures)
+    casdap_test_env(screenshot-hub-${pivot}-portrait)
+    set_property(TEST screenshot-hub-${pivot}-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+    add_test(NAME screenshot-hub-${pivot}-landscape
+        COMMAND casdap-player --screenshot hub --pivot ${pivot} --size 1920x1080 --library ${fixtures} --out ${shots}/hub-${pivot}-1920x1080.png
+    )
+    set_tests_properties(screenshot-hub-${pivot}-landscape PROPERTIES FIXTURES_REQUIRED library-fixtures)
+    casdap_test_env(screenshot-hub-${pivot}-landscape)
+    set_property(TEST screenshot-hub-${pivot}-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+endforeach()

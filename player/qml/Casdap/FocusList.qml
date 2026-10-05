@@ -38,6 +38,8 @@ ListView {
     }
 
     function visibleY(index: int, fromY: real): real {
+        if (list.height <= 0)
+            return Math.max(0, fromY)
         const top = index * list.rowPitch
         const low = top - (list.height - list.rowPitch)
         let y = fromY

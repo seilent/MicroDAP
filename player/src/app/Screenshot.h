@@ -13,6 +13,7 @@ struct ScreenshotOptions
     QString bluez;
     QString state;
     QString library;
+    QString pivot;
 };
 
 int screenshot(const ScreenshotOptions &options);

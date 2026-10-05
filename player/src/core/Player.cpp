@@ -8,6 +8,7 @@
 #include <QMutexLocker>
 #include <QSocketNotifier>
 
+#include <algorithm>
 #include <utility>
 
 namespace casdap {
@@ -361,6 +362,16 @@ void Player::play(const QList<QueueEntry> &entries, int start)
 {
     m_queue->set(entries, start);
     startAt(m_queue->currentIndex(), GST_STATE_PLAYING);
+}
+
+void Player::playTracks(const QVariantList &trackIds, int start)
+{
+    if (!m_library)
+        return;
+    const QList<QueueEntry> entries = m_library->queueEntries(trackIds);
+    if (entries.isEmpty())
+        return;
+    play(entries, std::max(0, std::min(static_cast<int>(entries.size()) - 1, start)));
 }
 
 void Player::restore(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing)
