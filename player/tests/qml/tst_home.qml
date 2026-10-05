@@ -61,6 +61,8 @@ TestCase {
 
         property bool connected: true
         property string deviceName: "Pixel 8"
+        property bool pairing: false
+        property int pairingRemaining: 0
     }
 
     QtObject {
@@ -105,6 +107,9 @@ TestCase {
         fill(history, "History", 6)
         fill(fresh, "New", 2)
         pins.clear()
+        phone.connected = true
+        phone.pairing = false
+        phone.pairingRemaining = 0
         counters.navigated = []
         counters.bluetoothOpens = 0
         counters.played = []
@@ -137,12 +142,46 @@ TestCase {
             compare(item.opacity, 1)
         }
         compare(page.menuItem(0).subtitle, "artists albums songs genres playlists")
-        compare(page.menuItem(1).subtitle, "phone pairing")
-        compare(page.menuItem(2).subtitle, "")
+        compare(page.menuItem(1).subtitle, "not connected")
+        compare(page.menuItem(2).subtitle, "now playing saved")
         compare(page.menuItem(3).subtitle, "recent new")
-        compare(page.menuItem(4).subtitle, "")
+        compare(page.menuItem(4).subtitle, "output library display power")
+        for (let i = 0; i < 5; i++) {
+            verify(page.menuItem(i).subtitle !== "")
+            compare(page.menuItem(i).subtitleItem.visible, true)
+            compare(page.menuItem(i).subtitleItem.font.capitalization, Font.AllUppercase)
+        }
         const first = page.menuItem(0)
         fuzzyCompare(first.subtitleBaseline, first.labelBaseline + Ui.px(8 + 0.7 * 8), 0.5)
+    }
+
+    function test_bluetooth_subtitle_states() {
+        const page = open({ animated: false, bluez: phone })
+        compare(page.menuItem(1).subtitle, "Pixel 8")
+        phone.connected = false
+        compare(page.menuItem(1).subtitle, "not connected")
+        phone.pairing = true
+        phone.pairingRemaining = 118
+        compare(page.menuItem(1).subtitle, "pairing 118")
+        phone.pairingRemaining = 7
+        compare(page.menuItem(1).subtitle, "pairing 7")
+        phone.connected = true
+        compare(page.menuItem(1).subtitle, "Pixel 8")
+        phone.pairing = false
+        phone.pairingRemaining = 0
+        compare(page.menuItem(1).subtitle, "Pixel 8")
+        compare(page.menuItem(1).subtitleItem.visible, true)
+    }
+
+    function test_playlists_subtitle() {
+        const page = open({ animated: false, playlistCount: 3 })
+        compare(page.menuItem(2).subtitle, "3 playlists")
+        page.playlistCount = 1
+        compare(page.menuItem(2).subtitle, "1 playlist")
+        page.playlistCount = 0
+        compare(page.menuItem(2).subtitle, "0 playlists")
+        page.playlistCount = -1
+        compare(page.menuItem(2).subtitle, "now playing saved")
     }
 
     function labelAlpha(page, index) {
@@ -460,7 +499,7 @@ TestCase {
         phone.connected = false
         compare(qp.phoneTile, false)
         compare(qp.count, 8)
-        compare(page.bluetoothSubtitle, "phone pairing")
+        compare(page.bluetoothSubtitle, "not connected")
         phone.connected = true
     }
 

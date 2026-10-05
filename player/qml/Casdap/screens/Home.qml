@@ -13,16 +13,31 @@ Page {
     property real pan: 0
     property real peekEnter: home.animated ? 0 : 1
     property real barEnter: home.animated ? 0 : 1
+    property int playlistCount: -1
 
     readonly property var menu: [
         { name: "music", subtitle: "artists albums songs genres playlists" },
-        { name: "bluetooth", subtitle: "phone pairing" },
-        { name: "playlists", subtitle: "" },
+        { name: "bluetooth", subtitle: "not connected" },
+        { name: "playlists", subtitle: "now playing saved" },
         { name: "history", subtitle: "recent new" },
-        { name: "settings", subtitle: "" }
+        { name: "settings", subtitle: "output library display power" }
     ]
     readonly property bool phoneConnected: home.bluez !== null && home.bluez.connected === true
-    readonly property string bluetoothSubtitle: home.phoneConnected ? home.bluez.deviceName : home.menu[1].subtitle
+    readonly property bool phonePairing: home.bluez !== null && home.bluez.pairing === true
+    readonly property string bluetoothSubtitle: home.phoneConnected ? home.bluez.deviceName
+        : home.phonePairing ? "pairing " + home.bluez.pairingRemaining
+        : home.menu[1].subtitle
+    readonly property string playlistsSubtitle: home.playlistCount < 0 ? home.menu[2].subtitle
+        : home.playlistCount === 1 ? "1 playlist"
+        : home.playlistCount + " playlists"
+
+    function subtitleFor(name: string, fallback: string): string {
+        if (name === "bluetooth")
+            return home.bluetoothSubtitle
+        if (name === "playlists")
+            return home.playlistsSubtitle
+        return fallback
+    }
     readonly property real pitch: Ui.landscape ? Ui.homePitchLandscape : Ui.homePitch
     readonly property real menuX: Ui.landscape ? Ui.px(Ui.homeMenuXLandscape) : Ui.px(Ui.canvasW - Motion.quickplayMenuInset) * home.pan
     readonly property real quickplayX: Ui.landscape ? 0 : -Ui.px(Ui.qpW - Ui.qpPeek) * (1 - home.pan)
@@ -232,7 +247,7 @@ Page {
                 required property var modelData
                 readonly property bool isFocused: item.index === home.focusIndex
                 readonly property real itemBaseline: home ? home.itemBaseline(item.index) : 0
-                readonly property string subtitle: item.modelData.name === "bluetooth" ? home.bluetoothSubtitle : item.modelData.subtitle
+                readonly property string subtitle: home.subtitleFor(item.modelData.name, item.modelData.subtitle)
                 readonly property real labelBaseline: item.y + label.y + label.baselineOffset
                 readonly property real subtitleBaseline: item.y + sub.y + sub.baselineOffset
                 readonly property Item labelItem: label
