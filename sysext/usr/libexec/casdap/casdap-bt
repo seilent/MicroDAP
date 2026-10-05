@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import configparser
 import os
 import shlex
 import signal
@@ -35,10 +36,52 @@ A2DP_SOURCE = '0000110a' + BASE_UUID
 SAVED = ('Pairable', 'PairableTimeout', 'DiscoverableTimeout')
 MAX_TIMEOUT = 600
 DEVICE_ENV = os.environ.get('CASDAP_BT_DEVICE_ENV', '/usr/libexec/armada/device-env')
+SETTINGS_FILE = os.environ.get('CASDAP_SETTINGS_FILE') or os.path.join(
+    os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'casdap', 'settings.ini')
+SETTINGS_SECTION = 'General'
+KEEP_PHONE_KEY = 'keepPhoneInGameMode'
+DISCONNECT_TIMEOUT = 10
 
 
 def log(message):
     print(message, file=sys.stderr, flush=True)
+
+
+def keep_phone():
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        if not parser.read(SETTINGS_FILE, encoding='utf-8'):
+            return False
+        return parser.getboolean(SETTINGS_SECTION, KEEP_PHONE_KEY, fallback=False)
+    except (configparser.Error, ValueError) as e:
+        log(f'settings {SETTINGS_FILE}: {e}')
+        return False
+
+
+def release_phones(bus, keep):
+    manager = dbus.Interface(bus.get_object(BLUEZ, '/', introspect=False), OBJECT_MANAGER)
+    try:
+        objects = manager.GetManagedObjects()
+    except dbus.DBusException as e:
+        log(f'exit: {e.get_dbus_name()}')
+        return
+    for path, interfaces in sorted(objects.items()):
+        props = interfaces.get(DEVICE)
+        if not props or not props.get('Connected'):
+            continue
+        uuids = [str(u).lower() for u in props.get('UUIDs', [])]
+        if A2DP_SOURCE not in uuids:
+            continue
+        path = str(path)
+        if keep:
+            log(f'keeping {path} connected')
+            continue
+        try:
+            device = dbus.Interface(bus.get_object(BLUEZ, path, introspect=False), DEVICE)
+            device.Disconnect(timeout=DISCONNECT_TIMEOUT)
+            log(f'disconnected {path} on exit')
+        except dbus.DBusException as e:
+            log(f'disconnect {path} failed: {e.get_dbus_name()}')
 
 
 class Rejected(dbus.DBusException):
@@ -299,6 +342,9 @@ class Gate:
 
 
 def main():
+    if sys.argv[1:] == ['--print-keep']:
+        print('keep' if keep_phone() else 'drop')
+        return 0
     DBusGMainLoop(set_as_default=True)
     address = os.environ.get('CASDAP_BT_SYSTEM_BUS')
     system = dbus.bus.BusConnection(address) if address else dbus.SystemBus()
@@ -319,6 +365,7 @@ def main():
 
     def stop(*_):
         window.close('closed on exit')
+        release_phones(system, keep_phone())
         adapter.set('Pairable', pairable)
         session.flush()
         loop.quit()

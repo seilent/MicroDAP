@@ -18,6 +18,7 @@ class Settings : public QObject
     Q_PROPERTY(double scale READ scale WRITE setScale NOTIFY scaleChanged)
     Q_PROPERTY(bool pocketControls READ pocketControls WRITE setPocketControls NOTIFY pocketControlsChanged)
     Q_PROPERTY(int saverSeconds READ saverSeconds WRITE setSaverSeconds NOTIFY saverSecondsChanged)
+    Q_PROPERTY(bool keepPhoneInGameMode READ keepPhoneInGameMode WRITE setKeepPhoneInGameMode NOTIFY keepPhoneInGameModeChanged)
     Q_PROPERTY(QString path READ path CONSTANT)
 
 public:
@@ -50,6 +51,8 @@ public:
     void setPocketControls(bool on);
     int saverSeconds() const;
     void setSaverSeconds(int seconds);
+    bool keepPhoneInGameMode() const;
+    void setKeepPhoneInGameMode(bool on);
 
     Q_INVOKABLE void sync();
 
@@ -60,6 +63,7 @@ signals:
     void scaleChanged();
     void pocketControlsChanged();
     void saverSecondsChanged();
+    void keepPhoneInGameModeChanged();
 
 private:
     void load();
@@ -74,6 +78,7 @@ private:
     double m_scale = 1.0;
     bool m_pocketControls = false;
     int m_saverSeconds = 30;
+    bool m_keepPhoneInGameMode = false;
 };
 
 }

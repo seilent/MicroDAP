@@ -37,6 +37,11 @@ QString keySaverSeconds()
     return QStringLiteral("saverSeconds");
 }
 
+QString keyKeepPhoneInGameMode()
+{
+    return QStringLiteral("keepPhoneInGameMode");
+}
+
 double normalizeScale(double scale)
 {
     const double stepped = qRound(scale * 10.0) / 10.0;
@@ -114,6 +119,7 @@ void Settings::load()
     m_scale = normalizeScale(m_settings.value(keyScale(), 1.0).toDouble());
     m_pocketControls = m_settings.value(keyPocketControls(), false).toBool();
     m_saverSeconds = normalizeSaver(m_settings.value(keySaverSeconds(), 30).toInt());
+    m_keepPhoneInGameMode = m_settings.value(keyKeepPhoneInGameMode(), false).toBool();
 }
 
 QString Settings::path() const
@@ -207,6 +213,20 @@ void Settings::setSaverSeconds(int seconds)
     m_saverSeconds = value;
     store(keySaverSeconds(), m_saverSeconds);
     emit saverSecondsChanged();
+}
+
+bool Settings::keepPhoneInGameMode() const
+{
+    return m_keepPhoneInGameMode;
+}
+
+void Settings::setKeepPhoneInGameMode(bool on)
+{
+    if (m_keepPhoneInGameMode == on)
+        return;
+    m_keepPhoneInGameMode = on;
+    store(keyKeepPhoneInGameMode(), m_keepPhoneInGameMode);
+    emit keepPhoneInGameModeChanged();
 }
 
 void Settings::store(const QString &key, const QVariant &value)

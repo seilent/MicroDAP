@@ -320,6 +320,7 @@ void PowerTest::settingsPersist()
         QCOMPARE(settings.scale(), 1.0);
         QVERIFY(!settings.pocketControls());
         QCOMPARE(settings.saverSeconds(), 30);
+        QVERIFY(!settings.keepPhoneInGameMode());
 
         QSignalSpy scaleSpy(&settings, &Settings::scaleChanged);
         settings.setScale(1.1);
@@ -349,8 +350,16 @@ void PowerTest::settingsPersist()
         QCOMPARE(settings.saverSeconds(), Settings::minSaverSeconds);
         settings.setSaverSeconds(45);
         settings.setRoots({QStringLiteral("/tmp/a"), QStringLiteral("/tmp/b")});
+
+        QSignalSpy keepSpy(&settings, &Settings::keepPhoneInGameModeChanged);
+        settings.setKeepPhoneInGameMode(true);
+        QCOMPARE(keepSpy.count(), 1);
+        settings.setKeepPhoneInGameMode(true);
+        QCOMPARE(keepSpy.count(), 1);
+        QVERIFY(settings.keepPhoneInGameMode());
     }
     QVERIFY(QFile::exists(path));
+    QVERIFY(readFile(path).contains(QStringLiteral("keepPhoneInGameMode=true")));
 
     Settings again(path);
     QCOMPARE(again.output(), QStringLiteral("headphones"));
@@ -359,6 +368,7 @@ void PowerTest::settingsPersist()
     QCOMPARE(again.scale(), 1.1);
     QVERIFY(again.pocketControls());
     QCOMPARE(again.saverSeconds(), 45);
+    QVERIFY(again.keepPhoneInGameMode());
 }
 
 void PowerTest::statusSysfs()

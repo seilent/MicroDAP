@@ -15,6 +15,7 @@ from gi.repository import GLib
 ADDRESS = os.environ['DBUS_SESSION_BUS_ADDRESS']
 CASDAP_BT = os.environ['CASDAP_BT']
 LOG = os.environ['CASDAP_BT_LOG']
+SETTINGS = os.path.join(os.path.dirname(LOG), 'settings.ini')
 
 BLUEZ = 'org.bluez'
 OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager'
@@ -129,8 +130,10 @@ class Adapter(dbus.service.Object):
 
 
 class Device(dbus.service.Object):
-    def __init__(self, bus, path, uuids):
+    def __init__(self, bus, fake, path, uuids):
         super().__init__(bus, path)
+        self.fake = fake
+        self.path = path
         self.props = {
             'Address': dbus.String(path.rsplit('/', 1)[1][4:].replace('_', ':')),
             'Paired': dbus.Boolean(False),
@@ -162,6 +165,11 @@ class Device(dbus.service.Object):
     def PropertiesChanged(self, interface, changed, invalidated):
         pass
 
+    @dbus.service.method(DEVICE, in_signature='', out_signature='')
+    def Disconnect(self):
+        self.fake.disconnected.append(self.path)
+        self.flip('Connected', dbus.Boolean(False))
+
     def flip(self, name, value):
         self.props[name] = value
         self.PropertiesChanged(DEVICE, dbus.Dictionary({name: value}, signature='sv'), dbus.Array([], signature='s'))
@@ -172,6 +180,7 @@ class Fake:
         self.bus = bus
         self.devices = {}
         self.removed = []
+        self.disconnected = []
         self.agent = None
         self.default_agent = None
         self.signals = []
@@ -186,7 +195,7 @@ class Fake:
         self.signals.append({str(k): v for k, v in changed.items()})
 
     def add_device(self, path, uuids):
-        device = Device(self.bus, path, [dbus.String(u) for u in uuids])
+        device = Device(self.bus, self, path, [dbus.String(u) for u in uuids])
         self.devices[path] = device
         return device
 
@@ -429,20 +438,86 @@ class Driver:
         self.check(wait_for(lambda: not self.active(), 2), 'window did not close when a paired phone connected')
         self.check_restored('known phone')
 
-    def test_sigterm(self, proc):
-        self.expect_ok('StartPairing(10) before SIGTERM', self.service.StartPairing, dbus.UInt32(10))
-        self.check_open('sigterm window', 10)
+    def terminate(self, proc, label):
         proc.send_signal(signal.SIGTERM)
         try:
             code = proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
             code = proc.wait()
-            self.check(False, 'casdap-bt did not exit on SIGTERM')
-        self.check(code == 0, f'casdap-bt exit {code}')
+            self.check(False, f'{label}: casdap-bt did not exit on SIGTERM')
+        self.check(code == 0, f'{label}: casdap-bt exit {code}')
+        self.check(wait_for(lambda: not self.bus.name_has_owner(SERVICE), 2), f'{label}: {SERVICE} still owned')
+
+    def test_sigterm(self, proc):
+        phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
+        idle_phone = ADAPTER_PATH + '/dev_10_00_00_00_00_08'
+        speaker = ADAPTER_PATH + '/dev_10_00_00_00_00_09'
+        in_loop(self.fake.add_device, idle_phone, [uuid('110a'), uuid('110c')])
+        in_loop(self.fake.add_device, speaker, [uuid('110b'), uuid('110c')])
+        in_loop(self.fake.flip, speaker, 'Connected', dbus.Boolean(True))
+        self.check(bool(self.fake.devices[phone].props['Connected']) is True, 'phone not connected before SIGTERM')
+        self.expect_ok('StartPairing(10) before SIGTERM', self.service.StartPairing, dbus.UInt32(10))
+        self.check_open('sigterm window', 10)
+        self.terminate(proc, 'sigterm')
         self.check_restored('sigterm')
         self.check(bool(self.adapter_get('Pairable')) is False, 'Pairable not restored to its value before start')
-        self.check(wait_for(lambda: not self.bus.name_has_owner(SERVICE), 2), f'{SERVICE} still owned')
+        self.check(self.fake.disconnected == [phone], f'disconnected on exit {self.fake.disconnected}')
+        self.check(bool(self.fake.devices[phone].props['Connected']) is False, 'phone still connected after exit')
+        self.check(bool(self.fake.devices[speaker].props['Connected']) is True, 'non source device disconnected on exit')
+
+    def test_sigterm_keep(self, proc):
+        phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
+        in_loop(self.fake.flip, phone, 'Connected', dbus.Boolean(True))
+        self.fake.disconnected.clear()
+        self.terminate(proc, 'sigterm keep')
+        self.check_restored('sigterm keep')
+        self.check(self.fake.disconnected == [], f'disconnected with keep on {self.fake.disconnected}')
+        self.check(bool(self.fake.devices[phone].props['Connected']) is True, 'phone disconnected with keep on')
+
+    def test_print_keep(self, env):
+        cases = (
+            (None, 'drop'),
+            ('[General]\nkeepPhoneInGameMode=true\n', 'keep'),
+            ('[General]\nkeepPhoneInGameMode=false\n', 'drop'),
+            ('[General]\nscale=1.1\n', 'drop'),
+            ('[General]\nkeepPhoneInGameMode=maybe\n', 'drop'),
+        )
+        for content, expected in cases:
+            if content is None:
+                if os.path.exists(SETTINGS):
+                    os.remove(SETTINGS)
+            else:
+                write_settings(content)
+            result = subprocess.run([sys.executable, CASDAP_BT, '--print-keep'], env=env,
+                                    capture_output=True, text=True)
+            self.check(result.returncode == 0, f'--print-keep exit {result.returncode} for {content!r}')
+            self.check(result.stdout.strip() == expected,
+                       f'--print-keep printed {result.stdout.strip()!r} for {content!r}')
+
+
+def write_settings(content):
+    with open(SETTINGS, 'w') as f:
+        f.write(content)
+
+
+def launch(fake, driver, env):
+    fake.agent = None
+    fake.default_agent = None
+    with open(LOG, 'a') as log:
+        proc = subprocess.Popen([sys.executable, CASDAP_BT], env=env, stdout=log, stderr=log)
+    ready = wait_for(lambda: fake.agent is not None and fake.default_agent is not None
+                     and driver.bus.name_has_owner(SERVICE), 5)
+    if not ready or proc.poll() is not None:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        with open(LOG) as log:
+            sys.stderr.write(log.read())
+        print('FAIL casdap-bt did not register', file=sys.stderr)
+        return None
+    driver.connect()
+    return proc
 
 
 def main():
@@ -453,18 +528,14 @@ def main():
     threading.Thread(target=loop.run, daemon=True).start()
 
     driver = Driver(fake)
-    env = dict(os.environ, CASDAP_BT_SYSTEM_BUS=ADDRESS)
-    with open(LOG, 'w') as log:
-        proc = subprocess.Popen([sys.executable, CASDAP_BT], env=env, stdout=log, stderr=log)
+    env = dict(os.environ, CASDAP_BT_SYSTEM_BUS=ADDRESS, CASDAP_SETTINGS_FILE=SETTINGS)
+    if os.path.exists(SETTINGS):
+        os.remove(SETTINGS)
+    open(LOG, 'w').close()
+    proc = launch(fake, driver, env)
+    if proc is None:
+        return 1
     try:
-        ready = wait_for(lambda: fake.agent is not None and fake.default_agent is not None
-                         and driver.bus.name_has_owner(SERVICE), 5)
-        if not ready or proc.poll() is not None:
-            with open(LOG) as log:
-                sys.stderr.write(log.read())
-            print('FAIL casdap-bt did not register', file=sys.stderr)
-            return 1
-        driver.connect()
         driver.test_registration()
         driver.test_closed_window()
         driver.test_authorize()
@@ -474,8 +545,14 @@ def main():
         driver.test_gate()
         driver.test_paired_closes()
         driver.test_sigterm(proc)
+        write_settings('[General]\nkeepPhoneInGameMode=true\n')
+        proc = launch(fake, driver, env)
+        if proc is None:
+            return 1
+        driver.test_sigterm_keep(proc)
+        driver.test_print_keep(env)
     finally:
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait()
     with open(LOG) as log:
@@ -485,6 +562,10 @@ def main():
     driver.check(f'Rejected RequestConfirmation {PHONE}' in text, 'no Rejected RequestConfirmation line')
     driver.check(f'pairing window closed: paired {ADAPTER_PATH}/dev_10_00_00_00_00_06' in text,
                  'no pairing window closed: paired line')
+    driver.check(f'disconnected {ADAPTER_PATH}/dev_10_00_00_00_00_06 on exit' in text,
+                 'no disconnected on exit line')
+    driver.check(f'keeping {ADAPTER_PATH}/dev_10_00_00_00_00_06 connected' in text,
+                 'no keeping connected line')
     if driver.failures:
         sys.stderr.write(text)
         print(f'bt-test: {driver.failures} failure(s)', file=sys.stderr)
