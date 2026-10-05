@@ -33,6 +33,7 @@ Page {
     property alias quickplayPanel: quickplayPanel
     property alias quickplay: quickplay
     property alias ring: ring
+    property alias focusBar: focusBar
     property alias sheet: sheet
     property alias watermark: watermark
     property alias menuRepeater: menuRepeater
@@ -213,23 +214,25 @@ Page {
         Ring {
             id: ring
 
-            readonly property real centerY: home.itemBaseline(home.focusIndex) - Ui.px(Ui.capHeight * Ui.homeItem.size / 2)
+            readonly property real centerY: home.itemBaseline(0) - Ui.px(Ui.capHeight * Ui.homeItem.size / 2)
 
             x: Ui.px(Ui.homeRingX) - ring.width / 2
             y: ring.centerY - ring.height / 2
             size: Ui.homeRing
             glyph: "play"
-            focused: true
+            focused: false
             animated: home.animated
             opacity: home.ringEnter
+        }
 
-            Behavior on y {
-                enabled: home.animated
-                NumberAnimation {
-                    duration: Motion.focusCursor
-                    easing.type: Motion.sine
-                }
-            }
+        FocusBar {
+            id: focusBar
+
+            x: Ui.px(Ui.homeBarX)
+            rowY: home.itemBaseline(home.focusIndex) - Ui.px(Ui.homeBarTop)
+            rowHeight: Ui.px(Ui.homeBarH)
+            animated: home.animated
+            opacity: home.ringEnter
         }
 
         Repeater {

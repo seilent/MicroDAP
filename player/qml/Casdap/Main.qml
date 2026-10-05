@@ -14,6 +14,8 @@ Window {
     readonly property var historyRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
     readonly property var historyNew: typeof HistoryNew === "undefined" ? null : HistoryNew
 
+    readonly property bool powerScreenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
+
     width: shotWidth
     height: shotHeight
     visible: true
@@ -27,6 +29,14 @@ Window {
         Ui.windowH = root.height
         if (!root.screenshot)
             pages.push(homeComponent)
+    }
+
+    function navigate(name: string) {
+        if (name === "bluetooth") {
+            pages.push(bluetoothComponent, {})
+            return
+        }
+        console.info("casdap: navigate " + name)
     }
 
     PageStack {
@@ -45,7 +55,7 @@ Window {
         player: typeof Player === "undefined" ? null : Player
         screenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
         pocketControls: typeof Settings === "undefined" ? false : Settings.pocketControls
-        onNowPlaying: console.log("casdap: navigate nowplaying")
+        onNowPlaying: console.info("casdap: navigate nowplaying")
     }
 
     Component {
@@ -55,11 +65,21 @@ Window {
             bluez: root.bluez
             historyModel: root.historyRecent
             newModel: root.historyNew
-            onNavigate: (name) => console.log("casdap: navigate " + name)
-            onNowPlayingBluetooth: console.log("casdap: navigate nowplaying-bluetooth")
-            onPlayRequested: (entry) => console.log("casdap: play " + entry.section + " " + entry.id)
-            onPinRequested: (entry, pin) => console.log("casdap: " + (pin ? "pin " : "unpin ") + entry.section + " " + entry.id)
-            onShuffleAll: console.log("casdap: shuffle all")
+            onNavigate: (name) => root.navigate(name)
+            onNowPlayingBluetooth: console.info("casdap: navigate nowplaying-bluetooth")
+            onPlayRequested: (entry) => console.info("casdap: play " + entry.section + " " + entry.id)
+            onPinRequested: (entry, pin) => console.info("casdap: " + (pin ? "pin " : "unpin ") + entry.section + " " + entry.id)
+            onShuffleAll: console.info("casdap: shuffle all")
+        }
+    }
+
+    Component {
+        id: bluetoothComponent
+
+        Bluetooth {
+            bluez: root.bluez
+            screenOff: root.powerScreenOff
+            onOpenNowPlaying: console.info("casdap: navigate nowplaying-bluetooth")
         }
     }
 
@@ -72,7 +92,13 @@ Window {
             : root.shotScreen === "volume" ? volumeComponent
             : root.shotScreen === "home" ? homeShotComponent
             : root.shotScreen === "quickplay" ? quickplayShotComponent
+            : root.shotScreen === "bluetooth" ? bluetoothShotComponent
             : null
+    }
+
+    Component {
+        id: bluetoothShotComponent
+        BluetoothShot {}
     }
 
     Component {

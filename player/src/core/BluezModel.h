@@ -25,6 +25,7 @@ class BluezModel : public QObject
     Q_PROPERTY(int battery READ battery NOTIFY batteryChanged)
     Q_PROPERTY(bool pairing READ pairing NOTIFY pairingChanged)
     Q_PROPERTY(int pairingRemaining READ pairingRemaining NOTIFY pairingRemainingChanged)
+    Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
 
 public:
     static constexpr int transportVolumeMax = 127;
@@ -52,6 +53,8 @@ public:
     int battery() const;
     bool pairing() const;
     int pairingRemaining() const;
+    bool active() const;
+    void setActive(bool active);
 
     Q_INVOKABLE virtual void play() = 0;
     Q_INVOKABLE virtual void pause() = 0;
@@ -82,6 +85,7 @@ signals:
     void batteryChanged();
     void pairingChanged();
     void pairingRemainingChanged();
+    void activeChanged();
 
 protected:
     void updateConnected(bool connected);
@@ -120,6 +124,7 @@ private:
     int m_battery = -1;
     bool m_pairing = false;
     int m_pairingRemaining = 0;
+    bool m_active = true;
 };
 
 }

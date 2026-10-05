@@ -77,6 +77,15 @@ set_tests_properties(bluez PROPERTIES FIXTURES_REQUIRED library-fixtures)
 casdap_test_env(bluez)
 set_property(TEST bluez APPEND PROPERTY ENVIRONMENT "CASDAP_AUDIO_SINK=fakesink sync=true")
 
+qt_add_executable(tst_systembluez core/tst_systembluez.cpp)
+target_link_libraries(tst_systembluez PRIVATE casdapcore Qt6::DBus Qt6::Test)
+if(DBUS_RUN_SESSION)
+    add_test(NAME systembluez COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_systembluez>)
+else()
+    add_test(NAME systembluez COMMAND tst_systembluez)
+endif()
+casdap_test_env(systembluez)
+
 set(CASDAP_TEST_FONT_DIR ${CMAKE_SOURCE_DIR}/../dist/usr/share/fonts/casdap CACHE PATH "Selawik TTF directory for the qml tests and specimen shots")
 
 qt_add_executable(tst_qml qml/tst_qml.cpp)
@@ -175,3 +184,21 @@ add_test(NAME screenshot-quickplay-landscape
 )
 casdap_test_env(screenshot-quickplay-landscape)
 set_property(TEST screenshot-quickplay-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-bluetooth-connected
+    COMMAND casdap-player --screenshot bluetooth --size 640x960 --bluez connected --out ${shots}/bluetooth-connected-640x960.png
+)
+casdap_test_env(screenshot-bluetooth-connected)
+set_property(TEST screenshot-bluetooth-connected APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-bluetooth-active
+    COMMAND casdap-player --screenshot bluetooth --size 640x960 --bluez active --out ${shots}/bluetooth-active-640x960.png
+)
+casdap_test_env(screenshot-bluetooth-active)
+set_property(TEST screenshot-bluetooth-active APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-bluetooth-pairing
+    COMMAND casdap-player --screenshot bluetooth --size 640x960 --bluez pairing --out ${shots}/bluetooth-pairing-640x960.png
+)
+casdap_test_env(screenshot-bluetooth-pairing)
+set_property(TEST screenshot-bluetooth-pairing APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")

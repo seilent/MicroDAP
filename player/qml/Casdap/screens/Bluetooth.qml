@@ -1,0 +1,468 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+
+Page {
+    id: page
+
+    property QtObject bluez: null
+    property bool animated: true
+    property bool screenOff: false
+    property int pivotIndex: 0
+    property int shownPivot: 0
+    property int pairingTimeout: 120
+    property string shownState: ""
+    property bool ready: false
+
+    readonly property bool live: page.animated && !page.screenOff
+    readonly property var pivots: ["phone", "pairing"]
+    readonly property bool connected: page.bluez !== null && page.bluez.connected === true
+    readonly property bool transportActive: page.connected && page.bluez.transportActive === true
+    readonly property bool pairing: page.bluez !== null && page.bluez.pairing === true
+    readonly property int pairingRemaining: page.bluez !== null && page.bluez.pairingRemaining !== undefined ? page.bluez.pairingRemaining : 0
+    readonly property int battery: page.bluez !== null && page.bluez.battery !== undefined ? page.bluez.battery : -1
+    readonly property string deviceName: page.bluez !== null && page.bluez.deviceName !== undefined ? page.bluez.deviceName : ""
+    readonly property string status: page.bluez !== null && page.bluez.status !== undefined ? page.bluez.status : ""
+    readonly property string trackTitle: page.bluez !== null && page.bluez.title !== undefined ? page.bluez.title : ""
+    readonly property string trackArtist: page.bluez !== null && page.bluez.artist !== undefined ? page.bluez.artist : ""
+    readonly property string stateLine: page.transportActive ? "audio active" : page.connected ? "connected" : "disconnected"
+    readonly property string instructions: page.pairing ? "pair from your phone, b to stop" : "press a to make this device discoverable"
+    readonly property real arcSweep: page.pairing && page.pairingTimeout > 0
+        ? 360 * Math.max(0, Math.min(1, page.pairingRemaining / page.pairingTimeout))
+        : 0
+    readonly property real nameBaseline: Ui.contentTop + 16
+    readonly property real stateBaseline: Ui.contentTop + 36
+    readonly property real rowTop: Ui.contentTop + 60
+    readonly property real ringCenterY: Ui.contentTop + 90
+    readonly property real hintBaseline: page.ringCenterY + Ui.backRing / 2 + Ui.qpHintDrop
+    readonly property real backdropAlpha: Ui.backdropStops[0][1]
+    readonly property bool switching: pivotAnim.running
+    readonly property bool stateSwapping: stateSwap.running
+    readonly property bool pulsing: pulse.running
+
+    property alias header: header
+    property alias strip: strip
+    property alias phonePage: phonePage
+    property alias pairingPage: pairingPage
+    property alias nameText: nameText
+    property alias stateText: stateText
+    property alias batteryGlyph: batteryGlyph
+    property alias transportRow: transportRow
+    property alias focusBar: focusBar
+    property alias discoverableText: discoverableText
+    property alias pairingRing: pairingRing
+    property alias pulseHolder: pulseHolder
+    property alias hintText: hintText
+
+    signal openNowPlaying()
+
+    function call(method: string, arg: var): bool {
+        if (page.bluez === null || typeof page.bluez[method] !== "function")
+            return false
+        if (arg === undefined)
+            page.bluez[method]()
+        else
+            page.bluez[method](arg)
+        return true
+    }
+
+    function togglePlayPause(): bool {
+        return page.call(page.status === "playing" ? "pause" : "play")
+    }
+
+    function contentAt(index: int): Item {
+        return index === 0 ? phonePage : pairingPage
+    }
+
+    function landPivot() {
+        pivotAnim.stop()
+        phonePage.x = 0
+        phonePage.opacity = 1
+        pairingPage.x = 0
+        pairingPage.opacity = 1
+        page.shownPivot = page.pivotIndex
+    }
+
+    function switchPivot(delta: int): bool {
+        const target = Math.max(0, Math.min(page.pivots.length - 1, page.pivotIndex + delta))
+        if (target === page.pivotIndex)
+            return false
+        if (pivotAnim.running)
+            page.landPivot()
+        const dir = target > page.pivotIndex ? 1 : -1
+        d.internal = true
+        page.pivotIndex = target
+        d.internal = false
+        if (!page.live) {
+            page.shownPivot = target
+            return true
+        }
+        pivotAnim.outgoing = page.contentAt(page.shownPivot)
+        pivotAnim.incoming = page.contentAt(target)
+        pivotAnim.dir = dir
+        pivotAnim.start()
+        return true
+    }
+
+    function completeAll() {
+        page.landPivot()
+        if (stateSwap.running)
+            stateSwap.stop()
+        stateText.opacity = 1
+        page.shownState = page.stateLine
+        if (pulse.running)
+            pulse.stop()
+        pulseHolder.scale = 1
+    }
+
+    function back(): bool {
+        if (page.stack === null || page.stack.depth < 2)
+            return false
+        page.stack.pop()
+        return true
+    }
+
+    function handleAction(name: string, repeat: bool): bool {
+        switch (name) {
+        case "lb":
+            if (!repeat)
+                page.switchPivot(-1)
+            return true
+        case "rb":
+            if (!repeat)
+                page.switchPivot(1)
+            return true
+        case "a":
+            if (repeat)
+                return true
+            if (page.pivotIndex === 1) {
+                if (!page.pairing)
+                    page.call("startPairing", page.pairingTimeout)
+                return true
+            }
+            if (page.transportActive) {
+                page.openNowPlaying()
+                return true
+            }
+            if (page.connected)
+                page.togglePlayPause()
+            return true
+        case "start":
+            if (repeat)
+                return true
+            if (page.pivotIndex === 0 && page.connected) {
+                page.togglePlayPause()
+                return true
+            }
+            return false
+        case "b":
+            if (repeat)
+                return false
+            if (page.pivotIndex === 1 && page.pairing) {
+                page.call("stopPairing")
+                return true
+            }
+            return page.back()
+        default:
+            return false
+        }
+    }
+
+    onPivotIndexChanged: {
+        if (!d.internal)
+            page.landPivot()
+    }
+
+    onStateLineChanged: {
+        if (page.ready && page.live)
+            stateSwap.restart()
+        else
+            page.shownState = page.stateLine
+    }
+
+    onLiveChanged: {
+        if (!page.live)
+            page.completeAll()
+    }
+
+    Component.onCompleted: {
+        page.shownPivot = page.pivotIndex
+        page.shownState = page.stateLine
+        page.ready = true
+    }
+
+    QtObject {
+        id: d
+
+        property bool internal: false
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: Ui.bg
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0; color: Qt.rgba(Ui.accent.r, Ui.accent.g, Ui.accent.b, page.backdropAlpha) }
+            GradientStop { position: 1; color: Qt.rgba(Ui.accent.r, Ui.accent.g, Ui.accent.b, 0) }
+        }
+    }
+
+    Item {
+        id: phonePage
+
+        width: page.width
+        height: page.height
+        visible: page.shownPivot === 0
+
+        Text {
+            id: nameText
+
+            x: Ui.px(Ui.hubEdge)
+            y: Ui.px(page.nameBaseline) - nameText.baselineOffset
+            width: page.width - 2 * Ui.px(Ui.hubEdge)
+            text: page.deviceName
+            color: Ui.white(Ui.npArtist.alpha)
+            font: Ui.font(Ui.npArtist)
+            elide: Text.ElideRight
+        }
+
+        Text {
+            id: stateText
+
+            x: Ui.px(Ui.hubEdge)
+            y: Ui.px(page.stateBaseline) - stateText.baselineOffset
+            text: page.shownState
+            color: Ui.white(Ui.listCount.alpha)
+            font: Ui.font(Ui.listCount)
+        }
+
+        Glyph {
+            id: batteryGlyph
+
+            visible: page.battery >= 0
+            x: stateText.x + stateText.width + Ui.px(Ui.statusGap)
+            anchors.verticalCenter: stateText.verticalCenter
+            name: "battery"
+            size: Ui.statusHeight
+            level: page.battery / 100
+            color: page.battery < Ui.batteryLowPercent ? Ui.accent : Ui.textFull
+        }
+
+        FocusBar {
+            id: focusBar
+
+            visible: transportRow.visible
+            rowY: transportRow.y
+            rowHeight: transportRow.height
+            animated: page.live
+        }
+
+        ListRow {
+            id: transportRow
+
+            visible: page.transportActive
+            y: Ui.px(page.rowTop)
+            width: page.width
+            ring: true
+            ringGlyph: "play"
+            primary: page.trackTitle
+            secondary: page.trackArtist
+            focused: page.pivotIndex === 0
+            pressed: page.pressed && page.pivotIndex === 0 && page.transportActive
+            animated: page.live
+        }
+    }
+
+    Item {
+        id: pairingPage
+
+        width: page.width
+        height: page.height
+        visible: page.shownPivot === 1
+
+        Text {
+            id: discoverableText
+
+            x: Ui.px(Ui.hubEdge)
+            y: Ui.px(page.nameBaseline) - discoverableText.baselineOffset
+            text: "discoverable"
+            color: Ui.white(Ui.npArtist.alpha)
+            font: Ui.font(Ui.npArtist)
+        }
+
+        Item {
+            id: pulseHolder
+
+            x: Ui.px(Ui.canvasW / 2) - pulseHolder.width / 2
+            y: Ui.px(page.ringCenterY) - pulseHolder.height / 2
+            width: pairingRing.width
+            height: pairingRing.height
+            transformOrigin: Item.Center
+
+            Ring {
+                id: pairingRing
+
+                size: Ui.backRing
+                glyph: "bluetooth"
+                focused: true
+                arcSweep: page.arcSweep
+                pressed: page.pressed && page.pivotIndex === 1
+                animated: page.live
+            }
+        }
+
+        Text {
+            id: hintText
+
+            x: Ui.px(Ui.hubEdge)
+            y: Ui.px(page.hintBaseline) - hintText.baselineOffset
+            width: page.width - 2 * Ui.px(Ui.hubEdge)
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            lineHeight: Ui.px(Ui.qpHintPitch)
+            lineHeightMode: Text.FixedHeight
+            text: page.instructions
+            color: Ui.white(Ui.quickplayHint.alpha)
+            font: Ui.font(Ui.quickplayHint)
+        }
+    }
+
+    CroppedHeader {
+        id: header
+
+        text: "bluetooth"
+        shift: strip.headerShift
+        animated: page.live
+    }
+
+    PivotStrip {
+        id: strip
+
+        labels: page.pivots
+        activeIndex: page.pivotIndex
+        animated: page.live
+    }
+
+    SequentialAnimation {
+        id: pivotAnim
+
+        property Item outgoing: null
+        property Item incoming: null
+        property real dir: 1
+
+        ParallelAnimation {
+            NumberAnimation {
+                target: pivotAnim.outgoing
+                property: "x"
+                to: -pivotAnim.dir * Ui.px(Motion.pivotShift)
+                duration: Motion.pivotOut
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.strip
+            }
+            NumberAnimation {
+                target: pivotAnim.outgoing
+                property: "opacity"
+                to: 0
+                duration: Motion.pivotOut
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.strip
+            }
+        }
+        ScriptAction {
+            script: {
+                pivotAnim.incoming.x = pivotAnim.dir * Ui.px(Motion.pivotShift)
+                pivotAnim.incoming.opacity = 0
+                page.shownPivot = page.pivotIndex
+                pivotAnim.outgoing.x = 0
+                pivotAnim.outgoing.opacity = 1
+            }
+        }
+        ParallelAnimation {
+            NumberAnimation {
+                target: pivotAnim.incoming
+                property: "x"
+                to: 0
+                duration: Motion.pivotRows
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.strip
+            }
+            NumberAnimation {
+                target: pivotAnim.incoming
+                property: "opacity"
+                to: 1
+                duration: Motion.pivotRows
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.strip
+            }
+        }
+    }
+
+    SequentialAnimation {
+        id: stateSwap
+
+        NumberAnimation {
+            target: stateText
+            property: "opacity"
+            from: 1
+            to: Motion.valueDip
+            duration: Motion.valueChange
+        }
+        ScriptAction {
+            script: page.shownState = page.stateLine
+        }
+        NumberAnimation {
+            target: stateText
+            property: "opacity"
+            from: Motion.valueDip
+            to: 1
+            duration: Motion.valueChange
+        }
+    }
+
+    SequentialAnimation {
+        id: pulse
+
+        NumberAnimation {
+            target: pulseHolder
+            property: "scale"
+            from: Motion.pulse[0][1]
+            to: Motion.pulse[1][1]
+            duration: Motion.pulse[1][0] - Motion.pulse[0][0]
+            easing.type: Motion.sine
+        }
+        NumberAnimation {
+            target: pulseHolder
+            property: "scale"
+            to: Motion.pulse[2][1]
+            duration: Motion.pulse[2][0] - Motion.pulse[1][0]
+            easing.type: Motion.sine
+        }
+        NumberAnimation {
+            target: pulseHolder
+            property: "scale"
+            to: Motion.pulse[3][1]
+            duration: Motion.pulse[3][0] - Motion.pulse[2][0]
+            easing.type: Motion.sine
+        }
+        NumberAnimation {
+            target: pulseHolder
+            property: "scale"
+            to: Motion.pulse[4][1]
+            duration: Motion.pulse[4][0] - Motion.pulse[3][0]
+            easing.type: Motion.sine
+        }
+    }
+
+    Connections {
+        target: page.bluez
+        ignoreUnknownSignals: true
+
+        function onConnectedChanged() {
+            if (page.ready && page.live && page.connected)
+                pulse.restart()
+        }
+    }
+}

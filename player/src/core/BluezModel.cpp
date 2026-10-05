@@ -102,6 +102,19 @@ int BluezModel::pairingRemaining() const
     return m_pairingRemaining;
 }
 
+bool BluezModel::active() const
+{
+    return m_active;
+}
+
+void BluezModel::setActive(bool active)
+{
+    if (m_active == active)
+        return;
+    m_active = active;
+    emit activeChanged();
+}
+
 void BluezModel::updateConnected(bool connected)
 {
     if (m_connected == connected)

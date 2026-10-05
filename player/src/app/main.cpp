@@ -1,4 +1,5 @@
 #include "FakeBluezModel.h"
+#include "Gamescope.h"
 #include "Library.h"
 #include "Models.h"
 #include "Mpris.h"
@@ -9,6 +10,7 @@
 #include "Settings.h"
 #include "State.h"
 #include "StatusModel.h"
+#include "SystemBluezModel.h"
 #include "Version.h"
 
 #include <QCommandLineParser>
@@ -16,6 +18,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QGuiApplication>
+#include <QImage>
+#include <QQuickWindow>
+#include <QTimer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
@@ -130,11 +135,13 @@ int main(int argc, char *argv[])
     casdap::HistoryModel historyNew(&library);
     historyNew.setMode(casdap::HistoryModel::New);
     casdap::Player player(&library);
-    std::unique_ptr<casdap::FakeBluezModel> bluez;
-    if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1) {
+    std::unique_ptr<casdap::BluezModel> bluez;
+    if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1)
         bluez = std::make_unique<casdap::FakeBluezModel>();
-        player.setBluez(bluez.get());
-    }
+    else
+        bluez = std::make_unique<casdap::SystemBluezModel>(QDBusConnection::systemBus(),
+                                                           QDBusConnection::sessionBus());
+    player.setBluez(bluez.get());
     casdap::State state(&player);
     state.installSignalHandlers();
     state.load();
@@ -143,6 +150,8 @@ int main(int argc, char *argv[])
     casdap::StatusModel status;
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status,
                      [&power, &status] { status.setActive(!power.screenOff()); });
+    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, bluez.get(),
+                     [&power, model = bluez.get()] { model->setActive(!power.screenOff()); });
     casdap::Pad pad;
     pad.setPocketControls(settings.pocketControls());
     QObject::connect(&settings, &casdap::Settings::pocketControlsChanged, &pad,
@@ -164,5 +173,20 @@ int main(int argc, char *argv[])
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");
+    if (!engine.rootObjects().isEmpty())
+        casdap::claimGamescopeFocus(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
+
+    const QString grabOut = qEnvironmentVariable("CASDAP_GRAB_OUT");
+    auto *window = engine.rootObjects().isEmpty()
+                       ? nullptr
+                       : qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+    if (!grabOut.isEmpty() && window) {
+        const int delay = qEnvironmentVariableIntValue("CASDAP_GRAB_AFTER_MS");
+        QTimer::singleShot(delay > 0 ? delay : 3000, window, [window, grabOut] {
+            const QImage image = window->grabWindow();
+            QTextStream(stderr) << "casdap-player: grab " << image.width() << 'x' << image.height()
+                                << (image.save(grabOut, "PNG") ? " saved " : " failed ") << grabOut << '\n';
+        });
+    }
     return app.exec();
 }

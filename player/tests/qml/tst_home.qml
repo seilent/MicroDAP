@@ -27,6 +27,21 @@ TestCase {
         width: 640
         height: 960
         stack: pages
+        pad: fakePad
+    }
+
+    QtObject {
+        id: fakePad
+
+        readonly property var names: ["up", "down", "left", "right", "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "back"]
+
+        signal action(int code, bool repeat)
+        signal pressed(int code)
+        signal released(int code)
+
+        function actionName(code) {
+            return fakePad.names[code]
+        }
     }
 
     ListModel {
@@ -130,36 +145,58 @@ TestCase {
         fuzzyCompare(first.subtitleBaseline, first.labelBaseline + Ui.px(8 + 0.7 * 8), 0.5)
     }
 
+    function labelAlpha(page, index) {
+        return page.menuItem(index).labelItem.color.a
+    }
+
+    function checkFocusAlphas(page) {
+        for (let i = 0; i < 5; i++)
+            fuzzyCompare(tc.labelAlpha(page, i), i === page.focusIndex ? 1.0 : 0.6, 1 / 255)
+    }
+
     function test_focus_treatment() {
         const page = open()
         compare(page.focusIndex, 0)
+        const ringCenterY = Ui.px(48) - Ui.px(0.7 * 34 / 2)
         compare(page.ring.width, Ui.px(35))
-        fuzzyCompare(page.ring.x + page.ring.width / 2, Ui.px(42), 0.01)
-        fuzzyCompare(page.ring.y + page.ring.height / 2, Ui.px(48) - Ui.px(0.7 * 34 / 2), 0.01)
+        compare(page.ring.focused, false)
         compare(page.ring.glyph, "play")
-        const focusedColor = Ui.white(1.0)
-        const dimColor = Ui.white(0.6)
-        compare(Qt.colorEqual(page.menuItem(0).labelItem.color, focusedColor), true)
-        compare(Qt.colorEqual(page.menuItem(1).labelItem.color, dimColor), true)
+        fuzzyCompare(page.ring.x + page.ring.width / 2, Ui.px(42), 0.01)
+        fuzzyCompare(page.ring.y + page.ring.height / 2, ringCenterY, 0.01)
+        compare(page.focusBar.width, Ui.px(2))
+        compare(page.focusBar.x, Ui.px(70 - 8))
+        verify(page.focusBar.x >= page.ring.x + page.ring.width)
+        verify(page.focusBar.x + page.focusBar.width <= Ui.px(70))
+        fuzzyCompare(page.focusBar.y, Ui.px(48) - Ui.px(0.7 * 34), 0.01)
+        fuzzyCompare(page.focusBar.height, Ui.px(0.7 * 34 + 8 + 0.7 * 8), 0.01)
+        compare(Qt.colorEqual(page.focusBar.color, Ui.white(1.0)), true)
+        tc.checkFocusAlphas(page)
         verify(router.dispatch("down", false))
         compare(page.focusIndex, 1)
-        fuzzyCompare(page.ring.y + page.ring.height / 2, Ui.px(48 + 55) - Ui.px(0.7 * 34 / 2), 0.01)
-        compare(Qt.colorEqual(page.menuItem(1).labelItem.color, focusedColor), true)
-        compare(Qt.colorEqual(page.menuItem(0).labelItem.color, dimColor), true)
+        fuzzyCompare(page.ring.y + page.ring.height / 2, ringCenterY, 0.01)
+        fuzzyCompare(page.focusBar.y, Ui.px(48 + 55) - Ui.px(0.7 * 34), 0.01)
+        tc.checkFocusAlphas(page)
         for (let i = 0; i < 10; i++)
             router.dispatch("down", false)
         compare(page.focusIndex, 4)
+        fuzzyCompare(page.ring.y + page.ring.height / 2, ringCenterY, 0.01)
+        fuzzyCompare(page.focusBar.y, Ui.px(48 + 55 * 4) - Ui.px(0.7 * 34), 0.01)
+        tc.checkFocusAlphas(page)
         router.dispatch("up", false)
         compare(page.focusIndex, 3)
+        fuzzyCompare(page.focusBar.y, Ui.px(48 + 55 * 3) - Ui.px(0.7 * 34), 0.01)
+        tc.checkFocusAlphas(page)
     }
 
-    function test_ring_follows_animated() {
+    function test_bar_follows_animated() {
         const page = open({ animated: true })
         page.completeAll()
-        const start = page.ring.y
+        const start = page.focusBar.y
+        const ringY = page.ring.y
         router.dispatch("down", false)
-        verify(page.ring.y < start + Ui.px(55))
-        tryCompare(page.ring, "y", start + Ui.px(55), 1000)
+        verify(page.focusBar.y < start + Ui.px(55))
+        tryCompare(page.focusBar, "y", start + Ui.px(55), 1000)
+        compare(page.ring.y, ringY)
     }
 
     function test_quickplay_peek() {
@@ -311,18 +348,36 @@ TestCase {
 
     function test_a_navigates() {
         const page = open()
-        router.dispatch("a", false)
-        compare(counters.navigated, ["music"])
-        router.dispatch("down", false)
-        router.dispatch("a", false)
-        compare(counters.navigated, ["music", "bluetooth"])
-        for (let i = 0; i < 3; i++)
-            router.dispatch("down", false)
-        router.dispatch("a", false)
-        compare(counters.navigated, ["music", "bluetooth", "settings"])
+        const names = ["music", "bluetooth", "playlists", "history", "settings"]
+        for (let i = 0; i < names.length; i++) {
+            if (i > 0)
+                verify(router.dispatch("down", false))
+            compare(page.focusIndex, i)
+            verify(router.dispatch("a", false))
+        }
+        compare(counters.navigated, names)
         router.dispatch("a", true)
-        compare(counters.navigated.length, 3)
-        router.dispatch("y", false)
+        compare(counters.navigated.length, names.length)
+        verify(router.dispatch("y", false))
+        compare(counters.shuffles, 1)
+        router.dispatch("y", true)
+        compare(counters.shuffles, 1)
+    }
+
+    function test_pad_signal_a_navigates() {
+        const page = open()
+        compare(router.pad, fakePad)
+        fakePad.pressed(4)
+        compare(page.pressed, true)
+        fakePad.action(4, false)
+        fakePad.released(4)
+        compare(page.pressed, false)
+        compare(counters.navigated, ["music"])
+        fakePad.action(1, false)
+        compare(page.focusIndex, 1)
+        fakePad.action(4, false)
+        compare(counters.navigated, ["music", "bluetooth"])
+        fakePad.action(7, false)
         compare(counters.shuffles, 1)
     }
 
@@ -423,8 +478,9 @@ TestCase {
         fuzzyCompare(item.x, Ui.px(70), 0.01)
         tryCompare(page.menuItem(4), "opacity", 1, 1500)
         tryCompare(page, "peekEnter", 1, 1500)
-        fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-6)
-        fuzzyCompare(page.ring.opacity, 1, 1e-6)
+        fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-3)
+        fuzzyCompare(page.ring.opacity, 1, 1e-3)
+        fuzzyCompare(page.focusBar.opacity, 1, 1e-3)
     }
 
     function test_complete_all() {

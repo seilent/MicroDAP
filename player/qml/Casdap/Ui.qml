@@ -249,4 +249,7 @@ QtObject {
     readonly property real qpHintW: 140
     readonly property real qpTilePad: 5
     readonly property real homeMenuXLandscape: 240
+    readonly property real homeBarX: ui.homeTextX - ui.focusBarOffset
+    readonly property real homeBarTop: ui.capHeight * ui.homeItem.size
+    readonly property real homeBarH: ui.homeBarTop + ui.homeSubtitleDrop + ui.capHeight * ui.homeSubtitle.size
 }

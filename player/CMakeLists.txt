@@ -9,6 +9,7 @@ find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Qml Quick QuickTest DBus Sql 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
+pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
 find_package(SDL3 REQUIRED CONFIG)
 
 qt_standard_project_setup(REQUIRES 6.11)
@@ -40,6 +41,8 @@ add_library(casdapcore STATIC
     src/core/State.h
     src/core/StatusModel.cpp
     src/core/StatusModel.h
+    src/core/SystemBluezModel.cpp
+    src/core/SystemBluezModel.h
     src/core/Version.cpp
     src/core/Version.h
 )
@@ -95,6 +98,8 @@ set(casdap_qml
     qml/Casdap/HomeShot.qml
     qml/Casdap/screens/Home.qml
     qml/Casdap/screens/Quickplay.qml
+    qml/Casdap/screens/Bluetooth.qml
+    qml/Casdap/BluetoothShot.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)
@@ -117,10 +122,12 @@ target_link_libraries(casdapui PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 
 qt_add_executable(casdap-player
     src/app/main.cpp
+    src/app/Gamescope.cpp
+    src/app/Gamescope.h
     src/app/Screenshot.cpp
     src/app/Screenshot.h
 )
-target_link_libraries(casdap-player PRIVATE casdapcore casdapuiplugin Qt6::Gui Qt6::Quick)
+target_link_libraries(casdap-player PRIVATE casdapcore casdapuiplugin Qt6::Gui Qt6::Quick PkgConfig::XCB)
 
 install(TARGETS casdap-player RUNTIME DESTINATION bin)
 

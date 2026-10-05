@@ -73,6 +73,7 @@ const QStringList &screens()
         QStringLiteral("volume"),
         QStringLiteral("home"),
         QStringLiteral("quickplay"),
+        QStringLiteral("bluetooth"),
     };
     return names;
 }
