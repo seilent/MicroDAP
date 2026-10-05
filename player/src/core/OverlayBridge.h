@@ -41,6 +41,7 @@ public:
     Player *player() const;
     QWindow *window() const;
     void setWindow(QWindow *window, WindowPrepare prepare = {});
+    bool ready() const;
     bool shown() const;
     bool mapped() const;
     qreal opacity() const;
@@ -66,6 +67,7 @@ private:
     void setMapped(bool mapped);
     void mapWindow();
     void destroyWindow();
+    void notifyReady();
     void ping();
 
     DbusPad *m_pad;
@@ -74,6 +76,7 @@ private:
     WindowPrepare m_prepare;
     QVariantAnimation m_fade;
     QTimer m_watchdog;
+    bool m_ready = false;
     bool m_shown = false;
     bool m_mapped = false;
     bool m_fading = false;

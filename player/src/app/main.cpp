@@ -18,6 +18,7 @@
 
 #include <QCommandLineParser>
 #include <QDBusConnection>
+#include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QGuiApplication>
@@ -152,9 +153,13 @@ int main(int argc, char *argv[])
     state.load();
     casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
     casdap::PowerBridge power(&player, QDBusConnection::sessionBus());
+    const bool overlayMode = parser.isSet(overlayOption);
+    if (overlayMode && !power.isRegistered()) {
+        qWarning() << "casdap overlay: another player owns org.casdap.Player, exiting";
+        return 0;
+    }
     casdap::StatusModel status;
 
-    const bool overlayMode = parser.isSet(overlayOption);
     std::unique_ptr<casdap::PadSource> pad;
     std::unique_ptr<casdap::OverlayBridge> overlay;
     if (overlayMode) {

@@ -167,7 +167,10 @@ the current opacity without a second map or destroy; `Show` during a show fade a
 nothing. `SetScreenOff` and `ShowPowerMenu` are logged and ignored in this mode. While hidden the
 4 Hz position poll is off (`position` is read from `playbin` for each save), `StatusModel` and the
 Bluetooth interpolation are inactive, the QML root is not visible. With `NOTIFY_SOCKET` set the bridge
-sends `WATCHDOG=1` every 7 s, shown or hidden.
+sends `READY=1` once after `org.casdap.Player` is registered and the hidden window is created, then
+`WATCHDOG=1` every 7 s, shown or hidden. When `org.casdap.Player` is already owned at start the
+overlay instance logs `another player owns org.casdap.Player, exiting` and exits 0; the DAP instance
+warns and continues.
 
 `casdap-overlay.service` (user unit) runs `casdap-player --overlay` with `DISPLAY=:0` and
 `QT_QPA_PLATFORM=xcb`, no `CASDAP_GAMESCOPE_APPID`. `BindsTo=` and `After=`

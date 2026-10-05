@@ -57,6 +57,7 @@ public slots:
 private slots:
     void initTestCase();
     void registered();
+    void secondInstanceNotRegistered();
     void screenOff();
     void powerMenu();
     void overlayNotSupported();
@@ -179,6 +180,24 @@ void PowerTest::registered()
     QCOMPARE(m_remote->property("OverlayShown").toBool(), false);
     QVERIFY(!m_bridge->overlayMode());
     QCOMPARE(m_bridge->overlay(), nullptr);
+}
+
+void PowerTest::secondInstanceNotRegistered()
+{
+    QDBusConnection second = QDBusConnection::connectToBus(QDBusConnection::SessionBus,
+                                                           QStringLiteral("casdap-test-second"));
+    QVERIFY(second.isConnected());
+    {
+        PowerBridge other(nullptr, second);
+        QVERIFY(!other.isRegistered());
+        QVERIFY(m_bridge->isRegistered());
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("casdap-test-second"));
+
+    QDBusReply<QString> owner = QDBusConnection::sessionBus().interface()->serviceOwner(PowerBridge::serviceName());
+    QVERIFY2(owner.isValid(), qPrintable(owner.error().message()));
+    QCOMPARE(owner.value(), QDBusConnection::sessionBus().baseService());
+    QCOMPARE(m_remote->property("ScreenOff").toBool(), false);
 }
 
 void PowerTest::screenOff()

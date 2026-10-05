@@ -34,10 +34,8 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     m_watchdog.setTimerType(Qt::CoarseTimer);
     m_watchdog.setInterval(WatchdogMs);
     connect(&m_watchdog, &QTimer::timeout, this, &OverlayBridge::ping);
-    if (!notifySocket().isEmpty()) {
-        ping();
+    if (!notifySocket().isEmpty())
         m_watchdog.start();
-    }
 }
 
 OverlayBridge::~OverlayBridge()
@@ -98,6 +96,12 @@ void OverlayBridge::setWindow(QWindow *window, WindowPrepare prepare)
     m_prepare = prepare ? std::move(prepare) : WindowPrepare([](QWindow *target) { target->create(); });
     if (m_window && !m_window->handle())
         m_prepare(m_window);
+    notifyReady();
+}
+
+bool OverlayBridge::ready() const
+{
+    return m_ready;
 }
 
 bool OverlayBridge::shown() const
@@ -229,6 +233,18 @@ void OverlayBridge::destroyWindow()
         return;
     m_window->setVisible(false);
     m_window->destroy();
+}
+
+void OverlayBridge::notifyReady()
+{
+    if (m_ready)
+        return;
+    m_ready = true;
+    if (notifySocket().isEmpty())
+        return;
+    if (!notify(QByteArrayLiteral("READY=1\n")))
+        qWarning() << "casdap overlay: ready notify failed" << notifySocket();
+    ping();
 }
 
 void OverlayBridge::ping()

@@ -72,7 +72,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     void hiddenAtStart();
-    void watchdogHidden();
+    void readyBeforeWatchdog();
     void toggleShows();
     void watchdogShown();
     void hideWritesZeroBeforeFade();
@@ -261,10 +261,12 @@ void OverlayTest::initTestCase()
     QVERIFY(m_window);
     QVERIFY(!m_window->handle());
     QVERIFY(!m_window->isVisible());
+    QVERIFY(!m_overlay->ready());
     m_overlay->setWindow(m_window, [](QWindow *target) {
         target->create();
         target->setWindowState(Qt::WindowFullScreen);
     });
+    QVERIFY(m_overlay->ready());
     QCOMPARE(m_overlay->window(), static_cast<QWindow *>(m_window.data()));
 }
 
@@ -303,8 +305,11 @@ void OverlayTest::hiddenAtStart()
     QCOMPARE(depth(), 1);
 }
 
-void OverlayTest::watchdogHidden()
+void OverlayTest::readyBeforeWatchdog()
 {
+    QVERIFY(m_overlay->ready());
+    QCOMPARE(readNotify(watchdogTimeoutMs), QByteArrayLiteral("READY=1\n"));
+    QCOMPARE(readNotify(watchdogTimeoutMs), QByteArrayLiteral("WATCHDOG=1\n"));
     QCOMPARE(readNotify(watchdogTimeoutMs), QByteArrayLiteral("WATCHDOG=1\n"));
 }
 
