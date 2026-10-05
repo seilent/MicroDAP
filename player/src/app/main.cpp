@@ -2,6 +2,7 @@
 #include "DbusPad.h"
 #include "Gamescope.h"
 #include "Intercept.h"
+#include "Keep.h"
 #include "Library.h"
 #include "Models.h"
 #include "Mpris.h"
@@ -157,6 +158,10 @@ int main(int argc, char *argv[])
     if (overlayMode && !power.isRegistered()) {
         qWarning() << "casdap overlay: another player owns org.casdap.Player, exiting";
         return 0;
+    }
+    if (!overlayMode) {
+        casdap::Keep::clear();
+        state.setKeep(power.keep());
     }
     casdap::StatusModel status;
 

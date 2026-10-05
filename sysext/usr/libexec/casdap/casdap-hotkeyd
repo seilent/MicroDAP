@@ -113,6 +113,25 @@ toggle_overlay() {
     esac
 }
 
+show_switch_prompt() {
+    local err rc=0
+    if [[ "${DRY_RUN}" == 1 ]]; then
+        run busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt
+        return 0
+    fi
+    err=$(busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt 2>&1 >/dev/null) || rc=$?
+    (( rc == 0 )) && return 0
+    case "${err}" in
+        *"The name is not activatable"*)
+            log "no player, switching back"
+            run systemctl start casdap-switch-back.service
+            ;;
+        *)
+            log "failed: ShowSwitchPrompt (rc=${rc}) ${err}"
+            ;;
+    esac
+}
+
 on_tap() {
     case "$1" in
         casdap) run busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause ;;
@@ -143,7 +162,7 @@ on_hold() {
             run systemctl start casdap-switch.service
             ;;
         casdap)
-            run systemctl start casdap-switch-back.service
+            show_switch_prompt
             ;;
         other)
             if plasma_running; then

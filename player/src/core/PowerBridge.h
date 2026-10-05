@@ -1,12 +1,16 @@
 #pragma once
 
+#include "Keep.h"
+
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
 #include <QDBusContext>
 #include <QObject>
+#include <QProcess>
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantMap>
 
 namespace casdap {
@@ -36,6 +40,7 @@ public slots:
     void ShowOverlay();
     void HideOverlay();
     void ToggleOverlay();
+    void ShowSwitchPrompt();
 
 signals:
     void ScreenOffChanged(bool screenOff);
@@ -50,6 +55,7 @@ class PowerBridge : public QObject, protected QDBusContext
     Q_PROPERTY(bool screenOff READ screenOff WRITE setScreenOff NOTIFY screenOffChanged)
     Q_PROPERTY(int volume READ volume NOTIFY volumeChanged)
     Q_PROPERTY(QStringList driftPaths READ driftPaths NOTIFY driftPathsChanged)
+    Q_PROPERTY(bool switching READ switching NOTIFY switchingChanged)
 
 public:
     PowerBridge(Player *player, const QDBusConnection &bus, QObject *parent = nullptr);
@@ -63,6 +69,8 @@ public:
     static QString notSupportedError();
     static QStringList verbs();
     static QStringList commandFor(const QString &verb);
+    static QStringList switchCommand();
+    static int switchTimeoutMs();
     static QString driftFile();
 
     bool isRegistered() const;
@@ -70,6 +78,7 @@ public:
     OverlayBridge *overlay() const;
     void setOverlay(OverlayBridge *overlay);
     bool overlayMode() const;
+    Keep *keep();
 
     bool screenOff() const;
     void setScreenOff(bool off);
@@ -77,10 +86,14 @@ public:
     QStringList driftPaths() const;
     QString playbackStatus() const;
     bool overlayShown() const;
+    bool switching() const;
 
     Q_INVOKABLE bool runVerb(const QString &verb);
     Q_INVOKABLE void reloadDrift();
+    Q_INVOKABLE void keepInBackground();
+    Q_INVOKABLE void closeAndSwitch();
     void requestPowerMenu();
+    void requestSwitchPrompt();
     void requestScreenOff(bool off);
     void showOverlay();
     void hideOverlay();
@@ -91,12 +104,22 @@ signals:
     void volumeChanged(int volume);
     void driftPathsChanged();
     void showPowerMenu();
+    void showSwitchPrompt();
+    void switchFailed();
+    void switchingChanged();
 
 private slots:
     void onVolumeChanged(double level);
+    void onSwitchFinished(int code, QProcess::ExitStatus status);
+    void onSwitchError(QProcess::ProcessError error);
+    void onSwitchTimeout();
 
 private:
     bool rejectWithoutOverlay(const char *member);
+    QString programPath(const QString &name) const;
+    void startSwitch();
+    void failSwitch(const QString &reason);
+    void dropSwitchProcess();
     void notifyPlaybackStatus();
     void notifyOverlayShown();
     void emitPropertiesChanged(const QVariantMap &changed);
@@ -106,6 +129,9 @@ private:
     QDBusConnection m_bus;
     PowerBridgeAdaptor *m_adaptor;
     OverlayBridge *m_overlay = nullptr;
+    Keep m_keep;
+    QProcess *m_switch = nullptr;
+    QTimer m_switchTimer;
     bool m_registered = false;
     bool m_screenOff = false;
     int m_volume = 0;

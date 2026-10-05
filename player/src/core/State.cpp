@@ -1,5 +1,6 @@
 #include "State.h"
 
+#include "Keep.h"
 #include "Player.h"
 #include "Queue.h"
 
@@ -100,6 +101,16 @@ QString State::path() const
     return m_path;
 }
 
+Keep *State::keep() const
+{
+    return m_keep;
+}
+
+void State::setKeep(Keep *keep)
+{
+    m_keep = keep;
+}
+
 void State::onStatusChanged()
 {
     if (m_player->status() == Player::Playing)
@@ -165,7 +176,10 @@ bool State::saveNow()
 
 bool State::saveExit()
 {
-    return save(true);
+    const bool ok = save(true);
+    if (m_keep)
+        m_keep->saveExit();
+    return ok;
 }
 
 void State::quit()

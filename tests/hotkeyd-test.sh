@@ -60,10 +60,14 @@ EOF
 cat > "${T}/bin/busctl" <<'EOF'
 #!/usr/bin/bash
 echo "busctl $*" >> "${STATE}/calls"
-if [[ "$*" == *ToggleOverlay && -s "${STATE}/busctl-stderr" ]]; then
-    cat "${STATE}/busctl-stderr" >&2
-    exit 1
-fi
+case "$*" in
+    *ToggleOverlay|*ShowSwitchPrompt)
+        if [[ -s "${STATE}/busctl-stderr" ]]; then
+            cat "${STATE}/busctl-stderr" >&2
+            exit 1
+        fi
+        ;;
+esac
 EOF
 
 cat > "${T}/bin/wpctl" <<'EOF'
@@ -132,6 +136,7 @@ getvol="wpctl get-volume @DEFAULT_AUDIO_SINK@"
 unmute="wpctl set-mute @DEFAULT_AUDIO_SINK@ 0"
 emit="busctl --user emit /org/casdap/Hotkeys org.casdap.Hotkeys VolumeChanged d 0.40"
 toggle="busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay"
+prompt="busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt"
 restart="systemctl --user restart casdap-overlay.service"
 intercept="casdap-intercept get"
 
@@ -215,11 +220,34 @@ run_case "hold in game with title, too late" game 1 0 "press;sleep 0.4;release;s
 expect_calls 0
 
 run_case "hold in casdap" casdap 0 0 "press;sleep 0.4;release"
-expect_call "${back}"
+expect_call "${prompt}"
+expect_no_call "${back}"
 expect_calls 1
+expect_log "hold in casdap"
+
+run_case "hold in casdap dry run" casdap 0 0 "press;sleep 0.4;release" 1
+expect_calls 0
+expect_log "would: ${prompt}"
+
+BUSCTL_ERR="Call failed: The name is not activatable" run_case "hold in casdap without a player" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${prompt}"
+expect_call "${back}"
+expect_calls 2
+expect_log "no player, switching back"
+
+BUSCTL_ERR="Call failed: Connection timed out" run_case "hold in casdap with a hung player" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${prompt}"
+expect_no_call "${back}"
+expect_calls 1
+expect_log "failed: ShowSwitchPrompt"
+
+run_case "hold then hold in casdap" casdap 0 0 "press;sleep 0.4;release;sleep 0.1;press;sleep 0.4;release"
+expect_call_count "${prompt}" 2
+expect_calls 2
 
 run_case "tap in casdap" casdap 0 0 "press;sleep 0.05;release"
 expect_call "${playpause}"
+expect_no_call "${prompt}"
 expect_calls 1
 
 run_case "hold in other with plasma" other 0 1 "press;sleep 0.4;release"

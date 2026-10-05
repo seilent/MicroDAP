@@ -14,11 +14,13 @@ Window {
     readonly property var historyRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
     readonly property var historyNew: typeof HistoryNew === "undefined" ? null : HistoryNew
 
-    readonly property bool powerScreenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
-    readonly property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
-    readonly property var player: root.screenshot || typeof Player === "undefined" ? null : Player
+    property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
+    property var player: root.screenshot || typeof Player === "undefined" ? null : Player
+    readonly property bool powerScreenOff: root.power !== null && root.power.screenOff === true
     readonly property var bridge: root.screenshot || typeof OverlayBridge === "undefined" ? null : OverlayBridge
     readonly property string topScreen: pages.currentItem !== null ? pages.currentItem.objectName : ""
+    readonly property int statusPlaying: 1
+    readonly property bool playing: root.player !== null && root.player.status === root.statusPlaying
 
     property bool overlay: root.bridge !== null
     property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
@@ -28,6 +30,8 @@ Window {
     property alias pageStack: pages
     property alias overlayLayer: overlays
     property alias background: bg
+    property alias switchPrompt: switchPrompt
+    property alias router: router
 
     width: shotWidth
     height: shotHeight
@@ -42,6 +46,7 @@ Window {
             return
         pages.completeAll()
         overlays.completeAll()
+        switchPrompt.complete()
     }
     Component.onCompleted: {
         Ui.windowW = root.width
@@ -56,6 +61,46 @@ Window {
             return
         }
         console.info("casdap: navigate " + name)
+    }
+
+    function closeSheets() {
+        const top = pages.currentItem
+        if (top === null || top.sheet === undefined || top.sheet === null)
+            return
+        if (top.sheet.shown)
+            top.sheet.close()
+    }
+
+    function showSwitchPrompt() {
+        if (root.off) {
+            console.info("casdap: ShowSwitchPrompt ignored, screen off")
+            return
+        }
+        if (switchPrompt.shown) {
+            switchPrompt.close()
+            return
+        }
+        root.closeSheets()
+        switchPrompt.show(root.playing)
+    }
+
+    function switchFailed() {
+        if (switchPrompt.shown)
+            switchPrompt.close()
+        overlays.toast.show("", "switch failed")
+    }
+
+    Connections {
+        target: root.power
+        ignoreUnknownSignals: true
+
+        function onShowSwitchPrompt() {
+            root.showSwitchPrompt()
+        }
+
+        function onSwitchFailed() {
+            root.switchFailed()
+        }
     }
 
     Binding {
@@ -84,11 +129,27 @@ Window {
 
         anchors.fill: parent
         stack: pages
+        modal: switchPrompt
         pad: typeof Pad === "undefined" ? null : Pad
         player: typeof Player === "undefined" ? null : Player
         screenOff: root.off
         pocketControls: !root.overlay && (typeof Settings === "undefined" ? false : Settings.pocketControls)
         onNowPlaying: console.info("casdap: navigate nowplaying")
+    }
+
+    SwitchPrompt {
+        id: switchPrompt
+
+        anchors.fill: parent
+        screenOff: root.off
+        onClosePlayer: {
+            if (root.power !== null)
+                root.power.closeAndSwitch()
+        }
+        onKeepInBackground: {
+            if (root.power !== null)
+                root.power.keepInBackground()
+        }
     }
 
     OverlayLayer {
@@ -142,7 +203,13 @@ Window {
             : root.shotScreen === "home" ? homeShotComponent
             : root.shotScreen === "quickplay" ? quickplayShotComponent
             : root.shotScreen === "bluetooth" ? bluetoothShotComponent
+            : root.shotScreen === "prompt" ? promptShotComponent
             : null
+    }
+
+    Component {
+        id: promptShotComponent
+        PromptShot {}
     }
 
     Component {

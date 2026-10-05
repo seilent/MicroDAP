@@ -9,6 +9,7 @@
     <method name="ShowOverlay"/>
     <method name="HideOverlay"/>
     <method name="ToggleOverlay"/>
+    <method name="ShowSwitchPrompt"/>
     <property name="ScreenOff" type="b" access="read"/>
     <property name="PlaybackStatus" type="s" access="read"/>
     <property name="OverlayShown" type="b" access="read"/>

@@ -23,6 +23,8 @@ add_library(casdapcore STATIC
     src/core/FakeBluezModel.h
     src/core/Intercept.cpp
     src/core/Intercept.h
+    src/core/Keep.cpp
+    src/core/Keep.h
     src/core/Library.cpp
     src/core/Library.h
     src/core/Models.cpp
@@ -107,8 +109,10 @@ set(casdap_qml
     qml/Casdap/screens/Home.qml
     qml/Casdap/screens/Quickplay.qml
     qml/Casdap/screens/Bluetooth.qml
+    qml/Casdap/screens/SwitchPrompt.qml
     qml/Casdap/OverlayLayer.qml
     qml/Casdap/BluetoothShot.qml
+    qml/Casdap/PromptShot.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)

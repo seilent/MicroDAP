@@ -70,12 +70,20 @@ void PowerBridgeAdaptor::ToggleOverlay()
     m_bridge->toggleOverlay();
 }
 
+void PowerBridgeAdaptor::ShowSwitchPrompt()
+{
+    qInfo() << "casdap power: ShowSwitchPrompt";
+    m_bridge->requestSwitchPrompt();
+}
+
 PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *parent)
     : QObject(parent)
     , m_player(player)
     , m_bus(bus)
     , m_adaptor(new PowerBridgeAdaptor(this))
 {
+    m_switchTimer.setSingleShot(true);
+    connect(&m_switchTimer, &QTimer::timeout, this, &PowerBridge::onSwitchTimeout);
     reloadDrift();
     if (m_player)
         connect(m_player, &Player::statusChanged, this, &PowerBridge::notifyPlaybackStatus);
@@ -105,6 +113,7 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
 
 PowerBridge::~PowerBridge()
 {
+    dropSwitchProcess();
     if (!m_registered)
         return;
     m_bus.unregisterService(serviceName());
@@ -165,6 +174,18 @@ QStringList PowerBridge::commandFor(const QString &verb)
     return {};
 }
 
+QStringList PowerBridge::switchCommand()
+{
+    return {QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("casdap-switch-back.service")};
+}
+
+int PowerBridge::switchTimeoutMs()
+{
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue("CASDAP_SWITCH_TIMEOUT_MS", &ok);
+    return ok && value > 0 ? value : 30000;
+}
+
 QString PowerBridge::driftFile()
 {
     return qEnvironmentVariable("CASDAP_DRIFT_FILE", QStringLiteral("/run/casdap/drift"));
@@ -201,6 +222,11 @@ void PowerBridge::setOverlay(OverlayBridge *overlay)
 bool PowerBridge::overlayMode() const
 {
     return m_overlay != nullptr;
+}
+
+Keep *PowerBridge::keep()
+{
+    return &m_keep;
 }
 
 bool PowerBridge::screenOff() const
@@ -248,6 +274,19 @@ bool PowerBridge::overlayShown() const
     return m_overlay && m_overlay->shown();
 }
 
+bool PowerBridge::switching() const
+{
+    return m_switchTimer.isActive();
+}
+
+QString PowerBridge::programPath(const QString &name) const
+{
+    const QString dir = qEnvironmentVariable("CASDAP_VERB_DIR");
+    if (dir.isEmpty())
+        return name;
+    return dir + QLatin1Char('/') + name;
+}
+
 bool PowerBridge::runVerb(const QString &verb)
 {
     QStringList command = commandFor(verb);
@@ -255,10 +294,7 @@ bool PowerBridge::runVerb(const QString &verb)
         qWarning() << "casdap power: unknown verb" << verb;
         return false;
     }
-    QString program = command.takeFirst();
-    const QString dir = qEnvironmentVariable("CASDAP_VERB_DIR");
-    if (!dir.isEmpty())
-        program = dir + QLatin1Char('/') + program;
+    const QString program = programPath(command.takeFirst());
     qInfo() << "casdap power: verb" << verb << program << command;
     const bool started = QProcess::startDetached(program, command);
     if (!started && !m_failedVerbs.contains(verb)) {
@@ -292,6 +328,95 @@ void PowerBridge::requestPowerMenu()
         return;
     }
     emit showPowerMenu();
+}
+
+void PowerBridge::requestSwitchPrompt()
+{
+    if (m_overlay) {
+        qInfo() << "casdap power: ShowSwitchPrompt needs dap mode";
+        if (calledFromDBus())
+            sendErrorReply(notSupportedError(), QStringLiteral("ShowSwitchPrompt needs dap mode"));
+        return;
+    }
+    emit showSwitchPrompt();
+}
+
+void PowerBridge::keepInBackground()
+{
+    qInfo() << "casdap power: keep in background";
+    m_keep.setFlag(true);
+    startSwitch();
+}
+
+void PowerBridge::closeAndSwitch()
+{
+    qInfo() << "casdap power: close player";
+    m_keep.setFlag(false);
+    Keep::clear();
+    startSwitch();
+}
+
+void PowerBridge::startSwitch()
+{
+    if (switching()) {
+        qInfo() << "casdap power: switch already running";
+        return;
+    }
+    QStringList command = switchCommand();
+    const QString program = programPath(command.takeFirst());
+    qInfo() << "casdap power: switch" << program << command;
+    m_switch = new QProcess(this);
+    connect(m_switch, &QProcess::finished, this, &PowerBridge::onSwitchFinished);
+    connect(m_switch, &QProcess::errorOccurred, this, &PowerBridge::onSwitchError);
+    m_switchTimer.start(switchTimeoutMs());
+    emit switchingChanged();
+    m_switch->start(program, command);
+}
+
+void PowerBridge::onSwitchFinished(int code, QProcess::ExitStatus status)
+{
+    if (status == QProcess::NormalExit && code == 0) {
+        qInfo() << "casdap power: switch start returned 0, waiting for the session stop";
+        dropSwitchProcess();
+        return;
+    }
+    failSwitch(QStringLiteral("exit %1").arg(status == QProcess::NormalExit ? code : -1));
+}
+
+void PowerBridge::onSwitchError(QProcess::ProcessError error)
+{
+    if (error != QProcess::FailedToStart)
+        return;
+    failSwitch(QStringLiteral("cannot start"));
+}
+
+void PowerBridge::onSwitchTimeout()
+{
+    failSwitch(QStringLiteral("no session stop within %1 ms").arg(switchTimeoutMs()));
+}
+
+void PowerBridge::failSwitch(const QString &reason)
+{
+    qWarning().noquote() << "casdap power: switch failed," << reason;
+    m_switchTimer.stop();
+    dropSwitchProcess();
+    m_keep.setFlag(false);
+    Keep::clear();
+    emit switchingChanged();
+    emit switchFailed();
+}
+
+void PowerBridge::dropSwitchProcess()
+{
+    if (!m_switch)
+        return;
+    m_switch->disconnect(this);
+    if (m_switch->state() != QProcess::NotRunning) {
+        m_switch->kill();
+        m_switch->waitForFinished(1000);
+    }
+    m_switch->deleteLater();
+    m_switch = nullptr;
 }
 
 void PowerBridge::requestScreenOff(bool off)

@@ -82,6 +82,7 @@ private slots:
     void showDuringShowFadeNoOp();
     void screenOffIgnored();
     void powerMenuIgnored();
+    void switchPromptNotSupported();
     void introspection();
     void hideWithDestroyedWindowNoOp();
 
@@ -514,6 +515,18 @@ void OverlayTest::powerMenuIgnored()
     QCOMPARE(spy.count(), 0);
 }
 
+void OverlayTest::switchPromptNotSupported()
+{
+    QSignalSpy spy(m_power.get(), &PowerBridge::showSwitchPrompt);
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowSwitchPrompt");
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowSwitchPrompt needs dap mode");
+    QDBusReply<void> reply = m_remote->call(QStringLiteral("ShowSwitchPrompt"));
+    QVERIFY(!reply.isValid());
+    QCOMPARE(reply.error().name(), PowerBridge::notSupportedError());
+    QCoreApplication::processEvents();
+    QCOMPARE(spy.count(), 0);
+}
+
 void OverlayTest::introspection()
 {
     QDBusInterface introspectable(PowerBridge::serviceName(), PowerBridge::objectPath(),
@@ -524,6 +537,7 @@ void OverlayTest::introspection()
     QVERIFY(xml.value().contains(QStringLiteral("ShowOverlay")));
     QVERIFY(xml.value().contains(QStringLiteral("HideOverlay")));
     QVERIFY(xml.value().contains(QStringLiteral("ToggleOverlay")));
+    QVERIFY(xml.value().contains(QStringLiteral("ShowSwitchPrompt")));
     QVERIFY(xml.value().contains(QStringLiteral("OverlayShown")));
     settleHidden();
 }
