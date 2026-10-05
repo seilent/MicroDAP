@@ -203,7 +203,13 @@ does not flow during stick calibration.
 `casdap-hotkeyd` (user unit, `Upholds=` from `default.target.d`) reads that node with `evtest` and
 classifies each press by the running session. Hold 1 s in game mode starts `casdap-switch.service`.
 While a title runs the first hold is ignored and a
-second hold within 3 s switches. Hold in casdap starts `casdap-switch-back.service`, tap sends
+second hold within 3 s switches. Tap in game mode runs `systemctl --user is-active
+casdap-overlay.service`; `active` means a background player exists and the tap calls
+`busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay`,
+anything else logs `no background player`. `Call failed: The name is not activatable` (the unit is
+still starting) logs `overlay player starting`; `Call failed: Connection timed out` runs
+`casdap-intercept get` and restarts `casdap-overlay.service` when it prints `3`, else logs `overlay
+timeout, pad free`. hotkeyd never starts the unit. Hold in casdap starts `casdap-switch-back.service`, tap sends
 `PlayPause` to `org.mpris.MediaPlayer2.casdap`. In Plasma a hold switches; in any other session it
 logs. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
 list override `CASDAP_HOTKEYD_VOLUME_NAMES=a:b`, read with their own `evtest` streams) step

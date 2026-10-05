@@ -10,6 +10,7 @@ DRY_RUN="${CASDAP_HOTKEYD_DRY_RUN:-0}"
 KEY="${CASDAP_HOTKEYD_KEY:-KEY_F13}"
 DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
 SYS_INPUT="${CASDAP_SYS_INPUT:-/sys/class/input}"
+PATH="${PATH}:/usr/libexec/casdap"
 
 log() { logger -t casdap-hotkeyd -- "$*"; }
 
@@ -86,9 +87,42 @@ last_hold_ms=0
 vol_key=
 vol_session=
 
+toggle_overlay() {
+    local err rc=0
+    if [[ "${DRY_RUN}" == 1 ]]; then
+        run busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay
+        return 0
+    fi
+    err=$(busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay 2>&1 >/dev/null) || rc=$?
+    (( rc == 0 )) && return 0
+    case "${err}" in
+        *"The name is not activatable"*)
+            log "overlay player starting"
+            ;;
+        *"Connection timed out"*)
+            if [[ "$(casdap-intercept get 2>/dev/null)" == 3 ]]; then
+                log "overlay timeout, pad held, restarting casdap-overlay.service"
+                run systemctl --user restart casdap-overlay.service
+            else
+                log "overlay timeout, pad free"
+            fi
+            ;;
+        *)
+            log "failed: ToggleOverlay (rc=${rc}) ${err}"
+            ;;
+    esac
+}
+
 on_tap() {
     case "$1" in
         casdap) run busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause ;;
+        game)
+            if [[ "$(systemctl --user is-active casdap-overlay.service 2>/dev/null)" == active ]]; then
+                toggle_overlay
+            else
+                log "no background player"
+            fi
+            ;;
         *) log "tap in ${1}, ignored" ;;
     esac
 }

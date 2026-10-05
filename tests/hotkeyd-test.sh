@@ -37,8 +37,15 @@ cat > "${T}/bin/systemctl" <<'EOF'
 case "$*" in
     "--user is-active --quiet gamescope-session-plus@casdap.service") [[ "$(cat "${STATE}/session")" == casdap ]] ;;
     "--user is-active --quiet gamescope-session-plus@steam.service")  [[ "$(cat "${STATE}/session")" == game ]] ;;
+    "--user is-active casdap-overlay.service") cat "${STATE}/overlay" ;;
     *) echo "systemctl $*" >> "${STATE}/calls" ;;
 esac
+EOF
+
+cat > "${T}/bin/casdap-intercept" <<'EOF'
+#!/usr/bin/bash
+echo "casdap-intercept $*" >> "${STATE}/calls"
+cat "${STATE}/intercept"
 EOF
 
 cat > "${T}/bin/pgrep" <<'EOF'
@@ -53,6 +60,10 @@ EOF
 cat > "${T}/bin/busctl" <<'EOF'
 #!/usr/bin/bash
 echo "busctl $*" >> "${STATE}/calls"
+if [[ "$*" == *ToggleOverlay && -s "${STATE}/busctl-stderr" ]]; then
+    cat "${STATE}/busctl-stderr" >&2
+    exit 1
+fi
 EOF
 
 cat > "${T}/bin/wpctl" <<'EOF'
@@ -96,6 +107,9 @@ run_case() {
     echo "$2" > "${STATE}/session"
     echo "$3" > "${STATE}/title"
     echo "$4" > "${STATE}/plasma"
+    echo "${OVERLAY:-inactive}" > "${STATE}/overlay"
+    echo "${INTERCEPT:-0}" > "${STATE}/intercept"
+    printf '%s' "${BUSCTL_ERR:-}" > "${STATE}/busctl-stderr"
     [[ -z "$5" ]] || printf '%s\n' "$5" | tr ';' '\n' > "${STATE}/script-event0"
     [[ -z "${7:-}" ]] || printf '%s\n' "$7" | tr ';' '\n' > "${STATE}/script-event1"
     [[ "${8:-0}" == 0 ]] || : > "${STATE}/muted"
@@ -117,6 +131,9 @@ voldown="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%-"
 getvol="wpctl get-volume @DEFAULT_AUDIO_SINK@"
 unmute="wpctl set-mute @DEFAULT_AUDIO_SINK@ 0"
 emit="busctl --user emit /org/casdap/Hotkeys org.casdap.Hotkeys VolumeChanged d 0.40"
+toggle="busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay"
+restart="systemctl --user restart casdap-overlay.service"
+intercept="casdap-intercept get"
 
 run_case "no device" game 0 0 "press"
 [[ "${rc}" == 0 ]] || fail "exit ${rc} without device"
@@ -142,7 +159,40 @@ echo casdap-test-voldown > "${T}/sys/event2/device/name"
 
 run_case "tap in game" game 0 0 "press;sleep 0.05;release"
 expect_calls 0
-expect_log "tap in game, ignored"
+expect_log "no background player"
+
+OVERLAY=active run_case "tap in game with background player" game 0 0 "press;sleep 0.05;release"
+expect_call "${toggle}"
+expect_calls 1
+
+OVERLAY=active run_case "tap in game with background player dry run" game 0 0 "press;sleep 0.05;release" 1
+expect_calls 0
+expect_log "would: ${toggle}"
+
+OVERLAY=active BUSCTL_ERR="Call failed: The name is not activatable" run_case "tap in game while the overlay starts" game 0 0 "press;sleep 0.05;release"
+expect_call "${toggle}"
+expect_calls 1
+expect_no_call "systemctl start"
+expect_no_call "restart"
+expect_log "overlay player starting"
+
+OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=3 run_case "tap in game with a hung overlay holding the pad" game 0 0 "press;sleep 0.05;release"
+expect_call "${toggle}"
+expect_call "${intercept}"
+expect_call "${restart}"
+expect_calls 3
+expect_no_call "systemctl start"
+
+OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=0 run_case "tap in game with a hung overlay, pad free" game 0 0 "press;sleep 0.05;release"
+expect_call "${toggle}"
+expect_call "${intercept}"
+expect_no_call "${restart}"
+expect_calls 2
+expect_log "overlay timeout, pad free"
+
+OVERLAY=active run_case "hold in game with background player" game 0 0 "press;sleep 0.4;release"
+expect_call "${switch}"
+expect_calls 1
 
 run_case "hold in game" game 0 0 "press;sleep 0.4;release"
 expect_call "${switch}"
