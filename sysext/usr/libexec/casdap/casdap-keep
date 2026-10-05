@@ -1,0 +1,30 @@
+#!/usr/bin/bash
+set -eu
+
+keep="${CASDAP_KEEP_FILE:-${HOME}/.config/casdap/keep}"
+boot_id_file="${CASDAP_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
+
+first_line() {
+    local line
+    [[ -r "$1" ]] || return 1
+    read -r line < "$1" || [[ -n "${line}" ]]
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -n "${line}" ]] || return 1
+    printf '%s\n' "${line}"
+}
+
+check() {
+    local marker boot_id
+    marker=$(first_line "${keep}") || return 1
+    boot_id=$(first_line "${boot_id_file}") || return 1
+    [[ "${marker}" == "${boot_id}" ]]
+}
+
+[[ $# -eq 1 ]] || exit 1
+
+case "$1" in
+    check) check ;;
+    clear) rm -f -- "${keep}" ;;
+    *) exit 1 ;;
+esac
