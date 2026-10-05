@@ -77,7 +77,11 @@ playing. Pages carry `objectName` (`home`, `bluetooth`) for that check. The laye
 pad input goes to the page below. With the screen off nothing is drawn and the level is kept.
 
 `Home` is the root page: the menu (`music`, `bluetooth`, `playlists`, `history`, `settings`), with
-Quickplay (`Pins`, `History`, `New`) peeking on the left in portrait. Y plays shuffle all; focus is the 2 u bar left of the item with the other items at 0.6. Left or Back/View pans Quickplay
+Quickplay (`Pins`, `History`, `New`) peeking on the left in portrait. Every item carries an upper case
+subtitle: `music` its pivots, `bluetooth` the phone name while connected, `PAIRING <seconds>` while
+the pairing window is open, else `NOT CONNECTED`, `playlists` `N PLAYLISTS` when `playlistCount` is
+set (default -1) else `NOW PLAYING SAVED`, `history` `RECENT NEW`, `settings` `OUTPUT LIBRARY DISPLAY
+POWER`. Y plays shuffle all; focus is the 2 u bar left of the item with the other items at 0.6. Left or Back/View pans Quickplay
 forward and shrinks the menu to a column on the right; right or B pans back. In landscape both sit side
 by side. X on a Quickplay tile opens the pin sheet. Menu items whose screen does not exist yet log
 `navigate <name>`.
@@ -142,7 +146,7 @@ Polkit boundary: any process running as `armada` may start `casdap-switch.servic
 `casdap-switch-back.service`, `casdap-priv@<verb>.service` and `armada-controller-type.service`.
 The verbs are fixed words; `casdap-priv` exits 1 on anything else.
 
-Pad target: `casdap-pad.service` (user unit, `PartOf=` the casdap session) sets every InputPlumber
+Pad target: `casdap-pad.service` (user unit, `BindsTo=` the casdap session) sets every InputPlumber
 composite device to `xb360` plus `keyboard` through `SetTargetDevices`, so SDL players see an Xbox
 pad. On session stop it starts `armada-controller-type.service`, which restores the configured type.
 InputPlumber's own polkit rule grants its actions to group `wheel`, which `armada` is in.
@@ -168,12 +172,12 @@ in every other session they are left to Steam. `CASDAP_HOTKEYD_DRY_RUN=1` (runti
 
 ## Bluetooth
 
-`casdap-bt.service` (user unit, `PartOf=` the casdap session, `Wants=` from
+`casdap-bt.service` (user unit, `BindsTo=` the casdap session, `Wants=` from
 `gamescope-session-plus@casdap.service.d/10-casdap-bt.conf`) runs `casdap-bt`, the only Bluetooth
 agent in casdap. `ExecStartPre` starts `casdap-priv@bt-class-headphones.service` (class
 `0x6c0418`), `ExecStopPost` starts `casdap-priv@bt-class-default.service`. The agent registers
 `org.bluez.Agent1` at `/org/casdap/agent` with capability `NoInputNoOutput` as the default agent,
-sets `Discoverable=false` on start and exits 1 when `org.bluez` leaves the bus (`Restart=on-failure`).
+sets `Discoverable=false` on start, sets `Pairable=false` after `RequestDefaultAgent` (bluez 5.87 turns it on there) and puts back the value it found on exit and exits 1 when `org.bluez` leaves the bus (`Restart=on-failure`).
 
 Pairing window: `org.casdap.Bluetooth` at `/org/casdap/Bluetooth` on the session bus, `StartPairing(u
 seconds)` (1 to 600, anything else raises `org.freedesktop.DBus.Error.InvalidArgs`), `StopPairing()`,

@@ -77,6 +77,7 @@ class Manager(dbus.service.Object):
     @dbus.service.method(AGENT_MANAGER, in_signature='o', out_signature='')
     def RequestDefaultAgent(self, path):
         self.fake.default_agent = str(path)
+        self.fake.adapter.props['Pairable'] = dbus.Boolean(True)
 
 
 class Adapter(dbus.service.Object):
@@ -292,6 +293,7 @@ class Driver:
         self.check(self.fake.agent[1] == 'NoInputNoOutput', f'agent capability {self.fake.agent[1]}')
         self.check(self.fake.default_agent == AGENT_PATH, f'default agent {self.fake.default_agent}')
         self.check(bool(self.adapter_get('Discoverable')) is False, 'startup left Discoverable true')
+        self.check(bool(self.adapter_get('Pairable')) is False, 'Pairable true after RequestDefaultAgent')
         self.check(self.active() is False, 'PairingActive true at startup')
         self.check(int(self.service_get('PairingRemaining')) == 0, 'PairingRemaining not 0 at startup')
 
@@ -433,6 +435,7 @@ class Driver:
             self.check(False, 'casdap-bt did not exit on SIGTERM')
         self.check(code == 0, f'casdap-bt exit {code}')
         self.check_restored('sigterm')
+        self.check(bool(self.adapter_get('Pairable')) is False, 'Pairable not restored to its value before start')
         self.check(wait_for(lambda: not self.bus.name_has_owner(SERVICE), 2), f'{SERVICE} still owned')
 
 

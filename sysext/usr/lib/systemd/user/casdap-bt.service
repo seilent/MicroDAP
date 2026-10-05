@@ -1,6 +1,6 @@
 [Unit]
 Description=CASDAP Bluetooth receiver agent
-PartOf=gamescope-session-plus@casdap.service
+BindsTo=gamescope-session-plus@casdap.service
 After=gamescope-session-plus@casdap.service
 
 [Service]

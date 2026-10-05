@@ -290,6 +290,7 @@ def main():
     system = dbus.bus.BusConnection(address) if address else dbus.SystemBus()
     session = dbus.SessionBus()
     adapter = Adapter(system)
+    pairable = adapter.get('Pairable')
     adapter.set('Discoverable', dbus.Boolean(False))
     window = Window(session, adapter)
     Agent(system, window)
@@ -297,12 +298,14 @@ def main():
     manager = dbus.Interface(system.get_object(BLUEZ, '/org/bluez', introspect=False), AGENT_MANAGER)
     manager.RegisterAgent(dbus.ObjectPath(AGENT_PATH), dbus.String('NoInputNoOutput'))
     manager.RequestDefaultAgent(dbus.ObjectPath(AGENT_PATH))
+    adapter.set('Pairable', dbus.Boolean(False))
     name = dbus.service.BusName(SERVICE, session)
     loop = GLib.MainLoop()
     status = [0]
 
     def stop(*_):
         window.close('closed on exit')
+        adapter.set('Pairable', pairable)
         session.flush()
         loop.quit()
         return GLib.SOURCE_REMOVE

@@ -1,6 +1,6 @@
 [Unit]
 Description=CASDAP pad target
-PartOf=gamescope-session-plus@casdap.service
+BindsTo=gamescope-session-plus@casdap.service
 After=gamescope-session-plus@casdap.service
 
 [Service]
