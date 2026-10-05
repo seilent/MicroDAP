@@ -324,6 +324,39 @@ TestCase {
         compare(page.arcSweep, 0)
     }
 
+    function test_paired_switches_to_phone() {
+        const page = open({ animated: true })
+        router.dispatch("rb", false)
+        page.completeAll()
+        compare(page.pivotIndex, 1)
+        compare(page.shownPivot, 1)
+        router.dispatch("a", false)
+        compare(fake.pairing, true)
+        fake.connect()
+        compare(page.pivotIndex, 1)
+        fake.pairing = false
+        compare(page.pivotIndex, 0)
+        compare(page.strip.activeIndex, 0)
+        compare(page.switching, true)
+        compare(page.shownPivot, 1)
+        tryCompare(page, "shownPivot", 0, 2000)
+        tryCompare(page, "switching", false, 2000)
+        compare(page.phonePage.visible, true)
+        compare(page.pairingPage.visible, false)
+        compare(page.phonePage.x, 0)
+        compare(page.phonePage.opacity, 1)
+    }
+
+    function test_pairing_end_without_phone_stays() {
+        const page = open({ animated: false, pivotIndex: 1 })
+        router.dispatch("a", false)
+        compare(fake.pairing, true)
+        fake.pairing = false
+        compare(page.pivotIndex, 1)
+        compare(page.shownPivot, 1)
+        compare(page.pairingPage.visible, true)
+    }
+
     function test_b_two_steps() {
         const page = open()
         router.dispatch("rb", false)
@@ -433,7 +466,8 @@ TestCase {
         compare(Ui.landscape, true)
         fuzzyCompare(page.nameText.y + page.nameText.baselineOffset, Ui.px(84 + 16), 0.5)
         fuzzyCompare(page.transportRow.y, Ui.px(84 + 60), 0.01)
-        compare(page.header.height, Ui.px(40))
+        compare(page.header.height, Ui.px(56))
+        fuzzyCompare(page.header.textBaseline, Ui.px(52), 0.5)
         router.dispatch("rb", false)
         const center = page.pairingRing.mapToItem(page, page.pairingRing.width / 2, page.pairingRing.height / 2)
         fuzzyCompare(center.x, Ui.px(Ui.canvasW / 2), 0.01)

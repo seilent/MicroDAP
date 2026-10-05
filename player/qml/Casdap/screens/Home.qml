@@ -12,7 +12,7 @@ Page {
     property bool quickplayShown: false
     property real pan: 0
     property real peekEnter: home.animated ? 0 : 1
-    property real ringEnter: home.animated ? 0 : 1
+    property real barEnter: home.animated ? 0 : 1
 
     readonly property var menu: [
         { name: "music", subtitle: "artists albums songs genres playlists" },
@@ -32,7 +32,6 @@ Page {
     property alias menuPanel: menuPanel
     property alias quickplayPanel: quickplayPanel
     property alias quickplay: quickplay
-    property alias ring: ring
     property alias focusBar: focusBar
     property alias sheet: sheet
     property alias watermark: watermark
@@ -96,7 +95,7 @@ Page {
                 item.completeEnter()
         }
         home.peekEnter = 1
-        home.ringEnter = 1
+        home.barEnter = 1
         quickplay.completeAll()
         sheet.complete()
     }
@@ -211,20 +210,6 @@ Page {
         scale: 1 + (Motion.quickplayScale - 1) * home.pan
         opacity: 1 + (Motion.quickplayAlpha - 1) * home.pan
 
-        Ring {
-            id: ring
-
-            readonly property real centerY: home.itemBaseline(0) - Ui.px(Ui.capHeight * Ui.homeItem.size / 2)
-
-            x: Ui.px(Ui.homeRingX) - ring.width / 2
-            y: ring.centerY - ring.height / 2
-            size: Ui.homeRing
-            glyph: "play"
-            focused: false
-            animated: home.animated
-            opacity: home.ringEnter
-        }
-
         FocusBar {
             id: focusBar
 
@@ -232,7 +217,7 @@ Page {
             rowY: home.itemBaseline(home.focusIndex) - Ui.px(Ui.homeBarTop)
             rowHeight: Ui.px(Ui.homeBarH)
             animated: home.animated
-            opacity: home.ringEnter
+            opacity: home.barEnter
         }
 
         Repeater {
@@ -268,14 +253,14 @@ Page {
 
                 onEnterChanged: {
                     if (item.index === 0)
-                        home.ringEnter = item.enter
+                        home.barEnter = item.enter
                 }
 
                 Component.onCompleted: {
                     if (home.animated)
                         enterAnim.start()
                     else if (item.index === 0)
-                        home.ringEnter = 1
+                        home.barEnter = 1
                 }
 
                 SequentialAnimation {

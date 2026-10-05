@@ -148,15 +148,11 @@ QtObject {
     readonly property real homeFirstBaseline: 48
     readonly property real homeSubtitleX: 10
     readonly property real homeSubtitleDrop: 8
-    readonly property real homeRing: 35
-    readonly property real homeRingStroke: 3
-    readonly property real homeRingX: 42
     readonly property real homePitchLandscape: 48
     readonly property real qpPeek: 56
     readonly property real qpPeekAlpha: 0.4
-    readonly property real headerBand: ui.landscape ? 40 : 56
+    readonly property real headerBand: 56
     readonly property real headerXHeightBottom: 52
-    readonly property real headerOffsetLandscape: -40
     readonly property real pivotTop: ui.landscape ? 44 : 60
     readonly property real pivotBottom: ui.landscape ? 72 : 92
     readonly property real pivotBaseline: ui.pivotTop + 21

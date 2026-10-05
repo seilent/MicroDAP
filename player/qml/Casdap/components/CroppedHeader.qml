@@ -8,7 +8,7 @@ Item {
     property real shift: 0
     property bool animated: true
 
-    readonly property real xHeightBottom: Ui.headerXHeightBottom + (Ui.landscape ? Ui.headerOffsetLandscape : 0)
+    readonly property real xHeightBottom: Ui.headerXHeightBottom
     readonly property real baselineY: Ui.px(root.xHeightBottom)
     readonly property real textX: label.x
     readonly property real textBaseline: label.y + label.baselineOffset

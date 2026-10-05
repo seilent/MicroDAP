@@ -15,6 +15,9 @@ Window {
     readonly property var historyNew: typeof HistoryNew === "undefined" ? null : HistoryNew
 
     readonly property bool powerScreenOff: typeof PowerBridge === "undefined" ? false : PowerBridge.screenOff
+    readonly property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
+    readonly property var player: root.screenshot || typeof Player === "undefined" ? null : Player
+    readonly property string topScreen: pages.currentItem !== null ? pages.currentItem.objectName : ""
 
     width: shotWidth
     height: shotHeight
@@ -58,10 +61,23 @@ Window {
         onNowPlaying: console.info("casdap: navigate nowplaying")
     }
 
+    OverlayLayer {
+        id: overlays
+
+        anchors.fill: parent
+        visible: !root.screenshot
+        power: root.power
+        bluez: root.screenshot ? null : root.bluez
+        player: root.player
+        screenOff: root.powerScreenOff
+        topScreen: root.topScreen
+    }
+
     Component {
         id: homeComponent
 
         Home {
+            objectName: "home"
             bluez: root.bluez
             historyModel: root.historyRecent
             newModel: root.historyNew
@@ -77,6 +93,7 @@ Window {
         id: bluetoothComponent
 
         Bluetooth {
+            objectName: "bluetooth"
             bluez: root.bluez
             screenOff: root.powerScreenOff
             onOpenNowPlaying: console.info("casdap: navigate nowplaying-bluetooth")

@@ -157,15 +157,8 @@ TestCase {
     function test_focus_treatment() {
         const page = open()
         compare(page.focusIndex, 0)
-        const ringCenterY = Ui.px(48) - Ui.px(0.7 * 34 / 2)
-        compare(page.ring.width, Ui.px(35))
-        compare(page.ring.focused, false)
-        compare(page.ring.glyph, "play")
-        fuzzyCompare(page.ring.x + page.ring.width / 2, Ui.px(42), 0.01)
-        fuzzyCompare(page.ring.y + page.ring.height / 2, ringCenterY, 0.01)
         compare(page.focusBar.width, Ui.px(2))
         compare(page.focusBar.x, Ui.px(70 - 8))
-        verify(page.focusBar.x >= page.ring.x + page.ring.width)
         verify(page.focusBar.x + page.focusBar.width <= Ui.px(70))
         fuzzyCompare(page.focusBar.y, Ui.px(48) - Ui.px(0.7 * 34), 0.01)
         fuzzyCompare(page.focusBar.height, Ui.px(0.7 * 34 + 8 + 0.7 * 8), 0.01)
@@ -173,13 +166,11 @@ TestCase {
         tc.checkFocusAlphas(page)
         verify(router.dispatch("down", false))
         compare(page.focusIndex, 1)
-        fuzzyCompare(page.ring.y + page.ring.height / 2, ringCenterY, 0.01)
         fuzzyCompare(page.focusBar.y, Ui.px(48 + 55) - Ui.px(0.7 * 34), 0.01)
         tc.checkFocusAlphas(page)
         for (let i = 0; i < 10; i++)
             router.dispatch("down", false)
         compare(page.focusIndex, 4)
-        fuzzyCompare(page.ring.y + page.ring.height / 2, ringCenterY, 0.01)
         fuzzyCompare(page.focusBar.y, Ui.px(48 + 55 * 4) - Ui.px(0.7 * 34), 0.01)
         tc.checkFocusAlphas(page)
         router.dispatch("up", false)
@@ -188,15 +179,21 @@ TestCase {
         tc.checkFocusAlphas(page)
     }
 
+    function test_no_ring() {
+        const page = open()
+        compare(page.ring, undefined)
+        compare(page.focusBar.x, Ui.px(62))
+        verify(router.dispatch("y", false))
+        compare(counters.shuffles, 1)
+    }
+
     function test_bar_follows_animated() {
         const page = open({ animated: true })
         page.completeAll()
         const start = page.focusBar.y
-        const ringY = page.ring.y
         router.dispatch("down", false)
         verify(page.focusBar.y < start + Ui.px(55))
         tryCompare(page.focusBar, "y", start + Ui.px(55), 1000)
-        compare(page.ring.y, ringY)
     }
 
     function test_quickplay_peek() {
@@ -479,7 +476,6 @@ TestCase {
         tryCompare(page.menuItem(4), "opacity", 1, 1500)
         tryCompare(page, "peekEnter", 1, 1500)
         fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-3)
-        fuzzyCompare(page.ring.opacity, 1, 1e-3)
         fuzzyCompare(page.focusBar.opacity, 1, 1e-3)
     }
 

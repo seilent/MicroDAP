@@ -139,7 +139,7 @@ TestCase {
         compare(Ui.jumpCols, 5)
         fuzzyCompare(Ui.jumpTile, (320 - 32 - 32) / 5, 1e-6)
         setWindow(1920, 1080, 1.0)
-        compare(Ui.headerBand, 40)
+        compare(Ui.headerBand, 56)
         compare(Ui.contentTop, 84)
         compare(Ui.jumpCols, 9)
         fuzzyCompare(Ui.npArt, 166, 0.01)

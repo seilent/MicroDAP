@@ -64,11 +64,20 @@ glyph change after the first one. `CroppedHeader`, `PivotStrip`, `ListRow`, `Til
 `Ring` and `FocusBar` take `animated` (default true); cleared, every Behavior is off and a running
 swap jumps to its end. `Backdrop` pauses its loops while `paused`, `screenOff` or not `visible`.
 `Toast.show()` during the exit restarts the entrance from the strip's current position. The volume
-overlay ring is `focused` inside the 0.4 group, so it reads at 0.4 (O20).
+overlay ring is `focused` inside the 0.4 group, so it reads at 0.4 (O20). `CroppedHeader` is 56 u
+tall with the x-height bottom at 52 u in both orientations.
+
+`OverlayLayer` sits above the `PageStack` in `Main.qml` (`power`, `bluez`, `player`, `screenOff`,
+`topScreen`; every source may be null). `PowerBridge.volumeChanged(int)` and
+`BluezModel.volumeChanged(int)` call `VolumeOverlay.show(level)`; the ring glyph and the bottom text
+follow the phone while its transport is active, else the local track. A new `Player.current` id
+shows the toast with artist and title unless the top page is now playing; the phone transport going
+active or its title changing shows `from <phone>` and the title unless the top page is Bluetooth or now
+playing. Pages carry `objectName` (`home`, `bluetooth`) for that check. The layer never takes focus;
+pad input goes to the page below. With the screen off nothing is drawn and the level is kept.
 
 `Home` is the root page: the menu (`music`, `bluetooth`, `playlists`, `history`, `settings`), with
-Quickplay (`Pins`, `History`, `New`) peeking on the left in portrait. The play ring sits fixed left
-of `music` and Y plays shuffle all; focus is the 2 u bar left of the item with the other items at 0.6. Left or Back/View pans Quickplay
+Quickplay (`Pins`, `History`, `New`) peeking on the left in portrait. Y plays shuffle all; focus is the 2 u bar left of the item with the other items at 0.6. Left or Back/View pans Quickplay
 forward and shrinks the menu to a column on the right; right or B pans back. In landscape both sit side
 by side. X on a Quickplay tile opens the pin sheet. Menu items whose screen does not exist yet log
 `navigate <name>`.
@@ -175,7 +184,9 @@ value and `Alias` to `ARMADA_DEVICE_NAME` from `device-env` (hostname without it
 `RequestConfirmation` and `RequestAuthorization` accept (JustWorks, no MITM protection); closed, every
 pairing request is answered with `org.bluez.Error.Rejected`. `RequestPinCode`, `RequestPasskey`,
 `DisplayPinCode` and `DisplayPasskey` are always rejected. `StopPairing`, the timeout and SIGTERM
-restore the saved values and set `Discoverable=false`.
+restore the saved values and set `Discoverable=false`. The window also closes that way when the gate
+keeps a device that paired while it was open (journal `pairing window closed: paired <path>`); a
+device the gate removes leaves it open.
 
 `AuthorizeService` accepts `110b`, `110c`, `110d`, `110e` and rejects every other uuid with a
 `Rejected <uuid> <device>` journal line, so HFP (`111e`, `111f`), HSP (`1108`, `1112`) and HID

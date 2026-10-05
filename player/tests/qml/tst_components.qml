@@ -117,6 +117,12 @@ TestCase {
         fuzzyCompare(header.textBaseline, 104, 0.5)
         fuzzyCompare(header.textX, Ui.px(Ui.hubEdge), 0.5)
         verify(header.clip)
+        setWindow(960, 640)
+        compare(Ui.landscape, true)
+        compare(header.height, Ui.px(56))
+        fuzzyCompare(header.textBaseline, Ui.px(52), 0.5)
+        fuzzyCompare(header.textBaseline, 104, 0.5)
+        fuzzyCompare(header.textX, Ui.px(Ui.hubEdge), 0.5)
     }
 
     function test_header_shift() {
@@ -384,7 +390,9 @@ TestCase {
         fuzzyCompare(ring.strokeWidth, 3 * Ui.u, 0.01)
         fuzzyCompare(glyph.width, 32 * Ui.u, 0.01)
         fuzzyCompare(glyph.strokeWidth, 4 * Ui.u, 0.01)
-        fuzzyCompare(header.height, 40 * Ui.u, 0.01)
+        fuzzyCompare(header.height, 56 * Ui.u, 0.01)
+        fuzzyCompare(header.textBaseline, Ui.px(52), 0.5)
+        fuzzyCompare(header.textBaseline, 52 * Ui.u, 0.5)
         fuzzyCompare(strip.labelItem(0).y + strip.labelItem(0).baselineOffset, Ui.px(Ui.pivotBaseline), 0.5)
         fuzzyCompare(Ui.pivotBaseline, 65, 1e-6)
     }

@@ -179,6 +179,11 @@ Page {
             page.shownState = page.stateLine
     }
 
+    onPairingChanged: {
+        if (page.ready && !page.pairing && page.pivotIndex === 1 && page.connected)
+            page.switchPivot(-1)
+    }
+
     onLiveChanged: {
         if (!page.live)
             page.completeAll()
