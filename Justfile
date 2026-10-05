@@ -39,6 +39,7 @@ test:
     bash tests/pad-test.sh
     bash tests/intercept-test.sh
     bash tests/keep-test.sh
+    bash tests/wait-x-test.sh
     bash tests/overlay-unit-test.sh
     bash tests/bt-test.sh
     just test-player

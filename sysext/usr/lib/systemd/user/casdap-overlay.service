@@ -10,9 +10,11 @@ StartLimitIntervalSec=0
 Type=notify
 NotifyAccess=main
 WatchdogSec=15
+TimeoutStartSec=40
 Environment=DISPLAY=:0
 Environment=QT_QPA_PLATFORM=xcb
 ExecCondition=/usr/libexec/casdap/casdap-keep check
+ExecStartPre=/usr/libexec/casdap/casdap-wait-x
 ExecStart=/usr/bin/casdap-player --overlay
 ExecStopPost=/usr/libexec/casdap/casdap-intercept 0
 Restart=on-failure
