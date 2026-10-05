@@ -12,7 +12,7 @@ TestCase {
     height: 960
 
     readonly property real canvasW: 320
-    readonly property real contentTop: 114
+    readonly property real contentTop: 128
 
     PageStack {
         id: pages
@@ -141,8 +141,8 @@ TestCase {
         compare(page.shownPivot, 0)
         compare(page.phonePage.visible, true)
         compare(page.pairingPage.visible, false)
-        fuzzyCompare(page.header.textBaseline, Ui.px(52), 0.5)
-        fuzzyCompare(page.strip.labelItem(0).y + page.strip.labelItem(0).baselineOffset, Ui.px(81), 0.5)
+        fuzzyCompare(page.header.textBaseline, Ui.px(66), 0.5)
+        fuzzyCompare(page.strip.labelItem(0).y + page.strip.labelItem(0).baselineOffset, Ui.px(95), 0.5)
     }
 
     function test_phone_layout() {
@@ -464,13 +464,13 @@ TestCase {
         pages.push(baseComponent)
         const page = pages.push(bluetoothComponent, { animated: false })
         compare(Ui.landscape, true)
-        fuzzyCompare(page.nameText.y + page.nameText.baselineOffset, Ui.px(84 + 16), 0.5)
-        fuzzyCompare(page.transportRow.y, Ui.px(84 + 60), 0.01)
-        compare(page.header.height, Ui.px(56))
-        fuzzyCompare(page.header.textBaseline, Ui.px(52), 0.5)
+        fuzzyCompare(page.nameText.y + page.nameText.baselineOffset, Ui.px(98 + 16), 0.5)
+        fuzzyCompare(page.transportRow.y, Ui.px(98 + 60), 0.01)
+        compare(page.header.height, Ui.px(70))
+        fuzzyCompare(page.header.textBaseline, Ui.px(66), 0.5)
         router.dispatch("rb", false)
         const center = page.pairingRing.mapToItem(page, page.pairingRing.width / 2, page.pairingRing.height / 2)
         fuzzyCompare(center.x, Ui.px(Ui.canvasW / 2), 0.01)
-        fuzzyCompare(center.y, Ui.px(84 + 90), 0.01)
+        fuzzyCompare(center.y, Ui.px(98 + 90), 0.01)
     }
 }

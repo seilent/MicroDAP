@@ -48,7 +48,7 @@ QtObject {
     readonly property real tracking: -0.5
     readonly property real trackingHeader: -1.0
 
-    readonly property var hubHeader: ({ name: "hubHeader", size: 160, style: "Light", caps: Font.AllLowercase, alpha: 0.4, tracking: -1.0, cropped: true, sample: "music" })
+    readonly property var hubHeader: ({ name: "hubHeader", size: 128, style: "Light", caps: Font.AllLowercase, alpha: 0.4, tracking: -1.0, cropped: true, sample: "music" })
     readonly property var homeItem: ({ name: "homeItem", size: 34, style: "Light", caps: Font.AllLowercase, alpha: 1.0, alphaDim: 0.6, tracking: -0.5, sample: "music" })
     readonly property var homeSubtitle: ({ name: "homeSubtitle", size: 8, style: "Regular", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "artists albums songs" })
     readonly property var quickplayHeader: ({ name: "quickplayHeader", size: 34, style: "Light", caps: Font.MixedCase, alpha: 0.6, tracking: -0.5, sample: "Pins" })
@@ -151,13 +151,14 @@ QtObject {
     readonly property real homePitchLandscape: 48
     readonly property real qpPeek: 56
     readonly property real qpPeekAlpha: 0.4
-    readonly property real headerBand: 56
-    readonly property real headerXHeightBottom: 52
-    readonly property real pivotTop: ui.landscape ? 44 : 60
-    readonly property real pivotBottom: ui.landscape ? 72 : 92
+    readonly property real headerBand: 70
+    readonly property real headerXHeightBottom: 66
+    readonly property real pivotTop: ui.landscape ? 58 : 74
+    readonly property real pivotBottom: ui.landscape ? 86 : 106
     readonly property real pivotBaseline: ui.pivotTop + 21
     readonly property real pivotGap: 16
-    readonly property real contentTop: ui.landscape ? 84 : 114
+    readonly property real pivotLeadGap: ui.hubEdge + 2
+    readonly property real contentTop: ui.landscape ? 98 : 128
     readonly property real tileS: ui.landscape ? 60 : Math.round(60 * ui.canvasW / 272)
     readonly property real gutter: 12
     readonly property int gridCols: ui.landscape

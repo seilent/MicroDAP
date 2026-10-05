@@ -112,17 +112,27 @@ TestCase {
 
     function test_header_geometry() {
         compare(header.height, Ui.px(Ui.headerBand))
-        compare(header.height, 112)
-        fuzzyCompare(header.textBaseline, Ui.px(52), 0.5)
-        fuzzyCompare(header.textBaseline, 104, 0.5)
+        compare(header.height, 140)
+        fuzzyCompare(header.textBaseline, Ui.px(66), 0.5)
+        fuzzyCompare(header.textBaseline, 132, 0.5)
         fuzzyCompare(header.textX, Ui.px(Ui.hubEdge), 0.5)
         verify(header.clip)
         setWindow(960, 640)
         compare(Ui.landscape, true)
-        compare(header.height, Ui.px(56))
-        fuzzyCompare(header.textBaseline, Ui.px(52), 0.5)
-        fuzzyCompare(header.textBaseline, 104, 0.5)
+        compare(header.height, Ui.px(70))
+        fuzzyCompare(header.textBaseline, Ui.px(66), 0.5)
+        fuzzyCompare(header.textBaseline, 132, 0.5)
         fuzzyCompare(header.textX, Ui.px(Ui.hubEdge), 0.5)
+    }
+
+    function test_header_xheight_visible() {
+        const em = Ui.fontPx(Ui.hubHeader.size)
+        compare(em, 256)
+        const xHeightTop = header.textBaseline - 0.5 * em
+        verify(xHeightTop >= 0, "x-height top " + xHeightTop)
+        fuzzyCompare(xHeightTop, Ui.px(2), 0.5)
+        verify(header.textBaseline - 0.74 * em < 0)
+        verify(header.textBaseline <= header.height)
     }
 
     function test_header_shift() {
@@ -146,8 +156,8 @@ TestCase {
     function test_pivot_geometry() {
         const label = strip.labelItem(0)
         verify(label !== null)
-        fuzzyCompare(label.y + label.baselineOffset, Ui.px(81), 0.5)
-        fuzzyCompare(label.y + label.baselineOffset, 162, 0.5)
+        fuzzyCompare(label.y + label.baselineOffset, Ui.px(95), 0.5)
+        fuzzyCompare(label.y + label.baselineOffset, 190, 0.5)
         fuzzyCompare(strip.activeLabelX, Ui.px(Ui.hubEdge), 0.5)
         compare(label.font.styleName, "Bold")
         compare(label.font.capitalization, Font.AllUppercase)
@@ -178,6 +188,32 @@ TestCase {
         strip.activeIndex = 1
         tryVerify(() => Math.abs(strip.activeLabelX - Ui.px(Ui.hubEdge)) < 0.5, 1500)
         strip.animated = false
+    }
+
+    function rightEdge(item) {
+        return item.mapToItem(strip, item.width, 0).x
+    }
+
+    function test_pivot_previous_off_screen() {
+        const first = strip.labelItem(0)
+        const second = strip.labelItem(1)
+        const third = strip.labelItem(2)
+        verify(tc.rightEdge(first) > 0)
+        strip.activeIndex = 1
+        tryVerify(() => Math.abs(strip.activeLabelX - Ui.px(Ui.hubEdge)) < 0.5, 1000)
+        verify(tc.rightEdge(first) <= 0, "first label right edge " + tc.rightEdge(first))
+        fuzzyCompare(tc.rightEdge(first), Ui.px(Ui.hubEdge - Ui.pivotLeadGap), 0.5)
+        fuzzyCompare(second.x - (first.x + first.width), Ui.px(Ui.pivotLeadGap), 0.5)
+        fuzzyCompare(third.x - (second.x + second.width), Ui.px(Ui.pivotGap), 0.5)
+        strip.activeIndex = 2
+        tryVerify(() => Math.abs(strip.activeLabelX - Ui.px(Ui.hubEdge)) < 0.5, 1000)
+        verify(tc.rightEdge(second) <= 0, "second label right edge " + tc.rightEdge(second))
+        verify(tc.rightEdge(first) <= 0)
+        fuzzyCompare(third.x - (second.x + second.width), Ui.px(Ui.pivotLeadGap), 0.5)
+        fuzzyCompare(second.x - (first.x + first.width), Ui.px(Ui.pivotGap), 0.5)
+        strip.activeIndex = 0
+        tryVerify(() => Math.abs(strip.activeLabelX - Ui.px(Ui.hubEdge)) < 0.5, 1000)
+        fuzzyCompare(second.x - (first.x + first.width), Ui.px(Ui.pivotGap), 0.5)
     }
 
     function test_row_geometry() {
@@ -390,11 +426,11 @@ TestCase {
         fuzzyCompare(ring.strokeWidth, 3 * Ui.u, 0.01)
         fuzzyCompare(glyph.width, 32 * Ui.u, 0.01)
         fuzzyCompare(glyph.strokeWidth, 4 * Ui.u, 0.01)
-        fuzzyCompare(header.height, 56 * Ui.u, 0.01)
-        fuzzyCompare(header.textBaseline, Ui.px(52), 0.5)
-        fuzzyCompare(header.textBaseline, 52 * Ui.u, 0.5)
+        fuzzyCompare(header.height, 70 * Ui.u, 0.01)
+        fuzzyCompare(header.textBaseline, Ui.px(66), 0.5)
+        fuzzyCompare(header.textBaseline, 66 * Ui.u, 0.5)
         fuzzyCompare(strip.labelItem(0).y + strip.labelItem(0).baselineOffset, Ui.px(Ui.pivotBaseline), 0.5)
-        fuzzyCompare(Ui.pivotBaseline, 65, 1e-6)
+        fuzzyCompare(Ui.pivotBaseline, 79, 1e-6)
     }
 
     Component {
