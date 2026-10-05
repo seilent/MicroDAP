@@ -112,14 +112,46 @@ playlists are Bold upper case; `playlists` lists `NOW PLAYING` first with `N SON
 through the pane, left/right move within a grid row (no wrap), LB/RB switch pivots with T5 (outgoing pane
 300 strip, incoming rows `min(i, 10) * 22` stagger over 380 strip, header parallax from the strip), no wrap at
 either end. A on a song calls `Player.playTracks(ids, position)` with every song id in list order (without a
-player it emits `play`); A on an album, artist or genre emits `open(kind, id)` (Main logs `navigate <kind>
-<id>`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
+player it emits `play`); A on an album, artist or genre emits `open(kind, id)` (Main pushes `AlbumDetail` for
+`album` and `ArtistDetail` for `artist`, logs `navigate genre <id>`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
 `jumpRequested` (Main logs `navigate jump`). LT/RT show the focused row's letter in the 120 u `JumpLetter`
 (T15). X opens the sheet `play`, `add to queue`, `pin to quickplay`; Y is `add to queue`; `play` on a song
 plays, every other verb emits `sheetAction(action, kind, id)` which Main logs. B pops. After
 `Library.scanning` went true then false, the next model reset runs F12 on the shown pane (rows `x` -5 to 0,
 `o` 0 to 1, 220 decel, `min(i, 10) * 50` stagger); a reset during the scan runs it when the scan ends.
 `screenOff` or `animated` false lands the pivot, settles the rows and dismisses the letter.
+
+`ArtistDetail` is the `artist` page, pushed with the turnstile (T3) by `open("artist", id)` from the hub:
+header `artist`, pivots `albums`, `songs`, the name (20 u Bold upper case) at HUB_EDGE on the CONTENT_TOP
+baseline, the ring row play, add, shuffle (32 u, top y 150, 56 u pitch from HUB_EDGE), `IN COLLECTION` on
+baseline 200, content from 212 on a `Backdrop` (L1 pan) of the artist art. The rows come from `Library`:
+`artistInfo(id)` (`name`, `artPath`: the first of the artist's albums with art), `artistAlbums(id)` resolved
+through `albumInfo(id)` (`title`, `artist`, `year`, `artPath`), `artistTracks(id)` through `trackRows(ids)`
+(`id`, `title`, `artist`, `album`, `albumId`, `durationMs`); a null library leaves the lists empty. `albums`
+is a `FocusList` of DETAIL_ROW cells (TILE_L art at HUB_EDGE with a 20 u play ring inset 4 from its bottom
+left, 13 u Bold upper case title and the year under it at HUB_EDGE + TILE_L + 8), `songs` the SONGS style
+rows. Focus starts on the play ring: left/right move along the rings, down enters the list, up from its first
+row returns to the rings; up/down and LT/RT move through the list, LB/RB switch pivots with T5 (no wrap).
+A on play calls `Player.playTracks(ids, 0)` with every song id, on shuffle the same ids shuffled, on add
+logs `add artist <id>` (no queue method exists yet); every ring A runs the F4 swap. A on an album emits
+`openAlbum(id)` (Main pushes `AlbumDetail`), A on a song plays from that row. Y plays shuffled. X opens the
+sheet `play`, `add to queue`, `pin to quickplay` on the focused row, or on the artist while the rings hold
+focus; `play` plays (the artist, the album's tracks from `albumTracks(id)`, or from the song), every other
+verb emits `sheetAction(action, kind, id)` which Main logs. B pops. Landscape keeps the name and rings in
+the column to 200 and runs the label and the list from x 216 (`IN COLLECTION` with its cap top at
+CONTENT_TOP, rows 12 u under its baseline). `screenOff` or `animated` false lands the pivot, settles the
+rows and the sheet and pauses the backdrop.
+
+`AlbumDetail` is the `album` page, pushed with the turnstile (T3) by `open("album", id)` from the hub or
+`openAlbum` from the artist page: header `album`, `IN COLLECTION` on baseline 60, TILE_L art at HUB_EDGE y
+76, the title (13 u Bold upper case, cap top on the art top) and the album artist (9 u, 13 u under) right of
+the art, track rows from y 204 (`albumInfo(id)` and `albumTracks(id)`): 1 based number, title, the
+duration `m:ss` right aligned at W - HUB_EDGE (absent when unknown), the accent dot left of the number on the
+row whose id is `Player.current.id`. The `Backdrop` is the album art. Focus starts on row 0; up/down and
+LT/RT move, A calls `Player.playTracks(ids, row)` with the album in disc and track order, Y emits
+`sheetAction("add to queue", "album", id)`, X opens the sheet `play`, `add to queue`, `pin to quickplay`
+(`play` from the row, the rest emit `sheetAction(action, "song", id)`), B pops. Landscape keeps the label
+and art in the column to 200 with the title and artist under the art and runs the rows from x 216, y 60.
 
 `NowPlaying` is the `nowplaying` page, pushed with the `fade` kind (T7) by Start on any other page, A on the
 hub's `NOW PLAYING` row, A on the Bluetooth page's transport row and the Quickplay phone tile; Start with
@@ -169,7 +201,8 @@ Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png 
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),
-`queue` (a sample queue of 20 with row 3 playing),
+`queue` (a sample queue of 20 with row 3 playing), `artist` and `album` (a sample artist with two albums
+and ten tracks, track 3 playing),
 `components`, `overlays`, `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
 `CASDAP_TEST_FONT_DIR` (default `../dist/usr/share/fonts/casdap`) feeds `CASDAP_FONT_DIR` to the QML

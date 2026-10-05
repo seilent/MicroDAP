@@ -178,6 +178,28 @@ QtObject {
     readonly property real playingDot: 4
     readonly property real playingDotOffset: 6
     readonly property real detailRow: 124
+    readonly property real detailNameBaseline: ui.contentTop
+    readonly property real detailRingTop: 150
+    readonly property real detailRing: 32
+    readonly property real detailRingGap: 24
+    readonly property int detailRingCount: 3
+    readonly property real detailLabelDrop: 12
+    readonly property real detailLabelBaseline: ui.landscape ? ui.contentTop + ui.capHeight * ui.sectionLabel.size : 200
+    readonly property real detailRowsTop: ui.detailLabelBaseline + ui.detailLabelDrop
+    readonly property real detailColumn: 200
+    readonly property real detailColumnRight: 216
+    readonly property real detailListX: ui.landscape ? ui.detailColumnRight - ui.hubEdge : 0
+    readonly property real detailTextX: ui.hubEdge + ui.tileL + ui.tileLGutter
+    readonly property real detailTitleDrop: ui.capHeight * ui.detailTitle.size
+    readonly property real detailSubPitch: ui.detailTitle.size
+    readonly property real detailPlayInset: 4
+    readonly property real albumLabelBaseline: 60
+    readonly property real albumArtTop: 76
+    readonly property real albumRowsTop: ui.landscape ? 60 : 204
+
+    function detailRingX(index: int): real {
+        return ui.hubEdge + index * (ui.detailRing + ui.detailRingGap)
+    }
     readonly property real settingsPitch: 43
     readonly property real queueCountBaseline: 60
     readonly property real queueRowsTop: 84

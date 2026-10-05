@@ -93,6 +93,23 @@ Window {
         pages.push(queueComponent, {})
     }
 
+    function openArtist(id: int): void {
+        pages.push(artistComponent, { artistId: id })
+    }
+
+    function openAlbum(id: int): void {
+        pages.push(albumComponent, { albumId: id })
+    }
+
+    function openEntry(kind: string, id: int): void {
+        if (kind === "album")
+            root.openAlbum(id)
+        else if (kind === "artist")
+            root.openArtist(id)
+        else
+            console.info("casdap: navigate " + kind + " " + id)
+    }
+
     function closeSheets() {
         const top = pages.currentItem
         if (top === null || top.sheet === undefined || top.sheet === null)
@@ -261,10 +278,37 @@ Window {
             genresModel: root.genres
             player: root.player
             library: root.library
-            onOpen: (kind, id) => console.info("casdap: navigate " + kind + " " + id)
+            onOpen: (kind, id) => root.openEntry(kind, id)
             onNowPlaying: root.openNowPlaying()
             onJumpRequested: console.info("casdap: navigate jump")
             onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
+        }
+    }
+
+    Component {
+        id: artistComponent
+
+        ArtistDetail {
+            objectName: "artist"
+            animated: !root.hidden
+            screenOff: root.off
+            library: root.library
+            player: root.player
+            onOpenAlbum: (id) => root.openAlbum(id)
+            onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
+        }
+    }
+
+    Component {
+        id: albumComponent
+
+        AlbumDetail {
+            objectName: "album"
+            animated: !root.hidden
+            screenOff: root.off
+            library: root.library
+            player: root.player
             onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
         }
     }
@@ -283,7 +327,23 @@ Window {
             : root.shotScreen === "hub" ? hubShotComponent
             : root.shotScreen === "nowplaying" ? nowPlayingShotComponent
             : root.shotScreen === "queue" ? queueShotComponent
+            : root.shotScreen === "artist" ? artistShotComponent
+            : root.shotScreen === "album" ? albumShotComponent
             : null
+    }
+
+    Component {
+        id: artistShotComponent
+        DetailShot {
+            kind: "artist"
+        }
+    }
+
+    Component {
+        id: albumShotComponent
+        DetailShot {
+            kind: "album"
+        }
     }
 
     Component {

@@ -78,6 +78,8 @@ const QStringList &screens()
         QStringLiteral("hub"),
         QStringLiteral("nowplaying"),
         QStringLiteral("queue"),
+        QStringLiteral("artist"),
+        QStringLiteral("album"),
     };
     return names;
 }

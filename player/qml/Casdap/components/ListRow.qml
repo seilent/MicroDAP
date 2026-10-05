@@ -27,6 +27,7 @@ PressScale {
     readonly property real secondaryBaseline: secondaryText.y + secondaryText.baselineOffset
     readonly property Item primaryItem: primaryText
     readonly property Item secondaryItem: secondaryText
+    readonly property Item trailingItem: trailingText
     readonly property Item dotItem: dot
     readonly property Item ringItem: rowRing
 

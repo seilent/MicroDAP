@@ -293,3 +293,17 @@ add_test(NAME screenshot-queue-landscape
 )
 casdap_test_env(screenshot-queue-landscape)
 set_property(TEST screenshot-queue-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+foreach(screen IN ITEMS artist album)
+    add_test(NAME screenshot-${screen}-portrait
+        COMMAND casdap-player --screenshot ${screen} --size 640x960 --out ${shots}/${screen}-640x960.png
+    )
+    casdap_test_env(screenshot-${screen}-portrait)
+    set_property(TEST screenshot-${screen}-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+    add_test(NAME screenshot-${screen}-landscape
+        COMMAND casdap-player --screenshot ${screen} --size 1920x1080 --out ${shots}/${screen}-1920x1080.png
+    )
+    casdap_test_env(screenshot-${screen}-landscape)
+    set_property(TEST screenshot-${screen}-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+endforeach()

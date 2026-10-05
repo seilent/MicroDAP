@@ -540,6 +540,74 @@ QVariantList Library::artistTracks(qint64 artistId) const
                     artistId);
 }
 
+QVariantMap Library::artistInfo(qint64 artistId) const
+{
+    QVariantMap info;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT name FROM artists WHERE id = ?"));
+    query.addBindValue(artistId);
+    if (!query.exec() || !query.next())
+        return info;
+    info.insert(QStringLiteral("id"), artistId);
+    info.insert(QStringLiteral("name"), query.value(0).toString());
+    query.finish();
+    query.prepare(QStringLiteral("SELECT a.art_path FROM albums a WHERE a.id IN "
+                                 "(SELECT t.album_id FROM tracks t "
+                                 "JOIN track_artists ta ON ta.track_id = t.id "
+                                 "WHERE ta.artist_id = ?) AND a.art_path IS NOT NULL "
+                                 "AND a.art_path != '' ORDER BY a.year, a.title, a.id LIMIT 1"));
+    query.addBindValue(artistId);
+    info.insert(QStringLiteral("artPath"),
+                query.exec() && query.next() ? query.value(0).toString() : QString());
+    return info;
+}
+
+QVariantMap Library::albumInfo(qint64 albumId) const
+{
+    QVariantMap info;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT title, artist, year, art_path FROM albums WHERE id = ?"));
+    query.addBindValue(albumId);
+    if (!query.exec() || !query.next())
+        return info;
+    info.insert(QStringLiteral("id"), albumId);
+    info.insert(QStringLiteral("title"), query.value(0).toString());
+    info.insert(QStringLiteral("artist"), query.value(1).toString());
+    info.insert(QStringLiteral("year"), query.value(2).isNull() ? 0 : query.value(2).toInt());
+    info.insert(QStringLiteral("artPath"), query.value(3).toString());
+    return info;
+}
+
+QVariantList Library::albumTracks(qint64 albumId) const
+{
+    return trackRows(idColumn(QStringLiteral("SELECT id FROM tracks WHERE album_id = ? "
+                                             "ORDER BY disc_no, track_no, id"),
+                              albumId));
+}
+
+QVariantList Library::trackRows(const QVariantList &trackIds) const
+{
+    QVariantList rows;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms "
+                                 "FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
+    for (const QVariant &id : trackIds) {
+        query.bindValue(0, id.toLongLong());
+        if (!query.exec() || !query.next())
+            continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("id"), query.value(0).toLongLong());
+        row.insert(QStringLiteral("title"), query.value(1).toString());
+        row.insert(QStringLiteral("artist"), query.value(2).toString());
+        row.insert(QStringLiteral("album"), query.value(3).toString());
+        row.insert(QStringLiteral("albumId"), query.value(4).toLongLong());
+        row.insert(QStringLiteral("durationMs"), query.value(5).toLongLong());
+        rows.append(row);
+        query.finish();
+    }
+    return rows;
+}
+
 QList<QueueEntry> Library::queueEntries(const QVariantList &trackIds) const
 {
     QList<QueueEntry> entries;

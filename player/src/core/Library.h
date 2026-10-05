@@ -45,6 +45,10 @@ public:
     Q_INVOKABLE int rating(qint64 trackId) const;
     Q_INVOKABLE QVariantList artistAlbums(qint64 artistId) const;
     Q_INVOKABLE QVariantList artistTracks(qint64 artistId) const;
+    Q_INVOKABLE QVariantMap artistInfo(qint64 artistId) const;
+    Q_INVOKABLE QVariantMap albumInfo(qint64 albumId) const;
+    Q_INVOKABLE QVariantList albumTracks(qint64 albumId) const;
+    Q_INVOKABLE QVariantList trackRows(const QVariantList &trackIds) const;
     QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
 
 signals:
