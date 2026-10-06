@@ -20,6 +20,7 @@ class Library : public QObject
     Q_OBJECT
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
     Q_PROPERTY(QVariantMap counts READ counts NOTIFY countsChanged)
+    Q_PROPERTY(int playlistCount READ playlistCount NOTIFY playlistCountChanged)
 
 public:
     explicit Library(QObject *parent = nullptr);
@@ -37,6 +38,7 @@ public:
 
     bool scanning() const;
     QVariantMap counts() const;
+    int playlistCount() const;
 
     Q_INVOKABLE void rescan(const QStringList &roots);
     Q_INVOKABLE void addHistory(qint64 trackId,
@@ -48,6 +50,8 @@ public:
     Q_INVOKABLE QVariantMap artistInfo(qint64 artistId) const;
     Q_INVOKABLE QVariantMap albumInfo(qint64 albumId) const;
     Q_INVOKABLE QVariantList albumTracks(qint64 albumId) const;
+    Q_INVOKABLE QVariantMap playlistInfo(qint64 playlistId) const;
+    Q_INVOKABLE QVariantList playlistTracks(qint64 playlistId) const;
     Q_INVOKABLE QVariantList trackRows(const QVariantList &trackIds) const;
     QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
     Q_INVOKABLE bool pin(const QString &kind, qint64 refId);
@@ -57,9 +61,11 @@ public:
 signals:
     void scanningChanged();
     void countsChanged();
+    void playlistCountChanged();
     void changed();
     void historyChanged();
     void pinsChanged();
+    void playlistsChanged();
     void ratingChanged(qint64 trackId, int rating);
     void scanned(int added, int updated, int removed, bool ok);
 

@@ -170,6 +170,9 @@ private slots:
     void pruneArtForeign();
     void pins();
     void pinsPrune();
+    void rateAndDepth();
+    void migrateFrom2();
+    void playlists();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -225,7 +228,7 @@ void LibraryTest::initTestCase()
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
     QVERIFY(m_library->isOpen());
-    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 2);
+    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 3);
 
     QSignalSpy scanningSpy(m_library.get(), &Library::scanningChanged);
     QSignalSpy changedSpy(m_library.get(), &Library::changed);
@@ -505,7 +508,7 @@ void LibraryTest::migrate()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 2);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 3);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 8);
 
@@ -941,6 +944,102 @@ void LibraryTest::pinsPrune()
                  .toInt(),
              0);
     QCOMPARE(model.rowCount(), before);
+}
+
+void LibraryTest::rateAndDepth()
+{
+    const QSqlDatabase db = m_library->database();
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE sample_rate = 44100")).toInt(),
+             scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt());
+    QVERIFY(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE path LIKE '%.flac' AND bit_depth = 8")).toInt() > 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE path LIKE '%.flac' AND bit_depth != 8")).toInt(), 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE path LIKE '%.mp3' AND bit_depth != 0")).toInt(), 0);
+    const qint64 id = scalar(db, QStringLiteral("SELECT id FROM tracks WHERE path LIKE '%.flac' LIMIT 1")).toLongLong();
+    const QVariantList rows = m_library->trackRows({id});
+    QCOMPARE(rows.size(), 1);
+    QCOMPARE(rows.first().toMap().value(QStringLiteral("sampleRate")).toInt(), 44100);
+    QCOMPARE(rows.first().toMap().value(QStringLiteral("bitDepth")).toInt(), 8);
+}
+
+void LibraryTest::migrateFrom2()
+{
+    const QString path = m_dir.path() + QStringLiteral("/migrate2.db");
+    QVERIFY(QFile::copy(m_library->dbPath(), path));
+    const QString setup = QStringLiteral("migrate2-setup");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), setup);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks DROP COLUMN sample_rate")));
+        QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks DROP COLUMN bit_depth")));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 2")));
+        query.finish();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(setup);
+
+    Library library(path, m_dir.path() + QStringLiteral("/art"));
+    QVERIFY(library.isOpen());
+    const QSqlDatabase db = library.database();
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 3);
+    const int total = scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt();
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), total);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE sample_rate IS NOT NULL")).toInt(), 0);
+
+    QSignalSpy spy(&library, &Library::scanned);
+    library.rescan({m_music});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QCOMPARE(spy.takeFirst().at(1).toInt(), total);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE sample_rate = 44100")).toInt(), total);
+
+    QSignalSpy again(&library, &Library::scanned);
+    library.rescan({m_music});
+    QVERIFY(again.wait(scanTimeoutMs));
+    const QList<QVariant> args = again.takeFirst();
+    QCOMPARE(args.at(0).toInt() + args.at(1).toInt() + args.at(2).toInt(), 0);
+}
+
+void LibraryTest::playlists()
+{
+    QSqlDatabase db = m_library->database();
+    QSqlQuery query(db);
+    QVERIFY(query.exec(QStringLiteral("DELETE FROM playlist_items")));
+    QVERIFY(query.exec(QStringLiteral("DELETE FROM playlists")));
+    QCOMPARE(m_library->playlistCount(), 0);
+    PlaylistsModel model(m_library.get());
+    QCOMPARE(model.rowCount(), 0);
+    QVERIFY(query.exec(QStringLiteral("INSERT INTO playlists(id, name) VALUES (1, 'Morning')")));
+    QVERIFY(query.exec(QStringLiteral("INSERT INTO playlists(id, name) VALUES (2, 'Drive')")));
+    const QList<QVariant> ids = [&] {
+        QList<QVariant> out;
+        QSqlQuery q(QStringLiteral("SELECT id FROM tracks ORDER BY id LIMIT 3"), db);
+        while (q.next())
+            out.append(q.value(0));
+        return out;
+    }();
+    QCOMPARE(ids.size(), 3);
+    for (int i = 0; i < 3; i++) {
+        QSqlQuery item(db);
+        item.prepare(QStringLiteral("INSERT INTO playlist_items(playlist_id, track_id, pos) VALUES (1, ?, ?)"));
+        item.addBindValue(ids.at(2 - i));
+        item.addBindValue(i);
+        QVERIFY(item.exec());
+    }
+    emit m_library->playlistsChanged();
+    emit m_library->playlistCountChanged();
+    QCOMPARE(m_library->playlistCount(), 2);
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.data(model.index(0), model.roleNames().key("title")).toString(), QStringLiteral("Drive"));
+    QCOMPARE(model.data(model.index(1), model.roleNames().key("title")).toString(), QStringLiteral("Morning"));
+    QCOMPARE(model.data(model.index(1), model.roleNames().key("subtitle")).toString(), QStringLiteral("3 songs"));
+    QCOMPARE(model.data(model.index(0), model.roleNames().key("subtitle")).toString(), QStringLiteral("0 songs"));
+    QCOMPARE(model.data(model.index(0), model.roleNames().key("kind")).toString(), QStringLiteral("playlist"));
+    const QVariantList tracks = m_library->playlistTracks(1);
+    QCOMPARE(tracks.size(), 3);
+    QCOMPARE(tracks.at(0).toLongLong(), ids.at(2).toLongLong());
+    QCOMPARE(tracks.at(2).toLongLong(), ids.at(0).toLongLong());
+    QCOMPARE(m_library->playlistTracks(9).size(), 0);
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)

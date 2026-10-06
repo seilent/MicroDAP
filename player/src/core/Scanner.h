@@ -38,6 +38,8 @@ struct TrackInfo
     int discNo = 0;
     int year = 0;
     int durationMs = 0;
+    int sampleRate = 0;
+    int bitDepth = 0;
     QString artPath;
 };
 

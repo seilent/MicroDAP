@@ -19,6 +19,9 @@ class Settings : public QObject
     Q_PROPERTY(bool pocketControls READ pocketControls WRITE setPocketControls NOTIFY pocketControlsChanged)
     Q_PROPERTY(int saverSeconds READ saverSeconds WRITE setSaverSeconds NOTIFY saverSecondsChanged)
     Q_PROPERTY(bool keepPhoneInGameMode READ keepPhoneInGameMode WRITE setKeepPhoneInGameMode NOTIFY keepPhoneInGameModeChanged)
+    Q_PROPERTY(int screenOffSeconds READ screenOffSeconds WRITE setScreenOffSeconds NOTIFY screenOffSecondsChanged)
+    Q_PROPERTY(int suspendMinutes READ suspendMinutes WRITE setSuspendMinutes NOTIFY suspendMinutesChanged)
+    Q_PROPERTY(bool wifiOffScreenOff READ wifiOffScreenOff WRITE setWifiOffScreenOff NOTIFY wifiOffScreenOffChanged)
     Q_PROPERTY(QString path READ path CONSTANT)
 
 public:
@@ -53,6 +56,12 @@ public:
     void setSaverSeconds(int seconds);
     bool keepPhoneInGameMode() const;
     void setKeepPhoneInGameMode(bool on);
+    int screenOffSeconds() const;
+    void setScreenOffSeconds(int seconds);
+    int suspendMinutes() const;
+    void setSuspendMinutes(int minutes);
+    bool wifiOffScreenOff() const;
+    void setWifiOffScreenOff(bool on);
 
     Q_INVOKABLE void sync();
 
@@ -64,6 +73,9 @@ signals:
     void pocketControlsChanged();
     void saverSecondsChanged();
     void keepPhoneInGameModeChanged();
+    void screenOffSecondsChanged();
+    void suspendMinutesChanged();
+    void wifiOffScreenOffChanged();
 
 private:
     void load();
@@ -79,6 +91,9 @@ private:
     bool m_pocketControls = false;
     int m_saverSeconds = 30;
     bool m_keepPhoneInGameMode = false;
+    int m_screenOffSeconds = 300;
+    int m_suspendMinutes = 10;
+    bool m_wifiOffScreenOff = false;
 };
 
 }

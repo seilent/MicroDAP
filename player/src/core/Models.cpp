@@ -353,4 +353,30 @@ bool PinsModel::loadPlaylist(Entry &entry) const
     return true;
 }
 
+PlaylistsModel::PlaylistsModel(Library *library, QObject *parent)
+    : LibraryModel(library, QByteArrayLiteral("title"), parent)
+{
+    connect(library, &Library::playlistsChanged, this, &LibraryModel::reload);
+    reload();
+}
+
+QList<LibraryModel::Entry> PlaylistsModel::load() const
+{
+    QList<Entry> entries;
+    QSqlQuery query(QStringLiteral("SELECT p.id, p.name, (SELECT COUNT(*) FROM playlist_items i "
+                                   "WHERE i.playlist_id = p.id) FROM playlists p ORDER BY p.name COLLATE NOCASE"),
+                    library()->database());
+    while (query.next()) {
+        Entry entry;
+        entry.id = query.value(0).toLongLong();
+        entry.title = query.value(1).toString();
+        entry.subtitle = countLabel(query.value(2).toInt(), "song", "songs");
+        entry.kind = QStringLiteral("playlist");
+        entry.section = QStringLiteral("playlists");
+        entry.sortKey = entry.title.toLower();
+        entries.append(entry);
+    }
+    return entries;
+}
+
 }

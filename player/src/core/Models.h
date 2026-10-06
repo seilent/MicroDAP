@@ -151,4 +151,15 @@ private:
     bool loadPlaylist(Entry &entry) const;
 };
 
+class PlaylistsModel : public LibraryModel
+{
+    Q_OBJECT
+
+public:
+    explicit PlaylistsModel(Library *library, QObject *parent = nullptr);
+
+protected:
+    QList<Entry> load() const override;
+};
+
 }

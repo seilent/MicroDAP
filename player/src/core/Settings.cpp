@@ -42,6 +42,21 @@ QString keyKeepPhoneInGameMode()
     return QStringLiteral("keepPhoneInGameMode");
 }
 
+QString keyScreenOffSeconds()
+{
+    return QStringLiteral("screenOffSeconds");
+}
+
+QString keySuspendMinutes()
+{
+    return QStringLiteral("suspendMinutes");
+}
+
+QString keyWifiOffScreenOff()
+{
+    return QStringLiteral("wifiOffScreenOff");
+}
+
 double normalizeScale(double scale)
 {
     const double stepped = qRound(scale * 10.0) / 10.0;
@@ -120,6 +135,9 @@ void Settings::load()
     m_pocketControls = m_settings.value(keyPocketControls(), false).toBool();
     m_saverSeconds = normalizeSaver(m_settings.value(keySaverSeconds(), 30).toInt());
     m_keepPhoneInGameMode = m_settings.value(keyKeepPhoneInGameMode(), false).toBool();
+    m_screenOffSeconds = qMax(0, m_settings.value(keyScreenOffSeconds(), 300).toInt());
+    m_suspendMinutes = qMax(0, m_settings.value(keySuspendMinutes(), 10).toInt());
+    m_wifiOffScreenOff = m_settings.value(keyWifiOffScreenOff(), false).toBool();
 }
 
 QString Settings::path() const
@@ -244,6 +262,50 @@ void Settings::sync()
         m_settings.setValue(it.key(), it.value());
     m_dirty.clear();
     m_settings.sync();
+}
+
+int Settings::screenOffSeconds() const
+{
+    return m_screenOffSeconds;
+}
+
+void Settings::setScreenOffSeconds(int seconds)
+{
+    const int value = qMax(0, seconds);
+    if (m_screenOffSeconds == value)
+        return;
+    m_screenOffSeconds = value;
+    store(keyScreenOffSeconds(), m_screenOffSeconds);
+    emit screenOffSecondsChanged();
+}
+
+int Settings::suspendMinutes() const
+{
+    return m_suspendMinutes;
+}
+
+void Settings::setSuspendMinutes(int minutes)
+{
+    const int value = qMax(0, minutes);
+    if (m_suspendMinutes == value)
+        return;
+    m_suspendMinutes = value;
+    store(keySuspendMinutes(), m_suspendMinutes);
+    emit suspendMinutesChanged();
+}
+
+bool Settings::wifiOffScreenOff() const
+{
+    return m_wifiOffScreenOff;
+}
+
+void Settings::setWifiOffScreenOff(bool on)
+{
+    if (m_wifiOffScreenOff == on)
+        return;
+    m_wifiOffScreenOff = on;
+    store(keyWifiOffScreenOff(), m_wifiOffScreenOff);
+    emit wifiOffScreenOffChanged();
 }
 
 }

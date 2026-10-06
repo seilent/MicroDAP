@@ -2,6 +2,8 @@
 
 #include <taglib/audioproperties.h>
 #include <taglib/fileref.h>
+#include <taglib/flacproperties.h>
+#include <taglib/mp4properties.h>
 #include <taglib/tag.h>
 #include <taglib/tbytevector.h>
 #include <taglib/tfile.h>
@@ -11,6 +13,7 @@
 #include <taglib/tstring.h>
 #include <taglib/tstringlist.h>
 #include <taglib/tvariant.h>
+#include <taglib/wavproperties.h>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -91,6 +94,17 @@ QByteArray toBytes(const TagLib::ByteVector &v)
 int leadingInt(const QString &s)
 {
     return s.section(QLatin1Char('/'), 0, 0).trimmed().toInt();
+}
+
+int bitDepthOf(const TagLib::AudioProperties *audio)
+{
+    if (const auto *flac = dynamic_cast<const TagLib::FLAC::Properties *>(audio))
+        return flac->bitsPerSample();
+    if (const auto *mp4 = dynamic_cast<const TagLib::MP4::Properties *>(audio))
+        return mp4->bitsPerSample();
+    if (const auto *wav = dynamic_cast<const TagLib::RIFF::WAV::Properties *>(audio))
+        return wav->bitsPerSample();
+    return 0;
 }
 
 FileStamp stampOf(const QFileInfo &info)
@@ -219,8 +233,11 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
             track.trackNo = static_cast<int>(tag->track());
             track.year = static_cast<int>(tag->year());
         }
-        if (const TagLib::AudioProperties *audio = ref.audioProperties())
+        if (const TagLib::AudioProperties *audio = ref.audioProperties()) {
             track.durationMs = audio->lengthInMilliseconds();
+            track.sampleRate = audio->sampleRate();
+            track.bitDepth = bitDepthOf(audio);
+        }
         if (TagLib::File *file = ref.file()) {
             TagLib::PropertyMap map = file->properties();
             if (map.contains("ARTISTS") && !map["ARTISTS"].isEmpty())

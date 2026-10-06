@@ -20,7 +20,7 @@ namespace {
 
 std::atomic_int connectionCounter{0};
 
-constexpr int schemaVersion = 2;
+constexpr int schemaVersion = 3;
 
 constexpr const char *trackArtistsTable =
     "CREATE TABLE IF NOT EXISTS track_artists("
@@ -29,6 +29,10 @@ constexpr const char *trackArtistsTable =
     "pos INTEGER NOT NULL, PRIMARY KEY(track_id, pos))";
 constexpr const char *trackArtistsIndex =
     "CREATE INDEX IF NOT EXISTS track_artists_artist ON track_artists(artist_id)";
+constexpr const char *addSampleRate = "ALTER TABLE tracks ADD COLUMN sample_rate INTEGER";
+constexpr const char *addBitDepth = "ALTER TABLE tracks ADD COLUMN bit_depth INTEGER";
+constexpr const char *markReread = "UPDATE tracks SET mtime = -1";
+constexpr const char *setVersion = "PRAGMA user_version = 3";
 
 const char *const schema[] = {
     "CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
@@ -40,7 +44,8 @@ const char *const schema[] = {
     "mtime INTEGER NOT NULL, size INTEGER NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, "
     "album_artist TEXT NOT NULL, album_id INTEGER NOT NULL REFERENCES albums(id), "
     "track_no INTEGER, disc_no INTEGER, year INTEGER, genre TEXT NOT NULL DEFAULT '', "
-    "duration_ms INTEGER, added INTEGER NOT NULL, rating INTEGER NOT NULL DEFAULT 0)",
+    "duration_ms INTEGER, added INTEGER NOT NULL, rating INTEGER NOT NULL DEFAULT 0, "
+    "sample_rate INTEGER, bit_depth INTEGER)",
     "CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist)",
     "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre)",
@@ -59,14 +64,23 @@ const char *const schema[] = {
     "PRIMARY KEY(playlist_id, pos))",
     "CREATE TABLE IF NOT EXISTS pins(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, "
     "ref_id INTEGER NOT NULL, pos INTEGER NOT NULL)",
-    "PRAGMA user_version = 2",
+    setVersion,
 };
 
 const char *const migrateFrom1[] = {
     trackArtistsTable,
     trackArtistsIndex,
-    "UPDATE tracks SET mtime = -1",
-    "PRAGMA user_version = 2",
+    addSampleRate,
+    addBitDepth,
+    markReread,
+    setVersion,
+};
+
+const char *const migrateFrom2[] = {
+    addSampleRate,
+    addBitDepth,
+    markReread,
+    setVersion,
 };
 
 const char *const pruneStatements[] = {
@@ -187,6 +201,9 @@ void Library::open()
     } else if (current == 1) {
         for (const char *sql : migrateFrom1)
             run(m_db, sql);
+    } else if (current == 2) {
+        for (const char *sql : migrateFrom2)
+            run(m_db, sql);
     } else if (current != schemaVersion) {
         qWarning() << "casdap library: unsupported schema version" << current << "in" << m_dbPath;
         m_db.close();
@@ -240,6 +257,11 @@ QVariantMap Library::counts() const
         {QStringLiteral("artists"), count(QStringLiteral("artists"))},
         {QStringLiteral("genres"), count(QStringLiteral("genres"))},
     };
+}
+
+int Library::playlistCount() const
+{
+    return m_db.isOpen() ? count(QStringLiteral("playlists")) : 0;
 }
 
 QHash<QString, FileStamp> Library::snapshot() const
@@ -309,6 +331,8 @@ void Library::finishScan(const ScanResult &result)
     if (ok) {
         emit countsChanged();
         emit changed();
+        emit playlistsChanged();
+        emit playlistCountChanged();
         if (unpinned > 0)
             emit pinsChanged();
         emit scanned(static_cast<int>(result.added.size()),
@@ -420,12 +444,13 @@ bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qin
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "INSERT INTO tracks(path, mtime, size, title, artist, album_artist, album_id, track_no, "
-        "disc_no, year, genre, duration_ms, added, rating) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
+        "disc_no, year, genre, duration_ms, added, rating, sample_rate, bit_depth) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
         "ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, size = excluded.size, "
         "title = excluded.title, artist = excluded.artist, album_artist = excluded.album_artist, "
         "album_id = excluded.album_id, track_no = excluded.track_no, disc_no = excluded.disc_no, "
-        "year = excluded.year, genre = excluded.genre, duration_ms = excluded.duration_ms"));
+        "year = excluded.year, genre = excluded.genre, duration_ms = excluded.duration_ms, "
+        "sample_rate = excluded.sample_rate, bit_depth = excluded.bit_depth"));
     query.addBindValue(track.path);
     query.addBindValue(track.mtime);
     query.addBindValue(track.size);
@@ -439,6 +464,8 @@ bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qin
     query.addBindValue(track.genre);
     query.addBindValue(track.durationMs);
     query.addBindValue(now);
+    query.addBindValue(track.sampleRate);
+    query.addBindValue(track.bitDepth);
     if (!run(query))
         return false;
 
@@ -656,11 +683,34 @@ QVariantList Library::albumTracks(qint64 albumId) const
                               albumId));
 }
 
+QVariantMap Library::playlistInfo(qint64 playlistId) const
+{
+    QVariantMap info;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT p.name, (SELECT COUNT(*) FROM playlist_items i "
+                                 "WHERE i.playlist_id = p.id) FROM playlists p WHERE p.id = ?"));
+    query.addBindValue(playlistId);
+    if (!query.exec() || !query.next())
+        return info;
+    info.insert(QStringLiteral("id"), playlistId);
+    info.insert(QStringLiteral("name"), query.value(0).toString());
+    info.insert(QStringLiteral("count"), query.value(1).toInt());
+    return info;
+}
+
+QVariantList Library::playlistTracks(qint64 playlistId) const
+{
+    return idColumn(QStringLiteral("SELECT track_id FROM playlist_items WHERE playlist_id = ? "
+                                   "ORDER BY pos"),
+                    playlistId);
+}
+
 QVariantList Library::trackRows(const QVariantList &trackIds) const
 {
     QVariantList rows;
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms "
+    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms, "
+                                 "t.sample_rate, t.bit_depth "
                                  "FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
     for (const QVariant &id : trackIds) {
         query.bindValue(0, id.toLongLong());
@@ -673,6 +723,8 @@ QVariantList Library::trackRows(const QVariantList &trackIds) const
         row.insert(QStringLiteral("album"), query.value(3).toString());
         row.insert(QStringLiteral("albumId"), query.value(4).toLongLong());
         row.insert(QStringLiteral("durationMs"), query.value(5).toLongLong());
+        row.insert(QStringLiteral("sampleRate"), query.value(6).toInt());
+        row.insert(QStringLiteral("bitDepth"), query.value(7).toInt());
         rows.append(row);
         query.finish();
     }

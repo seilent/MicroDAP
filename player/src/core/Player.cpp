@@ -129,9 +129,16 @@ qint64 Player::duration() const
 QVariantMap Player::current() const
 {
     QVariantMap map = m_queue->get(m_queue->currentIndex());
-    if (m_library && !map.isEmpty())
-        map.insert(QStringLiteral("rating"),
-                   m_library->rating(map.value(QStringLiteral("id")).toLongLong()));
+    if (m_library && !map.isEmpty()) {
+        const qint64 id = map.value(QStringLiteral("id")).toLongLong();
+        map.insert(QStringLiteral("rating"), m_library->rating(id));
+        const QVariantList rows = m_library->trackRows({id});
+        if (!rows.isEmpty()) {
+            const QVariantMap row = rows.first().toMap();
+            map.insert(QStringLiteral("sampleRate"), row.value(QStringLiteral("sampleRate")));
+            map.insert(QStringLiteral("bitDepth"), row.value(QStringLiteral("bitDepth")));
+        }
+    }
     return map;
 }
 
