@@ -12,6 +12,7 @@ PressScale {
     property bool playing: false
     property bool playingDot: false
     property bool bold: false
+    property bool countLine: false
     property bool ring: false
     property string ringGlyph: "play"
     property bool animated: true
@@ -20,7 +21,7 @@ PressScale {
     readonly property bool indented: root.number !== "" || root.ring
     readonly property real textX: Ui.px(Ui.hubEdge + (root.indented ? root.indent : 0))
     readonly property var primaryRole: root.bold ? Ui.listPlaylist : Ui.listPrimary
-    readonly property var secondaryRole: root.bold ? Ui.listCount : Ui.listSecondary
+    readonly property var secondaryRole: root.bold || root.countLine ? Ui.listCount : Ui.listSecondary
     readonly property real primaryAlpha: root.focused ? root.primaryRole.alpha : root.primaryRole.alphaDim
     readonly property color primaryColor: root.playing ? Ui.accent : Ui.white(root.primaryAlpha)
     readonly property real primaryBaseline: primaryText.y + primaryText.baselineOffset

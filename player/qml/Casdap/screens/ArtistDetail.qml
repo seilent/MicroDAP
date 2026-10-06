@@ -489,9 +489,9 @@ Page {
         Ring {
             id: playRing
 
-            x: tile.x + Ui.px(Ui.detailPlayInset)
-            y: tile.y + tile.height - playRing.height - Ui.px(Ui.detailPlayInset)
-            size: Ui.rowRing
+            x: tile.x + tile.width - playRing.width - Ui.px(Ui.detailRingInset)
+            y: tile.y + Ui.px(Ui.detailRingInset)
+            size: Ui.detailRing
             glyph: "play"
             focused: row.isFocused
             animated: page.live
@@ -502,10 +502,14 @@ Page {
 
             x: Ui.px(Ui.detailTextX)
             y: Ui.px(Ui.detailTitleDrop) - titleText.baselineOffset
-            width: row.width - Ui.px(Ui.hubEdge) - titleText.x
+            width: row.width - titleText.x
             text: row.modelData.title
             color: Ui.white(row.isFocused ? Ui.detailTitle.alpha : Ui.alphaHigh)
             font: Ui.font(Ui.detailTitle)
+            wrapMode: Text.Wrap
+            maximumLineCount: Ui.detailTitleLines
+            lineHeightMode: Text.FixedHeight
+            lineHeight: Ui.px(Ui.detailTitlePitch)
             elide: Text.ElideRight
 
             Behavior on color {
@@ -520,7 +524,7 @@ Page {
             id: subText
 
             x: Ui.px(Ui.detailTextX)
-            y: Ui.px(Ui.detailTitleDrop + Ui.detailSubPitch) - subText.baselineOffset
+            y: Ui.px(Ui.detailTitleDrop + (titleText.lineCount - 1) * Ui.detailTitlePitch + Ui.detailSubPitch) - subText.baselineOffset
             width: row.width - Ui.px(Ui.hubEdge) - subText.x
             text: row.modelData.subtitle
             color: Ui.white(Ui.detailSub.alpha)
@@ -633,7 +637,7 @@ Page {
         x: page.activeList.x + Ui.px(Ui.hubEdge - Ui.focusBarOffset)
         rowY: page.activeList.y + page.activeList.focusY
         rowHeight: page.activeList.rowPitch
-        opacity: page.activeList.opacity
+        opacity: page.activeList.opacity * page.focusOpacity
         animated: page.live
     }
 
@@ -644,8 +648,8 @@ Page {
         y: Ui.px(Ui.detailNameBaseline) - nameText.baselineOffset
         width: Ui.px((Ui.landscape ? Ui.detailColumn : Ui.canvasW) - Ui.hubEdge)
         text: page.name
-        color: Ui.white(Ui.npArtist.alpha)
-        font: Ui.font(Ui.npArtist)
+        color: Ui.white(Ui.detailName.alpha)
+        font: Ui.font(Ui.detailName)
         elide: Text.ElideRight
     }
 

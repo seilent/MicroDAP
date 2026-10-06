@@ -378,6 +378,7 @@ Page {
         x: Ui.px(Ui.hubEdge - Ui.focusBarOffset)
         rowY: queueList.y + queueList.focusY
         rowHeight: queueList.rowPitch
+        opacity: screen.focusOpacity
         animated: screen.live
     }
 

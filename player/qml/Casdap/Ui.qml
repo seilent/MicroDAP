@@ -60,16 +60,18 @@ QtObject {
     readonly property var listPlaylist: ({ name: "listPlaylist", size: 14, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, alphaDim: 0.85, tracking: -0.5, sample: "now playing" })
     readonly property var listSecondary: ({ name: "listSecondary", size: 11, style: "Light", caps: Font.MixedCase, alpha: 0.6, tracking: -0.5, sample: "Artist name" })
     readonly property var listCount: ({ name: "listCount", size: 11, style: "Light", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "749 songs" })
+    readonly property var detailName: ({ name: "detailName", size: 11, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, tracking: -0.5, sample: "kid cudi" })
     readonly property var detailTitle: ({ name: "detailTitle", size: 13, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, tracking: -0.5, sample: "album title" })
     readonly property var detailSub: ({ name: "detailSub", size: 9, style: "Light", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "2024" })
     readonly property var gridCaption: ({ name: "gridCaption", size: 9, style: "Regular", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "album title" })
-    readonly property var letterGlyph: ({ name: "letterGlyph", size: 20, style: "Light", caps: Font.AllLowercase, alpha: 1.0, tracking: -0.5, sample: "a" })
+    readonly property var letterGlyph: ({ name: "letterGlyph", size: 20, style: "Regular", caps: Font.AllLowercase, alpha: 1.0, tracking: -0.5, sample: "a" })
     readonly property var settingsItem: ({ name: "settingsItem", size: 17, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, alphaDim: 0.6, tracking: -0.5, sample: "output" })
     readonly property var settingsValue: ({ name: "settingsValue", size: 11, style: "Light", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "speaker" })
     readonly property var npArtist: ({ name: "npArtist", size: 20, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, tracking: -0.5, sample: "artist" })
     readonly property var npAlbum: ({ name: "npAlbum", size: 20, style: "Light", caps: Font.AllUppercase, alpha: 0.85, tracking: -0.5, sample: "album" })
     readonly property var npTitle: ({ name: "npTitle", size: 26, style: "Light", caps: Font.MixedCase, alpha: 1.0, tracking: -0.5, sample: "Song title" })
     readonly property var npNext: ({ name: "npNext", size: 13, style: "Light", caps: Font.MixedCase, alpha: 0.6, tracking: -0.5, sample: "Next track" })
+    readonly property var npCount: ({ name: "npCount", size: 13, style: "Light", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "4 of 11" })
     readonly property var time: ({ name: "time", size: 13, style: "Regular", caps: Font.MixedCase, alpha: 0.85, tracking: -0.5, sample: "0:05  -3:48" })
     readonly property var overlayNumber: ({ name: "overlayNumber", size: 48, style: "Light", caps: Font.MixedCase, alpha: 0.6, tracking: -0.5, sample: "13" })
     readonly property var overlayLabel: ({ name: "overlayLabel", size: 7, style: "Bold", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "volume" })
@@ -82,13 +84,13 @@ QtObject {
     readonly property var jumpLetter: ({ name: "jumpLetter", size: 120, style: "Light", caps: Font.AllLowercase, alpha: 1.0, tracking: -0.5, sample: "h" })
     readonly property var dialogTitle: ({ name: "dialogTitle", size: 22, style: "Light", caps: Font.AllLowercase, alpha: 1.0, tracking: -0.5, sample: "power" })
     readonly property var dialogItem: ({ name: "dialogItem", size: 17, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, alphaDim: 0.6, tracking: -0.5, sample: "screen off" })
-    readonly property var watermark: ({ name: "watermark", size: 14, style: "Regular", caps: Font.AllLowercase, alpha: 0.08, tracking: -0.5, sample: "casdap" })
+    readonly property var watermark: ({ name: "watermark", size: 14, style: "Light", caps: Font.AllLowercase, alpha: 0.08, tracking: -0.5, sample: "casdap" })
 
     readonly property var roleList: [
         ui.hubHeader, ui.homeItem, ui.homeSubtitle, ui.quickplayHeader, ui.quickplayHint, ui.pivotActive, ui.pivotInactive,
-        ui.sectionLabel, ui.listPrimary, ui.listPlaylist, ui.listSecondary, ui.listCount, ui.detailTitle,
+        ui.sectionLabel, ui.listPrimary, ui.listPlaylist, ui.listSecondary, ui.listCount, ui.detailName, ui.detailTitle,
         ui.detailSub, ui.gridCaption, ui.letterGlyph, ui.settingsItem, ui.settingsValue, ui.npArtist,
-        ui.npAlbum, ui.npTitle, ui.npNext, ui.time, ui.overlayNumber, ui.overlayLabel, ui.toastArtist,
+        ui.npAlbum, ui.npTitle, ui.npNext, ui.npCount, ui.time, ui.overlayNumber, ui.overlayLabel, ui.toastArtist,
         ui.toastTitle, ui.saverClock, ui.saverTitle, ui.saverArtist, ui.saverAlbum, ui.jumpLetter,
         ui.dialogTitle, ui.dialogItem, ui.watermark
     ]
@@ -149,8 +151,10 @@ QtObject {
     readonly property real homeSubtitleX: 10
     readonly property real homeSubtitleDrop: 8
     readonly property real homePitchLandscape: 48
-    readonly property real qpPeek: 56
+    readonly property real qpPeekScale: 0.30
+    readonly property real qpPeekY: 130
     readonly property real qpPeekAlpha: 0.4
+    readonly property real qpPeekW: ui.qpW * ui.qpPeekScale
     readonly property real headerBand: 70
     readonly property real headerXHeightBottom: 66
     readonly property real pivotTop: ui.landscape ? 58 : 74
@@ -178,11 +182,13 @@ QtObject {
     readonly property real playingDot: 4
     readonly property real playingDotOffset: 6
     readonly property real detailRow: 124
-    readonly property real detailNameBaseline: ui.contentTop
+    readonly property real detailNameDrop: 15
+    readonly property real detailNameBaseline: ui.pivotBaseline + ui.detailNameDrop
     readonly property real detailRingTop: 150
     readonly property real detailRing: 32
     readonly property real detailRingGap: 24
     readonly property int detailRingCount: 3
+    readonly property real detailRingInset: 8
     readonly property real detailLabelDrop: 12
     readonly property real detailLabelBaseline: ui.landscape ? ui.contentTop + ui.capHeight * ui.sectionLabel.size : 200
     readonly property real detailRowsTop: ui.detailLabelBaseline + ui.detailLabelDrop
@@ -190,19 +196,21 @@ QtObject {
     readonly property real detailColumnRight: 216
     readonly property real detailListX: ui.landscape ? ui.detailColumnRight - ui.hubEdge : 0
     readonly property real detailTextX: ui.hubEdge + ui.tileL + ui.tileLGutter
-    readonly property real detailTitleDrop: ui.capHeight * ui.detailTitle.size
+    readonly property real detailTitleDrop: 28
+    readonly property real detailTitlePitch: 15
+    readonly property int detailTitleLines: 2
     readonly property real detailSubPitch: ui.detailTitle.size
-    readonly property real detailPlayInset: 4
-    readonly property real albumLabelBaseline: 60
-    readonly property real albumArtTop: 76
-    readonly property real albumRowsTop: ui.landscape ? 60 : 204
+    readonly property real albumArtX: ui.edge
+    readonly property real albumArtTop: ui.landscape ? ui.contentTop : ui.npArtTop
+    readonly property real albumRowsGap: 12
+    readonly property real albumRowsTop: ui.landscape ? ui.contentTop : ui.albumArtTop + ui.tileL + ui.albumRowsGap
 
     function detailRingX(index: int): real {
         return ui.hubEdge + index * (ui.detailRing + ui.detailRingGap)
     }
     readonly property real settingsPitch: 43
-    readonly property real queueCountBaseline: 60
-    readonly property real queueRowsTop: 84
+    readonly property real queueCountBaseline: ui.pivotBaseline
+    readonly property real queueRowsTop: ui.contentTop
     readonly property real backRing: 64
     readonly property real backRingStroke: 4
     readonly property real backRingInset: 4
@@ -265,7 +273,10 @@ QtObject {
 
     readonly property real overlayPlusY: 72
     readonly property real overlayNumberBaseline: 160
-    readonly property real overlayMinusOffset: 72
+    readonly property real overlayAnchorH: 480
+    readonly property real overlayAnchorScale: ui.landscape ? ui.canvasH / ui.overlayAnchorH : 1
+    readonly property real overlayRingY: 216 * ui.overlayAnchorScale
+    readonly property real overlayMinusY: 372 * ui.overlayAnchorScale
     readonly property real overlayBottomMargin: 24
     readonly property real overlayTextPitch: 18
     readonly property real overlayLit: 1.0

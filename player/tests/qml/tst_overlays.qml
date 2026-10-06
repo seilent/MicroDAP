@@ -289,7 +289,7 @@ TestCase {
         compare(dialog.duration, 300)
         compare(dialog.hideDuration, 150)
         fuzzyCompare(dialog.fromScale, 0.9, 1e-9)
-        fuzzyCompare(dialog.scrim.color.a, 0.55, 0.005)
+        fuzzyCompare(dialog.scrim.color.a, 0.8, 0.005)
         compare(dialog.pitch, Ui.px(43))
         compare(dialog.openAnimation.animations[1].duration, 300)
         compare(dialog.openAnimation.animations[1].easing.type, Motion.pop)
@@ -461,13 +461,15 @@ TestCase {
         fuzzyCompare(overlay.number.y + overlay.number.baselineOffset, Ui.px(160), 1e-6)
         compare(overlay.number.font.pixelSize, Ui.fontPx(48))
         fuzzyCompare(overlay.ring.x + overlay.ring.width / 2, w / 2, 1e-6)
-        fuzzyCompare(overlay.ring.y + overlay.ring.height / 2, h / 2, 1e-6)
+        fuzzyCompare(overlay.ring.y + overlay.ring.height / 2, Ui.px(216), 1e-6)
         compare(overlay.ring.width, Ui.px(64))
         fuzzyCompare(overlay.prev.x + overlay.prev.width / 2, w / 2 - Ui.px(80), 1e-6)
         fuzzyCompare(overlay.next.x + overlay.next.width / 2, w / 2 + Ui.px(80), 1e-6)
-        fuzzyCompare(overlay.prev.y + overlay.prev.height / 2, h / 2, 1e-6)
+        fuzzyCompare(overlay.prev.y + overlay.prev.height / 2, Ui.px(216), 1e-6)
         fuzzyCompare(overlay.minus.x + overlay.minus.width / 2, w / 2, 1e-6)
-        fuzzyCompare(overlay.minus.y + overlay.minus.height / 2, h / 2 + Ui.px(72), 1e-6)
+        fuzzyCompare(overlay.minus.y + overlay.minus.height / 2, Ui.px(372), 1e-6)
+        fuzzyCompare(Ui.px(216) - Ui.px(72), Ui.px(144), 1e-6)
+        fuzzyCompare(Ui.px(372) - Ui.px(216), Ui.px(156), 1e-6)
         fuzzyCompare(overlay.volumeLabel.y, overlay.minus.y + overlay.minus.height, 1e-6)
         compare(overlay.volumeLabel.font.pixelSize, Ui.fontPx(7))
         compare(overlay.exitLabel.x, Ui.px(16))
@@ -518,6 +520,10 @@ TestCase {
 
     function test_overlay_row_landscape() {
         check_overlay_row(1920, 1080)
+        const minus = overlay.minus
+        verify(minus.y + minus.height <= 1080 + 1e-6)
+        fuzzyCompare(overlay.ring.y + overlay.ring.height / 2, Ui.px(216 * Ui.canvasH / 480), 1e-6)
+        fuzzyCompare(minus.y + minus.height / 2, Ui.px(372 * Ui.canvasH / 480), 1e-6)
     }
 
     function test_overlay_timings() {

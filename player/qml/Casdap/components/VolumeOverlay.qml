@@ -18,7 +18,8 @@ Item {
     readonly property color layerColor: Ui.scrimOverlay
     readonly property real edge: Ui.px(Ui.edge)
     readonly property real centerX: root.width / 2
-    readonly property real centerY: root.height / 2
+    readonly property real ringY: Ui.px(Ui.overlayRingY)
+    readonly property real minusY: Ui.px(Ui.overlayMinusY)
     readonly property real glyphSize: Ui.px(Ui.overlayGlyph)
     readonly property real glyphOffset: Ui.px(Ui.overlayGlyphOffset)
     readonly property real ringSize: Ui.px(Ui.overlayRing)
@@ -89,7 +90,7 @@ Item {
             id: prev
 
             x: root.centerX - root.glyphOffset - prev.width / 2
-            y: root.centerY - prev.height / 2
+            y: root.ringY - prev.height / 2
             size: Ui.overlayGlyph
             name: "previous"
             color: Ui.textFull
@@ -99,7 +100,7 @@ Item {
             id: ring
 
             x: root.centerX - ring.width / 2
-            y: root.centerY - ring.height / 2
+            y: root.ringY - ring.height / 2
             size: Ui.overlayRing
             glyph: root.playing ? "pause" : "play"
             focused: true
@@ -110,7 +111,7 @@ Item {
             id: next
 
             x: root.centerX + root.glyphOffset - next.width / 2
-            y: root.centerY - next.height / 2
+            y: root.ringY - next.height / 2
             size: Ui.overlayGlyph
             name: "next"
             color: Ui.textFull
@@ -155,7 +156,7 @@ Item {
         id: minus
 
         x: root.centerX - minus.width / 2
-        y: root.centerY + Ui.px(Ui.overlayMinusOffset) - minus.height / 2
+        y: root.minusY - minus.height / 2
         size: Ui.overlayGlyph
         name: "minus"
         color: Ui.white(Ui.overlayLit)

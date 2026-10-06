@@ -243,6 +243,13 @@ TestCase {
         compare(row.secondaryRole.caps, Font.AllUppercase)
         row.bold = false
         compare(row.primaryRole.style, "Regular")
+        compare(row.secondaryRole.caps, Font.MixedCase)
+        row.countLine = true
+        compare(row.primaryRole.style, "Regular")
+        compare(row.secondaryRole.caps, Font.AllUppercase)
+        compare(row.secondaryRole.style, "Light")
+        row.countLine = false
+        compare(row.secondaryRole.caps, Font.MixedCase)
     }
 
     function test_tile_geometry() {
@@ -371,6 +378,8 @@ TestCase {
 
     function test_letter_glyph_position() {
         const item = letter.letterItem
+        compare(item.font.styleName, "Regular")
+        compare(item.font.pixelSize, Ui.fontPx(20))
         fuzzyCompare(item.x + item.width, letter.width - Ui.px(Ui.letterInsetX), 0.5)
         fuzzyCompare(item.x + item.width, 130, 0.5)
         fuzzyCompare(item.y + item.baselineOffset, letter.height - Ui.px(Ui.letterInsetBaseline), 0.5)

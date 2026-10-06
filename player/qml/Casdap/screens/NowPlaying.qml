@@ -89,7 +89,7 @@ Page {
     readonly property real progressY: Ui.px(Ui.landscape
         ? Ui.npArtTopLandscape + Ui.npArt + Ui.npProgressGapLandscape
         : Ui.npProgressY)
-    readonly property real progressWidth: Ui.landscape ? np.artSide : np.width - 2 * np.edgeX
+    readonly property real progressWidth: np.artSide
     readonly property real timeBaseline: np.progressY + Ui.px(Ui.npTimeDrop)
     readonly property real ringY: Ui.px(Ui.npRingY)
     readonly property Item holder: np.parent
@@ -793,6 +793,7 @@ Page {
                 rowY: np.titleBaseline - Ui.px(Ui.capHeight * Ui.npTitle.size)
                 rowHeight: Ui.px(Ui.capHeight * Ui.npTitle.size)
                 visible: np.focusRow === 1
+                opacity: np.focusOpacity
                 animated: np.live
             }
 
@@ -813,8 +814,8 @@ Page {
                 y: np.nextBaseline - countItem.baselineOffset
                 visible: np.shownVariant
                 text: np.countText
-                color: Ui.white(Ui.npNext.alpha)
-                font: Ui.font(Ui.npNext)
+                color: Ui.white(Ui.npCount.alpha)
+                font: Ui.font(Ui.npCount)
             }
 
             Repeater {

@@ -169,6 +169,7 @@ Window {
 
         anchors.fill: parent
         visible: !root.screenshot && !root.hidden
+        dialogFade: switchPrompt.scrim.opacity
     }
 
     PadRouter {
@@ -309,6 +310,8 @@ Window {
             screenOff: root.off
             library: root.library
             player: root.player
+            status: root.status
+            bluez: root.bluez
             onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
         }
     }

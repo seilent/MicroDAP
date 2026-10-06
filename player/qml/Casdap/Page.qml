@@ -10,6 +10,8 @@ Item {
     property int focusCount: page.list !== null ? page.list.count : 0
     property bool pressed: false
     readonly property bool active: page.stack !== null && page.stack.currentItem === page
+    readonly property real dialogFade: page.stack !== null ? page.stack.dialogFade : 0
+    readonly property real focusOpacity: 1 - page.dialogFade
 
     signal action(string name, bool repeat)
     signal activated(int index)

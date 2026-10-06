@@ -91,7 +91,7 @@ TestCase {
     }
 
     function test_roles() {
-        compare(Ui.roleList.length, 35)
+        compare(Ui.roleList.length, 37)
         for (const role of Ui.roleList) {
             verify(role.size > 0, role.name)
             verify(["Light", "Regular", "Bold"].indexOf(role.style) >= 0, role.name)
@@ -105,6 +105,14 @@ TestCase {
         compare(Ui.listSecondary.size, 11)
         compare(Ui.npTitle.size, 26)
         compare(Ui.jumpLetter.size, 120)
+        compare(Ui.letterGlyph.style, "Regular")
+        compare(Ui.detailName.size, 11)
+        compare(Ui.detailName.style, "Bold")
+        compare(Ui.detailName.caps, Font.AllUppercase)
+        compare(Ui.npCount.size, 13)
+        compare(Ui.npCount.caps, Font.AllUppercase)
+        compare(Ui.watermark.style, "Light")
+        fuzzyCompare(Ui.watermark.alpha, 0.08, 1e-6)
     }
 
     function test_colors() {
@@ -145,6 +153,21 @@ TestCase {
         compare(Ui.npRingY, 440)
         compare(Ui.jumpCols, 5)
         fuzzyCompare(Ui.jumpTile, (320 - 32 - 32) / 5, 1e-6)
+        fuzzyCompare(Ui.qpPeekScale, 0.30, 1e-9)
+        compare(Ui.qpPeekY, 130)
+        fuzzyCompare(Ui.qpPeekW, 64.8, 1e-6)
+        compare(Ui.detailNameBaseline, 110)
+        compare(Ui.detailRingInset, 8)
+        compare(Ui.detailTitleDrop, 28)
+        compare(Ui.detailTitlePitch, 15)
+        compare(Ui.albumArtX, 16)
+        compare(Ui.albumArtTop, 155)
+        compare(Ui.albumRowsTop, 283)
+        compare(Ui.queueCountBaseline, 95)
+        compare(Ui.queueRowsTop, 128)
+        compare(Ui.overlayRingY, 216)
+        compare(Ui.overlayMinusY, 372)
+        compare(Motion.dialogScrim, 0.8)
         setWindow(1920, 1080, 1.0)
         compare(Ui.headerBand, 70)
         compare(Ui.headerXHeightBottom, 66)
@@ -154,6 +177,14 @@ TestCase {
         compare(Ui.contentTop, 98)
         compare(Ui.jumpCols, 9)
         fuzzyCompare(Ui.npArt, 166, 0.01)
+        compare(Ui.detailNameBaseline, 94)
+        compare(Ui.albumArtTop, 98)
+        compare(Ui.albumRowsTop, 98)
+        compare(Ui.queueCountBaseline, 79)
+        compare(Ui.queueRowsTop, 98)
+        fuzzyCompare(Ui.overlayRingY, 216 * Ui.canvasH / 480, 1e-6)
+        fuzzyCompare(Ui.overlayMinusY, 372 * Ui.canvasH / 480, 1e-6)
+        verify(Ui.overlayMinusY < Ui.canvasH)
     }
 
     function test_fonts() {

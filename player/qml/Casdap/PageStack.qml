@@ -5,6 +5,7 @@ Item {
     id: root
 
     property bool animate: true
+    property real dialogFade: 0
     property var pages: []
     readonly property int depth: root.pages.length
     readonly property Item currentItem: root.pages.length > 0 ? root.pages[root.pages.length - 1].content : null

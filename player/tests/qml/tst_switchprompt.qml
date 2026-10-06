@@ -79,7 +79,11 @@ TestCase {
         compare(prompt.duration, Motion.dialog)
         compare(prompt.hideDuration, Motion.dialogHide)
         compare(prompt.fromScale, Motion.dialogScale)
-        compare(prompt.scrimAlpha, Motion.sheetScrim)
+        compare(prompt.scrimAlpha, Motion.dialogScrim)
+        fuzzyCompare(prompt.scrimAlpha, 0.8, 1e-6)
+        compare(Qt.colorEqual(prompt.scrimColor, Ui.scrimOverlay), true)
+        fuzzyCompare(prompt.scrim.color.a, 0.8, 1 / 255)
+        compare(prompt.scrim.color.r, 0)
         compare(prompt.pitch, Ui.px(Ui.settingsPitch))
         compare(prompt.edge, Ui.px(Ui.edge))
         compare(prompt.titleText.font.pixelSize, Ui.fontPx(Ui.dialogTitle.size))
@@ -202,6 +206,24 @@ TestCase {
         compare(fakePower.calls, ["keep", "close"])
         compare(prompt.shown, true)
         compare(main.pageStack.depth, 1)
+    }
+
+    function test_page_focus_hides_under_dialog() {
+        compare(main.pageStack.dialogFade, 0)
+        compare(home.dialogFade, 0)
+        fuzzyCompare(home.focusBar.opacity, 1, 1e-6)
+        fakePower.showSwitchPrompt()
+        prompt.complete()
+        compare(prompt.scrim.opacity, 1)
+        compare(main.pageStack.dialogFade, 1)
+        compare(home.focusOpacity, 0)
+        fuzzyCompare(home.focusBar.opacity, 0, 1e-6)
+        prompt.close()
+        compare(prompt.closeAnimation.running, true)
+        verify(home.focusBar.opacity < 1)
+        prompt.complete()
+        compare(main.pageStack.dialogFade, 0)
+        fuzzyCompare(home.focusBar.opacity, 1, 1e-6)
     }
 
     function test_switch_failed_toasts() {

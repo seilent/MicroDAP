@@ -11,6 +11,8 @@ Page {
     property string artPath: ""
     property QtObject library: null
     property QtObject player: null
+    property QtObject status: null
+    property QtObject bluez: null
     property bool animated: true
     property bool screenOff: false
     property var rows: []
@@ -20,28 +22,32 @@ Page {
     readonly property bool live: page.animated && !page.screenOff
     readonly property var sheetItems: ["play", "add to queue", "pin to quickplay"]
     readonly property int count: page.rows.length
+    readonly property int statusPlaying: 1
+    readonly property int statusPaused: 2
     readonly property var current: page.player !== null && page.player.current !== undefined && page.player.current !== null
         ? page.player.current : ({})
     readonly property int currentId: page.current.id === undefined || page.current.id === null ? -1 : Number(page.current.id)
+    readonly property bool playing: page.player !== null && page.player.status === page.statusPlaying
+    readonly property bool paused: page.player !== null && page.player.status === page.statusPaused
+    readonly property bool phoneConnected: page.bluez !== null && page.bluez.connected === true
+    readonly property int battery: page.status !== null && page.status.battery !== undefined ? page.status.battery : -1
+    readonly property bool batteryPresent: page.status !== null && page.status.batteryPresent === true
+    readonly property string clock: page.status !== null && page.status.clock !== undefined ? page.status.clock : ""
     readonly property int rowIndex: trackList.focusIndex
     readonly property var focusedRow: page.rows[page.rowIndex] === undefined ? null : page.rows[page.rowIndex]
     readonly property string artUrl: page.artPath === "" ? "" : "file://" + page.artPath
-    readonly property real artX: Ui.px(Ui.hubEdge)
+    readonly property real artX: Ui.px(Ui.albumArtX)
     readonly property real artY: Ui.px(Ui.albumArtTop)
     readonly property real artSide: Ui.px(Ui.tileL)
-    readonly property real textX: Ui.landscape ? page.artX : Ui.px(Ui.detailTextX)
-    readonly property real textWidth: Ui.landscape
-        ? Ui.px(Ui.detailColumn - Ui.hubEdge)
-        : page.width - Ui.px(Ui.hubEdge) - page.textX
-    readonly property real titleBaseline: Ui.landscape
-        ? page.artY + page.artSide + Ui.px(Ui.detailSubPitch)
-        : page.artY + Ui.px(Ui.detailTitleDrop)
-    readonly property real artistBaseline: page.titleBaseline + Ui.px(Ui.detailSubPitch)
+    readonly property real textX: Ui.px(Ui.landscape ? Ui.npColumnRight : Ui.edge)
+    readonly property real textWidth: page.width - Ui.px(Ui.edge) - page.textX
+    readonly property real artistBaseline: Ui.px(Ui.landscape ? Ui.npArtistBaselineLandscape : Ui.npTextTop)
+    readonly property real albumBaseline: Ui.px(Ui.landscape ? Ui.npAlbumBaselineLandscape : Ui.npAlbumBaseline)
     readonly property real listX: Ui.px(Ui.detailListX)
     readonly property real listY: Ui.px(Ui.albumRowsTop)
 
-    property alias header: header
-    property alias labelItem: labelText
+    property alias backRing: backRing
+    property alias statusStrip: statusStrip
     property alias artItem: art
     property alias titleItem: titleText
     property alias artistItem: artistText
@@ -272,17 +278,57 @@ Page {
         x: trackList.x + Ui.px(Ui.hubEdge - Ui.focusBarOffset)
         rowY: trackList.y + trackList.focusY
         rowHeight: trackList.rowPitch
+        opacity: page.focusOpacity
         animated: page.live
     }
 
-    Text {
-        id: labelText
+    Ring {
+        id: backRing
 
-        x: Ui.px(Ui.hubEdge)
-        y: Ui.px(Ui.albumLabelBaseline) - labelText.baselineOffset
-        text: "in collection"
-        color: Ui.white(Ui.sectionLabel.alpha)
-        font: Ui.font(Ui.sectionLabel)
+        x: Ui.px(Ui.backRingInset)
+        y: Ui.px(Ui.backRingInset)
+        size: Ui.backRing
+        focused: true
+        glyph: "back"
+        animated: page.live
+    }
+
+    StatusStrip {
+        id: statusStrip
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        clock: page.clock
+        battery: page.battery
+        batteryPresent: page.batteryPresent
+        bluetooth: page.phoneConnected
+        playing: page.playing
+        paused: page.paused
+    }
+
+    Text {
+        id: artistText
+
+        x: page.textX
+        y: page.artistBaseline - artistText.baselineOffset
+        width: page.textWidth
+        text: page.artist
+        color: Ui.white(Ui.npArtist.alpha)
+        font: Ui.font(Ui.npArtist)
+        elide: Text.ElideRight
+    }
+
+    Text {
+        id: titleText
+
+        x: page.textX
+        y: page.albumBaseline - titleText.baselineOffset
+        width: page.textWidth
+        text: page.title
+        color: Ui.white(Ui.npAlbum.alpha)
+        font: Ui.font(Ui.npAlbum)
+        elide: Text.ElideRight
     }
 
     Tile {
@@ -293,37 +339,6 @@ Page {
         size: Ui.tileL
         captioned: false
         source: page.artUrl
-        animated: page.live
-    }
-
-    Text {
-        id: titleText
-
-        x: page.textX
-        y: page.titleBaseline - titleText.baselineOffset
-        width: page.textWidth
-        text: page.title
-        color: Ui.white(Ui.detailTitle.alpha)
-        font: Ui.font(Ui.detailTitle)
-        elide: Text.ElideRight
-    }
-
-    Text {
-        id: artistText
-
-        x: page.textX
-        y: page.artistBaseline - artistText.baselineOffset
-        width: page.textWidth
-        text: page.artist
-        color: Ui.white(Ui.detailSub.alpha)
-        font: Ui.font(Ui.detailSub)
-        elide: Text.ElideRight
-    }
-
-    CroppedHeader {
-        id: header
-
-        text: "album"
         animated: page.live
     }
 

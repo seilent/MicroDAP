@@ -714,6 +714,7 @@ Page {
             width: row.width
             number: row.modelData.kind === "song" ? row.modelData.number : ""
             bold: row.modelData.kind === "genre" || row.modelData.kind === "playlist" || row.modelData.kind === "nowplaying"
+            countLine: row.modelData.kind === "artist"
             ring: row.modelData.kind === "playlist" || row.modelData.kind === "nowplaying"
             ringGlyph: "play"
             primary: row.modelData.title
@@ -893,7 +894,7 @@ Page {
         x: Ui.px(Ui.hubEdge - Ui.focusBarOffset) + hub.activeList.x
         rowY: hub.activeList.y + hub.activeList.focusY
         rowHeight: hub.activeList.rowPitch
-        opacity: hub.activeList.opacity
+        opacity: hub.activeList.opacity * hub.focusOpacity
         animated: hub.live
     }
 

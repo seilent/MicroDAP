@@ -183,7 +183,18 @@ TestCase {
         fake.connect()
         const page = open()
         compare(page.transportRow.visible, false)
+        compare(page.focusBar.visible, true)
+        fuzzyCompare(page.focusBar.x, Ui.px(20 - 8), 0.01)
+        fuzzyCompare(page.focusBar.y, Ui.px(128 + 16 - 0.7 * 20), 0.01)
+        fuzzyCompare(page.focusBar.y + page.focusBar.height, Ui.px(128 + 36), 0.01)
+        fuzzyCompare(page.focusBar.y, page.nameText.y + page.nameText.baselineOffset - Ui.px(0.7 * 20), 0.5)
+        fuzzyCompare(page.focusBar.y + page.focusBar.height, page.stateText.y + page.stateText.baselineOffset, 0.5)
+        fake.activate()
+        fuzzyCompare(page.focusBar.y, page.transportRow.y, 0.01)
+        fake.transportActive = false
+        fake.connected = false
         compare(page.focusBar.visible, false)
+        fake.connected = true
         compare(page.batteryGlyph.visible, true)
         fake.battery = 9
         compare(Qt.colorEqual(page.batteryGlyph.color, Ui.accent), true)

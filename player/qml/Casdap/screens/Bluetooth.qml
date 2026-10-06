@@ -31,6 +31,8 @@ Page {
         : 0
     readonly property real nameBaseline: Ui.contentTop + 16
     readonly property real stateBaseline: Ui.contentTop + 36
+    readonly property real nameBlockTop: page.nameBaseline - Ui.capHeight * Ui.npArtist.size
+    readonly property real nameBlockHeight: page.stateBaseline - page.nameBlockTop
     readonly property real rowTop: Ui.contentTop + 60
     readonly property real ringCenterY: Ui.contentTop + 90
     readonly property real hintBaseline: page.ringCenterY + Ui.backRing / 2 + Ui.qpHintDrop
@@ -248,9 +250,10 @@ Page {
         FocusBar {
             id: focusBar
 
-            visible: transportRow.visible
-            rowY: transportRow.y
-            rowHeight: transportRow.height
+            visible: page.connected
+            rowY: page.transportActive ? transportRow.y : Ui.px(page.nameBlockTop)
+            rowHeight: page.transportActive ? transportRow.height : Ui.px(page.nameBlockHeight)
+            opacity: page.focusOpacity
             animated: page.live
         }
 

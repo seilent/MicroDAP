@@ -40,9 +40,12 @@ Page {
     }
     readonly property real pitch: Ui.landscape ? Ui.homePitchLandscape : Ui.homePitch
     readonly property real menuX: Ui.landscape ? Ui.px(Ui.homeMenuXLandscape) : Ui.px(Ui.canvasW - Motion.quickplayMenuInset) * home.pan
-    readonly property real quickplayX: Ui.landscape ? 0 : -Ui.px(Ui.qpW - Ui.qpPeek) * (1 - home.pan)
     readonly property real panVisual: Ui.landscape ? (home.quickplayShown ? 1 : 0) : home.pan
-    readonly property real quickplayAlpha: (Ui.qpPeekAlpha + (1 - Ui.qpPeekAlpha) * home.panVisual) * home.peekEnter
+    readonly property real quickplayScale: Ui.landscape ? 1 : Ui.qpPeekScale + (1 - Ui.qpPeekScale) * home.pan
+    readonly property real quickplayY: Ui.landscape ? 0 : Ui.px(Ui.qpPeekY) * (1 - home.pan)
+    readonly property real quickplayRestAlpha: Ui.landscape ? Motion.quickplayAlpha : Ui.qpPeekAlpha
+    readonly property real quickplayAlpha: (home.quickplayRestAlpha + (1 - home.quickplayRestAlpha) * home.panVisual) * home.peekEnter
+    readonly property real menuAlpha: 1 + (Motion.quickplayAlpha - 1) * home.panVisual
     readonly property bool panning: panAnim.running
     property alias menuPanel: menuPanel
     property alias quickplayPanel: quickplayPanel
@@ -188,11 +191,13 @@ Page {
     Item {
         id: quickplayPanel
 
-        x: home.quickplayX
-        y: 0
+        x: 0
+        y: home.quickplayY
         width: Ui.px(Ui.qpW)
         height: home.height
         opacity: home.quickplayAlpha
+        transformOrigin: Item.TopLeft
+        scale: home.quickplayScale
 
         Quickplay {
             id: quickplay
@@ -223,7 +228,7 @@ Page {
         angle: Motion.quickplayAngle * home.pan
         transformOrigin: Item.TopLeft
         scale: 1 + (Motion.quickplayScale - 1) * home.pan
-        opacity: 1 + (Motion.quickplayAlpha - 1) * home.pan
+        opacity: home.menuAlpha
 
         FocusBar {
             id: focusBar
@@ -232,7 +237,7 @@ Page {
             rowY: home.itemBaseline(home.focusIndex) - Ui.px(Ui.homeBarTop)
             rowHeight: Ui.px(Ui.homeBarH)
             animated: home.animated
-            opacity: home.barEnter
+            opacity: home.barEnter * home.focusOpacity
         }
 
         Repeater {
@@ -325,19 +330,17 @@ Page {
                 }
             }
         }
-    }
 
-    Text {
-        id: watermark
+        Text {
+            id: watermark
 
-        opacity: 1 - home.panVisual
-
-        x: Ui.px(Ui.edge)
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: Ui.px(Ui.edge)
-        text: "casdap"
-        color: Ui.white(Ui.watermark.alpha)
-        font: Ui.font(Ui.watermark)
+            opacity: 1 - home.panVisual
+            x: Ui.px(Ui.homeTextX)
+            y: menuPanel.height - Ui.px(Ui.edge) - watermark.baselineOffset
+            text: "casdap"
+            color: Ui.white(Ui.watermark.alpha)
+            font: Ui.font(Ui.watermark)
+        }
     }
 
     Sheet {
