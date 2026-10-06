@@ -83,8 +83,7 @@ int OutputControl::sinkId(const QString &status, const QString &name)
 
 bool OutputControl::parseJack(const QString &text)
 {
-    static const QRegularExpression re(QStringLiteral("^\\s*:\\s*values=(on|off)\\b"),
-                                       QRegularExpression::MultilineOption);
+    static const QRegularExpression re(QStringLiteral("name='Headphone Jack'[^\\n]*\\n(?:[^\\n]*\\n)?\\s*:\\s*values=(on|off)\\b"));
     const QRegularExpressionMatch match = re.match(text);
     return match.hasMatch() && match.captured(1) == QLatin1StringView("on");
 }
@@ -170,7 +169,7 @@ void OutputControl::refreshJack()
     if (m_jack)
         return;
     run(m_jack, amixerPath(),
-        {QStringLiteral("-c0"), QStringLiteral("cget"), QStringLiteral("name='Headphone Jack'")},
+        {QStringLiteral("-c0"), QStringLiteral("contents")},
         [this](bool ok, const QByteArray &out) { setJackPresent(ok && parseJack(QString::fromUtf8(out))); });
 }
 

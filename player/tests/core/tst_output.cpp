@@ -30,12 +30,21 @@ const char *statusText =
     " │      49. alsa_input.platform-sound.HiFi__Mic__source       [vol: 1.00]\n";
 
 const char *jackOn =
-    "numid=12,iface=CARD,name='Headphone Jack'\n"
+    "numid=19,iface=MIXER,name='HPHL Volume'\n"
+    "  ; type=INTEGER,access=rw---R--,values=1,min=0,max=24,step=0\n"
+    "  : values=20\n"
+    "numid=126,iface=CARD,name='Mic Jack'\n"
+    "  ; type=BOOLEAN,access=r-------,values=1\n"
+    "  : values=off\n"
+    "numid=127,iface=CARD,name='Headphone Jack'\n"
     "  ; type=BOOLEAN,access=r-------,values=1\n"
     "  : values=on\n";
 
 const char *jackOff =
-    "numid=12,iface=CARD,name='Headphone Jack'\n"
+    "numid=126,iface=CARD,name='Mic Jack'\n"
+    "  ; type=BOOLEAN,access=r-------,values=1\n"
+    "  : values=on\n"
+    "numid=127,iface=CARD,name='Headphone Jack'\n"
     "  ; type=BOOLEAN,access=r-------,values=1\n"
     "  : values=off\n";
 
@@ -156,7 +165,7 @@ void OutputTest::speakerAndHeadphones()
     QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("speaker"));
     QVERIFY(applied.at(0).at(1).toBool());
     QVERIFY(!control.busy());
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("amixer -c0 cget name='Headphone Jack'\n")), waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("amixer -c0 contents\n")), waitMs);
     QString log = readFile(m_log);
     QVERIFY2(log.startsWith(QStringLiteral("wpctl status --name\nwpctl set-default 47\n")), qPrintable(log));
     QTRY_VERIFY_WITH_TIMEOUT(control.jackPresent(), waitMs);

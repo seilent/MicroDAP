@@ -1,6 +1,8 @@
 #include "Settings.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QStandardPaths>
 
 namespace casdap {
@@ -134,6 +136,22 @@ QStringList Settings::defaultRoots()
 {
     return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
             QStringLiteral("/run/media")};
+}
+
+QStringList Settings::candidateRoots()
+{
+    QStringList out = defaultRoots();
+    const QString base = qEnvironmentVariable("CASDAP_MEDIA_ROOT", QStringLiteral("/run/media"));
+    const QFileInfoList users = QDir(base).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &user : users) {
+        const QFileInfoList mounts = QDir(user.absoluteFilePath()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo &mount : mounts) {
+            const QString music = mount.absoluteFilePath() + QStringLiteral("/Music");
+            out.append(QFileInfo::exists(music) ? music : mount.absoluteFilePath());
+        }
+    }
+    out.removeDuplicates();
+    return out;
 }
 
 void Settings::load()

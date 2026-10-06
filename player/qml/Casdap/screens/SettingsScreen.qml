@@ -288,7 +288,7 @@ Page {
         return true
     }
 
-    function cycle(list: var, value: var, delta: int): var {
+    function cycle(list: var, value: var, delta: int, wrap: bool): var {
         let i = list.indexOf(value)
         if (i < 0) {
             let best = 0
@@ -298,7 +298,7 @@ Page {
             }
             i = best
         }
-        const next = Math.max(0, Math.min(list.length - 1, i + delta))
+        const next = wrap ? (i + delta + list.length) % list.length : Math.max(0, Math.min(list.length - 1, i + delta))
         return list[next]
     }
 
@@ -322,16 +322,16 @@ Page {
         page.set("accent", c)
     }
 
-    function step(delta: int): bool {
+    function step(delta: int, wrap: bool): bool {
         const r = page.focusedRow
         if (r === null)
             return false
         switch (r.key) {
         case "output":
-            page.set("output", page.cycle(page.outputs, page.output, delta))
+            page.set("output", page.cycle(page.outputs, page.output, delta, wrap))
             return true
         case "codec":
-            page.set("btCodec", page.cycle(page.codecs, page.codec, delta))
+            page.set("btCodec", page.cycle(page.codecs, page.codec, delta, wrap))
             return true
         case "toasts":
             page.set("overlayToasts", !page.overlayToasts)
@@ -339,21 +339,22 @@ Page {
         case "accent": {
             const list = Ui.accentOptions
             const i = list.indexOf(page.accent.toUpperCase())
-            const next = Math.max(0, Math.min(list.length - 1, (i < 0 ? 0 : i) + delta))
+            const base = i < 0 ? 0 : i
+            const next = wrap ? (base + delta + list.length) % list.length : Math.max(0, Math.min(list.length - 1, base + delta))
             page.applyAccent(list[next])
             return true
         }
         case "scale":
-            page.applyScale(page.cycle(page.scaleSteps, Math.round(Ui.userScale * 10) / 10, delta))
+            page.applyScale(page.cycle(page.scaleSteps, Math.round(Ui.userScale * 10) / 10, delta, wrap))
             return true
         case "saver":
-            page.set("saverSeconds", page.cycle(page.saverSteps, page.saverSeconds, delta))
+            page.set("saverSeconds", page.cycle(page.saverSteps, page.saverSeconds, delta, wrap))
             return true
         case "screenOff":
-            page.set("screenOffSeconds", page.cycle(page.screenOffSteps, page.screenOffSeconds, delta))
+            page.set("screenOffSeconds", page.cycle(page.screenOffSteps, page.screenOffSeconds, delta, wrap))
             return true
         case "suspend":
-            page.set("suspendMinutes", page.cycle(page.suspendSteps, page.suspendMinutes, delta))
+            page.set("suspendMinutes", page.cycle(page.suspendSteps, page.suspendMinutes, delta, wrap))
             return true
         case "pocket":
             page.set("pocketControls", !page.pocketControls)
@@ -369,10 +370,13 @@ Page {
     function toggleRoot(path: string) {
         const next = page.roots.slice()
         const at = next.indexOf(path)
-        if (at >= 0)
+        if (at >= 0) {
+            if (next.length === 1)
+                return
             next.splice(at, 1)
-        else
+        } else {
             next.push(path)
+        }
         page.set("roots", next)
     }
 
@@ -389,10 +393,10 @@ Page {
             console.info("casdap: game mode")
             return
         }
-        if (typeof page.power.runVerb === "function")
-            page.power.runVerb("game-mode")
-        else if (typeof page.power.closeAndSwitch === "function")
+        if (typeof page.power.closeAndSwitch === "function")
             page.power.closeAndSwitch()
+        else if (typeof page.power.runVerb === "function")
+            page.power.runVerb("game-mode")
     }
 
     function activate(): bool {
@@ -431,7 +435,7 @@ Page {
         case "replaygain":
             return true
         default:
-            return page.step(1)
+            return page.step(1, true)
         }
     }
 
@@ -468,9 +472,9 @@ Page {
         case "down":
             return page.moveRow(1)
         case "left":
-            return page.step(-1)
+            return page.step(-1, false)
         case "right":
-            return page.step(1)
+            return page.step(1, false)
         case "lt":
             return page.pageRow(-1)
         case "rt":

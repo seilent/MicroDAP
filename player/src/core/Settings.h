@@ -42,6 +42,7 @@ public:
     static QStringList codecs();
     static QStringList accents();
     static QStringList defaultRoots();
+    Q_INVOKABLE static QStringList candidateRoots();
 
     QString path() const;
 

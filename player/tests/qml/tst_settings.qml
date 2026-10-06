@@ -63,11 +63,11 @@ TestCase {
     QtObject {
         id: legacyPower
 
-        property int switches: 0
+        property var verbs: []
         property var driftPaths: []
 
-        function closeAndSwitch() {
-            legacyPower.switches++
+        function runVerb(verb) {
+            legacyPower.verbs = legacyPower.verbs.concat([verb])
         }
     }
 
@@ -168,7 +168,7 @@ TestCase {
         fakePower.verbs = []
         fakePower.switches = 0
         fakePower.driftPaths = []
-        legacyPower.switches = 0
+        legacyPower.verbs = []
         fakeBridge.closes = 0
         counters.pair = 0
         counters.gameMode = 0
@@ -301,6 +301,10 @@ TestCase {
         compare(tc.rowItem(page, 1).valueItem.text, "speaker")
         verify(router.dispatch("a", false))
         compare(fakeSettings.output, "headphones")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.output, "auto")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.output, "auto")
     }
 
     function test_output_no_jack() {
@@ -456,6 +460,11 @@ TestCase {
         compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/run/media/armada/SD"]))
         compare(page.rows[folders + 1].value, "off")
         compare(page.rows[folders + 1].title, "/home/armada/Music")
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/run/media/armada/SD"]))
+        compare(page.rows[folders + 2].value, "on")
+        router.dispatch("up", false)
         router.dispatch("up", false)
         router.dispatch("a", false)
         compare(page.foldersOpen, false)
@@ -609,18 +618,18 @@ TestCase {
         router.dispatch("a", false)
         router.dispatch("a", false)
         compare(page.sheet.shown, false)
-        compare(JSON.stringify(fakePower.verbs), JSON.stringify(["game-mode"]))
-        compare(fakePower.switches, 0)
+        compare(fakePower.verbs.length, 0)
+        compare(fakePower.switches, 1)
         compare(fakeBridge.closes, 0)
         compare(counters.gameMode, 1)
     }
 
-    function test_game_mode_falls_back_to_switch() {
+    function test_game_mode_falls_back_to_verb() {
         const page = open({ power: legacyPower })
         tc.focusKey(page, "gameMode")
         router.dispatch("a", false)
         router.dispatch("a", false)
-        compare(legacyPower.switches, 1)
+        compare(JSON.stringify(legacyPower.verbs), JSON.stringify(["game-mode"]))
     }
 
     function test_about_rows() {

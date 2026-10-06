@@ -710,6 +710,7 @@ Window {
             objectName: "settings"
             animated: !root.hidden
             screenOff: root.off
+            folders: root.settings !== null && typeof root.settings.candidateRoots === "function" ? root.settings.candidateRoots() : []
             overlay: root.overlay
             settings: root.settings
             power: root.power

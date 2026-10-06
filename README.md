@@ -634,7 +634,7 @@ without the binary it is the `hw_params` rate. Read with `pcmFormat` every 2 s w
 `wpctl set-default <id>` with the id read from `wpctl status --name` for
 `alsa_output.platform-sound.HiFi__Speaker__sink` or `HiFi__Headphones__sink`; `auto` runs
 `pw-metadata -d 0 default.configured.audio.sink`, so WirePlumber picks the sink by route priority again.
-`jackPresent` reads `amixer -c0 cget name='Headphone Jack'` (`values=on`), polled every 2 s while `active`
+`jackPresent` reads the `Headphone Jack` block of `amixer -c0 contents` (`values=on`; the CARD control has no cget name), polled every 2 s while `active`
 and after every apply. `busy` is true while a command chain runs, `applied(output, ok)` ends it.
 `CASDAP_WPCTL_BIN`, `CASDAP_PW_METADATA_BIN` and `CASDAP_AMIXER_BIN` replace the binaries.
 
