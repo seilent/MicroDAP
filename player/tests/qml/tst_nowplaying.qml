@@ -553,6 +553,28 @@ TestCase {
         compare(page.trackShift, 0)
     }
 
+    function test_trackChangeTwiceKeepsAnimation() {
+        const page = open({ animated: true })
+        compare(page.shown.id, 1)
+        fakePlayer.select(1)
+        compare(page.trackAnimation.running, true)
+        compare(page.pending.id, 2)
+        wait(100)
+        verify(page.trackOpacity < 1)
+        const before = page.trackOpacity
+        fakePlayer.currentChanged()
+        compare(page.trackAnimation.running, true)
+        compare(page.pending.id, 2)
+        verify(page.trackOpacity <= before)
+        wait(50)
+        verify(page.trackOpacity < before)
+        tryCompare(page, "trackAnimating", false, Motion.trackHide + Motion.trackShow + 100)
+        compare(page.shown.id, 2)
+        compare(page.titleItem.text, "Song 2")
+        compare(page.trackOpacity, 1)
+        compare(page.artOpacity, 1)
+    }
+
     function test_track_change_lands_when_not_live() {
         const page = open()
         fakePlayer.select(5)

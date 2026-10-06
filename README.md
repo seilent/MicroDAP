@@ -296,7 +296,9 @@ ring with the F4 swap (`Player.toggleShuffle`, `cycleRepeat`, `rate`), up moves 
 at EDGE - 8) where A emits `openQueue` (Main pushes `QueueScreen`), down returns. LB and RB skip, X plays
 or pauses, Y and Back/View emit `openQueue`, LT and RT seek 10 s, B and Start pop with the fade kind (T8).
 A track change runs T9 (title, next rows and times out 500 easeOut with the art, in 400 easeIn with the
-art scaling from 0.8 about (0.2, 0.5)); a new art source crossfades the backdrop over 2000 linear and
+art scaling from 0.8 about (0.2, 0.5)); a second `currentChanged` for the same track or a new track during
+the out phase replaces the pending track without restarting the animation; a new art source crossfades the
+backdrop over 2000 linear and
 restarts its pan (T10). After 5000 ms without input the unfocused rings and the status strip fade to 0.4
 over 380 decel, the focused ring stays at 1.0, the first input only restores them. With
 `BluezModel.transportActive` the page shows the Bluetooth variant: `FROM <PHONE>` at baseline 97 (39 in
@@ -534,7 +536,7 @@ exits 1 with the save file kept. `org.armada.Power` is never touched.
 
 Power: `casdap-power <verb>` (`/usr/libexec/casdap/`, runs as `armada`) has `screen-off`, `screen-on`,
 `toggle`, `suspend`, `poweroff`, `idle-check` and `cpu-apply`; anything else exits 1. Markers live under
-`CASDAP_RUNTIME_DIR` (default `$XDG_RUNTIME_DIR/casdap-power`): `off`, `wifi`, `idle-since`, `screen-on-ms`.
+`CASDAP_RUNTIME_DIR` (default `$XDG_RUNTIME_DIR/casdap-power`): `off`, `wifi`, `idle-since`, `last-ms`, `lock`.
 Settings come from `CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.ini`, keys `wifiOffScreenOff`,
 `suspendMinutes`, `rgb`). `screen-off`, `toggle` and `cpu-apply` exit 1 unless `systemctl --user is-active
 gamescope-session-plus@casdap.service` prints `active`; `screen-on` runs in every state. `screen-off`, in
@@ -549,8 +551,11 @@ then with the session `active` starts `cpu-restore` (only without the `off` mark
 `CASDAP_CPU_BEFORE_FILE` present) and `cpu-dap`, in any other state `cpu-restore`; then
 `casdap-priv@rgb-wake.service` when `rgb=accent`, `casdap-priv@backlight-on.service`, `SetScreenOff b false`
 (session `active` only), removes the `off` marker
-and writes `screen-on-ms`. `toggle` runs `screen-on` with the `off` marker, else `screen-off`, and does nothing
-within 2 s of `screen-on-ms` (`CASDAP_POWER_DEBOUNCE_MS`). `cpu-apply` starts `cpu-off` with the `off` marker,
+and writes `last-ms`. `screen-off` writes `last-ms` as its last step too. `screen-off` and `screen-on` hold
+`lock` (`flock -w 10`, `lock timeout` and exit 1 when it fails) for their whole run. `toggle` takes the lock
+with `flock -n` and with it held logs `toggle during a transition, ignored` and exits 0; it does nothing within
+2 s of `last-ms` (`CASDAP_POWER_DEBOUNCE_MS`, both directions), else runs `screen-on` with the `off` marker and
+`screen-off` without it. `cpu-apply` starts `cpu-off` with the `off` marker,
 else `cpu-dap`. `idle-check` exits 0 outside the session; busy (`PlaybackStatus` contains `Playing`, or any
 `org.bluez.MediaTransport1` under `/org/bluez` on the system bus has `State` `active`) or `suspendMinutes`
 0 removes `idle-since`; idle writes it with the current unix time when absent and runs `systemctl suspend`

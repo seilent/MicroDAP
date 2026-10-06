@@ -247,6 +247,10 @@ Page {
             np.applyShown(map)
             return
         }
+        if (trackAnim.running && np.pending !== null) {
+            np.pending = map
+            return
+        }
         np.pending = map
         trackAnim.restart()
     }
@@ -891,7 +895,6 @@ Page {
             NumberAnimation {
                 target: np
                 property: "trackShift"
-                from: 0
                 to: Motion.trackShiftOut
                 duration: Motion.trackHide
                 easing.type: Motion.easeOut
@@ -899,7 +902,6 @@ Page {
             NumberAnimation {
                 target: np
                 property: "trackOpacity"
-                from: 1
                 to: 0
                 duration: Motion.trackHide
                 easing.type: Motion.easeOut
@@ -907,7 +909,6 @@ Page {
             NumberAnimation {
                 target: np
                 property: "artOpacity"
-                from: 1
                 to: 0
                 duration: Motion.trackHide
                 easing.type: Motion.easeOut
