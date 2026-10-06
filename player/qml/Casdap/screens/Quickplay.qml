@@ -27,6 +27,7 @@ Item {
     readonly property real gridW: 2 * qp.tilePx + qp.gutterPx
     property alias flick: flick
     property alias newSection: newSection
+    property alias newHeader: newHeader
     property alias phoneItem: phone
     property alias pinsHeader: pinsHeader
     property alias historyHeader: historyHeader
@@ -256,8 +257,8 @@ Item {
         const bottom = top + item.height
         const p = qp.sectionOf(qp.focusIndex)
         if (p.local < 2) {
-            const header = p.section === 2 ? newSection : p.section === 1 ? historySection : pinsSection
-            top = qp.pinsCount === 0 && p.section === 1 ? 0 : header.mapToItem(content, 0, 0).y
+            const header = p.section === 2 ? newHeader : p.section === 1 ? historyHeader : pinsHeader
+            top = p.section === 0 || (qp.pinsCount === 0 && p.section === 1) ? 0 : header.mapToItem(content, 0, 0).y
         }
         const maxY = Math.max(0, flick.contentHeight - flick.height)
         let y = scrollAnim.running ? scrollAnim.to : flick.contentY
@@ -285,6 +286,12 @@ Item {
     }
 
     onFocusIndexChanged: qp.ensureVisible(Motion.scroll)
+    onActiveChanged: {
+        if (qp.active)
+            qp.ensureVisible(0)
+        else
+            Qt.callLater(function() { qp.ensureVisible(Motion.scroll) })
+    }
     onCountChanged: {
         if (qp.focusIndex >= qp.count)
             qp.focusIndex = Math.max(0, qp.count - 1)
@@ -297,6 +304,7 @@ Item {
         contentWidth: width
         contentHeight: content.height
         interactive: false
+        onContentHeightChanged: Qt.callLater(function() { qp.ensureVisible(0) })
         boundsBehavior: Flickable.StopAtBounds
 
         Item {

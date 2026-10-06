@@ -419,13 +419,31 @@ TestCase {
             router.dispatch("down", false)
         tryVerify(function() { return !qp.scrolling }, 2000)
         verify(qp.flick.contentY > 0)
-        const newTop = qp.newSection.mapToItem(qp.flick.contentItem, 0, 0).y
+        const newTop = qp.newHeader.mapToItem(qp.flick.contentItem, 0, 0).y
         verify(qp.flick.contentY <= newTop + 0.5)
         for (let i = 0; i < 12; i++)
             router.dispatch("up", false)
         tryVerify(function() { return !qp.scrolling }, 2000)
         compare(qp.focusIndex, 0)
         compare(qp.flick.contentY, 0)
+    }
+
+    function test_scroll_up_reveals_pins_header() {
+        fill(pins, "Pin", 4)
+        fill(history, "History", 20)
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        for (let i = 0; i < 12; i++)
+            router.dispatch("down", false)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        verify(qp.flick.contentY > 0)
+        for (let i = 0; i < 12; i++)
+            router.dispatch("up", false)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        compare(qp.focusIndex, 0)
+        compare(qp.flick.contentY, 0)
+        fuzzyCompare(qp.pinsHeader.mapToItem(qp.flick, 0, qp.pinsHeader.baselineOffset).y, Ui.px(Ui.qpFirstBaseline), 0.5)
     }
 
     function test_a_navigates() {
