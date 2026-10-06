@@ -61,7 +61,10 @@ with a 100 ms easeIn `contentY` tween per step; LT/RT move one page of whole row
 Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
 32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, an accent arc
 from `Ui.ringArcStart`, and runs the F4 swap (scale 0.7 to 1 in 400 ms, opacity in 200 ms) on every
-glyph change after the first one. `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
+glyph change after the first one. `Tile` is the TILE_S art square with, while `captioned`, a 24 u caption
+band under it: title and artist in the 9 u grid caption role, each as wide as the tile and clipped at its
+right edge (no ellipsis), baselines at art bottom + 11 and + 22; the title goes to alpha 1 while focused,
+the artist stays at 0.6. `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
 `Ring` and `FocusBar` take `animated` (default true); cleared, every Behavior is off and a running
 swap jumps to its end. `PageSurface` is `Ui.bg` under a vertical gradient from accent at alpha
 `Ui.backdropStops[0][1]` (0.15) to accent at 0, the first child of every page except `Home` (`MusicHub`,
@@ -112,8 +115,8 @@ with `animated` true; `animated` turning true later changes nothing.
 returning `id`, `title` or `name`, `subtitle`, `artPath`, `section`); the `section` letter (`#`, a..z)
 groups the rows. Artists, songs and genres get a divider row per letter (ROW_HEIGHT, the 20 u Regular letter at
 HUB_EDGE on the LETTER_TILE baseline inset), skipped by focus; albums are a grid of `Ui.gridCols` cells
-(3 portrait, 6 at W 483) with a `LetterTile` cell before each letter group and a `Tile` per album whose
-caption runs under the next cell. Artist rows carry the count line (`1 ALBUM, 3 SONGS`) in the upper case
+(3 portrait, 6 at W 483) with a `LetterTile` cell before each letter group and a `Tile` per album; the cell
+is TILE_S + 24 tall, rows at TILE_S + 24 + GUTTER pitch. Artist rows carry the count line (`1 ALBUM, 3 SONGS`) in the upper case
 count role. Songs rows carry the 1 based position as the number; genres and
 playlists are Bold upper case; `playlists` lists `NOW PLAYING` first with `N SONGS` from
 `Player.queue.count` (no saved playlist model exists yet, `playlistsModel` is null). Up/down and LT/RT move

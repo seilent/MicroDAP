@@ -34,6 +34,7 @@ Page {
     readonly property bool alphabetic: hub.pivotIndex !== 4
     readonly property bool grid: hub.pivotIndex === 1
     readonly property real cellPitch: Ui.tileS + Ui.gutter
+    readonly property real gridRowPitch: Ui.tileCellH + Ui.gutter
     readonly property int cols: Ui.gridCols
     readonly property var albumRows: hub.chunk(hub.albumCells, hub.cols)
     readonly property var panes: [artistsPane, albumsPane, songsPane, genresPane, playlistsPane]
@@ -815,7 +816,7 @@ Page {
                 x: Ui.px(Ui.hubEdge + cell.index * hub.cellPitch)
                 y: 0
                 width: Ui.px(Ui.tileS)
-                height: Ui.px(Ui.tileS)
+                height: Ui.px(cell.letter ? Ui.tileS : Ui.tileCellH)
 
                 Tile {
                     id: tile
@@ -858,7 +859,7 @@ Page {
         id: albumsPane
 
         pivot: 1
-        rowPitch: Ui.px(hub.cellPitch)
+        rowPitch: Ui.px(hub.gridRowPitch)
         model: hub.albumRows
         delegate: GridRow {}
     }

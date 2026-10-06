@@ -10,8 +10,8 @@ Item {
     readonly property real tileRowY: Ui.contentTop
     readonly property real tilesW: 3 * Ui.tileS + 2 * Ui.gutter
     readonly property real listX: root.sideColumn ? Ui.px(Ui.hubEdge + root.tilesW + Ui.gutter) : 0
-    readonly property real listRowY: root.sideColumn ? root.tileRowY : root.tileRowY + Ui.tileS + Ui.gutter
-    readonly property real ringRowY: root.tileRowY + Ui.tileS + Ui.gutter + (root.sideColumn ? 0 : 3 * Ui.rowHeight + 8)
+    readonly property real listRowY: root.sideColumn ? root.tileRowY : root.tileRowY + Ui.tileCellH + Ui.gutter
+    readonly property real ringRowY: root.tileRowY + Ui.tileCellH + Ui.gutter + (root.sideColumn ? 0 : 3 * Ui.rowHeight + 8)
     readonly property real smallRingY: root.ringRowY + Ui.backRing + root.gap
     readonly property real glyphX: root.listX + Ui.px(Ui.hubEdge)
     readonly property real glyphRowY: root.sideColumn ? root.listRowY + 3 * Ui.rowHeight + 8 : root.smallRingY + Ui.npRing + root.gap

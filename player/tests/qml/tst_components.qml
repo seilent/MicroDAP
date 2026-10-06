@@ -256,18 +256,27 @@ TestCase {
         compare(tile.width, Ui.px(Ui.tileS))
         compare(tile.width, 142)
         compare(tile.height, tile.width)
-        fuzzyCompare(tile.captionItem.x, Ui.px(Ui.tileS + 4), 0.5)
-        fuzzyCompare(tile.captionItem.width, Ui.px(Ui.tileS + Ui.gutter - 4), 0.5)
-        fuzzyCompare(tile.captionItem.width, 158, 0.5)
+        fuzzyCompare(tile.captionItem.x, 0, 0.5)
+        fuzzyCompare(tile.captionItem.y, tile.height, 0.5)
+        fuzzyCompare(tile.captionItem.width, tile.width, 0.5)
+        fuzzyCompare(tile.captionItem.height, Ui.px(Ui.tileCaptionBand), 0.5)
+        fuzzyCompare(tile.captionItem.height, 48, 0.5)
         verify(tile.captionItem.clip)
+        fuzzyCompare(tile.titleItem.y + tile.titleItem.baselineOffset, Ui.px(Ui.tileCaptionDrop), 0.5)
+        fuzzyCompare(tile.subtitleItem.y + tile.subtitleItem.baselineOffset, Ui.px(Ui.tileCaptionDrop + Ui.tileCaptionPitch), 0.5)
+        fuzzyCompare(tile.titleItem.width, tile.width, 0.5)
+        fuzzyCompare(tile.subtitleItem.width, tile.width, 0.5)
+        compare(Ui.tileCellH, Ui.tileS + 24)
         compare(tile.borderWidth, Ui.px(Ui.focusBorder))
         compare(tile.borderWidth, 4)
     }
 
     function test_tile_focus() {
         fuzzyCompare(tile.captionAlpha, Ui.gridCaption.alpha, 1e-6)
+        fuzzyCompare(tile.subtitleItem.color.a, Ui.gridCaption.alpha, 1e-6)
         tile.focused = true
         fuzzyCompare(tile.captionAlpha, 1.0, 1e-6)
+        fuzzyCompare(tile.subtitleItem.color.a, Ui.gridCaption.alpha, 1e-6)
     }
 
     function test_letter_tile() {
@@ -370,10 +379,9 @@ TestCase {
 
     function test_tile_caption_clip() {
         const right = tile.x + tile.captionItem.x + tile.captionItem.width
-        fuzzyCompare(right, 348, 0.5)
-        fuzzyCompare(right, letter.x + letter.width, 0.5)
-        verify(letter.x < right)
-        verify(tile.x + tile.width < letter.x)
+        fuzzyCompare(right, tile.x + tile.width, 0.5)
+        verify(right <= letter.x)
+        verify(tile.captionItem.y >= tile.width)
     }
 
     function test_letter_glyph_position() {

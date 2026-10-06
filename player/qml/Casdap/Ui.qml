@@ -168,8 +168,10 @@ QtObject {
     readonly property int gridCols: ui.landscape
         ? Math.floor((ui.canvasW - 2 * ui.hubEdge + ui.gutter) / (ui.tileS + ui.gutter))
         : 3
-    readonly property real tileCaptionX: 4
-    readonly property real tileCaptionW: ui.tileS + ui.gutter - 4
+    readonly property real tileCaptionDrop: 11
+    readonly property real tileCaptionPitch: 11
+    readonly property real tileCaptionBand: 24
+    readonly property real tileCellH: ui.tileS + ui.tileCaptionBand
     readonly property real tileL: 116
     readonly property real tileLGutter: 8
     readonly property real letterTileBorder: 1

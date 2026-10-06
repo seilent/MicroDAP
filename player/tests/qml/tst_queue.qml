@@ -300,7 +300,7 @@ TestCase {
         router.dispatch("b", false)
         tryCompare(page.sheet, "progress", 0, 2000)
         fuzzyCompare(page.sheet.panel.y, page.height, 0.01)
-        compare(page.sheet.visible, false)
+        tryCompare(page.sheet, "visible", false, 1000)
     }
 
     function test_y_removes_with_f12() {

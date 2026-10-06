@@ -190,7 +190,7 @@ TestCase {
         compare(page.header.text, "music")
         compare(page.artistsPane.y, Ui.px(128))
         compare(page.artistsPane.rowPitch, Ui.px(40))
-        compare(page.albumsPane.rowPitch, Ui.px(71 + 12))
+        compare(page.albumsPane.rowPitch, Ui.px(71 + 24 + 12))
         compare(page.focusBar.x, Ui.px(20 - 8))
         compare(page.focusBar.visible, true)
     }
@@ -208,7 +208,7 @@ TestCase {
         compare(page.cols, 6)
         compare(page.albumRows[0].length, 6)
         compare(page.albumsPane.y, Ui.px(98))
-        compare(page.albumsPane.rowPitch, Ui.px(60 + 12))
+        compare(page.albumsPane.rowPitch, Ui.px(60 + 24 + 12))
     }
 
     function test_grid_letter_tiles() {
@@ -227,27 +227,52 @@ TestCase {
         compare(row.cellAt(0).letterItem.letter, "#")
     }
 
-    function test_caption_clipped_by_next_tile() {
+    function test_caption_under_tile() {
         const page = open({ pivotIndex: 1 })
-        const row = page.albumsPane.itemAtIndex(1)
-        verify(row !== null)
-        for (let c = 0; c < 2; c++) {
+        const row = tc.rowAt(page.albumsPane, 1)
+        compare(row.height, Ui.px(71 + 24 + 12))
+        for (let c = 0; c < 3; c++) {
             const cell = row.cellAt(c)
-            const next = row.cellAt(c + 1)
+            verify(cell !== null)
+            compare(cell.letter, false)
             compare(cell.x, Ui.px(20 + c * (71 + 12)))
             compare(cell.width, Ui.px(71))
-            const caption = cell.tileItem.captionItem
-            fuzzyCompare(cell.x + caption.x, Ui.px(20 + c * 83 + 71 + 4), 0.01)
-            fuzzyCompare(caption.width, Ui.px(71 + 12 - 4), 0.01)
-            verify(cell.x + caption.x + caption.width > next.x)
-            fuzzyCompare(cell.x + caption.x + caption.width, next.x + next.width, 0.01)
+            compare(cell.height, Ui.px(71 + 24))
+            const tile = cell.tileItem
+            compare(tile.height, Ui.px(71))
+            const caption = tile.captionItem
+            compare(caption.visible, true)
+            fuzzyCompare(caption.x, 0, 0.01)
+            fuzzyCompare(caption.y, Ui.px(71), 0.01)
+            fuzzyCompare(caption.width, Ui.px(71), 0.01)
+            fuzzyCompare(caption.height, Ui.px(24), 0.01)
             compare(caption.clip, true)
-            verify(next.z >= cell.z)
-            verify(tc.childIndex(row, next) > tc.childIndex(row, cell))
+            fuzzyCompare(caption.y + tile.titleItem.y + tile.titleItem.baselineOffset, Ui.px(71 + 11), 0.01)
+            fuzzyCompare(tile.subtitleItem.y + tile.subtitleItem.baselineOffset, Ui.px(11 + 11), 0.01)
+            fuzzyCompare(tile.titleItem.width, caption.width, 0.01)
+            fuzzyCompare(tile.subtitleItem.width, caption.width, 0.01)
+            compare(tile.titleItem.elide, Text.ElideNone)
+            compare(tile.titleItem.wrapMode, Text.NoWrap)
+            if (c < 2) {
+                const next = row.cellAt(c + 1)
+                verify(cell.x + caption.x + caption.width <= next.x)
+            }
         }
-        const last = row.cellAt(2)
-        fuzzyCompare(last.x + last.tileItem.captionItem.x, Ui.px(20 + 2 * 83 + 75), 0.01)
-        verify(last.x + last.tileItem.captionItem.x < Ui.px(320))
+        const tile = row.cellAt(0).tileItem
+        tile.title = "a very long album title that runs past the tile width"
+        verify(tile.titleItem.implicitWidth > tile.captionItem.width)
+        fuzzyCompare(tile.titleItem.width, tile.captionItem.width, 0.01)
+        fuzzyCompare(tile.captionItem.width, Ui.px(71), 0.01)
+    }
+
+    function test_letter_cell_no_caption() {
+        const page = open({ pivotIndex: 1 })
+        const row = tc.rowAt(page.albumsPane, 0)
+        const cell = row.cellAt(0)
+        compare(cell.letter, true)
+        compare(cell.height, Ui.px(71))
+        compare(cell.tileItem.visible, false)
+        compare(cell.letterItem.height, Ui.px(71))
     }
 
     function test_pivot_travel_no_wrap() {
