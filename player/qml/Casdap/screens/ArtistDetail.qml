@@ -21,6 +21,7 @@ Page {
     property var sheetRow: null
 
     readonly property bool live: page.animated && !page.screenOff
+    readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property var pivots: ["albums", "songs"]
     readonly property var ringGlyphs: ["play", "plus", "shuffle"]
     readonly property var panes: [albumsPane, songsPane]
@@ -100,6 +101,14 @@ Page {
             pane.snapTo(0)
         }
         page.syncFocus()
+        if (d.ready && page.live && !page.arriving)
+            Qt.callLater(page.runRefresh)
+    }
+
+    function runRefresh() {
+        if (!page.live)
+            return
+        page.panes[page.shownPivot].refresh()
     }
 
     function shuffled(ids: var): var {
@@ -372,6 +381,11 @@ Page {
         page.syncFocus()
     }
 
+    onEntered: (first, kind) => {
+        if (page.arriving)
+            page.panes[page.shownPivot].feather(1)
+    }
+
     onLiveChanged: {
         if (!page.live)
             page.completeAll()
@@ -408,7 +422,7 @@ Page {
         property int pivot: 0
         property real shift: 0
 
-        signal entrance(real shift, int stagger, int cap, int duration)
+        signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve)
         signal settle()
 
         function firstVisible(): int {
@@ -417,7 +431,12 @@ Page {
 
         function feather(dir: int): void {
             pane.forceLayout()
-            pane.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows)
+            pane.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+        }
+
+        function refresh(): void {
+            pane.forceLayout()
+            pane.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
         }
 
         x: page.listX + pane.shift
@@ -438,24 +457,26 @@ Page {
         readonly property Item ringItem: playRing
         readonly property Item titleItem: titleText
         readonly property Item subItem: subText
-        property real enter: 1
-        property real shift: 0
+        property real enter: page.arriving ? 0 : 1
+        property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
         property int enterDuration: 0
+        property var enterCurve: Motion.strip
 
         width: row.pane.width
         height: row.pane.rowPitch
-        x: Ui.px(row.shift) * (1 - row.enter)
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
 
         Connections {
             target: row.pane
 
-            function onEntrance(shift, stagger, cap, duration) {
+            function onEntrance(shift, stagger, cap, duration, stripCurve) {
                 enterAnim.stop()
                 row.shift = shift
                 row.stagger = Math.min(cap, Math.max(0, row.index - row.pane.firstVisible())) * stagger
                 row.enterDuration = duration
+                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
                 row.enter = 0
                 enterAnim.start()
             }
@@ -480,7 +501,7 @@ Page {
                 to: 1
                 duration: row.enterDuration
                 easing.type: Motion.bezier
-                easing.bezierCurve: Motion.strip
+                easing.bezierCurve: row.enterCurve
             }
         }
 
@@ -551,24 +572,26 @@ Page {
         readonly property var pane: row.ListView.view
         readonly property bool isFocused: page.focusRow === 1 && page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
-        property real enter: 1
-        property real shift: 0
+        property real enter: page.arriving ? 0 : 1
+        property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
         property int enterDuration: 0
+        property var enterCurve: Motion.strip
 
         width: row.pane.width
         height: row.pane.rowPitch
-        x: Ui.px(row.shift) * (1 - row.enter)
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
 
         Connections {
             target: row.pane
 
-            function onEntrance(shift, stagger, cap, duration) {
+            function onEntrance(shift, stagger, cap, duration, stripCurve) {
                 enterAnim.stop()
                 row.shift = shift
                 row.stagger = Math.min(cap, Math.max(0, row.index - row.pane.firstVisible())) * stagger
                 row.enterDuration = duration
+                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
                 row.enter = 0
                 enterAnim.start()
             }
@@ -593,7 +616,7 @@ Page {
                 to: 1
                 duration: row.enterDuration
                 easing.type: Motion.bezier
-                easing.bezierCurve: Motion.strip
+                easing.bezierCurve: row.enterCurve
             }
         }
 

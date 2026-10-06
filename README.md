@@ -43,8 +43,18 @@ a hinge with perspective `d = 2.3 * width` px. `PageStack` runs the exit animati
 to its end before the enter animation (350 ms, expOut6) starts, keeps the incoming page at opacity 0
 and visible meanwhile, reports `inputLocked`, `phase` and `transitionKind`, and `completeAll()` jumps a running
 transition to its end state. `push(component, properties, kind)` takes `turnstile` (default) or `fade`:
-`fade` runs the outgoing page opacity 1 to 0 over 300 pop, then the incoming 0 to 1 over 300 with the
-page's `enterEasing` (default pop); `pop()` reverses with the kind the page was pushed with.
+`fade` runs the outgoing page opacity 1 to 0 over 300 pop, then the incoming over 300 with its backdrop at
+pop and, for a page declaring `splitFade` (now playing), its content at easeIn (`Holder.backdropFade`,
+`contentFade`; the content leaves over 250 easeIn, T7 and T8); `pop()` reverses with the kind the page was
+pushed with and flies the outgoing page's `header` and `strip` up (`y` 0 to -0.25 H, opacity to 0, 250 expOut6)
+alongside the turn (T4). A page declaring `pageMotion` `home` runs its own exit (the holder stays flat and
+opaque for its `exitDuration`) and returns with no turn. The stack emits `entered(page, kind)` when a page's
+enter animation ends (at once for a push or pop without animation, `kind` empty) and `leaving(page)` when a
+`home` page's exit starts; `Page` relays them as `entered(first, kind)` and `leaving()` and sets `arrived`.
+Every page with a row list (hub panes, Settings, Playlists, History, Queue, ArtistDetail, AlbumDetail) feathers
+its visible rows once on first show, after `entered` (T2a): rows `x` +34 u to 0, opacity 0 to 1, 380 strip,
+stagger `min(i, 10) * 22` from the first visible row; the rows wait at `x` +34 u and opacity 0 while `arriving`
+(`animated`, screen on and `PageStack.animate`), and `animated` false, screen off or a stack restore lands them.
 
 `Pad` is a context property; `PadRouter` turns its actions into names (`up down left right a b x y
 lb rb lt rt start back`) and hands each to the top page of the `PageStack` through
@@ -133,7 +143,10 @@ the song, anything else or no library logs `play <kind> <id>`). The hub, artist 
 `unpin from quickplay` in place of `pin to quickplay` while `Library.isPinned(kind, id)` is true, and Main
 runs `Library.pin` or `unpin` for both verbs. A on `music`, `bluetooth`, `playlists`, `history` and
 `settings` pushes the page of that name; Main binds `playlistCount` to `Library.playlistCount`. The entrance (menu items, focus bar, Quickplay peek) plays once when the page is created
-with `animated` true; `animated` turning true later changes nothing.
+with `animated` true; `animated` turning true later changes nothing. A on an item runs the T2 exit before the
+pushed page turns in: every menu item flies `y` to -0.25 H and opacity to 0 over 250 expOut6, staggered 28 ms per
+item outward from the focused one, the focus bar with the focused item and the Quickplay peek to 0 in the same
+250; a pop back to home replays the T1 entrance with 0 stagger (T4) in place of a turn.
 
 `MusicHub` is the `music` page (`objectName` `music`): header `music`, pivots `artists`, `albums`,
 `songs`, `genres`, `playlists`, content from CONTENT_TOP. Each pivot is a `FocusList` pane built from the
@@ -151,7 +164,7 @@ through the pane, left/right move within a grid row (no wrap), LB/RB switch pivo
 either end. A on a song calls `Player.playTracks(ids, position)` with every song id in list order (without a
 player it emits `play`); A on an album, artist or genre emits `open(kind, id)` (Main pushes `AlbumDetail` for
 `album` and `ArtistDetail` for `artist`, logs `navigate genre <id>`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
-`jumpRequested` and opens the `JumpGrid` over the hub (T14: the hub body dims to 0.4, the grid swivels in about
+`jumpRequested` and opens the `JumpGrid` over the hub (T14: the grid is full screen on `Ui.bg` over the list, swiveling in about
 a horizontal center hinge from -30 degrees over 350 expOut6, out to 30 over 250 expIn1). `jumpTo(letter)` from
 the grid snaps the pane so the letter's divider (or letter cell) sits at the top, focuses the first row under it
 (the cell itself on albums) and shows the 120 u `JumpLetter` (T15). LT/RT show the focused row's letter in the
@@ -175,13 +188,15 @@ first with `N SONGS` from `Player.queue.count`, then every row of the `Playlists
 `title`, `subtitle`), all Bold upper case with the play ring. A on `NOW PLAYING` emits `nowPlaying`, A on a
 playlist calls `Player.playTracks(Library.playlistTracks(id), 0)` (without a player or library it emits
 `play("playlist", id)`); X opens the sheet `play`, `add to queue`, `pin to quickplay` (or `unpin from
-quickplay`), Y is `add to queue`, both emit `sheetAction`. Model changes rebuild the rows. B pops.
+quickplay`), Y is `add to queue`, both emit `sheetAction`. A playlist model change rebuilds the rows with F12
+and swaps the count text with F7 (opacity 1 to 0.2 to 1, 200 + 200). B pops.
 
 `HistoryScreen` is the `history` page: header `history`, pivots `recent`, `new`, each a `FocusList` of rows
 holding `Ui.historyCols` (2) uncaptioned QP_TILE tiles at HUB_EDGE from CONTENT_TOP, row pitch QP_TILE +
 QP_GUTTER, from the `HistoryRecent` (kind `song`) and `HistoryNew` (kind `album`) models. Up/down and LT/RT
-move through the rows, left/right across the two tiles, LB/RB switch pivots (the panes slide 34 u with the
-strip curve, 300 out and 380 in). A plays the song (`playTracks([id], 0)`) or the album
+move through the rows, left/right across the two tiles, LB/RB switch pivots with T5 (outgoing pane 300 strip,
+incoming rows `x` +-34 u to 0 with `min(i, 10) * 22` stagger over 380 strip, header parallax from the strip). A
+model change on the shown pivot rebuilds its rows with F12. A plays the song (`playTracks([id], 0)`) or the album
 (`Library.albumTracks(id)`), without a player it emits `play(kind, id)`; X opens the sheet `play`, `add to
 queue`, pin or unpin, Y is `add to queue`. B pops. `screenOff` or `animated` false lands the pivot.
 
@@ -212,6 +227,7 @@ read only lines in the value role: `ARMADA <IMAGE_VERSION>` and `IMAGE <digest>`
 while `PowerBridge.driftPaths` is not empty, `TRACK 44100 HZ 16 BIT` from `Player.current.sampleRate` and
 `bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. Left/right step a value (A steps it too),
 read only rows ignore them, a changed value text runs F7 (opacity 1 to 0.2 over 200, swap, 0.2 to 1 over 200).
+The sub rows opened by LIBRARY FOLDERS and ABOUT arrive with F12 from the row under the opener.
 LT/RT page by the content height. B pops. Main applies `Settings.scale` and `Settings.accent` to `Ui` at start.
 
 `ArtistDetail` is the `artist` page, pushed with the turnstile (T3) by `open("artist", id)` from the hub:
@@ -220,7 +236,7 @@ under the pivot baseline (110 portrait, 94 landscape), the ring row play, add, s
 baseline 200, content from 212 on a `Backdrop` (L1 pan) of the artist art. The rows come from `Library`:
 `artistInfo(id)` (`name`, `artPath`: the first of the artist's albums with art), `artistAlbums(id)` resolved
 through `albumInfo(id)` (`title`, `artist`, `year`, `artPath`), `artistTracks(id)` through `trackRows(ids)`
-(`id`, `title`, `artist`, `album`, `albumId`, `durationMs`); a null library leaves the lists empty. `albums`
+(`id`, `title`, `artist`, `album`, `albumId`, `durationMs`); a null library leaves the lists empty; a new `artistId` reloads them with F12 on the shown pivot. `albums`
 is a `FocusList` of DETAIL_ROW cells (TILE_L art at HUB_EDGE with a 32 u play ring inset 8 from its top
 right, 13 u Bold upper case title on baseline art top + 28 wrapping to two lines at pitch 15 and clipped at
 W, the year under the last line, both at HUB_EDGE + TILE_L + 8), `songs` the SONGS style
@@ -240,7 +256,7 @@ rows and the sheet and pauses the backdrop.
 `openAlbum` from the artist page, laid out as the now playing top stack: no header word, back ring (64 u,
 inset 4, decorative) top left, `StatusStrip` top right, the album artist (20 u Bold upper case) on baseline
 117 and the title (20 u Light upper case) on 141 at EDGE, TILE_L art at EDGE y 155, track rows from y 283
-(art bottom + 12; `albumInfo(id)` and `albumTracks(id)`): 1 based number, title, the
+(art bottom + 12; `albumInfo(id)` and `albumTracks(id)`, a new `albumId` reloads them with F12): 1 based number, title, the
 duration `m:ss` right aligned at W - HUB_EDGE (absent when unknown), the accent dot left of the number on the
 row whose id is `Player.current.id`. The `Backdrop` is the album art. Focus starts on row 0; up/down and
 LT/RT move, A calls `Player.playTracks(ids, row)` with the album in disc and track order, Y emits
@@ -293,7 +309,7 @@ one after it, `move up` on the first row, `move down` on the last. `remove` call
 focus at its new position, a removed row leaves focus at the same index clamped to the end. Every queue
 change (`rowsInserted`, `rowsRemoved`, `rowsMoved`, `modelReset`) rebuilds the rows and runs F12 from the
 edited index on the visible rows at and below it (`x` -5 to 0, `o` 0 to 1, 220 decel, stagger
-`min(i, 10) * 50` counted from the first affected visible row). B pops with T4; Start pops when the page below
+`min(i, 10) * 50` counted from the first affected visible row); a changed count text swaps with F7. B pops with T4; Start pops when the page below
 is now playing, else falls through to the router (which opens now playing). `screenOff` or `animated` false
 settles the rows, the scroll and the sheet.
 

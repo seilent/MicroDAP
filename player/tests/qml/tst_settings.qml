@@ -713,4 +713,61 @@ TestCase {
         compare(page.sheet.visible, false)
         compare(page.sheet.shown, true)
     }
+
+    function test_t2a_first_show() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(settingsComponent, { animated: true })
+        compare(page.arriving, true)
+        const first = tc.rowItem(page, 0)
+        const output = tc.rowItem(page, 1)
+        compare(first.enter, 0)
+        compare(output.enter, 0)
+        compare(output.shift, Motion.pivotShift)
+        fuzzyCompare(output.x, Ui.px(34), 0.01)
+        compare(output.opacity, 0)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(page.arriving, false)
+        compare(output.enterDuration, 380)
+        compare(first.stagger, 0)
+        compare(output.stagger, 22)
+        compare(tc.rowItem(page, 3).stagger, 3 * 22)
+        tryCompare(output, "enter", 1, 2000)
+        tryCompare(tc.rowItem(page, 3), "enter", 1, 2000)
+        fuzzyCompare(output.x, 0, 0.01)
+        compare(output.opacity, 1)
+    }
+
+    function test_t2a_rest_without_animation() {
+        const page = open({ animated: true })
+        compare(page.arriving, false)
+        const output = tc.rowItem(page, 1)
+        compare(output.enter, 1)
+        compare(output.x, 0)
+        compare(output.opacity, 1)
+    }
+
+    function test_f12_on_folders_and_about() {
+        const page = open({ animated: true })
+        tc.focusKey(page, "folders")
+        router.dispatch("a", false)
+        compare(page.foldersOpen, true)
+        const sub = tc.rowItem(page, tc.keyIndex(page, "folders") + 1)
+        compare(sub.sub, true)
+        tryVerify(function() { return sub.enter < 1 }, 1000)
+        compare(sub.enterDuration, 220)
+        compare(sub.shift, Motion.listChangeShift)
+        compare(sub.stagger, 0)
+        compare(tc.rowItem(page, tc.keyIndex(page, "folders") + 2).stagger, 50)
+        compare(tc.rowItem(page, tc.keyIndex(page, "folders")).enter, 1)
+        tryCompare(sub, "enter", 1, 2000)
+        tc.focusKey(page, "about")
+        router.dispatch("a", false)
+        compare(page.aboutOpen, true)
+        const info = tc.rowItem(page, tc.keyIndex(page, "about") + 1)
+        compare(info.info, true)
+        tryVerify(function() { return info.enter < 1 }, 1000)
+        compare(info.enterDuration, 220)
+        tryCompare(info, "enter", 1, 2000)
+    }
 }

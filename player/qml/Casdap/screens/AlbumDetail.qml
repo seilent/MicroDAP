@@ -20,6 +20,7 @@ Page {
     property var sheetRow: null
 
     readonly property bool live: page.animated && !page.screenOff
+    readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property int count: page.rows.length
     readonly property int statusPlaying: 1
     readonly property int statusPaused: 2
@@ -102,6 +103,13 @@ Page {
         trackList.forceLayout()
         trackList.snapTo(0)
         page.focusIndex = trackList.focusIndex
+        if (d.ready && page.live && !page.arriving)
+            Qt.callLater(page.runRefresh)
+    }
+
+    function runRefresh(): void {
+        if (page.live)
+            trackList.refresh()
     }
 
     function play(start: int): void {
@@ -168,6 +176,7 @@ Page {
     }
 
     function completeAll(): void {
+        trackList.settle()
         trackList.completeScroll()
         sheet.complete()
     }
@@ -210,6 +219,11 @@ Page {
             page.completeAll()
     }
 
+    onEntered: (first, kind) => {
+        if (page.arriving)
+            trackList.feather(1)
+    }
+
     onAlbumIdChanged: {
         if (d.ready)
             page.load()
@@ -239,9 +253,53 @@ Page {
         readonly property bool isFocused: trackList.focusIndex === row.index
         readonly property bool isPlaying: page.currentId >= 0 && page.currentId === row.modelData.id
         readonly property Item rowItem: listRow
+        property real enter: page.arriving ? 0 : 1
+        property real shift: page.arriving ? Motion.pivotShift : 0
+        property int stagger: 0
+        property int enterDuration: 0
+        property var enterCurve: Motion.strip
 
         width: trackList.width
         height: trackList.rowPitch
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
+        opacity: row.enter
+
+        Connections {
+            target: trackList
+
+            function onEntrance(shift, stagger, cap, duration, stripCurve) {
+                enterAnim.stop()
+                row.shift = shift
+                row.stagger = Math.min(cap, Math.max(0, row.index - trackList.firstVisible())) * stagger
+                row.enterDuration = duration
+                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
+                row.enter = 0
+                enterAnim.start()
+            }
+
+            function onSettle() {
+                enterAnim.stop()
+                row.enter = 1
+            }
+        }
+
+        SequentialAnimation {
+            id: enterAnim
+
+            PauseAnimation {
+                duration: row.stagger
+            }
+
+            NumberAnimation {
+                target: row
+                property: "enter"
+                from: 0
+                to: 1
+                duration: row.enterDuration
+                easing.type: Motion.bezier
+                easing.bezierCurve: row.enterCurve
+            }
+        }
 
         ListRow {
             id: listRow
@@ -272,6 +330,23 @@ Page {
 
     FocusList {
         id: trackList
+
+        signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve)
+        signal settle()
+
+        function firstVisible(): int {
+            return Math.max(0, Math.floor(trackList.contentY / trackList.rowPitch))
+        }
+
+        function feather(dir: int): void {
+            trackList.forceLayout()
+            trackList.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+        }
+
+        function refresh(): void {
+            trackList.forceLayout()
+            trackList.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
+        }
 
         x: page.listX
         y: page.listY

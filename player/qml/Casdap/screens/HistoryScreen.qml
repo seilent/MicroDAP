@@ -18,6 +18,7 @@ Page {
     property var sheetEntry: null
 
     readonly property bool live: page.animated && !page.screenOff
+    readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property var pivots: ["recent", "new"]
     readonly property int cols: Ui.historyCols
     readonly property real tilePx: Ui.px(Ui.qpTile)
@@ -85,6 +86,14 @@ Page {
             pane.snapTo(Math.min(pane.focusIndex, pane.count - 1))
         page.clampCol()
         page.focusIndex = page.activeList.focusIndex
+        if (d.ready && pivot === page.shownPivot && page.live && !page.arriving && !page.switching)
+            Qt.callLater(page.runRefresh)
+    }
+
+    function runRefresh() {
+        if (!page.live)
+            return
+        page.panes[page.shownPivot].refresh()
     }
 
     function clampCol() {
@@ -169,6 +178,7 @@ Page {
         for (const pane of page.panes) {
             pane.x = 0
             pane.opacity = 1
+            pane.settle()
         }
         page.shownPivot = page.pivotIndex
     }
@@ -262,6 +272,11 @@ Page {
         page.focusIndex = page.activeList.focusIndex
     }
 
+    onEntered: (first, kind) => {
+        if (page.arriving)
+            page.panes[page.shownPivot].feather(1)
+    }
+
     onHistoryModelChanged: page.rebuild(0)
     onNewModelChanged: page.rebuild(1)
     onColsChanged: {
@@ -278,12 +293,14 @@ Page {
         page.rebuild(0)
         page.rebuild(1)
         page.shownPivot = page.pivotIndex
+        d.ready = true
     }
 
     QtObject {
         id: d
 
         property bool internal: false
+        property bool ready: false
     }
 
     component ModelWatch: QtObject {
@@ -332,6 +349,11 @@ Page {
         readonly property var pane: row.ListView.view
         readonly property bool isFocusedRow: page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property int cellCount: cells.count
+        property real enter: page.arriving ? 0 : 1
+        property real shift: page.arriving ? Motion.pivotShift : 0
+        property int stagger: 0
+        property int enterDuration: 0
+        property var enterCurve: Motion.strip
 
         function cellAt(col: int): Item {
             return cells.itemAt(col)
@@ -339,6 +361,45 @@ Page {
 
         width: row.pane.width
         height: row.pane.rowPitch
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
+        opacity: row.enter
+
+        Connections {
+            target: row.pane
+
+            function onEntrance(shift, stagger, cap, duration, stripCurve) {
+                enterAnim.stop()
+                row.shift = shift
+                row.stagger = Math.min(cap, Math.max(0, row.index - row.pane.firstVisible())) * stagger
+                row.enterDuration = duration
+                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
+                row.enter = 0
+                enterAnim.start()
+            }
+
+            function onSettle() {
+                enterAnim.stop()
+                row.enter = 1
+            }
+        }
+
+        SequentialAnimation {
+            id: enterAnim
+
+            PauseAnimation {
+                duration: row.stagger
+            }
+
+            NumberAnimation {
+                target: row
+                property: "enter"
+                from: 0
+                to: 1
+                duration: row.enterDuration
+                easing.type: Motion.bezier
+                easing.bezierCurve: row.enterCurve
+            }
+        }
 
         Repeater {
             id: cells
@@ -369,6 +430,23 @@ Page {
         id: pane
 
         property int pivot: 0
+
+        signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve)
+        signal settle()
+
+        function firstVisible(): int {
+            return Math.max(0, Math.floor(pane.contentY / pane.rowPitch))
+        }
+
+        function feather(dir: int): void {
+            pane.forceLayout()
+            pane.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+        }
+
+        function refresh(): void {
+            pane.forceLayout()
+            pane.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
+        }
 
         x: 0
         y: Ui.px(Ui.contentTop)
@@ -455,27 +533,11 @@ Page {
                 page.shownPivot = page.pivotIndex
                 pivotAnim.outgoing.x = 0
                 pivotAnim.outgoing.opacity = 1
-                pivotAnim.incoming.x = pivotAnim.dir * Ui.px(Motion.pivotShift)
-                pivotAnim.incoming.opacity = 0
+                pivotAnim.incoming.feather(pivotAnim.dir)
             }
         }
-        ParallelAnimation {
-            NumberAnimation {
-                target: pivotAnim.incoming
-                property: "x"
-                to: 0
-                duration: Motion.pivotRows
-                easing.type: Motion.bezier
-                easing.bezierCurve: Motion.strip
-            }
-            NumberAnimation {
-                target: pivotAnim.incoming
-                property: "opacity"
-                to: 1
-                duration: Motion.pivotRows
-                easing.type: Motion.bezier
-                easing.bezierCurve: Motion.strip
-            }
+        PauseAnimation {
+            duration: Motion.pivotRows + Motion.pivotRowCap * Motion.pivotRowStagger
         }
     }
 }

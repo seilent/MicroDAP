@@ -36,6 +36,14 @@ QtObject {
         return a + (b - a) * t
     }
 
+    function outExpo(t: real): real {
+        return t >= 1 ? 1 : 1 - Math.pow(2, -10 * t)
+    }
+
+    function inQuad(t: real): real {
+        return t * t
+    }
+
     readonly property var decel: [0.1, 0.9, 0.2, 1.0, 1, 1]
     readonly property var strip: [0.2, 0.8, 0.2, 1, 1, 1]
     readonly property int sine: Easing.OutSine
@@ -58,6 +66,8 @@ QtObject {
     readonly property int turnstileInFade: 10
     readonly property real turnstileOutAngle: 50
     readonly property real turnstileInAngle: -80
+    readonly property int headerOut: 250
+    readonly property real headerOutShift: -0.25
 
     readonly property int homeEnter: 220
     readonly property int homeEnterPeek: 420

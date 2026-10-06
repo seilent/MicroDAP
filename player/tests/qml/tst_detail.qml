@@ -639,4 +639,87 @@ TestCase {
         router.dispatch("x", false)
         compare(page.sheet.visible, false)
     }
+
+    function test_t2a_artist_first_show() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(artistComponent, { artistId: 7, animated: true, pivotIndex: 1 })
+        compare(page.arriving, true)
+        const pane = page.songsPane
+        const first = tc.rowAt(pane, 0)
+        compare(first.enter, 0)
+        compare(first.shift, Motion.pivotShift)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, Ui.px(34), 0.01)
+        compare(first.opacity, 0)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(page.arriving, false)
+        compare(first.enterDuration, 380)
+        compare(first.stagger, 0)
+        const third = tc.rowAt(pane, 2)
+        compare(third.stagger, 2 * 22)
+        tryCompare(first, "enter", 1, 2000)
+        tryCompare(third, "enter", 1, 2000)
+        fuzzyCompare(third.mapToItem(third.parent, 0, 0).x - third.x, 0, 0.01)
+        compare(third.opacity, 1)
+    }
+
+    function test_t2a_album_first_show() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(albumComponent, { albumId: 1, animated: true })
+        compare(page.arriving, true)
+        const first = tc.rowAt(page.trackList, 0)
+        compare(first.enter, 0)
+        compare(first.opacity, 0)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, Ui.px(34), 0.01)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(first.enterDuration, 380)
+        compare(tc.rowAt(page.trackList, 1).stagger, 22)
+        tryCompare(first, "enter", 1, 2000)
+        tryCompare(tc.rowAt(page.trackList, 2), "enter", 1, 2000)
+        fuzzyCompare(tc.rowAt(page.trackList, 2).x, 0, 0.01)
+        compare(tc.rowAt(page.trackList, 2).opacity, 1)
+    }
+
+    function test_t2a_rest_without_animation() {
+        const album = openAlbum({ animated: true })
+        const row = tc.rowAt(album.trackList, 0)
+        compare(album.arriving, false)
+        compare(row.enter, 1)
+        compare(row.x, 0)
+        compare(row.opacity, 1)
+        pages.clear()
+        const artist = openArtist({ animated: false })
+        compare(artist.arriving, false)
+        compare(tc.rowAt(artist.albumsPane, 0).enter, 1)
+    }
+
+    function test_f12_on_album_reload() {
+        const page = openAlbum({ animated: true })
+        page.albumId = 2
+        compare(page.rows.length, 3)
+        tryVerify(function() {
+            const r = page.trackList.itemAtIndex(0)
+            return r !== null && r.enter < 1
+        }, 1000)
+        const first = tc.rowAt(page.trackList, 0)
+        compare(first.enterDuration, 220)
+        compare(first.shift, Motion.listChangeShift)
+        compare(tc.rowAt(page.trackList, 1).stagger, 50)
+        tryCompare(first, "enter", 1, 2000)
+    }
+
+    function test_f12_on_artist_reload() {
+        const page = openArtist({ animated: true, pivotIndex: 1 })
+        page.artistId = 8
+        tryVerify(function() {
+            const r = page.songsPane.itemAtIndex(0)
+            return r !== null && r.enter < 1
+        }, 1000)
+        const first = tc.rowAt(page.songsPane, 0)
+        compare(first.enterDuration, 220)
+        compare(first.shift, Motion.listChangeShift)
+        tryCompare(first, "enter", 1, 2000)
+        compare(tc.rowAt(page.albumsPane, 0).enter, 1)
+    }
 }

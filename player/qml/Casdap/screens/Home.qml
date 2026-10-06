@@ -14,7 +14,17 @@ Page {
     property real pan: 0
     property real peekEnter: 1
     property real barEnter: 1
+    property real peekExit: 0
+    property real barExit: 0
+    property bool exited: false
     property int playlistCount: -1
+
+    readonly property string pageMotion: "home"
+    readonly property int exitSpan: Math.max(home.focusIndex, home.menu.length - 1 - home.focusIndex)
+    readonly property int exitDuration: Motion.homeOut + Motion.homeOutStagger * home.exitSpan
+    readonly property real peekExitCurve: Motion.expOut6(home.peekExit)
+    readonly property real barExitCurve: Motion.expOut6(home.barExit)
+    readonly property bool exiting: peekExitAnim.running
 
     readonly property var menu: [
         { name: "music", subtitle: "artists albums songs genres playlists" },
@@ -45,7 +55,7 @@ Page {
     readonly property real quickplayScale: Ui.landscape ? 1 : Ui.qpPeekScale + (1 - Ui.qpPeekScale) * home.pan
     readonly property real quickplayY: Ui.landscape ? 0 : Ui.px(Ui.qpPeekY) * (1 - home.pan)
     readonly property real quickplayRestAlpha: Ui.landscape ? Motion.quickplayAlpha : Ui.qpPeekAlpha
-    readonly property real quickplayAlpha: (home.quickplayRestAlpha + (1 - home.quickplayRestAlpha) * home.panVisual) * home.peekEnter
+    readonly property real quickplayAlpha: (home.quickplayRestAlpha + (1 - home.quickplayRestAlpha) * home.panVisual) * home.peekEnter * (1 - home.peekExitCurve)
     readonly property real menuAlpha: 1 + (Motion.quickplayAlpha - 1) * home.panVisual
     readonly property bool panning: panAnim.running
     property alias menuPanel: menuPanel
@@ -116,6 +126,8 @@ Page {
             panAnim.complete()
         if (peekAnim.running)
             peekAnim.complete()
+        if (peekExitAnim.running)
+            peekExitAnim.complete()
         for (let i = 0; i < menuRepeater.count; i++) {
             const item = menuRepeater.itemAt(i)
             if (item !== null)
@@ -125,6 +137,39 @@ Page {
         home.barEnter = 1
         quickplay.completeAll()
         sheet.complete()
+    }
+
+    function runExit() {
+        if (!home.animated)
+            return
+        home.exited = true
+        peekExitAnim.stop()
+        home.peekExit = 0
+        peekExitAnim.start()
+        for (let i = 0; i < menuRepeater.count; i++) {
+            const item = menuRepeater.itemAt(i)
+            if (item !== null)
+                item.startExit(Math.abs(i - home.focusIndex) * Motion.homeOutStagger)
+        }
+    }
+
+    function replayEntrance() {
+        home.exited = false
+        peekExitAnim.stop()
+        home.peekExit = 0
+        home.barExit = 0
+        for (let i = 0; i < menuRepeater.count; i++) {
+            const item = menuRepeater.itemAt(i)
+            if (item !== null)
+                item.startEnter(0)
+        }
+        if (!home.animated) {
+            home.peekEnter = 1
+            return
+        }
+        peekAnim.stop()
+        home.peekEnter = 0
+        peekAnim.start()
     }
 
     function openPinSheet(entry) {
@@ -184,6 +229,13 @@ Page {
     }
 
     onActivated: (index) => home.navigate(home.menu[index].name)
+
+    onLeaving: home.runExit()
+
+    onEntered: (first, kind) => {
+        if (kind === "home" || home.exited)
+            home.replayEntrance()
+    }
 
     onAnimatedChanged: {
         if (!home.animated)
@@ -246,7 +298,7 @@ Page {
             rowY: home.itemBaseline(home.focusIndex) - Ui.px(Ui.homeBarTop)
             rowHeight: Ui.px(Ui.homeBarH)
             animated: home.animated
-            opacity: home.barEnter * home.focusOpacity
+            opacity: home.barEnter * (1 - home.barExitCurve) * home.focusOpacity
         }
 
         Repeater {
@@ -267,22 +319,53 @@ Page {
                 readonly property Item labelItem: label
                 readonly property Item subtitleItem: sub
                 property real enter: 1
+                property real exit: 0
+                property int enterStagger: item.index * Motion.homeEnterStagger
+                property int exitStagger: 0
+                readonly property real exitCurve: Motion.expOut6(item.exit)
+                readonly property real restY: item.itemBaseline - label.baselineOffset
 
                 function completeEnter() {
                     enterAnim.complete()
+                    exitAnim.complete()
                     item.enter = 1
                 }
 
+                function startEnter(stagger: int): void {
+                    enterAnim.stop()
+                    exitAnim.stop()
+                    item.exit = 0
+                    if (!home.animated) {
+                        item.enter = 1
+                        return
+                    }
+                    item.enterStagger = stagger
+                    item.enter = 0
+                    enterAnim.start()
+                }
+
+                function startExit(stagger: int): void {
+                    exitAnim.stop()
+                    item.exitStagger = stagger
+                    item.exit = 0
+                    exitAnim.start()
+                }
+
                 x: Ui.px(Ui.homeTextX) + Ui.px(Motion.homeEnterShift) * (1 - item.enter)
-                y: item.itemBaseline - label.baselineOffset
+                y: item.restY + item.exitCurve * Motion.homeOutShift * home.height
                 width: Math.max(label.width, sub.x + sub.width)
                 height: sub.visible ? sub.y + sub.height : label.height
-                opacity: item.enter
+                opacity: item.enter * (1 - item.exitCurve)
                 pressed: item.isFocused && home.pressed && !home.quickplayShown
 
                 onEnterChanged: {
                     if (item.index === 0)
                         home.barEnter = item.enter
+                }
+
+                onExitChanged: {
+                    if (item.isFocused)
+                        home.barExit = item.exit
                 }
 
                 Component.onCompleted: {
@@ -296,7 +379,7 @@ Page {
                     id: enterAnim
 
                     PauseAnimation {
-                        duration: item.index * Motion.homeEnterStagger
+                        duration: item.enterStagger
                     }
 
                     NumberAnimation {
@@ -307,6 +390,23 @@ Page {
                         duration: Motion.homeEnter
                         easing.type: Motion.bezier
                         easing.bezierCurve: Motion.decel
+                    }
+                }
+
+                SequentialAnimation {
+                    id: exitAnim
+
+                    PauseAnimation {
+                        duration: item.exitStagger
+                    }
+
+                    NumberAnimation {
+                        target: item
+                        property: "exit"
+                        from: 0
+                        to: 1
+                        duration: Motion.homeOut
+                        easing.type: Motion.linear
                     }
                 }
 
@@ -384,5 +484,16 @@ Page {
         duration: Motion.homeEnterPeek
         easing.type: Motion.bezier
         easing.bezierCurve: Motion.decel
+    }
+
+    NumberAnimation {
+        id: peekExitAnim
+
+        target: home
+        property: "peekExit"
+        from: 0
+        to: 1
+        duration: Motion.homeOut
+        easing.type: Motion.linear
     }
 }

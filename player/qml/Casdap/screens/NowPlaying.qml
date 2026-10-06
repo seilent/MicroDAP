@@ -29,7 +29,7 @@ Page {
     property string elapsedText: "0:00"
     property string remainingText: ""
 
-    readonly property int enterEasing: Motion.easeIn
+    readonly property bool splitFade: true
     readonly property bool live: np.animated && !np.screenOff
     readonly property bool variant: np.bluez !== null && np.bluez.transportActive === true
     readonly property int statusPlaying: 1
@@ -94,8 +94,10 @@ Page {
     readonly property bool fadingPage: np.holder !== null && np.holder.kind === "fade" && np.stack !== null
         && np.stack.phase !== "idle" && (np.stack.incoming === np.holder || np.stack.outgoing === np.holder)
     readonly property real pageProgress: np.holder !== null && np.holder.progress !== undefined ? np.holder.progress : 1
+    readonly property real backdropFade: np.holder !== null && np.holder.backdropFade !== undefined ? np.holder.backdropFade : 1
+    readonly property real contentFade: np.holder !== null && np.holder.contentFade !== undefined ? np.holder.contentFade : 1
     readonly property real contentScale: !np.fadingPage ? np.variantScale
-        : Motion.lerp(Motion.nowPlayingScale, 1, np.holder.entering ? np.pageProgress : 1 - np.pageProgress)
+        : Motion.lerp(Motion.nowPlayingScale, 1, np.contentFade)
     readonly property bool trackAnimating: trackAnim.running
     readonly property bool variantAnimating: variantIn.running || variantOut.running
     readonly property bool crossfading: crossfadeAnim.running
@@ -582,13 +584,14 @@ Page {
 
     PageSurface {
         anchors.fill: parent
+        opacity: np.backdropFade
     }
 
     Item {
         id: localLayer
 
         anchors.fill: parent
-        opacity: np.localLayerOpacity
+        opacity: np.localLayerOpacity * np.backdropFade
         visible: np.localLayerOpacity > 0
 
         Backdrop {
@@ -616,7 +619,7 @@ Page {
         id: content
 
         anchors.fill: parent
-        opacity: np.contentOpacity
+        opacity: np.contentOpacity * np.contentFade
         transform: Scale {
             origin.x: content.width * Motion.nowPlayingOriginX
             origin.y: content.height * Motion.nowPlayingOriginY

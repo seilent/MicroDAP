@@ -389,4 +389,121 @@ TestCase {
         router.dispatch("a", false)
         compare(JSON.stringify(counters.navigated), JSON.stringify(["playlists", "history", "settings"]))
     }
+
+    function test_playlists_t2a_first_show() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(playlistsComponent, { animated: true, player: fakePlayer })
+        compare(page.arriving, true)
+        const first = tc.rowAt(page.listView, 0)
+        compare(first.enter, 0)
+        compare(first.shift, Motion.pivotShift)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, Ui.px(34), 0.01)
+        compare(first.opacity, 0)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(page.arriving, false)
+        compare(first.enterDuration, 380)
+        compare(first.stagger, 0)
+        compare(tc.rowAt(page.listView, 2).stagger, 2 * 22)
+        tryCompare(first, "enter", 1, 2000)
+        tryCompare(tc.rowAt(page.listView, 2), "enter", 1, 2000)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, 0, 0.01)
+        compare(first.opacity, 1)
+    }
+
+    function test_playlists_t2a_rest_without_animation() {
+        const page = open(playlistsComponent, { animated: true, player: fakePlayer })
+        compare(page.arriving, false)
+        const first = tc.rowAt(page.listView, 0)
+        compare(first.enter, 1)
+        compare(first.x, 0)
+        compare(first.opacity, 1)
+    }
+
+    function test_playlists_f12_and_f7() {
+        const page = open(playlistsComponent, { animated: true, player: fakePlayer })
+        compare(page.countText.text, "2 playlists")
+        playlists.append({ id: 3, title: "Harmonics", subtitle: "9 songs", kind: "playlist" })
+        compare(page.countLine, "3 playlists")
+        compare(page.countSwapping, true)
+        compare(page.countText.text, "2 playlists")
+        tryCompare(page, "shownCount", "3 playlists", 1000)
+        verify(page.countText.opacity < 1)
+        tryCompare(page, "countSwapping", false, 1000)
+        compare(page.countText.opacity, 1)
+        tryVerify(function() {
+            const r = page.listView.itemAtIndex(3)
+            return r !== null && r.stagger === 3 * 50
+        }, 1000)
+        const added = tc.rowAt(page.listView, 3)
+        compare(added.enterDuration, 220)
+        compare(added.shift, Motion.listChangeShift)
+        compare(added.stagger, 3 * 50)
+        tryCompare(added, "enter", 1, 2000)
+        fakePlayer.queue.count = 3
+        wait(20)
+        compare(tc.rowAt(page.listView, 0).enter, 1)
+        compare(page.rows[0].subtitle, "3 songs")
+    }
+
+    function test_history_t2a_first_show() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(historyComponent, { animated: true, player: fakePlayer })
+        compare(page.arriving, true)
+        const first = tc.rowAt(page.recentPane, 0)
+        compare(first.enter, 0)
+        compare(first.shift, Motion.pivotShift)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, Ui.px(34), 0.01)
+        compare(first.opacity, 0)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(first.enterDuration, 380)
+        compare(first.stagger, 0)
+        compare(tc.rowAt(page.recentPane, 2).stagger, 2 * 22)
+        tryCompare(first, "enter", 1, 2000)
+        tryCompare(tc.rowAt(page.recentPane, 3), "enter", 1, 2000)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, 0, 0.01)
+    }
+
+    function test_history_t5_row_stagger() {
+        const page = open(historyComponent, { animated: true, player: fakePlayer })
+        router.dispatch("rb", false)
+        verify(page.switching)
+        tryCompare(page, "shownPivot", 1, 2000)
+        const pane = page.newPane
+        compare(pane.x, 0)
+        for (let i = 0; i < 2; i++) {
+            const row = tc.rowAt(pane, i)
+            compare(row.stagger, Math.min(i, 10) * 22)
+            compare(row.enterDuration, 380)
+            compare(row.shift, 34)
+            verify(row.enter < 1)
+        }
+        tryCompare(tc.rowAt(pane, 0), "enter", 1, 2000)
+        tryCompare(tc.rowAt(pane, 1), "enter", 1, 2000)
+        fuzzyCompare(tc.rowAt(pane, 1).x, 0, 0.01)
+        compare(tc.rowAt(pane, 1).opacity, 1)
+        tryCompare(page, "switching", false, 2000)
+        router.dispatch("lb", false)
+        tryCompare(page, "shownPivot", 0, 2000)
+        compare(tc.rowAt(page.recentPane, 0).shift, -34)
+        tryCompare(tc.rowAt(page.recentPane, 0), "enter", 1, 2000)
+    }
+
+    function test_history_f12_on_model_change() {
+        const page = open(historyComponent, { animated: true, player: fakePlayer })
+        recent.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "song" })
+        tryVerify(function() {
+            const r = page.recentPane.itemAtIndex(0)
+            return r !== null && r.enter < 1
+        }, 1000)
+        const first = tc.rowAt(page.recentPane, 0)
+        compare(first.enterDuration, 220)
+        compare(first.shift, Motion.listChangeShift)
+        compare(tc.rowAt(page.recentPane, 1).stagger, 50)
+        tryCompare(first, "enter", 1, 2000)
+        fresh.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "album" })
+        wait(20)
+        compare(tc.rowAt(page.recentPane, 0).enter, 1)
+    }
 }

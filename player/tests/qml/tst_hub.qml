@@ -700,4 +700,85 @@ TestCase {
         verify(top + list.rowPitch <= list.height + 0.01)
         compare(router.dispatch("down", false), false)
     }
+
+    function test_t2a_first_show() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(hubComponent, { animated: true, pivotIndex: 2 })
+        compare(page.arriving, true)
+        compare(pages.phase, "exit")
+        const pane = page.songsPane
+        const first = tc.rowAt(pane, 0)
+        compare(first.enter, 0)
+        compare(first.shift, Motion.pivotShift)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, Ui.px(34), 0.01)
+        compare(first.opacity, 0)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(page.arrived, true)
+        compare(page.arriving, false)
+        compare(first.enterDuration, 380)
+        compare(first.stagger, 0)
+        const third = tc.rowAt(pane, 3)
+        compare(third.stagger, 3 * 22)
+        compare(third.enterDuration, 380)
+        tryCompare(first, "enter", 1, 2000)
+        tryCompare(third, "enter", 1, 2000)
+        fuzzyCompare(third.mapToItem(third.parent, 0, 0).x - third.x, 0, 0.01)
+        compare(third.opacity, 1)
+    }
+
+    function test_t2a_rest_without_animation() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(hubComponent, { animated: false, pivotIndex: 2 })
+        compare(page.arriving, false)
+        const first = tc.rowAt(page.songsPane, 0)
+        compare(first.enter, 1)
+        compare(first.x, 0)
+        compare(first.opacity, 1)
+        pages.completeAll()
+        compare(first.enter, 1)
+        pages.animate = false
+        const rest = open({ animated: true })
+        compare(rest.arriving, false)
+        compare(tc.rowAt(rest.artistsPane, 0).enter, 1)
+    }
+
+    function test_t2a_screen_off_lands() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(hubComponent, { animated: true })
+        tryCompare(pages, "phase", "idle", 3000)
+        const first = tc.rowAt(page.artistsPane, 0)
+        verify(first.enter < 1)
+        page.screenOff = true
+        compare(first.enter, 1)
+        compare(first.opacity, 1)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, 0, 0.01)
+    }
+
+    function test_t4_header_fly_up() {
+        pages.animate = true
+        pages.push(blankComponent, {})
+        const page = pages.push(hubComponent, { animated: true })
+        pages.completeAll()
+        tryCompare(page.strip, "laidOut", true, 2000)
+        compare(page.header.y, 0)
+        compare(page.strip.y, 0)
+        verify(router.dispatch("b", false))
+        compare(pages.phase, "exit")
+        const holder = pages.outgoing
+        compare(holder.flying, true)
+        verify(holder.content === page)
+        tryVerify(function() { return holder.fly > 0 && holder.fly < 1 }, 1000)
+        const fly = holder.fly
+        verify(page.header.y < 0)
+        fuzzyCompare(page.header.y, fly * Motion.headerOutShift * page.height, Ui.px(1))
+        fuzzyCompare(page.header.opacity, 1 - fly, 0.05)
+        fuzzyCompare(page.strip.y, page.header.y, Ui.px(1))
+        fuzzyCompare(page.strip.opacity, page.header.opacity, 0.05)
+        compare(holder.toAngle, Motion.turnstileInAngle)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(pages.depth, 1)
+    }
 }

@@ -15,29 +15,71 @@ Item {
     readonly property string transitionKind: d.kind
     readonly property bool inputLocked: d.phase !== "idle"
 
+    signal entered(Item page, string kind)
+    signal leaving(Item page)
+
     component Holder: Turnstile {
         id: holder
 
         property Item content: null
         property bool entering: true
+        property bool revealed: true
+        property bool flying: false
         property string kind: "turnstile"
         property string pushKind: "turnstile"
-        property int easingType: Easing.Linear
         property real fromAngle: 0
         property real toAngle: 0
         property int duration: Motion.turnstileIn
         property real progress: 1
         readonly property real elapsed: holder.progress * holder.duration
         readonly property bool fade: holder.kind === "fade"
+        readonly property bool still: holder.kind === "home"
+        readonly property bool splitFade: holder.content !== null && holder.content.splitFade === true
+        readonly property Item header: holder.content !== null && holder.content.header !== undefined ? holder.content.header : null
+        readonly property Item strip: holder.content !== null && holder.content.strip !== undefined ? holder.content.strip : null
+        readonly property real fly: holder.flying ? Motion.expOut6(Math.min(1, holder.elapsed / Motion.headerOut)) : 0
+        readonly property real flyY: holder.fly * Motion.headerOutShift * holder.height
+        readonly property real backdropFade: !holder.fade ? 1
+            : holder.entering ? Motion.outExpo(holder.progress) : 1 - Motion.outExpo(holder.progress)
+        readonly property real contentFade: !holder.fade ? 1
+            : holder.entering ? Motion.inQuad(holder.progress)
+            : 1 - Motion.inQuad(Math.min(1, holder.elapsed / Motion.nowPlayingOut))
 
         anchors.fill: holder.parent
         angle: holder.fromAngle + (holder.toAngle - holder.fromAngle)
             * (holder.entering ? Motion.expOut6(holder.progress) : Motion.expIn6(holder.progress))
-        opacity: holder.fade
-            ? (holder.entering ? holder.progress : 1 - holder.progress)
-            : holder.entering
-                ? Math.min(1, holder.elapsed / Motion.turnstileInFade)
-                : (holder.elapsed < Motion.turnstileOutHold ? 1 : 0)
+        opacity: holder.still ? (holder.revealed ? 1 : 0)
+            : holder.fade ? (holder.splitFade ? 1 : holder.backdropFade)
+            : holder.entering ? Math.min(1, holder.elapsed / Motion.turnstileInFade)
+            : (holder.elapsed < Motion.turnstileOutHold ? 1 : 0)
+
+        Binding {
+            target: holder.header
+            property: "y"
+            value: holder.flyY
+            when: holder.flying && holder.header !== null
+        }
+
+        Binding {
+            target: holder.header
+            property: "opacity"
+            value: 1 - holder.fly
+            when: holder.flying && holder.header !== null
+        }
+
+        Binding {
+            target: holder.strip
+            property: "y"
+            value: holder.flyY
+            when: holder.flying && holder.strip !== null
+        }
+
+        Binding {
+            target: holder.strip
+            property: "opacity"
+            value: 1 - holder.fly
+            when: holder.flying && holder.strip !== null
+        }
     }
 
     Component {
@@ -54,54 +96,74 @@ Item {
         property string phase: "idle"
         property string kind: "turnstile"
 
-        function enterEasing(holder): int {
-            if (holder.content !== null && holder.content.enterEasing !== undefined)
-                return holder.content.enterEasing
-            return Motion.pop
+        function motionOf(holder): string {
+            if (holder.content !== null && holder.content.pageMotion !== undefined)
+                return String(holder.content.pageMotion)
+            return ""
         }
 
-        function begin(from, to, outTo, inFrom, remove, kind) {
+        function exitDuration(holder): int {
+            if (holder.content !== null && holder.content.exitDuration !== undefined)
+                return Number(holder.content.exitDuration)
+            return Motion.turnstileOut
+        }
+
+        function begin(from, to, remove, kind, pop) {
             d.outgoing = from
             d.incoming = to
             d.removeOutgoing = remove
             d.kind = kind
             const fade = kind === "fade"
-            from.kind = kind
+            const fromHome = !pop && !fade && d.motionOf(from) === "home"
+            const toHome = pop && !fade && d.motionOf(to) === "home"
+            from.kind = fromHome ? "home" : kind
             from.entering = false
+            from.revealed = true
+            from.flying = pop && !fade
             from.fromAngle = 0
-            from.toAngle = fade ? 0 : outTo
-            from.duration = fade ? Motion.nowPlayingFade : Motion.turnstileOut
-            from.easingType = fade ? Motion.pop : Easing.Linear
+            from.toAngle = fade || fromHome ? 0 : (pop ? Motion.turnstileInAngle : Motion.turnstileOutAngle)
+            from.duration = fade ? Motion.nowPlayingFade : fromHome ? d.exitDuration(from) : Motion.turnstileOut
             from.progress = 0
             from.visible = true
-            to.kind = kind
+            to.kind = toHome ? "home" : kind
             to.entering = true
-            to.fromAngle = fade ? 0 : inFrom
+            to.revealed = false
+            to.flying = false
+            to.fromAngle = fade || toHome ? 0 : (pop ? Motion.turnstileOutAngle : Motion.turnstileInAngle)
             to.toAngle = 0
-            to.duration = fade ? Motion.nowPlayingIn : Motion.turnstileIn
-            to.easingType = fade ? d.enterEasing(to) : Easing.Linear
+            to.duration = fade ? Motion.nowPlayingIn : toHome ? 0 : Motion.turnstileIn
             to.progress = 0
             to.visible = true
             d.phase = "exit"
+            if (fromHome)
+                root.leaving(from.content)
             transition.start()
         }
 
         function showIncoming() {
             if (d.outgoing)
                 d.outgoing.visible = false
+            if (d.incoming)
+                d.incoming.revealed = true
             d.phase = "enter"
         }
 
         function finish() {
+            const page = d.incoming !== null ? d.incoming.content : null
+            const kind = d.incoming !== null ? d.incoming.kind : ""
             if (d.outgoing) {
                 d.outgoing.visible = false
                 if (d.removeOutgoing)
                     d.outgoing.destroy()
             }
+            if (d.incoming)
+                d.incoming.revealed = true
             d.outgoing = null
             d.incoming = null
             d.removeOutgoing = false
             d.phase = "idle"
+            if (page !== null)
+                root.entered(page, kind)
         }
     }
 
@@ -114,7 +176,7 @@ Item {
             from: 0
             to: 1
             duration: d.outgoing !== null ? d.outgoing.duration : Motion.turnstileOut
-            easing.type: d.outgoing !== null ? d.outgoing.easingType : Easing.Linear
+            easing.type: Motion.linear
         }
         ScriptAction {
             script: d.showIncoming()
@@ -125,7 +187,7 @@ Item {
             from: 0
             to: 1
             duration: d.incoming !== null ? d.incoming.duration : Motion.turnstileIn
-            easing.type: d.incoming !== null ? d.incoming.easingType : Easing.Linear
+            easing.type: Motion.linear
         }
         onFinished: d.finish()
     }
@@ -135,7 +197,10 @@ Item {
             root.completeAll()
         const transitionKind = kind === undefined ? "turnstile" : kind
         const holder = holderComponent.createObject(root)
-        const content = component.createObject(holder, properties === undefined ? {} : properties)
+        const props = properties === undefined ? {} : properties
+        if (props.stack === undefined)
+            props.stack = root
+        const content = component.createObject(holder, props)
         content.anchors.fill = holder
         holder.content = content
         holder.pushKind = transitionKind
@@ -147,9 +212,10 @@ Item {
             holder.visible = true
             if (previous !== null)
                 previous.visible = false
+            root.entered(content, "")
             return content
         }
-        d.begin(previous, holder, Motion.turnstileOutAngle, Motion.turnstileInAngle, false, transitionKind)
+        d.begin(previous, holder, false, transitionKind, false)
         return content
     }
 
@@ -163,11 +229,13 @@ Item {
         root.pages = root.pages.slice(0, root.pages.length - 1)
         if (!root.animate) {
             below.progress = 1
+            below.revealed = true
             below.visible = true
             top.destroy()
+            root.entered(below.content, "")
             return
         }
-        d.begin(top, below, Motion.turnstileInAngle, Motion.turnstileOutAngle, true, top.pushKind)
+        d.begin(top, below, true, top.pushKind, true)
     }
 
     function completeAll() {

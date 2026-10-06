@@ -92,6 +92,12 @@ TestCase {
         }
     }
 
+    Component {
+        id: blankComponent
+
+        Page {}
+    }
+
     function fill(model, prefix, n) {
         model.clear()
         for (let i = 0; i < n; i++)
@@ -705,5 +711,92 @@ TestCase {
         compare(page.quickplayShown, false)
         fuzzyCompare(page.menuPanel.opacity, 1, 1e-6)
         fuzzyCompare(page.quickplayPanel.opacity, 0.6, 1e-6)
+    }
+
+    function test_t2_exit_on_push() {
+        const page = open({ animated: true })
+        page.completeAll()
+        page.setFocus(1)
+        pages.animate = true
+        compare(page.pageMotion, "home")
+        compare(page.exitDuration, Motion.homeOut + 3 * Motion.homeOutStagger)
+        pages.push(blankComponent, {})
+        compare(pages.phase, "exit")
+        const holder = pages.outgoing
+        compare(holder.kind, "home")
+        compare(holder.duration, page.exitDuration)
+        compare(holder.toAngle, 0)
+        compare(holder.opacity, 1)
+        const focused = page.menuItem(1)
+        const far = page.menuItem(4)
+        compare(focused.exitStagger, 0)
+        compare(page.menuItem(0).exitStagger, Motion.homeOutStagger)
+        compare(far.exitStagger, 3 * Motion.homeOutStagger)
+        tryVerify(function() { return focused.exit > 0 && focused.exit < 1 }, 1000)
+        const curve = focused.exitCurve
+        verify(focused.y < focused.restY)
+        verify(focused.opacity < 1)
+        fuzzyCompare(focused.y, focused.restY + curve * Motion.homeOutShift * page.height, Ui.px(1))
+        fuzzyCompare(focused.opacity, 1 - curve, 0.05)
+        verify(page.quickplayPanel.opacity < 0.4)
+        verify(page.focusBar.opacity < 1)
+        tryCompare(focused, "exit", 1, 2000)
+        compare(focused.opacity, 0)
+        fuzzyCompare(focused.y, focused.restY + Motion.homeOutShift * page.height, 0.01)
+        tryCompare(far, "exit", 1, 2000)
+        tryCompare(page, "peekExit", 1, 2000)
+        fuzzyCompare(page.quickplayPanel.opacity, 0, 1e-6)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(page.parent.visible, false)
+    }
+
+    function test_t4_home_return_replays_t1() {
+        const page = open({ animated: true })
+        page.completeAll()
+        pages.animate = true
+        pages.push(blankComponent, {})
+        pages.completeAll()
+        const item = page.menuItem(0)
+        tryCompare(item, "exit", 1, 2000)
+        compare(item.opacity, 0)
+        compare(page.parent.visible, false)
+        pages.pop()
+        compare(pages.phase, "exit")
+        const holder = pages.incoming
+        compare(holder.kind, "home")
+        compare(holder.duration, 0)
+        compare(holder.opacity, 0)
+        compare(pages.outgoing.flying, true)
+        compare(pages.transitionKind, "turnstile")
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(holder.opacity, 1)
+        compare(item.exit, 0)
+        verify(item.enter < 1)
+        compare(item.enterStagger, 0)
+        compare(page.menuItem(4).enterStagger, 0)
+        verify(item.x > Ui.px(70))
+        verify(page.peekEnter < 1)
+        tryCompare(item, "enter", 1, 2000)
+        tryCompare(page.menuItem(4), "enter", 1, 2000)
+        tryCompare(page, "peekEnter", 1, 2000)
+        fuzzyCompare(item.x, Ui.px(70), 0.01)
+        compare(item.opacity, 1)
+        fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-3)
+        fuzzyCompare(page.focusBar.opacity, 1, 1e-3)
+    }
+
+    function test_exit_skipped_without_animated() {
+        const page = open()
+        pages.animate = true
+        pages.push(blankComponent, {})
+        compare(pages.outgoing.kind, "home")
+        compare(page.menuItem(0).exit, 0)
+        compare(page.menuItem(0).opacity, 1)
+        pages.completeAll()
+        pages.pop()
+        pages.completeAll()
+        compare(page.menuItem(0).enter, 1)
+        compare(page.menuItem(0).opacity, 1)
+        compare(page.peekEnter, 1)
     }
 }

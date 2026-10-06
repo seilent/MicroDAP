@@ -10,8 +10,10 @@ Page {
     property var rows: []
     property var sheetItems: []
     property int sheetRow: -1
+    property string shownCount: ""
 
     readonly property bool live: screen.animated && !screen.screenOff
+    readonly property bool arriving: !screen.arrived && screen.live && screen.stackAnimates
     readonly property var queue: screen.player !== null && screen.player.queue !== undefined && screen.player.queue !== null
         ? screen.player.queue : null
     readonly property int count: screen.rows.length
@@ -19,6 +21,7 @@ Page {
     readonly property string countText: (screen.count > 0 && screen.currentIndex >= 0 ? screen.currentIndex + 1 : 0) + " of " + screen.count
     readonly property int rowIndex: queueList.focusIndex
     readonly property var focusedRow: screen.rows[screen.rowIndex] === undefined ? null : screen.rows[screen.rowIndex]
+    readonly property bool countSwapping: countAnim.running
 
     property alias header: header
     property alias countItem: countLabel
@@ -80,7 +83,18 @@ Page {
         if (from < 0 || !screen.live)
             return
         queueList.forceLayout()
-        queueList.entrance(Math.max(from, queueList.firstVisible()))
+        queueList.entrance(Math.max(from, queueList.firstVisible()), Motion.listChangeShift, Motion.listChangeStagger,
+            Motion.listChangeCap, Motion.listChange, false)
+    }
+
+    function swapCount(): void {
+        countAnim.stop()
+        if (!screen.live || !d.ready || screen.shownCount === screen.countText) {
+            screen.shownCount = screen.countText
+            countLabel.opacity = 1
+            return
+        }
+        countAnim.start()
     }
 
     function moveRow(delta: int): bool {
@@ -191,6 +205,9 @@ Page {
     function completeAll() {
         queueList.settle()
         queueList.completeScroll()
+        countAnim.stop()
+        screen.shownCount = screen.countText
+        countLabel.opacity = 1
         sheet.complete()
     }
 
@@ -238,6 +255,13 @@ Page {
             screen.completeAll()
     }
 
+    onCountTextChanged: screen.swapCount()
+
+    onEntered: (first, kind) => {
+        if (screen.arriving)
+            queueList.feather()
+    }
+
     onQueueChanged: {
         if (d.ready)
             screen.rebuild()
@@ -248,6 +272,7 @@ Page {
         if (screen.count > 0)
             queueList.snapTo(Math.max(0, screen.currentIndex))
         screen.focusIndex = queueList.focusIndex
+        screen.shownCount = screen.countText
         d.ready = true
     }
 
@@ -291,22 +316,28 @@ Page {
         readonly property bool isFocused: queueList.focusIndex === row.index
         readonly property bool isPlaying: screen.currentIndex === row.index
         readonly property Item rowItem: listRow
-        property real enter: 1
+        property real enter: screen.arriving ? 0 : 1
+        property real shift: screen.arriving ? Motion.pivotShift : Motion.listChangeShift
         property int stagger: 0
+        property int enterDuration: Motion.listChange
+        property var enterCurve: Motion.decel
 
         width: queueList.width
         height: queueList.rowPitch
-        x: Ui.px(Motion.listChangeShift) * (1 - row.enter)
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
 
         Connections {
             target: queueList
 
-            function onEntrance(from) {
+            function onEntrance(from, shift, stagger, cap, duration, stripCurve) {
                 if (row.index < from)
                     return
                 enterAnim.stop()
-                row.stagger = Math.min(Motion.listChangeCap, row.index - from) * Motion.listChangeStagger
+                row.shift = shift
+                row.stagger = Math.min(cap, row.index - from) * stagger
+                row.enterDuration = duration
+                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
                 row.enter = 0
                 enterAnim.start()
             }
@@ -329,9 +360,9 @@ Page {
                 property: "enter"
                 from: 0
                 to: 1
-                duration: Motion.listChange
+                duration: row.enterDuration
                 easing.type: Motion.bezier
-                easing.bezierCurve: Motion.decel
+                easing.bezierCurve: row.enterCurve
             }
         }
 
@@ -356,11 +387,16 @@ Page {
     FocusList {
         id: queueList
 
-        signal entrance(int from)
+        signal entrance(int from, real shift, int stagger, int cap, int duration, bool stripCurve)
         signal settle()
 
         function firstVisible(): int {
             return Math.max(0, Math.floor(queueList.contentY / queueList.rowPitch))
+        }
+
+        function feather(): void {
+            queueList.forceLayout()
+            queueList.entrance(queueList.firstVisible(), Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
         }
 
         x: 0
@@ -394,9 +430,31 @@ Page {
 
         x: Ui.px(Ui.hubEdge)
         y: Ui.px(Ui.queueCountBaseline) - countLabel.baselineOffset
-        text: screen.countText
+        text: screen.shownCount
         color: Ui.white(Ui.listCount.alpha)
         font: Ui.font(Ui.listCount)
+    }
+
+    SequentialAnimation {
+        id: countAnim
+
+        NumberAnimation {
+            target: countLabel
+            property: "opacity"
+            to: Motion.valueDip
+            duration: Motion.valueChange
+            easing.type: Motion.linear
+        }
+        ScriptAction {
+            script: screen.shownCount = screen.countText
+        }
+        NumberAnimation {
+            target: countLabel
+            property: "opacity"
+            to: 1
+            duration: Motion.valueChange
+            easing.type: Motion.linear
+        }
     }
 
     Sheet {

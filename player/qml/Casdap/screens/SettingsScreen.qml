@@ -19,6 +19,7 @@ Page {
     property var shownValues: ({})
 
     readonly property bool live: page.animated && !page.screenOff
+    readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property var outputs: ["auto", "speaker", "headphones"]
     readonly property var codecs: ["auto", "aptx", "aac", "ldac", "sbc"]
     readonly property var saverSteps: [10, 15, 30, 60, 120, 300]
@@ -61,6 +62,32 @@ Page {
 
     signal pairPhone()
     signal gameModeRequested()
+    signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve, int from)
+    signal settle()
+
+    function firstVisible(): int {
+        return page.rowAtY(flick.contentY)
+    }
+
+    function feather(): void {
+        page.entrance(Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true, page.firstVisible())
+    }
+
+    function refreshFrom(index: int): void {
+        if (!page.live)
+            return
+        d.pendingFrom = d.pendingFrom < 0 ? index : Math.min(d.pendingFrom, index)
+        Qt.callLater(page.runRefresh)
+    }
+
+    function runRefresh(): void {
+        const from = d.pendingFrom
+        d.pendingFrom = -1
+        if (from < 0 || !page.live)
+            return
+        page.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false,
+            Math.max(from, page.firstVisible()))
+    }
 
     function buildScaleSteps(): var {
         const out = []
@@ -388,6 +415,7 @@ Page {
             return true
         case "folders":
             page.foldersOpen = !page.foldersOpen
+            page.refreshFrom(page.focusIndex + 1)
             return true
         case "gameMode":
             sheet.title = page.gameModeTitle
@@ -396,6 +424,7 @@ Page {
             return true
         case "about":
             page.aboutOpen = !page.aboutOpen
+            page.refreshFrom(page.focusIndex + 1)
             return true
         case "orientation":
         case "rate":
@@ -418,6 +447,7 @@ Page {
     }
 
     function completeAll() {
+        page.settle()
         page.completeScroll()
         sheet.complete()
     }
@@ -460,6 +490,11 @@ Page {
 
     onRowsChanged: page.fixFocus()
 
+    onEntered: (first, kind) => {
+        if (page.arriving)
+            page.feather()
+    }
+
     onLiveChanged: {
         if (!page.live)
             page.completeAll()
@@ -475,6 +510,12 @@ Page {
         }
         page.folders = list
         page.focusIndex = Math.max(0, page.nearestFocusable(0, 1))
+    }
+
+    QtObject {
+        id: d
+
+        property int pendingFrom: -1
     }
 
     component SettingsRow: Item {
@@ -496,11 +537,17 @@ Page {
         readonly property Item swatchItem: swatchRow
         property string shownValue: item.modelData.value
         readonly property bool valueSwapping: valueAnim.running
+        property real enter: page.arriving ? 0 : 1
+        property real shift: page.arriving ? Motion.pivotShift : 0
+        property int stagger: 0
+        property int enterDuration: 0
+        property var enterCurve: Motion.strip
 
-        x: 0
+        x: Ui.px(item.shift) * (1 - item.enter)
         y: page.rowTopOf(item.index)
         width: flick.width
         height: page.rowHeightOf(item.modelData)
+        opacity: item.enter
 
         Component.onCompleted: {
             const old = page.shownValues[item.modelData.key]
@@ -509,6 +556,45 @@ Page {
                 return
             item.shownValue = old
             valueAnim.start()
+        }
+
+        Connections {
+            target: page
+
+            function onEntrance(shift, stagger, cap, duration, stripCurve, from) {
+                if (item.index < from)
+                    return
+                enterAnim.stop()
+                item.shift = shift
+                item.stagger = Math.min(cap, item.index - from) * stagger
+                item.enterDuration = duration
+                item.enterCurve = stripCurve ? Motion.strip : Motion.decel
+                item.enter = 0
+                enterAnim.start()
+            }
+
+            function onSettle() {
+                enterAnim.stop()
+                item.enter = 1
+            }
+        }
+
+        SequentialAnimation {
+            id: enterAnim
+
+            PauseAnimation {
+                duration: item.stagger
+            }
+
+            NumberAnimation {
+                target: item
+                property: "enter"
+                from: 0
+                to: 1
+                duration: item.enterDuration
+                easing.type: Motion.bezier
+                easing.bezierCurve: item.enterCurve
+            }
         }
 
         SequentialAnimation {

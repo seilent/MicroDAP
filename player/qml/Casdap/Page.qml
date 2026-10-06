@@ -10,13 +10,17 @@ Item {
     property int focusCount: page.list !== null ? page.list.count : 0
     property bool pressed: false
     property int pageId: -1
+    property bool arrived: false
     readonly property bool active: page.stack !== null && page.stack.currentItem === page
     readonly property real dialogFade: page.stack !== null ? page.stack.dialogFade : 0
     readonly property bool dialogUp: page.dialogFade > 0
     readonly property real focusOpacity: 1 - page.dialogFade
+    readonly property bool stackAnimates: page.stack !== null && page.stack.animate === true
 
     signal action(string name, bool repeat)
     signal activated(int index)
+    signal entered(bool first, string kind)
+    signal leaving()
 
     function focusItem(): Item {
         return page.list !== null ? page.list.focusItem() : null
@@ -96,5 +100,23 @@ Item {
         const owner = page.parent.parent
         if (owner !== null && owner !== undefined && typeof owner.pop === "function" && typeof owner.completeAll === "function")
             page.stack = owner
+    }
+
+    Connections {
+        target: page.stack
+        ignoreUnknownSignals: true
+
+        function onEntered(item, kind) {
+            if (item !== page)
+                return
+            const first = !page.arrived
+            page.entered(first, kind)
+            page.arrived = true
+        }
+
+        function onLeaving(item) {
+            if (item === page)
+                page.leaving()
+        }
     }
 }

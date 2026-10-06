@@ -11,13 +11,16 @@ Page {
     property bool screenOff: false
     property var rows: []
     property var sheetRow: null
+    property string shownCount: ""
 
     readonly property bool live: page.animated && !page.screenOff
+    readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property int queueCount: page.player !== null && page.player.queue !== undefined && page.player.queue !== null
         ? page.player.queue.count : 0
     readonly property int savedCount: page.modelCount(page.playlistsModel)
     readonly property string countLine: page.savedCount === 1 ? "1 playlist" : page.savedCount + " playlists"
     readonly property var focusedRow: page.rows[page.focusIndex] === undefined ? null : page.rows[page.focusIndex]
+    readonly property bool countSwapping: countAnim.running
     property alias header: header
     property alias countText: countText
     property alias listView: listView
@@ -67,6 +70,27 @@ Page {
         if (listView.count > 0)
             listView.snapTo(Math.min(listView.focusIndex, listView.count - 1))
         page.focusIndex = listView.focusIndex
+    }
+
+    function reload(): void {
+        page.rebuild()
+        if (d.ready && page.live && !page.arriving)
+            Qt.callLater(page.runRefresh)
+    }
+
+    function runRefresh(): void {
+        if (page.live)
+            listView.refresh()
+    }
+
+    function swapCount(): void {
+        countAnim.stop()
+        if (!page.live || !d.ready || page.shownCount === page.countLine) {
+            page.shownCount = page.countLine
+            countText.opacity = 1
+            return
+        }
+        countAnim.start()
     }
 
     function playlistIds(id: int): var {
@@ -120,7 +144,11 @@ Page {
     }
 
     function completeAll() {
+        listView.settle()
         listView.completeScroll()
+        countAnim.stop()
+        page.shownCount = page.countLine
+        countText.opacity = 1
         sheet.complete()
     }
 
@@ -172,34 +200,50 @@ Page {
         }
     }
 
-    onPlaylistsModelChanged: page.rebuild()
+    onPlaylistsModelChanged: page.reload()
     onQueueCountChanged: page.rebuild()
+    onCountLineChanged: page.swapCount()
+
+    onEntered: (first, kind) => {
+        if (page.arriving)
+            listView.feather(1)
+    }
 
     onLiveChanged: {
         if (!page.live)
             page.completeAll()
     }
 
-    Component.onCompleted: page.rebuild()
+    Component.onCompleted: {
+        page.rebuild()
+        page.shownCount = page.countLine
+        d.ready = true
+    }
+
+    QtObject {
+        id: d
+
+        property bool ready: false
+    }
 
     Connections {
         target: page.playlistsModel
         ignoreUnknownSignals: true
 
         function onModelReset() {
-            page.rebuild()
+            page.reload()
         }
 
         function onRowsInserted() {
-            page.rebuild()
+            page.reload()
         }
 
         function onRowsRemoved() {
-            page.rebuild()
+            page.reload()
         }
 
         function onDataChanged() {
-            page.rebuild()
+            page.reload()
         }
     }
 
@@ -209,6 +253,23 @@ Page {
 
     FocusList {
         id: listView
+
+        signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve)
+        signal settle()
+
+        function firstVisible(): int {
+            return Math.max(0, Math.floor(listView.contentY / listView.rowPitch))
+        }
+
+        function feather(dir: int): void {
+            listView.forceLayout()
+            listView.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+        }
+
+        function refresh(): void {
+            listView.forceLayout()
+            listView.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
+        }
 
         x: 0
         y: Ui.px(Ui.contentTop)
@@ -221,7 +282,14 @@ Page {
 
             required property int index
             required property var modelData
+            property real enter: page.arriving ? 0 : 1
+            property real shift: page.arriving ? Motion.pivotShift : 0
+            property int stagger: 0
+            property int enterDuration: 0
+            property var enterCurve: Motion.strip
 
+            transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
+            opacity: row.enter
             width: listView.width
             bold: true
             ring: true
@@ -231,6 +299,43 @@ Page {
             focused: listView.focusIndex === row.index
             pressed: row.focused && page.pressed
             animated: page.live
+
+            Connections {
+                target: listView
+
+                function onEntrance(shift, stagger, cap, duration, stripCurve) {
+                    enterAnim.stop()
+                    row.shift = shift
+                    row.stagger = Math.min(cap, Math.max(0, row.index - listView.firstVisible())) * stagger
+                    row.enterDuration = duration
+                    row.enterCurve = stripCurve ? Motion.strip : Motion.decel
+                    row.enter = 0
+                    enterAnim.start()
+                }
+
+                function onSettle() {
+                    enterAnim.stop()
+                    row.enter = 1
+                }
+            }
+
+            SequentialAnimation {
+                id: enterAnim
+
+                PauseAnimation {
+                    duration: row.stagger
+                }
+
+                NumberAnimation {
+                    target: row
+                    property: "enter"
+                    from: 0
+                    to: 1
+                    duration: row.enterDuration
+                    easing.type: Motion.bezier
+                    easing.bezierCurve: row.enterCurve
+                }
+            }
         }
     }
 
@@ -256,9 +361,31 @@ Page {
 
         x: Ui.px(Ui.hubEdge)
         y: Ui.px(Ui.queueCountBaseline) - countText.baselineOffset
-        text: page.countLine
+        text: page.shownCount
         color: Ui.white(Ui.listCount.alpha)
         font: Ui.font(Ui.listCount)
+    }
+
+    SequentialAnimation {
+        id: countAnim
+
+        NumberAnimation {
+            target: countText
+            property: "opacity"
+            to: Motion.valueDip
+            duration: Motion.valueChange
+            easing.type: Motion.linear
+        }
+        ScriptAction {
+            script: page.shownCount = page.countLine
+        }
+        NumberAnimation {
+            target: countText
+            property: "opacity"
+            to: 1
+            duration: Motion.valueChange
+            easing.type: Motion.linear
+        }
     }
 
     Sheet {

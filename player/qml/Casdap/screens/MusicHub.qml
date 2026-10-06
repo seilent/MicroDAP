@@ -26,6 +26,7 @@ Page {
     property var sheetRow: null
 
     readonly property bool live: hub.animated && !hub.screenOff
+    readonly property bool arriving: !hub.arrived && hub.live && hub.stackAnimates
     readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists"]
     readonly property bool scanning: hub.library !== null && hub.library.scanning === true
     readonly property int queueCount: hub.player !== null && hub.player.queue !== undefined && hub.player.queue !== null
@@ -582,6 +583,11 @@ Page {
         hub.syncFocus()
     }
 
+    onEntered: (first, kind) => {
+        if (hub.arriving)
+            hub.contentAt(hub.shownPivot).feather(1)
+    }
+
     onLiveChanged: {
         if (!hub.live)
             hub.completeAll()
@@ -734,15 +740,15 @@ Page {
         readonly property bool isFocused: !row.divider && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
         readonly property Item dividerItem: dividerText
-        property real enter: 1
-        property real shift: 0
+        property real enter: hub.arriving ? 0 : 1
+        property real shift: hub.arriving ? Motion.pivotShift : 0
         property int stagger: 0
         property int enterDuration: 0
         property var enterCurve: Motion.strip
 
         width: row.pane.width
         height: row.pane.rowPitch
-        x: Ui.px(row.shift) * (1 - row.enter)
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
 
         Connections {
@@ -820,8 +826,8 @@ Page {
         readonly property var pane: row.ListView.view
         readonly property bool isFocusedRow: hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property int cellCount: cells.count
-        property real enter: 1
-        property real shift: 0
+        property real enter: hub.arriving ? 0 : 1
+        property real shift: hub.arriving ? Motion.pivotShift : 0
         property int stagger: 0
         property int enterDuration: 0
         property var enterCurve: Motion.strip
@@ -832,7 +838,7 @@ Page {
 
         width: row.pane.width
         height: row.pane.rowPitch
-        x: Ui.px(row.shift) * (1 - row.enter)
+        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
 
         Connections {

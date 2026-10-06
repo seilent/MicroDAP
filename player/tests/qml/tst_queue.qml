@@ -524,4 +524,56 @@ TestCase {
         pages.completeAll()
         compare(pages.depth, 1)
     }
+
+    function test_t2a_first_show() {
+        pages.animate = true
+        const below = pages.push(blankComponent, {})
+        below.objectName = "nowplaying"
+        const page = pages.push(queueComponent, { animated: true })
+        compare(page.arriving, true)
+        const first = tc.rowAt(0)
+        compare(first.enter, 0)
+        compare(first.shift, Motion.pivotShift)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, Ui.px(34), 0.01)
+        compare(first.opacity, 0)
+        tryCompare(pages, "phase", "idle", 3000)
+        compare(page.arriving, false)
+        compare(first.enterDuration, 380)
+        compare(first.stagger, 0)
+        compare(tc.rowAt(3).stagger, 3 * 22)
+        const deep = tc.list().itemAtIndex(12)
+        if (deep !== null)
+            compare(deep.stagger, 10 * 22)
+        tryCompare(first, "enter", 1, 2000)
+        tryCompare(tc.rowAt(3), "enter", 1, 2000)
+        fuzzyCompare(first.mapToItem(first.parent, 0, 0).x - first.x, 0, 0.01)
+        compare(first.opacity, 1)
+    }
+
+    function test_t2a_rest_without_animation() {
+        const page = open({ animated: true })
+        compare(page.arriving, false)
+        const first = tc.rowAt(0)
+        compare(first.enter, 1)
+        compare(first.x, 0)
+        compare(first.opacity, 1)
+    }
+
+    function test_count_f7() {
+        const page = open({ animated: true })
+        compare(page.countItem.text, "3 of 20")
+        fakeQueue.index = 5
+        compare(page.countText, "6 of 20")
+        compare(page.countSwapping, true)
+        compare(page.countItem.text, "3 of 20")
+        tryCompare(page, "shownCount", "6 of 20", 1000)
+        verify(page.countItem.opacity < 1)
+        tryCompare(page, "countSwapping", false, 1000)
+        compare(page.countItem.opacity, 1)
+        compare(page.countItem.text, "6 of 20")
+        page.screenOff = true
+        fakeQueue.index = 7
+        compare(page.countSwapping, false)
+        compare(page.countItem.text, "8 of 20")
+    }
 }
