@@ -490,6 +490,70 @@ TestCase {
         compare(counters.pinned[0].pin, false)
     }
 
+    function test_entry_kinds() {
+        pins.append({ id: 11, kind: "album", title: "Pinned Album", subtitle: "Artist", artPath: "" })
+        pins.append({ id: 12, kind: "artist", title: "Pinned Artist", subtitle: "2 albums", artPath: "" })
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        compare(qp.count, 10)
+        compare(qp.tileAt(0).entry.section, "pins")
+        compare(qp.tileAt(0).entry.kind, "album")
+        compare(qp.tileAt(0).entry.id, 11)
+        compare(qp.tileAt(0).entry.title, "Pinned Album")
+        compare(qp.tileAt(1).entry.kind, "artist")
+        compare(qp.tileAt(1).entry.id, 12)
+        compare(qp.tileAt(2).entry.section, "history")
+        compare(qp.tileAt(2).entry.kind, "song")
+        compare(qp.tileAt(8).entry.section, "new")
+        compare(qp.tileAt(8).entry.kind, "album")
+        verify(router.dispatch("x", false))
+        compare(page.sheet.items, ["unpin"])
+        verify(router.dispatch("a", false))
+        compare(counters.pinned.length, 1)
+        compare(counters.pinned[0].pin, false)
+        compare(counters.pinned[0].entry.kind, "album")
+        compare(counters.pinned[0].entry.id, 11)
+        verify(router.dispatch("down", false))
+        compare(qp.tileAt(qp.focusIndex).entry.section, "history")
+        verify(router.dispatch("x", false))
+        compare(page.sheet.items, ["pin to quickplay"])
+        verify(router.dispatch("a", false))
+        compare(counters.pinned.length, 2)
+        compare(counters.pinned[1].pin, true)
+        compare(counters.pinned[1].entry.kind, "song")
+        compare(counters.pinned[1].entry.id, 1)
+        verify(router.dispatch("a", false))
+        compare(counters.played.length, 1)
+        compare(counters.played[0].kind, "song")
+        compare(counters.played[0].id, 1)
+    }
+
+    function test_pin_appears_in_pins() {
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        compare(qp.pinsCount, 0)
+        compare(qp.emptyText.visible, true)
+        pins.append({ id: 1, kind: "song", title: "History 1", subtitle: "Artist 1", artPath: "" })
+        compare(qp.pinsCount, 1)
+        compare(qp.count, 9)
+        compare(qp.emptyText.visible, false)
+        compare(qp.tileAt(0).entry.section, "pins")
+        compare(qp.tileAt(0).entry.kind, "song")
+        compare(qp.tileAt(0).entry.title, "History 1")
+        pins.clear()
+        compare(qp.pinsCount, 0)
+        compare(qp.emptyText.visible, true)
+    }
+
+    function test_phone_tile_kind() {
+        const page = open({ animated: false, bluez: phone })
+        router.dispatch("left", false)
+        compare(page.quickplay.tileAt(0).entry.kind, "phone")
+        compare(page.quickplay.tileAt(0).entry.phone, true)
+    }
+
     function test_watermark() {
         const page = open()
         compare(page.watermark.text, "casdap")

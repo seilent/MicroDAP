@@ -74,6 +74,11 @@ TestCase {
         id: fakeLibrary
 
         property bool scanning: false
+        property var pinned: []
+
+        function isPinned(kind, id) {
+            return fakeLibrary.pinned.indexOf(kind + ":" + id) >= 0
+        }
     }
 
     QtObject {
@@ -163,6 +168,7 @@ TestCase {
         fakePlayer.calls = []
         fakePlayer.queue.count = 12
         fakeLibrary.scanning = false
+        fakeLibrary.pinned = []
         counters.opened = []
         counters.nowPlaying = 0
         counters.jumps = 0
@@ -556,6 +562,28 @@ TestCase {
         compare(pages.depth, 2)
         verify(router.dispatch("b", false))
         compare(pages.depth, 1)
+    }
+
+    function test_sheet_unpin_label() {
+        fakeLibrary.pinned = ["song:1"]
+        const page = open({ pivotIndex: 2, library: fakeLibrary })
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "unpin from quickplay"]))
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, "unpin from quickplay")
+        compare(counters.sheetActions[0].kind, "song")
+        compare(counters.sheetActions[0].id, 1)
+        router.dispatch("down", false)
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "pin to quickplay"]))
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions[1].action, "pin to quickplay")
+        compare(counters.sheetActions[1].id, 2)
     }
 
     function entering(pane, index) {

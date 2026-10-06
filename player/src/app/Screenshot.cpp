@@ -198,6 +198,7 @@ int screenshot(const ScreenshotOptions &options)
     std::unique_ptr<AlbumsModel> albums;
     std::unique_ptr<SongsModel> songs;
     std::unique_ptr<GenresModel> genres;
+    std::unique_ptr<PinsModel> pins;
     if (!options.library.isEmpty()) {
         tempDir = std::make_unique<QTemporaryDir>();
         if (!tempDir->isValid()) {
@@ -222,6 +223,7 @@ int screenshot(const ScreenshotOptions &options)
         albums = std::make_unique<AlbumsModel>(library.get());
         songs = std::make_unique<SongsModel>(library.get());
         genres = std::make_unique<GenresModel>(library.get());
+        pins = std::make_unique<PinsModel>(library.get());
     }
 
     QQmlApplicationEngine engine;
@@ -238,6 +240,8 @@ int screenshot(const ScreenshotOptions &options)
                                              static_cast<QObject *>(songs.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("Genres"),
                                              static_cast<QObject *>(genres.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("Pins"),
+                                             static_cast<QObject *>(pins.get()));
     engine.setInitialProperties({
         {QStringLiteral("screenshot"), true},
         {QStringLiteral("shotScreen"), options.screen},

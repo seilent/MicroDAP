@@ -22,6 +22,7 @@ public:
         SubtitleRole,
         ArtPathRole,
         SectionRole,
+        KindRole,
     };
     Q_ENUM(Role)
 
@@ -44,6 +45,7 @@ protected:
         QString artPath;
         QString section;
         QString sortKey;
+        QString kind;
     };
 
     LibraryModel(Library *library, const QByteArray &titleRole, QObject *parent);
@@ -130,6 +132,23 @@ protected:
 
 private:
     Mode m_mode = Recent;
+};
+
+class PinsModel : public LibraryModel
+{
+    Q_OBJECT
+
+public:
+    explicit PinsModel(Library *library, QObject *parent = nullptr);
+
+protected:
+    QList<Entry> load() const override;
+
+private:
+    bool loadAlbum(Entry &entry) const;
+    bool loadArtist(Entry &entry) const;
+    bool loadSong(Entry &entry) const;
+    bool loadPlaylist(Entry &entry) const;
 };
 
 }

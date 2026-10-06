@@ -43,6 +43,8 @@ QVariant LibraryModel::data(const QModelIndex &index, int role) const
         return entry.artPath;
     case SectionRole:
         return entry.section;
+    case KindRole:
+        return entry.kind;
     default:
         return {};
     }
@@ -56,6 +58,7 @@ QHash<int, QByteArray> LibraryModel::roleNames() const
         {SubtitleRole, QByteArrayLiteral("subtitle")},
         {ArtPathRole, QByteArrayLiteral("artPath")},
         {SectionRole, QByteArrayLiteral("section")},
+        {KindRole, QByteArrayLiteral("kind")},
     };
 }
 
@@ -70,6 +73,7 @@ QVariantMap LibraryModel::get(int row) const
     map.insert(QStringLiteral("subtitle"), entry.subtitle);
     map.insert(QStringLiteral("artPath"), entry.artPath);
     map.insert(QStringLiteral("section"), entry.section);
+    map.insert(QStringLiteral("kind"), entry.kind);
     return map;
 }
 
@@ -259,6 +263,94 @@ QList<LibraryModel::Entry> HistoryModel::load() const
         entries.append(entry);
     }
     return entries;
+}
+
+PinsModel::PinsModel(Library *library, QObject *parent)
+    : LibraryModel(library, QByteArrayLiteral("title"), parent)
+{
+    connect(library, &Library::pinsChanged, this, &LibraryModel::reload);
+    reload();
+}
+
+QList<LibraryModel::Entry> PinsModel::load() const
+{
+    QList<Entry> entries;
+    QSqlQuery query(QStringLiteral("SELECT kind, ref_id FROM pins ORDER BY pos, id"),
+                    library()->database());
+    while (query.next()) {
+        Entry entry;
+        entry.kind = query.value(0).toString();
+        entry.id = query.value(1).toLongLong();
+        entry.section = QStringLiteral("pins");
+        bool found = false;
+        if (entry.kind == QLatin1StringView("album"))
+            found = loadAlbum(entry);
+        else if (entry.kind == QLatin1StringView("artist"))
+            found = loadArtist(entry);
+        else if (entry.kind == QLatin1StringView("song"))
+            found = loadSong(entry);
+        else if (entry.kind == QLatin1StringView("playlist"))
+            found = loadPlaylist(entry);
+        if (found)
+            entries.append(entry);
+    }
+    return entries;
+}
+
+bool PinsModel::loadAlbum(Entry &entry) const
+{
+    QSqlQuery query(library()->database());
+    query.prepare(QStringLiteral("SELECT title, artist, art_path FROM albums WHERE id = ?"));
+    query.addBindValue(entry.id);
+    if (!query.exec() || !query.next())
+        return false;
+    entry.title = query.value(0).toString();
+    entry.subtitle = query.value(1).toString();
+    entry.artPath = query.value(2).toString();
+    return true;
+}
+
+bool PinsModel::loadArtist(Entry &entry) const
+{
+    const QVariantMap info = library()->artistInfo(entry.id);
+    if (info.isEmpty())
+        return false;
+    entry.title = info.value(QStringLiteral("name")).toString();
+    entry.artPath = info.value(QStringLiteral("artPath")).toString();
+    QSqlQuery query(library()->database());
+    query.prepare(QStringLiteral("SELECT COUNT(DISTINCT t.album_id) FROM tracks t "
+                                 "JOIN track_artists ta ON ta.track_id = t.id WHERE ta.artist_id = ?"));
+    query.addBindValue(entry.id);
+    const int albums = query.exec() && query.next() ? query.value(0).toInt() : 0;
+    entry.subtitle = countLabel(albums, "album", "albums");
+    return true;
+}
+
+bool PinsModel::loadSong(Entry &entry) const
+{
+    QSqlQuery query(library()->database());
+    query.prepare(QStringLiteral("SELECT t.title, t.artist, a.art_path FROM tracks t "
+                                 "JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
+    query.addBindValue(entry.id);
+    if (!query.exec() || !query.next())
+        return false;
+    entry.title = query.value(0).toString();
+    entry.subtitle = query.value(1).toString();
+    entry.artPath = query.value(2).toString();
+    return true;
+}
+
+bool PinsModel::loadPlaylist(Entry &entry) const
+{
+    QSqlQuery query(library()->database());
+    query.prepare(QStringLiteral("SELECT p.name, (SELECT COUNT(*) FROM playlist_items i "
+                                 "WHERE i.playlist_id = p.id) FROM playlists p WHERE p.id = ?"));
+    query.addBindValue(entry.id);
+    if (!query.exec() || !query.next())
+        return false;
+    entry.title = query.value(0).toString();
+    entry.subtitle = countLabel(query.value(1).toInt(), "song", "songs");
+    return true;
 }
 
 }

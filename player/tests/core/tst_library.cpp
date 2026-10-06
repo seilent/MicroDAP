@@ -168,6 +168,8 @@ private slots:
     void missingRoot();
     void artContent();
     void pruneArtForeign();
+    void pins();
+    void pinsPrune();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -804,6 +806,141 @@ void LibraryTest::pruneArtForeign()
     QVERIFY(QFile::remove(lookalike));
     QVERIFY(QFile::remove(shortHash));
     QVERIFY(QFile::remove(upper));
+}
+
+void LibraryTest::pins()
+{
+    const QSqlDatabase db = m_library->database();
+    const qint64 albumOne = scalar(db, QStringLiteral("SELECT id FROM albums WHERE title = ?"),
+                                   {QStringLiteral("Album One")})
+                                .toLongLong();
+    const qint64 artistA = scalar(db, QStringLiteral("SELECT id FROM artists WHERE name = ?"),
+                                  {QStringLiteral("Artist A")})
+                               .toLongLong();
+    const qint64 two = scalar(db, QStringLiteral("SELECT id FROM tracks WHERE title = ?"),
+                              {QStringLiteral("Two")})
+                           .toLongLong();
+    QVERIFY(albumOne > 0);
+    QVERIFY(artistA > 0);
+    QVERIFY(two > 0);
+    {
+        QSqlQuery insert(db);
+        insert.prepare(QStringLiteral("INSERT INTO playlists(name) VALUES(?)"));
+        insert.addBindValue(QStringLiteral("Mix"));
+        QVERIFY(insert.exec());
+    }
+    const qint64 mix = scalar(db, QStringLiteral("SELECT id FROM playlists WHERE name = ?"),
+                              {QStringLiteral("Mix")})
+                           .toLongLong();
+    QVERIFY(mix > 0);
+    {
+        QSqlQuery insert(db);
+        insert.prepare(QStringLiteral("INSERT INTO playlist_items(playlist_id, pos, track_id) VALUES(?, 0, ?)"));
+        insert.addBindValue(mix);
+        insert.addBindValue(two);
+        QVERIFY(insert.exec());
+    }
+
+    PinsModel model(m_library.get());
+    QCOMPARE(model.rowCount(), 0);
+    QVERIFY(model.roleNames().value(LibraryModel::KindRole) == QByteArrayLiteral("kind"));
+    QVERIFY(model.roleNames().value(LibraryModel::TitleRole) == QByteArrayLiteral("title"));
+
+    QSignalSpy spy(m_library.get(), &Library::pinsChanged);
+    QVERIFY(!m_library->isPinned(QStringLiteral("album"), albumOne));
+    QVERIFY(m_library->pin(QStringLiteral("album"), albumOne));
+    QVERIFY(m_library->isPinned(QStringLiteral("album"), albumOne));
+    QVERIFY(!m_library->pin(QStringLiteral("album"), albumOne));
+    QVERIFY(m_library->pin(QStringLiteral("artist"), artistA));
+    QVERIFY(m_library->pin(QStringLiteral("song"), two));
+    QVERIFY(m_library->pin(QStringLiteral("playlist"), mix));
+    QVERIFY(!m_library->pin(QStringLiteral("genre"), 1));
+    QCOMPARE(spy.count(), 4);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pins")).toInt(), 4);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT MAX(pos) FROM pins")).toInt(), 3);
+
+    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(model.data(model.index(0), LibraryModel::KindRole).toString(), QStringLiteral("album"));
+    QCOMPARE(model.data(model.index(0), LibraryModel::IdRole).toLongLong(), albumOne);
+    QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("Album One"));
+    QCOMPARE(model.data(model.index(0), LibraryModel::SubtitleRole).toString(),
+             scalar(db, QStringLiteral("SELECT artist FROM albums WHERE id = ?"), {albumOne}).toString());
+    QVERIFY(!model.data(model.index(0), LibraryModel::ArtPathRole).toString().isEmpty());
+    QCOMPARE(model.data(model.index(0), LibraryModel::SectionRole).toString(), QStringLiteral("pins"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::KindRole).toString(), QStringLiteral("artist"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Artist A"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::SubtitleRole).toString(), QStringLiteral("1 album"));
+    QVERIFY(!model.data(model.index(1), LibraryModel::ArtPathRole).toString().isEmpty());
+    QCOMPARE(model.data(model.index(2), LibraryModel::KindRole).toString(), QStringLiteral("song"));
+    QCOMPARE(model.data(model.index(2), LibraryModel::TitleRole).toString(), QStringLiteral("Two"));
+    QCOMPARE(model.data(model.index(2), LibraryModel::SubtitleRole).toString(),
+             scalar(db, QStringLiteral("SELECT artist FROM tracks WHERE id = ?"), {two}).toString());
+    QCOMPARE(model.data(model.index(2), LibraryModel::ArtPathRole).toString(),
+             artPathOf(QStringLiteral("Album One")));
+    QCOMPARE(model.data(model.index(3), LibraryModel::KindRole).toString(), QStringLiteral("playlist"));
+    QCOMPARE(model.data(model.index(3), LibraryModel::TitleRole).toString(), QStringLiteral("Mix"));
+    QCOMPARE(model.data(model.index(3), LibraryModel::SubtitleRole).toString(), QStringLiteral("1 song"));
+    QVERIFY(model.data(model.index(3), LibraryModel::ArtPathRole).toString().isEmpty());
+    const QVariantMap first = model.get(0);
+    QCOMPARE(first.value(QStringLiteral("kind")).toString(), QStringLiteral("album"));
+    QCOMPARE(first.value(QStringLiteral("id")).toLongLong(), albumOne);
+
+    QVERIFY(m_library->unpin(QStringLiteral("album"), albumOne));
+    QVERIFY(!m_library->unpin(QStringLiteral("album"), albumOne));
+    QVERIFY(!m_library->isPinned(QStringLiteral("album"), albumOne));
+    QCOMPARE(spy.count(), 5);
+    QCOMPARE(model.rowCount(), 3);
+    QCOMPARE(model.data(model.index(0), LibraryModel::KindRole).toString(), QStringLiteral("artist"));
+
+    QVERIFY(m_library->pin(QStringLiteral("album"), albumOne));
+    QCOMPARE(model.rowCount(), 4);
+    QCOMPARE(model.data(model.index(3), LibraryModel::KindRole).toString(), QStringLiteral("album"));
+    QCOMPARE(model.data(model.index(3), LibraryModel::IdRole).toLongLong(), albumOne);
+}
+
+void LibraryTest::pinsPrune()
+{
+    const QSqlDatabase db = m_library->database();
+    const QString source = firstTrackOf(QStringLiteral("Album One"));
+    QVERIFY(!source.isEmpty());
+    const QString albumDir = m_music + QStringLiteral("/Pinned");
+    const QString copy = albumDir + QStringLiteral("/01 Pinned.flac");
+    QVERIFY(QDir().mkpath(albumDir));
+    QVERIFY(QFile::copy(source, copy));
+    QVERIFY(retagAlbum(copy, QStringLiteral("Pinned")));
+    QVERIFY(bumpMtime(copy, 3600));
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added, 1);
+    const qint64 pinned = scalar(db, QStringLiteral("SELECT id FROM albums WHERE title = ?"),
+                                 {QStringLiteral("Pinned")})
+                              .toLongLong();
+    QVERIFY(pinned > 0);
+
+    PinsModel model(m_library.get());
+    const int before = model.rowCount();
+    QVERIFY(m_library->pin(QStringLiteral("album"), pinned));
+    QCOMPARE(model.rowCount(), before + 1);
+
+    QSignalSpy spy(m_library.get(), &Library::pinsChanged);
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(removed, 0);
+    QCOMPARE(spy.count(), 0);
+    QVERIFY(m_library->isPinned(QStringLiteral("album"), pinned));
+
+    QVERIFY(QDir(albumDir).removeRecursively());
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(!m_library->isPinned(QStringLiteral("album"), pinned));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pins WHERE kind = ? AND ref_id = ?"),
+                    {QStringLiteral("album"), pinned})
+                 .toInt(),
+             0);
+    QCOMPARE(model.rowCount(), before);
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)

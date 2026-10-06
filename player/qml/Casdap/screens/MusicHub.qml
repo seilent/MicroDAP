@@ -27,7 +27,6 @@ Page {
 
     readonly property bool live: hub.animated && !hub.screenOff
     readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists"]
-    readonly property var sheetItems: ["play", "add to queue", "pin to quickplay"]
     readonly property bool scanning: hub.library !== null && hub.library.scanning === true
     readonly property int queueCount: hub.player !== null && hub.player.queue !== undefined && hub.player.queue !== null
         ? hub.player.queue.count : 0
@@ -339,16 +338,26 @@ Page {
             return false
         hub.sheetRow = t
         sheet.title = t.title
-        sheet.items = hub.sheetItems
+        sheet.items = hub.sheetItemsFor(t.kind, t.id)
         sheet.open()
         return true
+    }
+
+    function pinLabel(kind: string, id: int): string {
+        const pinned = hub.library !== null && typeof hub.library.isPinned === "function"
+            && hub.library.isPinned(kind, id) === true
+        return pinned ? "unpin from quickplay" : "pin to quickplay"
+    }
+
+    function sheetItemsFor(kind: string, id: int): var {
+        return ["play", "add to queue", hub.pinLabel(kind, id)]
     }
 
     function runSheet(index: int) {
         const t = hub.sheetRow
         if (t === null)
             return
-        const action = hub.sheetItems[index]
+        const action = sheet.items[index]
         if (action === "play" && t.kind === "song")
             hub.playSong(t)
         else

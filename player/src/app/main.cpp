@@ -149,6 +149,7 @@ int main(int argc, char *argv[])
     casdap::AlbumsModel albums(&library);
     casdap::SongsModel songs(&library);
     casdap::GenresModel genres(&library);
+    casdap::PinsModel pins(&library);
     casdap::Player player(&library);
     std::unique_ptr<casdap::BluezModel> bluez;
     if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1)
@@ -208,6 +209,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Albums"), &albums);
     engine.rootContext()->setContextProperty(QStringLiteral("Songs"), &songs);
     engine.rootContext()->setContextProperty(QStringLiteral("Genres"), &genres);
+    engine.rootContext()->setContextProperty(QStringLiteral("Pins"), &pins);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
     engine.rootContext()->setContextProperty(QStringLiteral("Pad"), pad.get());
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);

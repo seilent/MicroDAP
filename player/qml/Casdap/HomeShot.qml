@@ -9,10 +9,20 @@ Item {
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var contextRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
     readonly property var contextNew: typeof HistoryNew === "undefined" ? null : HistoryNew
+    readonly property var contextPins: typeof Pins === "undefined" ? null : Pins
 
     Rectangle {
         anchors.fill: parent
         color: Ui.bg
+    }
+
+    ListModel {
+        id: samplePins
+
+        Component.onCompleted: {
+            samplePins.append({ id: 1, kind: "album", title: "HARMONICS vol.2", subtitle: "Various Artists", artPath: "" })
+            samplePins.append({ id: 2, kind: "artist", title: "Addison Road", subtitle: "2 albums", artPath: "" })
+        }
     }
 
     ListModel {
@@ -49,6 +59,7 @@ Item {
         bluez: root.contextBluez
         historyModel: root.contextRecent !== null ? root.contextRecent : sampleHistory
         newModel: root.contextNew !== null ? root.contextNew : sampleNew
+        pinsModel: root.contextPins !== null ? root.contextPins : root.quickplay ? samplePins : null
 
         Component.onCompleted: {
             if (root.quickplay)

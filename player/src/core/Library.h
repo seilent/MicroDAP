@@ -50,12 +50,16 @@ public:
     Q_INVOKABLE QVariantList albumTracks(qint64 albumId) const;
     Q_INVOKABLE QVariantList trackRows(const QVariantList &trackIds) const;
     QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
+    Q_INVOKABLE bool pin(const QString &kind, qint64 refId);
+    Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
+    Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;
 
 signals:
     void scanningChanged();
     void countsChanged();
     void changed();
     void historyChanged();
+    void pinsChanged();
     void ratingChanged(qint64 trackId, int rating);
     void scanned(int added, int updated, int removed, bool ok);
 
@@ -73,6 +77,7 @@ private:
     QVariantList idColumn(const QString &sql, qint64 bind) const;
     bool removeTrack(const QString &path);
     bool prune();
+    int prunePins();
     void pruneArt();
 
     QString m_dbPath;

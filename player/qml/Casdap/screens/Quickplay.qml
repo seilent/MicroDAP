@@ -49,9 +49,13 @@ Item {
         required property var model
         property int offset: 0
         property string sectionName: ""
+        property string defaultKind: ""
         readonly property int flat: t.offset + t.index
+        readonly property string kind: t.model.kind === undefined || t.model.kind === null || t.model.kind === ""
+            ? t.defaultKind : String(t.model.kind)
         readonly property var entry: ({
             section: t.sectionName,
+            kind: t.kind,
             id: t.model.id,
             title: t.model.title,
             subtitle: t.model.subtitle,
@@ -345,6 +349,7 @@ Item {
                             readonly property bool focused: qp.active && qp.focusIndex === 0
                             readonly property var entry: ({
                                 section: "pins",
+                                kind: "phone",
                                 id: -1,
                                 title: qp.phoneName,
                                 subtitle: "",
@@ -435,6 +440,7 @@ Item {
                             delegate: QpTile {
                                 offset: qp.pinsCount
                                 sectionName: "history"
+                                defaultKind: "song"
                             }
                         }
                     }
@@ -469,6 +475,7 @@ Item {
                             delegate: QpTile {
                                 offset: qp.pinsCount + qp.historyCount
                                 sectionName: "new"
+                                defaultKind: "album"
                             }
                         }
                     }

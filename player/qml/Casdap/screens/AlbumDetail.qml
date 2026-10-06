@@ -20,7 +20,6 @@ Page {
     property var sheetRow: null
 
     readonly property bool live: page.animated && !page.screenOff
-    readonly property var sheetItems: ["play", "add to queue", "pin to quickplay"]
     readonly property int count: page.rows.length
     readonly property int statusPlaying: 1
     readonly property int statusPaused: 2
@@ -129,12 +128,22 @@ Page {
         return true
     }
 
+    function pinLabel(kind: string, id: int): string {
+        const pinned = page.library !== null && typeof page.library.isPinned === "function"
+            && page.library.isPinned(kind, id) === true
+        return pinned ? "unpin from quickplay" : "pin to quickplay"
+    }
+
+    function sheetItemsFor(kind: string, id: int): var {
+        return ["play", "add to queue", page.pinLabel(kind, id)]
+    }
+
     function openSheet(): bool {
         if (page.focusedRow === null)
             return false
         page.sheetRow = { kind: "song", id: page.focusedRow.id, title: page.focusedRow.title, row: page.rowIndex }
         sheet.title = page.focusedRow.title
-        sheet.items = page.sheetItems
+        sheet.items = page.sheetItemsFor("song", page.focusedRow.id)
         sheet.open()
         return true
     }
@@ -143,7 +152,7 @@ Page {
         const t = page.sheetRow
         if (t === null)
             return
-        const action = page.sheetItems[index]
+        const action = sheet.items[index]
         if (action === "play")
             page.play(t.row)
         else

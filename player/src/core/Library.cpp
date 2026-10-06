@@ -109,6 +109,21 @@ const QRegularExpression &artNamePattern()
     return pattern;
 }
 
+const char *pinTable(const QString &kind)
+{
+    if (kind == QLatin1StringView("album"))
+        return "albums";
+    if (kind == QLatin1StringView("artist"))
+        return "artists";
+    if (kind == QLatin1StringView("song"))
+        return "tracks";
+    if (kind == QLatin1StringView("playlist"))
+        return "playlists";
+    return nullptr;
+}
+
+constexpr const char *pinKinds[] = {"album", "artist", "song", "playlist"};
+
 }
 
 Library::Library(QObject *parent)
@@ -279,6 +294,8 @@ void Library::finishScan(const ScanResult &result)
     for (const QString &path : result.removed)
         ok = ok && removeTrack(path);
     ok = ok && prune();
+    const int unpinned = ok ? prunePins() : -1;
+    ok = ok && unpinned >= 0;
     if (ok)
         ok = m_db.commit();
     if (ok) {
@@ -292,6 +309,8 @@ void Library::finishScan(const ScanResult &result)
     if (ok) {
         emit countsChanged();
         emit changed();
+        if (unpinned > 0)
+            emit pinsChanged();
         emit scanned(static_cast<int>(result.added.size()),
                      static_cast<int>(result.updated.size()),
                      static_cast<int>(result.removed.size()), true);
@@ -446,6 +465,58 @@ bool Library::prune()
             return false;
     }
     return true;
+}
+
+int Library::prunePins()
+{
+    int removed = 0;
+    for (const char *kind : pinKinds) {
+        const QString name = QString::fromLatin1(kind);
+        QSqlQuery query(m_db);
+        query.prepare(QStringLiteral("DELETE FROM pins WHERE kind = ? AND ref_id NOT IN (SELECT id FROM %1)")
+                          .arg(QLatin1StringView(pinTable(name))));
+        query.addBindValue(name);
+        if (!run(query))
+            return -1;
+        removed += qMax(0, query.numRowsAffected());
+    }
+    return removed;
+}
+
+bool Library::pin(const QString &kind, qint64 refId)
+{
+    if (!pinTable(kind) || isPinned(kind, refId))
+        return false;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("INSERT INTO pins(kind, ref_id, pos) "
+                                 "SELECT ?, ?, COALESCE(MAX(pos), -1) + 1 FROM pins"));
+    query.addBindValue(kind);
+    query.addBindValue(refId);
+    if (!run(query))
+        return false;
+    emit pinsChanged();
+    return true;
+}
+
+bool Library::unpin(const QString &kind, qint64 refId)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM pins WHERE kind = ? AND ref_id = ?"));
+    query.addBindValue(kind);
+    query.addBindValue(refId);
+    if (!run(query) || query.numRowsAffected() <= 0)
+        return false;
+    emit pinsChanged();
+    return true;
+}
+
+bool Library::isPinned(const QString &kind, qint64 refId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT 1 FROM pins WHERE kind = ? AND ref_id = ? LIMIT 1"));
+    query.addBindValue(kind);
+    query.addBindValue(refId);
+    return query.exec() && query.next();
 }
 
 void Library::pruneArt()

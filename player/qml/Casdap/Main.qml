@@ -18,6 +18,7 @@ Window {
     readonly property var albums: typeof Albums === "undefined" ? null : Albums
     readonly property var songs: typeof Songs === "undefined" ? null : Songs
     readonly property var genres: typeof Genres === "undefined" ? null : Genres
+    readonly property var pins: typeof Pins === "undefined" ? null : Pins
     readonly property var library: root.screenshot || typeof Library === "undefined" ? null : Library
 
     property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
@@ -108,6 +109,44 @@ Window {
             root.openArtist(id)
         else
             console.info("casdap: navigate " + kind + " " + id)
+    }
+
+    function setPinned(kind: string, id: int, pin: bool): void {
+        const verb = pin ? "pin " : "unpin "
+        if (root.library === null) {
+            console.info("casdap: " + verb + kind + " " + id)
+            return
+        }
+        const ok = pin ? root.library.pin(kind, id) : root.library.unpin(kind, id)
+        if (!ok)
+            console.info("casdap: " + verb + kind + " " + id + " failed")
+    }
+
+    function sheetAction(action: string, kind: string, id: int): void {
+        if (action === "pin to quickplay" || action === "unpin from quickplay") {
+            root.setPinned(kind, id, action === "pin to quickplay")
+            return
+        }
+        console.info("casdap: " + action + " " + kind + " " + id)
+    }
+
+    function playEntry(entry: var): void {
+        const kind = entry.kind === undefined || entry.kind === null ? "" : String(entry.kind)
+        const id = Number(entry.id)
+        let ids = []
+        if (kind === "song") {
+            ids = [id]
+        } else if (kind === "album" && root.library !== null) {
+            for (const row of root.library.albumTracks(id))
+                ids.push(Number(row.id))
+        } else if (kind === "artist" && root.library !== null) {
+            ids = root.library.artistTracks(id)
+        }
+        if (root.player === null || ids.length === 0) {
+            console.info("casdap: play " + kind + " " + id)
+            return
+        }
+        root.player.playTracks(ids, 0)
     }
 
     function closeSheets() {
@@ -221,10 +260,11 @@ Window {
             bluez: root.bluez
             historyModel: root.historyRecent
             newModel: root.historyNew
+            pinsModel: root.pins
             onNavigate: (name) => root.navigate(name)
             onNowPlayingBluetooth: root.openNowPlaying()
-            onPlayRequested: (entry) => console.info("casdap: play " + entry.section + " " + entry.id)
-            onPinRequested: (entry, pin) => console.info("casdap: " + (pin ? "pin " : "unpin ") + entry.section + " " + entry.id)
+            onPlayRequested: (entry) => root.playEntry(entry)
+            onPinRequested: (entry, pin) => root.setPinned(entry.kind === undefined ? "" : String(entry.kind), Number(entry.id), pin)
             onShuffleAll: console.info("casdap: shuffle all")
         }
     }
@@ -283,7 +323,7 @@ Window {
             onNowPlaying: root.openNowPlaying()
             onJumpRequested: console.info("casdap: navigate jump")
             onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
-            onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
 
@@ -297,7 +337,7 @@ Window {
             library: root.library
             player: root.player
             onOpenAlbum: (id) => root.openAlbum(id)
-            onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
 
@@ -312,7 +352,7 @@ Window {
             player: root.player
             status: root.status
             bluez: root.bluez
-            onSheetAction: (action, kind, id) => console.info("casdap: " + action + " " + kind + " " + id)
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
 

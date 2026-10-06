@@ -23,7 +23,6 @@ Page {
     readonly property bool live: page.animated && !page.screenOff
     readonly property var pivots: ["albums", "songs"]
     readonly property var ringGlyphs: ["play", "plus", "shuffle"]
-    readonly property var sheetItems: ["play", "add to queue", "pin to quickplay"]
     readonly property var panes: [albumsPane, songsPane]
     readonly property FocusList activeList: page.panes[page.pivotIndex]
     readonly property var currentRows: page.pivotIndex === 0 ? page.albumRows : page.songRows
@@ -187,13 +186,23 @@ Page {
         return page.focusedRow
     }
 
+    function pinLabel(kind: string, id: int): string {
+        const pinned = page.library !== null && typeof page.library.isPinned === "function"
+            && page.library.isPinned(kind, id) === true
+        return pinned ? "unpin from quickplay" : "pin to quickplay"
+    }
+
+    function sheetItemsFor(kind: string, id: int): var {
+        return ["play", "add to queue", page.pinLabel(kind, id)]
+    }
+
     function openSheet(): bool {
         const t = page.sheetTarget()
         if (t === null)
             return false
         page.sheetRow = t
         sheet.title = t.title
-        sheet.items = page.sheetItems
+        sheet.items = page.sheetItemsFor(t.kind, t.id)
         sheet.open()
         return true
     }
@@ -202,7 +211,7 @@ Page {
         const t = page.sheetRow
         if (t === null)
             return
-        const action = page.sheetItems[index]
+        const action = sheet.items[index]
         if (action !== "play") {
             page.sheetAction(action, t.kind, t.id)
             return
