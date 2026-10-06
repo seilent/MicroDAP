@@ -22,6 +22,8 @@ class Settings : public QObject
     Q_PROPERTY(int screenOffSeconds READ screenOffSeconds WRITE setScreenOffSeconds NOTIFY screenOffSecondsChanged)
     Q_PROPERTY(int suspendMinutes READ suspendMinutes WRITE setSuspendMinutes NOTIFY suspendMinutesChanged)
     Q_PROPERTY(bool wifiOffScreenOff READ wifiOffScreenOff WRITE setWifiOffScreenOff NOTIFY wifiOffScreenOffChanged)
+    Q_PROPERTY(QString btCodec READ btCodec WRITE setBtCodec NOTIFY btCodecChanged)
+    Q_PROPERTY(bool overlayToasts READ overlayToasts WRITE setOverlayToasts NOTIFY overlayToastsChanged)
     Q_PROPERTY(QString path READ path CONSTANT)
 
 public:
@@ -37,6 +39,7 @@ public:
 
     static QString defaultPath();
     static QStringList outputs();
+    static QStringList codecs();
     static QStringList accents();
     static QStringList defaultRoots();
 
@@ -62,6 +65,10 @@ public:
     void setSuspendMinutes(int minutes);
     bool wifiOffScreenOff() const;
     void setWifiOffScreenOff(bool on);
+    QString btCodec() const;
+    void setBtCodec(const QString &codec);
+    bool overlayToasts() const;
+    void setOverlayToasts(bool on);
 
     Q_INVOKABLE void sync();
 
@@ -76,6 +83,8 @@ signals:
     void screenOffSecondsChanged();
     void suspendMinutesChanged();
     void wifiOffScreenOffChanged();
+    void btCodecChanged();
+    void overlayToastsChanged();
 
 private:
     void load();
@@ -94,6 +103,8 @@ private:
     int m_screenOffSeconds = 300;
     int m_suspendMinutes = 10;
     bool m_wifiOffScreenOff = false;
+    QString m_btCodec;
+    bool m_overlayToasts = false;
 };
 
 }

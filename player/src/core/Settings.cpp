@@ -57,6 +57,16 @@ QString keyWifiOffScreenOff()
     return QStringLiteral("wifiOffScreenOff");
 }
 
+QString keyBtCodec()
+{
+    return QStringLiteral("btCodec");
+}
+
+QString keyOverlayToasts()
+{
+    return QStringLiteral("overlayToasts");
+}
+
 double normalizeScale(double scale)
 {
     const double stepped = qRound(scale * 10.0) / 10.0;
@@ -100,7 +110,13 @@ QString Settings::defaultPath()
 
 QStringList Settings::outputs()
 {
-    return {QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("bt")};
+    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones")};
+}
+
+QStringList Settings::codecs()
+{
+    return {QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"),
+            QStringLiteral("ldac"), QStringLiteral("sbc")};
 }
 
 QStringList Settings::accents()
@@ -138,6 +154,10 @@ void Settings::load()
     m_screenOffSeconds = qMax(0, m_settings.value(keyScreenOffSeconds(), 300).toInt());
     m_suspendMinutes = qMax(0, m_settings.value(keySuspendMinutes(), 10).toInt());
     m_wifiOffScreenOff = m_settings.value(keyWifiOffScreenOff(), false).toBool();
+
+    const QString codec = m_settings.value(keyBtCodec()).toString().toLower();
+    m_btCodec = codecs().contains(codec) ? codec : codecs().first();
+    m_overlayToasts = m_settings.value(keyOverlayToasts(), false).toBool();
 }
 
 QString Settings::path() const
@@ -306,6 +326,35 @@ void Settings::setWifiOffScreenOff(bool on)
     m_wifiOffScreenOff = on;
     store(keyWifiOffScreenOff(), m_wifiOffScreenOff);
     emit wifiOffScreenOffChanged();
+}
+
+QString Settings::btCodec() const
+{
+    return m_btCodec;
+}
+
+void Settings::setBtCodec(const QString &codec)
+{
+    const QString value = codec.toLower();
+    if (!codecs().contains(value) || m_btCodec == value)
+        return;
+    m_btCodec = value;
+    store(keyBtCodec(), m_btCodec);
+    emit btCodecChanged();
+}
+
+bool Settings::overlayToasts() const
+{
+    return m_overlayToasts;
+}
+
+void Settings::setOverlayToasts(bool on)
+{
+    if (m_overlayToasts == on)
+        return;
+    m_overlayToasts = on;
+    store(keyOverlayToasts(), m_overlayToasts);
+    emit overlayToastsChanged();
 }
 
 }

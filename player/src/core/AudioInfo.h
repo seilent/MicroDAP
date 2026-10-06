@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
+#include <QProcess>
 #include <QString>
 #include <QTimer>
 
@@ -10,28 +12,42 @@ class AudioInfo : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString pcmFormat READ pcmFormat NOTIFY pcmFormatChanged)
+    Q_PROPERTY(int graphRate READ graphRate NOTIFY graphRateChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
 
 public:
     explicit AudioInfo(QObject *parent = nullptr);
+    ~AudioInfo() override;
 
     QString pcmFormat() const;
+    int graphRate() const;
     bool active() const;
     void setActive(bool active);
 
     static QString hwParamsPath();
+    static QString pwDumpPath();
     static QString parse(const QString &text);
+    static int parseGraphRate(const QByteArray &json);
 
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE void refreshGraphRate();
 
 signals:
     void pcmFormatChanged();
+    void graphRateChanged();
     void activeChanged();
 
 private:
+    void onDumpFinished(int code, QProcess::ExitStatus status);
+    void updateGraphRate();
+
     QString m_pcmFormat;
+    int m_hwRate = 0;
+    int m_pwRate = 0;
+    int m_graphRate = 0;
     bool m_active = false;
     QTimer m_timer;
+    QProcess *m_dump = nullptr;
 };
 
 }
