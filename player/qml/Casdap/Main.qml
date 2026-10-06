@@ -19,7 +19,11 @@ Window {
     readonly property var songs: typeof Songs === "undefined" ? null : Songs
     readonly property var genres: typeof Genres === "undefined" ? null : Genres
     readonly property var pins: typeof Pins === "undefined" ? null : Pins
+    readonly property var playlists: typeof Playlists === "undefined" ? null : Playlists
     readonly property var library: root.screenshot || typeof Library === "undefined" ? null : Library
+    readonly property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
+    readonly property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
+    readonly property int playlistCount: root.library !== null && root.library.playlistCount !== undefined ? root.library.playlistCount : -1
 
     property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
     property var player: root.screenshot || typeof Player === "undefined" ? null : Player
@@ -62,20 +66,45 @@ Window {
     Component.onCompleted: {
         Ui.windowW = root.width
         Ui.windowH = root.height
+        root.applySettings()
         if (!root.screenshot)
             pages.push(homeComponent)
     }
 
+    function applySettings() {
+        if (root.settings === null)
+            return
+        if (root.settings.scale !== undefined)
+            Ui.userScale = Math.max(Ui.sMin, Math.min(Ui.sMax, Number(root.settings.scale)))
+        if (root.settings.accent !== undefined && String(root.settings.accent) !== "")
+            Ui.accent = root.settings.accent
+    }
+
     function navigate(name: string) {
-        if (name === "bluetooth") {
+        switch (name) {
+        case "bluetooth":
             pages.push(bluetoothComponent, {})
-            return
-        }
-        if (name === "music") {
+            break
+        case "music":
             pages.push(hubComponent, {})
-            return
+            break
+        case "playlists":
+            pages.push(playlistsComponent, {})
+            break
+        case "history":
+            pages.push(historyComponent, {})
+            break
+        case "settings":
+            pages.push(settingsComponent, {})
+            break
+        default:
+            console.info("casdap: navigate " + name)
+            break
         }
-        console.info("casdap: navigate " + name)
+    }
+
+    function openPairing() {
+        pages.push(bluetoothComponent, { pivotIndex: 1 })
     }
 
     function openNowPlaying() {
@@ -261,6 +290,7 @@ Window {
             historyModel: root.historyRecent
             newModel: root.historyNew
             pinsModel: root.pins
+            playlistCount: root.playlistCount
             onNavigate: (name) => root.navigate(name)
             onNowPlayingBluetooth: root.openNowPlaying()
             onPlayRequested: (entry) => root.playEntry(entry)
@@ -321,9 +351,55 @@ Window {
             library: root.library
             onOpen: (kind, id) => root.openEntry(kind, id)
             onNowPlaying: root.openNowPlaying()
-            onJumpRequested: console.info("casdap: navigate jump")
             onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+        }
+    }
+
+    Component {
+        id: playlistsComponent
+
+        PlaylistsScreen {
+            objectName: "playlists"
+            animated: !root.hidden
+            screenOff: root.off
+            playlistsModel: root.playlists
+            player: root.player
+            library: root.library
+            onNowPlaying: root.openNowPlaying()
+            onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+        }
+    }
+
+    Component {
+        id: historyComponent
+
+        HistoryScreen {
+            objectName: "history"
+            animated: !root.hidden
+            screenOff: root.off
+            historyModel: root.historyRecent
+            newModel: root.historyNew
+            player: root.player
+            library: root.library
+            onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+        }
+    }
+
+    Component {
+        id: settingsComponent
+
+        SettingsScreen {
+            objectName: "settings"
+            animated: !root.hidden
+            screenOff: root.off
+            settings: root.settings
+            power: root.power
+            player: root.player
+            audioInfo: root.audioInfo
+            onPairPhone: root.openPairing()
         }
     }
 
@@ -372,7 +448,34 @@ Window {
             : root.shotScreen === "queue" ? queueShotComponent
             : root.shotScreen === "artist" ? artistShotComponent
             : root.shotScreen === "album" ? albumShotComponent
+            : root.shotScreen === "settings" ? settingsShotComponent
+            : root.shotScreen === "jump" ? jumpShotComponent
+            : root.shotScreen === "playlists" ? playlistsShotComponent
+            : root.shotScreen === "history" ? historyShotComponent
             : null
+    }
+
+    Component {
+        id: settingsShotComponent
+        SettingsShot {}
+    }
+
+    Component {
+        id: jumpShotComponent
+        HubShot {
+            pivot: root.shotPivot
+            jump: true
+        }
+    }
+
+    Component {
+        id: playlistsShotComponent
+        PlaylistsShot {}
+    }
+
+    Component {
+        id: historyShotComponent
+        HistoryShot {}
     }
 
     Component {

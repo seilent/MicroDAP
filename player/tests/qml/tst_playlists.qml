@@ -1,0 +1,392 @@
+import QtQuick
+import QtTest
+import Casdap
+
+TestCase {
+    id: tc
+
+    name: "PlaylistsHistory"
+    when: windowShown
+    visible: true
+    width: 640
+    height: 960
+
+    PageStack {
+        id: pages
+
+        width: 640
+        height: 960
+    }
+
+    PadRouter {
+        id: router
+
+        width: 640
+        height: 960
+        stack: pages
+        pad: null
+    }
+
+    ListModel {
+        id: playlists
+    }
+
+    ListModel {
+        id: recent
+    }
+
+    ListModel {
+        id: fresh
+    }
+
+    QtObject {
+        id: fakePlayer
+
+        property var calls: []
+        property QtObject queue: QtObject {
+            property int count: 12
+        }
+
+        function playTracks(ids, start) {
+            fakePlayer.calls = fakePlayer.calls.concat([{ ids: ids, start: start }])
+        }
+    }
+
+    QtObject {
+        id: fakeLibrary
+
+        property var pinned: []
+        property int playlistCount: 2
+
+        function isPinned(kind, id) {
+            return fakeLibrary.pinned.indexOf(kind + ":" + id) >= 0
+        }
+
+        function playlistTracks(id) {
+            return id === 1 ? [11, 12, 13] : [21, 22]
+        }
+
+        function albumTracks(id) {
+            return [{ id: id * 10 + 1 }, { id: id * 10 + 2 }]
+        }
+    }
+
+    QtObject {
+        id: counters
+
+        property int nowPlaying: 0
+        property var played: []
+        property var sheetActions: []
+        property var navigated: []
+    }
+
+    Component {
+        id: playlistsComponent
+
+        PlaylistsScreen {
+            playlistsModel: playlists
+            onNowPlaying: counters.nowPlaying++
+            onPlay: (kind, id) => counters.played = counters.played.concat([{ kind: kind, id: id }])
+            onSheetAction: (action, kind, id) => counters.sheetActions = counters.sheetActions.concat([{ action: action, kind: kind, id: id }])
+        }
+    }
+
+    Component {
+        id: historyComponent
+
+        HistoryScreen {
+            historyModel: recent
+            newModel: fresh
+            onPlay: (kind, id) => counters.played = counters.played.concat([{ kind: kind, id: id }])
+            onSheetAction: (action, kind, id) => counters.sheetActions = counters.sheetActions.concat([{ action: action, kind: kind, id: id }])
+        }
+    }
+
+    Component {
+        id: homeComponent
+
+        Home {
+            animated: false
+            onNavigate: (name) => counters.navigated = counters.navigated.concat([name])
+        }
+    }
+
+    Component {
+        id: blankComponent
+
+        Page {}
+    }
+
+    function setWindow(w, h) {
+        Ui.userScale = 1.0
+        Ui.windowW = w
+        Ui.windowH = h
+        pages.width = w
+        pages.height = h
+        router.width = w
+        router.height = h
+    }
+
+    function init() {
+        tc.setWindow(640, 960)
+        pages.clear()
+        pages.animate = false
+        playlists.clear()
+        playlists.append({ id: 1, title: "Morning", subtitle: "3 songs", kind: "playlist" })
+        playlists.append({ id: 2, title: "Night Drive", subtitle: "2 songs", kind: "playlist" })
+        recent.clear()
+        for (let i = 0; i < 7; i++)
+            recent.append({ id: 100 + i, title: "Song " + i, subtitle: "Artist " + i, artPath: "", kind: "song" })
+        fresh.clear()
+        for (let i = 0; i < 3; i++)
+            fresh.append({ id: 200 + i, title: "Album " + i, subtitle: "Artist " + i, artPath: "", kind: "album" })
+        fakePlayer.calls = []
+        fakePlayer.queue.count = 12
+        fakeLibrary.pinned = []
+        counters.nowPlaying = 0
+        counters.played = []
+        counters.sheetActions = []
+        counters.navigated = []
+    }
+
+    function open(component, properties) {
+        const props = properties === undefined ? {} : properties
+        if (props.animated === undefined)
+            props.animated = false
+        pages.push(blankComponent, {})
+        const page = pages.push(component, props)
+        page.completeAll()
+        return page
+    }
+
+    function rowAt(view, index) {
+        tryVerify(() => view.itemAtIndex(index) !== null, 1000)
+        return view.itemAtIndex(index)
+    }
+
+    function test_playlists_rows() {
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary })
+        compare(page.header.text, "playlists")
+        compare(page.rows.length, 3)
+        compare(page.rows[0].kind, "nowplaying")
+        compare(page.rows[0].title, "now playing")
+        compare(page.rows[0].subtitle, "12 songs")
+        compare(page.rows[1].title, "Morning")
+        compare(page.rows[1].subtitle, "3 songs")
+        compare(page.countText.text, "2 playlists")
+        compare(page.countText.x, Ui.px(20))
+        fuzzyCompare(page.countText.y + page.countText.baselineOffset, Ui.px(95), 0.5)
+        compare(page.countText.font.pixelSize, Ui.fontPx(11))
+        compare(page.countText.font.capitalization, Font.AllUppercase)
+        compare(page.listView.y, Ui.px(128))
+        compare(page.listView.rowPitch, Ui.px(40))
+        const first = tc.rowAt(page.listView, 0)
+        compare(first.ring, true)
+        compare(first.bold, true)
+        compare(first.focused, true)
+        compare(first.primaryRole.name, "listPlaylist")
+        compare(first.primaryItem.font.styleName, "Bold")
+        compare(first.primaryItem.font.capitalization, Font.AllUppercase)
+        compare(first.secondaryItem.font.capitalization, Font.AllUppercase)
+        const second = tc.rowAt(page.listView, 1)
+        compare(second.bold, true)
+        compare(second.focused, false)
+        compare(page.focusBar.x, Ui.px(12))
+        fuzzyCompare(page.focusBar.y, Ui.px(128), 0.01)
+        fakePlayer.queue.count = 1
+        compare(page.rows[0].subtitle, "1 song")
+    }
+
+    function test_playlists_play() {
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary })
+        verify(router.dispatch("a", false))
+        compare(counters.nowPlaying, 1)
+        compare(fakePlayer.calls.length, 0)
+        verify(router.dispatch("down", false))
+        compare(page.focusIndex, 1)
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([11, 12, 13]))
+        compare(fakePlayer.calls[0].start, 0)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(JSON.stringify(fakePlayer.calls[1].ids), JSON.stringify([21, 22]))
+        compare(router.dispatch("down", false), false)
+    }
+
+    function test_playlists_play_without_player() {
+        const page = open(playlistsComponent, {})
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].kind, "playlist")
+        compare(counters.played[0].id, 1)
+    }
+
+    function test_playlists_sheet() {
+        fakeLibrary.pinned = ["playlist:2"]
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary })
+        compare(router.dispatch("x", false), true)
+        compare(page.sheet.shown, false)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "Morning")
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "pin to quickplay"]))
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(page.sheet.shown, false)
+        compare(counters.sheetActions[0].action, "pin to quickplay")
+        compare(counters.sheetActions[0].kind, "playlist")
+        compare(counters.sheetActions[0].id, 1)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "unpin from quickplay"]))
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        router.dispatch("y", false)
+        compare(counters.sheetActions[1].action, "add to queue")
+        compare(counters.sheetActions[1].id, 2)
+    }
+
+    function test_playlists_model_changes_and_b() {
+        const page = open(playlistsComponent, { player: fakePlayer })
+        playlists.append({ id: 3, title: "Harmonics", subtitle: "9 songs", kind: "playlist" })
+        compare(page.rows.length, 4)
+        compare(page.countText.text, "3 playlists")
+        playlists.clear()
+        compare(page.rows.length, 1)
+        compare(page.countText.text, "0 playlists")
+        compare(pages.depth, 2)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_history_layout() {
+        const page = open(historyComponent, { player: fakePlayer, library: fakeLibrary })
+        compare(page.header.text, "history")
+        compare(JSON.stringify(page.pivots), JSON.stringify(["recent", "new"]))
+        compare(page.pivotIndex, 0)
+        compare(page.cols, 2)
+        compare(page.recentRows.length, 4)
+        compare(page.recentRows[0].length, 2)
+        compare(page.recentRows[3].length, 1)
+        compare(page.newRows.length, 2)
+        compare(page.recentPane.y, Ui.px(128))
+        compare(page.recentPane.rowPitch, Ui.px(77 + 2))
+        const row = tc.rowAt(page.recentPane, 0)
+        compare(row.cellCount, 2)
+        const a = row.cellAt(0)
+        const b = row.cellAt(1)
+        compare(a.x, Ui.px(20))
+        compare(a.width, Ui.px(77))
+        compare(a.height, Ui.px(77))
+        compare(b.x, Ui.px(20 + 77 + 2))
+        compare(a.captioned, false)
+        compare(a.focused, true)
+        compare(b.focused, false)
+        compare(page.recentRows[0][0].kind, "song")
+        compare(page.newRows[0][0].kind, "album")
+        tc.setWindow(1920, 1080)
+        compare(page.recentPane.y, Ui.px(98))
+        compare(page.cols, 2)
+    }
+
+    function test_history_navigation_and_play() {
+        const page = open(historyComponent, { player: fakePlayer, library: fakeLibrary })
+        verify(router.dispatch("right", false))
+        compare(page.col, 1)
+        compare(router.dispatch("right", false), false)
+        verify(router.dispatch("down", false))
+        compare(page.rowIndex, 1)
+        compare(page.col, 1)
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        compare(page.rowIndex, 3)
+        compare(page.col, 0)
+        compare(router.dispatch("down", false), false)
+        verify(router.dispatch("a", false))
+        compare(fakePlayer.calls.length, 1)
+        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([106]))
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 1)
+        compare(page.shownPivot, 1)
+        compare(page.rowIndex, 0)
+        router.dispatch("a", false)
+        compare(JSON.stringify(fakePlayer.calls[1].ids), JSON.stringify([2001, 2002]))
+        compare(router.dispatch("rb", false), true)
+        compare(page.pivotIndex, 1)
+        router.dispatch("lb", false)
+        compare(page.pivotIndex, 0)
+        compare(page.rowIndex, 3)
+    }
+
+    function test_history_play_without_player() {
+        const page = open(historyComponent, {})
+        router.dispatch("a", false)
+        compare(counters.played[0].kind, "song")
+        compare(counters.played[0].id, 100)
+        router.dispatch("rb", false)
+        router.dispatch("a", false)
+        compare(counters.played[1].kind, "album")
+        compare(counters.played[1].id, 200)
+    }
+
+    function test_history_sheet_and_models() {
+        fakeLibrary.pinned = ["song:100"]
+        const page = open(historyComponent, { player: fakePlayer, library: fakeLibrary })
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "Song 0")
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "unpin from quickplay"]))
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions[0].action, "add to queue")
+        compare(counters.sheetActions[0].kind, "song")
+        compare(counters.sheetActions[0].id, 100)
+        router.dispatch("y", false)
+        compare(counters.sheetActions[1].action, "add to queue")
+        recent.clear()
+        compare(page.recentRows.length, 0)
+        compare(page.focusedEntry, null)
+        compare(router.dispatch("a", false), true)
+        compare(fakePlayer.calls.length, 0)
+        recent.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "song" })
+        compare(page.recentRows.length, 1)
+        compare(page.focusedEntry.id, 300)
+    }
+
+    function test_history_pivot_motion_and_screen_off() {
+        const page = open(historyComponent, { animated: true, player: fakePlayer })
+        router.dispatch("rb", false)
+        verify(page.switching)
+        compare(page.shownPivot, 0)
+        tryCompare(page, "shownPivot", 1, 2000)
+        tryCompare(page, "switching", false, 2000)
+        compare(page.newPane.x, 0)
+        compare(page.newPane.opacity, 1)
+        router.dispatch("lb", false)
+        verify(page.switching)
+        page.screenOff = true
+        compare(page.switching, false)
+        compare(page.shownPivot, 0)
+        compare(page.recentPane.x, 0)
+        compare(page.recentPane.opacity, 1)
+    }
+
+    function test_home_navigates_and_counts() {
+        pages.push(homeComponent, { playlistCount: 2 })
+        const home = pages.currentItem
+        compare(home.playlistsSubtitle, "2 playlists")
+        home.playlistCount = -1
+        compare(home.playlistsSubtitle, "now playing saved")
+        home.setFocus(2)
+        router.dispatch("a", false)
+        home.setFocus(3)
+        router.dispatch("a", false)
+        home.setFocus(4)
+        router.dispatch("a", false)
+        compare(JSON.stringify(counters.navigated), JSON.stringify(["playlists", "history", "settings"]))
+    }
+}

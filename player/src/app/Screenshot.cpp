@@ -80,6 +80,10 @@ const QStringList &screens()
         QStringLiteral("queue"),
         QStringLiteral("artist"),
         QStringLiteral("album"),
+        QStringLiteral("settings"),
+        QStringLiteral("jump"),
+        QStringLiteral("playlists"),
+        QStringLiteral("history"),
     };
     return names;
 }

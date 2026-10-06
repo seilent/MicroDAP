@@ -67,6 +67,7 @@ QtObject {
     readonly property var letterGlyph: ({ name: "letterGlyph", size: 20, style: "Regular", caps: Font.AllLowercase, alpha: 1.0, tracking: -0.5, sample: "a" })
     readonly property var settingsItem: ({ name: "settingsItem", size: 17, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, alphaDim: 0.6, tracking: -0.5, sample: "output" })
     readonly property var settingsValue: ({ name: "settingsValue", size: 11, style: "Light", caps: Font.AllUppercase, alpha: 0.6, tracking: -0.5, sample: "speaker" })
+    readonly property var settingsSub: ({ name: "settingsSub", size: 11, style: "Light", caps: Font.MixedCase, alpha: 1.0, alphaDim: 0.6, tracking: -0.5, sample: "/home/armada/Music" })
     readonly property var npArtist: ({ name: "npArtist", size: 20, style: "Bold", caps: Font.AllUppercase, alpha: 1.0, tracking: -0.5, sample: "artist" })
     readonly property var npAlbum: ({ name: "npAlbum", size: 20, style: "Light", caps: Font.AllUppercase, alpha: 0.85, tracking: -0.5, sample: "album" })
     readonly property var npTitle: ({ name: "npTitle", size: 26, style: "Light", caps: Font.MixedCase, alpha: 1.0, tracking: -0.5, sample: "Song title" })
@@ -89,7 +90,7 @@ QtObject {
     readonly property var roleList: [
         ui.hubHeader, ui.homeItem, ui.homeSubtitle, ui.quickplayHeader, ui.quickplayHint, ui.pivotActive, ui.pivotInactive,
         ui.sectionLabel, ui.listPrimary, ui.listPlaylist, ui.listSecondary, ui.listCount, ui.detailName, ui.detailTitle,
-        ui.detailSub, ui.gridCaption, ui.letterGlyph, ui.settingsItem, ui.settingsValue, ui.npArtist,
+        ui.detailSub, ui.gridCaption, ui.letterGlyph, ui.settingsItem, ui.settingsValue, ui.settingsSub, ui.npArtist,
         ui.npAlbum, ui.npTitle, ui.npNext, ui.npCount, ui.time, ui.overlayNumber, ui.overlayLabel, ui.toastArtist,
         ui.toastTitle, ui.saverClock, ui.saverTitle, ui.saverArtist, ui.saverAlbum, ui.jumpLetter,
         ui.dialogTitle, ui.dialogItem, ui.watermark
@@ -211,6 +212,13 @@ QtObject {
         return ui.hubEdge + index * (ui.detailRing + ui.detailRingGap)
     }
     readonly property real settingsPitch: 43
+    readonly property real settingsLabelBaselineInset: ui.letterInsetBaseline
+    readonly property real settingsSwatch: 12
+    readonly property real settingsSwatchGap: 4
+    readonly property real settingsValueFocused: 0.85
+    readonly property real settingsValueDim: 0.4
+    readonly property int historyCols: 2
+    readonly property real historyRowPitch: ui.qpTile + ui.qpGutter
     readonly property real queueCountBaseline: ui.pivotBaseline
     readonly property real queueRowsTop: ui.contentTop
     readonly property real backRing: 64
@@ -264,6 +272,11 @@ QtObject {
     readonly property int jumpCols: ui.landscape ? 9 : 5
     readonly property real jumpGap: 8
     readonly property real jumpTile: (ui.canvasW - 2 * ui.edge - (ui.jumpCols - 1) * ui.jumpGap) / ui.jumpCols
+    readonly property int jumpExitCells: 2
+    readonly property int jumpCells: 27
+    readonly property int jumpRows: Math.ceil((ui.jumpExitCells + ui.jumpCells) / ui.jumpCols)
+    readonly property real jumpGridH: ui.jumpRows * ui.jumpTile + (ui.jumpRows - 1) * ui.jumpGap
+    readonly property real jumpTop: Math.max(ui.edge, (ui.canvasH - ui.jumpGridH) / 2)
     readonly property real stickDeadzone: 0.5
     readonly property int stickRepeatFirst: 300
     readonly property int stickRepeat: 80

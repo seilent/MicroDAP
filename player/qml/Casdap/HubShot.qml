@@ -5,6 +5,7 @@ Item {
     id: root
 
     property string pivot: "albums"
+    property bool jump: false
 
     readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists"]
     readonly property var contextArtists: typeof Artists === "undefined" ? null : Artists
@@ -101,7 +102,7 @@ Item {
         id: hub
 
         anchors.fill: parent
-        animated: false
+        animated: root.jump
         pivotIndex: Math.max(0, root.pivots.indexOf(root.pivot))
         artistsModel: root.contextArtists !== null ? root.contextArtists : sampleArtists
         albumsModel: root.contextAlbums !== null ? root.contextAlbums : sampleAlbums
@@ -109,6 +110,12 @@ Item {
         genresModel: root.contextGenres !== null ? root.contextGenres : sampleGenres
         library: root.contextLibrary
 
-        Component.onCompleted: hub.completeAll()
+        Component.onCompleted: {
+            hub.completeAll()
+            if (root.jump) {
+                hub.openJumpGrid()
+                hub.completeAll()
+            }
+        }
     }
 }

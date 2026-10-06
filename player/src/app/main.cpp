@@ -14,6 +14,7 @@
 #include "Settings.h"
 #include "State.h"
 #include "StatusModel.h"
+#include "AudioInfo.h"
 #include "SystemBluezModel.h"
 #include "Version.h"
 
@@ -150,6 +151,8 @@ int main(int argc, char *argv[])
     casdap::SongsModel songs(&library);
     casdap::GenresModel genres(&library);
     casdap::PinsModel pins(&library);
+    casdap::PlaylistsModel playlists(&library);
+    casdap::AudioInfo audioInfo;
     casdap::Player player(&library);
     std::unique_ptr<casdap::BluezModel> bluez;
     if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1)
@@ -185,9 +188,10 @@ int main(int argc, char *argv[])
         pad = std::make_unique<casdap::Pad>();
     }
 
-    auto applyActive = [&power, &status, model = bluez.get(), bridge = overlay.get()] {
+    auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get()] {
         const bool active = !power.screenOff() && (!bridge || bridge->mapped());
         status.setActive(active);
+        audioInfo.setActive(active);
         model->setActive(active);
     };
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status, applyActive);
@@ -205,6 +209,8 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"), &historyRecent);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"), &historyNew);
+    engine.rootContext()->setContextProperty(QStringLiteral("Playlists"), &playlists);
+    engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);
     engine.rootContext()->setContextProperty(QStringLiteral("Artists"), &artists);
     engine.rootContext()->setContextProperty(QStringLiteral("Albums"), &albums);
     engine.rootContext()->setContextProperty(QStringLiteral("Songs"), &songs);

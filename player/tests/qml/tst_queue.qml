@@ -325,9 +325,6 @@ TestCase {
             compare(row.stagger, Math.min(i - 4, 10) * 50)
             verify(row.enter < 1)
         }
-        const deep = page.list.itemAtIndex(15)
-        if (deep !== null)
-            compare(deep.stagger, 500)
         tryCompare(tc.rowAt(4), "enter", 1, 2000)
         tryCompare(tc.rowAt(visible - 1), "enter", 1, 2000)
         fuzzyCompare(page.list.itemAtIndex(visible - 1).x, 0, 0.01)

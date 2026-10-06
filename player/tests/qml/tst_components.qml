@@ -524,7 +524,9 @@ TestCase {
         for (let i = 0; i < screens.length; i++) {
             const page = createTemporaryObject(screens[i], tc, { width: 640, height: 960, visible: false })
             verify(page !== null)
-            const first = page.children[0]
+            let first = page.children[0]
+            if (!(first instanceof PageSurface) && first.children.length > 0)
+                first = first.children[0]
             verify(first instanceof PageSurface, "screen " + i + " first child")
             compare(first.width, page.width)
             compare(first.height, page.height)

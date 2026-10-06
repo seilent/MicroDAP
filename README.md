@@ -33,7 +33,8 @@ QML test runner `tst_qml`. `Ui` (singleton) holds the scale and every token: the
 Type roles are objects (`size`, `style`, `caps`, `alpha`, `tracking`), `font(role)` builds the
 `Qt.font` with family Selawik and the face picked by `styleName` (fontconfig reports Light and
 Semilight both at weight 50). The five Selawik TTFs load through `FontLoader` from `CASDAP_FONT_DIR`
-(default `/usr/share/fonts/casdap`, read by the `Env` singleton); `fontsReady` reports all five.
+(default `/usr/share/fonts/casdap`, read by the `Env` singleton, which also reports `version` and the
+build manifest head as `manifest`); `fontsReady` reports all five.
 `Main.qml` writes `Ui.windowW` and `Ui.windowH` on every resize, so a new surface size reflows
 without restart. `Motion` (singleton) holds the curves (`expOut6`, `expIn6`, `expIn1`, `expIn15` as
 functions on a linear 0..1 progress, `decel` and `strip` as `Easing.BezierSpline` arrays, Qt stand
@@ -112,8 +113,8 @@ sheet `pin to quickplay` (`unpin` on a Pins tile), A on it runs `Library.pin` or
 and id; A on a tile plays it (`album` its tracks from `albumTracks`, `artist` its `artistTracks`, `song`
 the song, anything else or no library logs `play <kind> <id>`). The hub, artist and album sheets read
 `unpin from quickplay` in place of `pin to quickplay` while `Library.isPinned(kind, id)` is true, and Main
-runs `Library.pin` or `unpin` for both verbs. Menu items whose screen does not exist yet log
-`navigate <name>`. The entrance (menu items, focus bar, Quickplay peek) plays once when the page is created
+runs `Library.pin` or `unpin` for both verbs. A on `music`, `bluetooth`, `playlists`, `history` and
+`settings` pushes the page of that name; Main binds `playlistCount` to `Library.playlistCount`. The entrance (menu items, focus bar, Quickplay peek) plays once when the page is created
 with `animated` true; `animated` turning true later changes nothing.
 
 `MusicHub` is the `music` page (`objectName` `music`): header `music`, pivots `artists`, `albums`,
@@ -132,12 +133,62 @@ through the pane, left/right move within a grid row (no wrap), LB/RB switch pivo
 either end. A on a song calls `Player.playTracks(ids, position)` with every song id in list order (without a
 player it emits `play`); A on an album, artist or genre emits `open(kind, id)` (Main pushes `AlbumDetail` for
 `album` and `ArtistDetail` for `artist`, logs `navigate genre <id>`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
-`jumpRequested` (Main logs `navigate jump`). LT/RT show the focused row's letter in the 120 u `JumpLetter`
-(T15). X opens the sheet `play`, `add to queue`, `pin to quickplay`; Y is `add to queue`; `play` on a song
+`jumpRequested` and opens the `JumpGrid` over the hub (T14: the hub body dims to 0.4, the grid swivels in about
+a horizontal center hinge from -30 degrees over 350 expOut6, out to 30 over 250 expIn1). `jumpTo(letter)` from
+the grid snaps the pane so the letter's divider (or letter cell) sits at the top, focuses the first row under it
+(the cell itself on albums) and shows the 120 u `JumpLetter` (T15). LT/RT show the focused row's letter in the
+same `JumpLetter`. X opens the sheet `play`, `add to queue`, `pin to quickplay`; Y is `add to queue`; `play` on a song
 plays, every other verb emits `sheetAction(action, kind, id)` which Main logs. B pops. After
 `Library.scanning` went true then false, the next model reset runs F12 on the shown pane (rows `x` -5 to 0,
 `o` 0 to 1, 220 decel, `min(i, 10) * 50` stagger); a reset during the scan runs it when the scan ends.
 `screenOff` or `animated` false lands the pivot, settles the rows and dismisses the letter.
+
+`JumpGrid` (`screens/JumpGrid.qml`) is the letter grid hosted by the hub: `exit` top left in the 7 u overlay
+label role, the 27 `LetterTile` cells (`#` first, then a..z) in `Ui.jumpCols` columns (5 portrait, 9 landscape)
+with the JUMP_GRID tile and 8 u gap from EDGE, the first row starting after `Ui.jumpExitCells` (2) empty slots
+so `exit` sits in the first slot, the block centered vertically (`Ui.jumpTop`). `open(letters, letter)` takes
+the letters that have rows and the hub's focused letter; a letter without rows draws at 0.4 and is skipped;
+left/right step to the next letter with rows, up/down the next in the same column. A emits `jumpTo(letter)`
+and closes, B, Back/View and Start close with the hub focus unchanged. `screenOff` lands the swivel.
+
+`PlaylistsScreen` is the `playlists` page: header `playlists`, the count `N PLAYLISTS` in the 11 u count role
+at HUB_EDGE on the pivot row baseline, the hub PLAYLISTS rows in a `FocusList` from CONTENT_TOP: `NOW PLAYING`
+first with `N SONGS` from `Player.queue.count`, then every row of the `Playlists` context model (roles `id`,
+`title`, `subtitle`), all Bold upper case with the play ring. A on `NOW PLAYING` emits `nowPlaying`, A on a
+playlist calls `Player.playTracks(Library.playlistTracks(id), 0)` (without a player or library it emits
+`play("playlist", id)`); X opens the sheet `play`, `add to queue`, `pin to quickplay` (or `unpin from
+quickplay`), Y is `add to queue`, both emit `sheetAction`. Model changes rebuild the rows. B pops.
+
+`HistoryScreen` is the `history` page: header `history`, pivots `recent`, `new`, each a `FocusList` of rows
+holding `Ui.historyCols` (2) uncaptioned QP_TILE tiles at HUB_EDGE from CONTENT_TOP, row pitch QP_TILE +
+QP_GUTTER, from the `HistoryRecent` (kind `song`) and `HistoryNew` (kind `album`) models. Up/down and LT/RT
+move through the rows, left/right across the two tiles, LB/RB switch pivots (the panes slide 34 u with the
+strip curve, 300 out and 380 in). A plays the song (`playTracks([id], 0)`) or the album
+(`Library.albumTracks(id)`), without a player it emits `play(kind, id)`; X opens the sheet `play`, `add to
+queue`, pin or unpin, Y is `add to queue`. B pops. `screenOff` or `animated` false lands the pivot.
+
+`SettingsScreen` is the `settings` page: header `settings`, a scrolling column from CONTENT_TOP of four group
+labels (the 8 u Regular upper case section label role at HUB_EDGE, ROW_HEIGHT tall, baseline 8 u above the
+row bottom, skipped by focus) and SETTINGS_PITCH rows (17 u Bold upper case title at HUB_EDGE, 11 u Light
+upper case value right aligned at W - HUB_EDGE; focused 1.0 and 0.85, others 0.6 and 0.4). OUTPUT: `OUTPUT`
+(`AUTO`, `SPEAKER`, `HEADPHONES` from `Settings.output`), `PAIR A PHONE` (A emits `pairPhone`, Main pushes
+`Bluetooth` on its PAIRING pivot). LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in
+`folders` plus `Settings.roots`, path as written in 11 u Light with `ON` or `OFF`, A toggles it in
+`Settings.roots`). DISPLAY: `ACCENT` (the five `Ui.accentOptions` as 12 u swatches at 4 u gap, the current
+one with the 2 u border; left/right and A move it and write `Ui.accent` and `Settings.accent`),
+`ORIENTATION` (read only, the current orientation), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps; `Ui.userScale` and
+`Settings.scale` follow live, focus and the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
+`Settings.saverSeconds`). POWER: `SCREEN OFF AFTER` (`OFF`, 1, 2, 5, 10, 30 MIN on `Settings.screenOffSeconds`),
+`SUSPEND AFTER` (`OFF`, 5, 10, 30, 60 MIN on `Settings.suspendMinutes`), `POCKET CONTROLS` (`ON`, `OFF`),
+`WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), `GAME MODE` (A opens the sheet `game mode`
+with `switch to game mode`, T12; accepting calls `PowerBridge.runVerb("game-mode")`, or `closeAndSwitch()` on
+a bridge without `runVerb`). `ABOUT` is the last row with the version (`Env.version`) as its value; A opens
+read only lines in the value role: `ARMADA <IMAGE_VERSION>` and `IMAGE <digest>` from `Env.manifest` (the
+`key=value` head of `/usr/share/casdap/build-manifest`, `CASDAP_MANIFEST_FILE` overrides), `DRIFT N FILES`
+while `PowerBridge.driftPaths` is not empty, `TRACK 44100 HZ 16 BIT` from `Player.current.sampleRate` and
+`bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. Left/right step a value (A steps it too),
+read only rows ignore them, a changed value text runs F7 (opacity 1 to 0.2 over 200, swap, 0.2 to 1 over 200).
+LT/RT page by the content height. B pops. Main applies `Settings.scale` and `Settings.accent` to `Ui` at start.
 
 `ArtistDetail` is the `artist` page, pushed with the turnstile (T3) by `open("artist", id)` from the hub:
 header `artist`, pivots `albums`, `songs`, the name (11 u Bold upper case) at HUB_EDGE on a baseline 15 u
@@ -226,7 +277,9 @@ offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez of
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),
 `queue` (a sample queue of 20 with row 3 playing), `artist` and `album` (a sample artist with two albums
-and ten tracks, track 3 playing),
+and ten tracks, track 3 playing), `settings` (sample values, two folders, a FLAC track and `44100 S24_LE`),
+`jump` (the grid over the hub pivot of `--pivot`, default `albums`), `playlists` (`NOW PLAYING` and four
+sample playlists), `history` (seven recent songs and five new albums),
 `components`, `overlays`, `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). CMake cache var
 `CASDAP_TEST_FONT_DIR` (default `../dist/usr/share/fonts/casdap`) feeds `CASDAP_FONT_DIR` to the QML

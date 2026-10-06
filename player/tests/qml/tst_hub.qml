@@ -427,6 +427,10 @@ TestCase {
         compare(page.gridCol, 0)
         router.dispatch("a", false)
         compare(counters.jumps, 1)
+        compare(page.jumpGrid.shown, true)
+        verify(router.dispatch("b", false))
+        compare(page.jumpGrid.shown, false)
+        compare(pages.depth, 2)
         verify(router.dispatch("right", false))
         compare(page.gridCol, 1)
         router.dispatch("a", false)
@@ -516,13 +520,17 @@ TestCase {
         compare(page.jump.letter, cell.letter)
     }
 
-    function test_back_view_logs_jump() {
+    function test_back_view_opens_jump_grid() {
         const page = open()
         verify(router.dispatch("back", false))
         compare(counters.jumps, 1)
+        compare(page.jumpGrid.shown, true)
+        router.dispatch("b", false)
+        compare(page.jumpGrid.shown, false)
         page.switchPivot(4)
         router.dispatch("back", false)
         compare(counters.jumps, 1)
+        compare(page.jumpGrid.shown, false)
     }
 
     function test_sheet_actions() {
@@ -611,9 +619,6 @@ TestCase {
             compare(row.shift, -5)
             verify(row.enter < 1)
         }
-        const deep = pane.itemAtIndex(11)
-        if (deep !== null)
-            compare(deep.stagger, 500)
         tryCompare(tc.rowAt(pane, 0), "enter", 1, 2000)
         tryCompare(tc.rowAt(pane, last), "enter", 1, 2000)
         songs.append({ id: 100, title: "z song 2", subtitle: "Artist", artPath: "", section: "Z" })

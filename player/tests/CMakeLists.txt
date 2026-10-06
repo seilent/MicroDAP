@@ -70,6 +70,11 @@ endif()
 casdap_test_env(power)
 set_property(TEST power APPEND PROPERTY ENVIRONMENT "CASDAP_AUDIO_SINK=fakesink sync=false")
 
+qt_add_executable(tst_audioinfo core/tst_audioinfo.cpp)
+target_link_libraries(tst_audioinfo PRIVATE casdapcore Qt6::Test)
+add_test(NAME audioinfo COMMAND tst_audioinfo)
+casdap_test_env(audioinfo)
+
 qt_add_executable(tst_bluez core/tst_bluez.cpp)
 target_compile_definitions(tst_bluez PRIVATE CASDAP_FIXTURE_MUSIC="${fixtures}")
 target_link_libraries(tst_bluez PRIVATE casdapcore Qt6::Test)
@@ -294,7 +299,7 @@ add_test(NAME screenshot-queue-landscape
 casdap_test_env(screenshot-queue-landscape)
 set_property(TEST screenshot-queue-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 
-foreach(screen IN ITEMS artist album)
+foreach(screen IN ITEMS artist album settings playlists history)
     add_test(NAME screenshot-${screen}-portrait
         COMMAND casdap-player --screenshot ${screen} --size 640x960 --out ${shots}/${screen}-640x960.png
     )
@@ -307,3 +312,15 @@ foreach(screen IN ITEMS artist album)
     casdap_test_env(screenshot-${screen}-landscape)
     set_property(TEST screenshot-${screen}-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 endforeach()
+
+add_test(NAME screenshot-jump-portrait
+    COMMAND casdap-player --screenshot jump --pivot artists --size 640x960 --out ${shots}/jump-640x960.png
+)
+casdap_test_env(screenshot-jump-portrait)
+set_property(TEST screenshot-jump-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-jump-landscape
+    COMMAND casdap-player --screenshot jump --pivot artists --size 1920x1080 --out ${shots}/jump-1920x1080.png
+)
+casdap_test_env(screenshot-jump-landscape)
+set_property(TEST screenshot-jump-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")

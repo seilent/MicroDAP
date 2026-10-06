@@ -24,6 +24,7 @@ add_library(casdapcore STATIC
     src/core/Intercept.cpp
     src/core/Intercept.h
     src/core/Keep.cpp
+    src/core/AudioInfo.cpp
     src/core/Keep.h
     src/core/Library.cpp
     src/core/Library.h
@@ -116,6 +117,10 @@ set(casdap_qml
     qml/Casdap/screens/QueueScreen.qml
     qml/Casdap/screens/ArtistDetail.qml
     qml/Casdap/screens/AlbumDetail.qml
+    qml/Casdap/screens/SettingsScreen.qml
+    qml/Casdap/screens/JumpGrid.qml
+    qml/Casdap/screens/PlaylistsScreen.qml
+    qml/Casdap/screens/HistoryScreen.qml
     qml/Casdap/OverlayLayer.qml
     qml/Casdap/BluetoothShot.qml
     qml/Casdap/PromptShot.qml
@@ -123,6 +128,9 @@ set(casdap_qml
     qml/Casdap/NowPlayingShot.qml
     qml/Casdap/QueueShot.qml
     qml/Casdap/DetailShot.qml
+    qml/Casdap/SettingsShot.qml
+    qml/Casdap/PlaylistsShot.qml
+    qml/Casdap/HistoryShot.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)

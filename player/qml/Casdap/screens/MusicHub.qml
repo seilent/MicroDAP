@@ -50,6 +50,8 @@ Page {
     property alias focusBar: focusBar
     property alias sheet: sheet
     property alias jump: jump
+    property alias jumpGrid: jumpGrid
+    property alias body: body
     property alias artistsPane: artistsPane
     property alias albumsPane: albumsPane
     property alias songsPane: songsPane
@@ -302,6 +304,67 @@ Page {
         return hub.grid ? hub.focusedCell : hub.focusedRow
     }
 
+    function availableLetters(): var {
+        const out = []
+        if (hub.grid) {
+            for (const cell of hub.albumCells) {
+                if (cell.kind === "letter")
+                    out.push(cell.letter)
+            }
+            return out
+        }
+        for (const r of hub.currentRows) {
+            if (r.kind === "divider")
+                out.push(r.letter)
+        }
+        return out
+    }
+
+    function openJumpGrid(): bool {
+        if (!hub.alphabetic)
+            return false
+        hub.jumpRequested()
+        jumpGrid.open(hub.availableLetters(), hub.focusLetter())
+        return true
+    }
+
+    function jumpTo(letter: string) {
+        const rows = hub.currentRows
+        const list = hub.activeList
+        let rowIndex = -1
+        let col = 0
+        if (hub.grid) {
+            for (let i = 0; i < rows.length && rowIndex < 0; i++) {
+                for (let c = 0; c < rows[i].length; c++) {
+                    if (rows[i][c].kind === "letter" && rows[i][c].letter === letter) {
+                        rowIndex = i
+                        col = c
+                        break
+                    }
+                }
+            }
+        } else {
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].kind === "divider" && rows[i].letter === letter) {
+                    rowIndex = i
+                    break
+                }
+            }
+        }
+        if (rowIndex < 0)
+            return
+        list.completeScroll()
+        const target = hub.grid ? rowIndex : hub.nearestFocusable(rows, rowIndex + 1, 1)
+        if (target < 0)
+            return
+        list.focusIndex = target
+        list.contentY = Math.max(0, Math.min(list.maxContentY, rowIndex * list.rowPitch))
+        if (hub.grid)
+            hub.gridCol = col
+        hub.syncFocus()
+        jump.show(letter)
+    }
+
     function playSong(row: var) {
         if (hub.player !== null && typeof hub.player.playTracks === "function") {
             hub.player.playTracks(hub.songIds, hub.songIds.indexOf(row.id))
@@ -316,7 +379,7 @@ Page {
             return
         switch (t.kind) {
         case "letter":
-            hub.jumpRequested()
+            hub.openJumpGrid()
             break
         case "song":
             hub.playSong(t)
@@ -451,6 +514,7 @@ Page {
         for (const pane of hub.panes)
             pane.completeScroll()
         jump.complete()
+        jumpGrid.complete()
         sheet.complete()
     }
 
@@ -464,6 +528,8 @@ Page {
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
+        if (jumpGrid.shown)
+            return jumpGrid.handleAction(name, repeat)
         switch (name) {
         case "up":
             return hub.moveRow(-1)
@@ -504,8 +570,7 @@ Page {
         case "back":
             if (repeat || !hub.alphabetic)
                 return false
-            hub.jumpRequested()
-            return true
+            return hub.openJumpGrid()
         default:
             return false
         }
@@ -852,76 +917,92 @@ Page {
         }
     }
 
-    PageSurface {
+    Item {
+        id: body
+
         anchors.fill: parent
+        opacity: 1 - (1 - Motion.swivelDim) * jumpGrid.visualOpacity
+
+        PageSurface {
+            anchors.fill: parent
+        }
+
+        Pane {
+            id: artistsPane
+
+            pivot: 0
+            model: hub.artistRows
+            delegate: HubRow {}
+        }
+
+        Pane {
+            id: albumsPane
+
+            pivot: 1
+            rowPitch: Ui.px(hub.gridRowPitch)
+            model: hub.albumRows
+            delegate: GridRow {}
+        }
+
+        Pane {
+            id: songsPane
+
+            pivot: 2
+            model: hub.songRows
+            delegate: HubRow {}
+        }
+
+        Pane {
+            id: genresPane
+
+            pivot: 3
+            model: hub.genreRows
+            delegate: HubRow {}
+        }
+
+        Pane {
+            id: playlistsPane
+
+            pivot: 4
+            model: hub.playlistRows
+            delegate: HubRow {}
+        }
+
+        FocusBar {
+            id: focusBar
+
+            visible: !hub.grid && hub.shownPivot === hub.pivotIndex && hub.focusedRow !== null
+            x: Ui.px(Ui.hubEdge - Ui.focusBarOffset) + hub.activeList.x
+            rowY: hub.activeList.y + hub.activeList.focusY
+            rowHeight: hub.activeList.rowPitch
+            opacity: hub.activeList.opacity * hub.focusOpacity
+            animated: hub.live
+        }
+
+        CroppedHeader {
+            id: header
+
+            text: "music"
+            shift: strip.headerShift
+            animated: hub.live
+        }
+
+        PivotStrip {
+            id: strip
+
+            labels: hub.pivots
+            activeIndex: hub.pivotIndex
+            animated: hub.live
+        }
     }
 
-    Pane {
-        id: artistsPane
+    JumpGrid {
+        id: jumpGrid
 
-        pivot: 0
-        model: hub.artistRows
-        delegate: HubRow {}
-    }
-
-    Pane {
-        id: albumsPane
-
-        pivot: 1
-        rowPitch: Ui.px(hub.gridRowPitch)
-        model: hub.albumRows
-        delegate: GridRow {}
-    }
-
-    Pane {
-        id: songsPane
-
-        pivot: 2
-        model: hub.songRows
-        delegate: HubRow {}
-    }
-
-    Pane {
-        id: genresPane
-
-        pivot: 3
-        model: hub.genreRows
-        delegate: HubRow {}
-    }
-
-    Pane {
-        id: playlistsPane
-
-        pivot: 4
-        model: hub.playlistRows
-        delegate: HubRow {}
-    }
-
-    FocusBar {
-        id: focusBar
-
-        visible: !hub.grid && hub.shownPivot === hub.pivotIndex && hub.focusedRow !== null
-        x: Ui.px(Ui.hubEdge - Ui.focusBarOffset) + hub.activeList.x
-        rowY: hub.activeList.y + hub.activeList.focusY
-        rowHeight: hub.activeList.rowPitch
-        opacity: hub.activeList.opacity * hub.focusOpacity
-        animated: hub.live
-    }
-
-    CroppedHeader {
-        id: header
-
-        text: "music"
-        shift: strip.headerShift
-        animated: hub.live
-    }
-
-    PivotStrip {
-        id: strip
-
-        labels: hub.pivots
-        activeIndex: hub.pivotIndex
-        animated: hub.live
+        anchors.fill: parent
+        screenOff: !hub.live
+        pressed: hub.pressed
+        onJumpTo: (letter) => hub.jumpTo(letter)
     }
 
     Sheet {
