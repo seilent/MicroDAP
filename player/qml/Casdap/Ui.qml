@@ -220,8 +220,7 @@ QtObject {
     readonly property real settingsSwatchGap: 4
     readonly property real settingsValueFocused: 0.85
     readonly property real settingsValueDim: 0.4
-    readonly property int historyCols: 2
-    readonly property real historyRowPitch: ui.qpTile + ui.qpGutter
+    readonly property real eqValueGap: 8
     readonly property real queueCountBaseline: ui.pivotBaseline
     readonly property real queueRowsTop: ui.contentTop
     readonly property real backRing: 64

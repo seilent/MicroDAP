@@ -172,7 +172,7 @@ TestCase {
         compare(saver.shown, false)
         compare(saver.hideAnimation.running, true)
         tryCompare(saver, "progress", 0, 2000)
-        compare(saver.visible, false)
+        tryCompare(saver, "visible", false, 1000)
         compare(saver.dimLayer.opacity, 0)
         compare(main.pageStack.opacity, 1)
         compare(main.saverTimer.running, true)

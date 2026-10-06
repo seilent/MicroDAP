@@ -118,6 +118,22 @@ TestCase {
 
         property int pair: 0
         property int gameMode: 0
+        property int eq: 0
+    }
+
+    QtObject {
+        id: fakeEq
+
+        property string activeOutput: "headphones"
+        property var keys: ({ headphones: "/home/armada/.config/casdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
+        property bool missing: false
+
+        signal profilesChanged()
+
+        function profileMap(output) {
+            const key = fakeEq.keys[output]
+            return { key: key, name: key === "custom" || key === "off" ? "" : "HD 600", missing: fakeEq.missing, preamp: 0, bands: [] }
+        }
     }
 
     Component {
@@ -132,6 +148,7 @@ TestCase {
             rgbControl: fakeRgb
             folders: ["/home/armada/Music", "/run/media/armada/SD"]
             onPairPhone: counters.pair++
+            onOpenEq: counters.eq++
             onGameModeRequested: counters.gameMode++
         }
     }
@@ -143,7 +160,7 @@ TestCase {
     }
 
     readonly property var expectedKeys: [
-        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "pair",
+        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
         "label-library", "folders",
         "label-display", "accent", "orientation", "scale", "saver", "rgb", "toasts",
         "label-power", "screenOff", "suspend", "pocket", "wifi", "gameMode",
@@ -195,6 +212,10 @@ TestCase {
         fakeBridge.closes = 0
         counters.pair = 0
         counters.gameMode = 0
+        counters.eq = 0
+        fakeEq.activeOutput = "headphones"
+        fakeEq.keys = ({ headphones: "/home/armada/.config/casdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
+        fakeEq.missing = false
     }
 
     function cleanup() {
@@ -292,7 +313,7 @@ TestCase {
         const page = open()
         compare(router.dispatch("up", false), false)
         compare(page.focusIndex, 1)
-        for (let i = 0; i < 8; i++)
+        for (let i = 0; i < 9; i++)
             verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "pair"))
         verify(router.dispatch("down", false))
@@ -609,6 +630,45 @@ TestCase {
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
         compare(item.valueItem.font.styleName, "Light")
         compare(item.valueItem.font.capitalization, Font.AllUppercase)
+    }
+
+    function test_eq_row() {
+        const page = open({ eq: fakeEq })
+        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "replaygain") + 1)
+        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "pair") - 1)
+        compare(tc.rowOf(page, "eq").title, "eq")
+        compare(tc.rowOf(page, "eq").value, "HD 600")
+        compare(tc.itemOf(page, "eq").valueItem.font.capitalization, Font.AllUppercase)
+        fakeEq.activeOutput = "usb"
+        compare(tc.rowOf(page, "eq").value, "custom")
+        fakeEq.activeOutput = "speaker"
+        compare(tc.rowOf(page, "eq").value, "off")
+        fakeEq.activeOutput = "headphones"
+        fakeEq.missing = true
+        fakeEq.profilesChanged()
+        compare(tc.rowOf(page, "eq").value, "HD 600 (missing)")
+        tc.focusKey(page, "eq")
+        compare(router.dispatch("right", false), false)
+        compare(router.dispatch("left", false), false)
+        verify(router.dispatch("a", false))
+        compare(counters.eq, 1)
+        compare(tc.rowOf(page, "eq").value, "HD 600 (missing)")
+    }
+
+    function test_eq_row_without_eq() {
+        const page = open()
+        compare(tc.rowOf(page, "eq").value, "off")
+        tc.focusKey(page, "eq")
+        verify(router.dispatch("a", false))
+        compare(counters.eq, 1)
+    }
+
+    function test_eq_row_overlay() {
+        const page = open({ overlay: true, bridge: fakeBridge, eq: fakeEq })
+        compare(tc.rowOf(page, "eq").value, "HD 600")
+        tc.focusKey(page, "eq")
+        verify(router.dispatch("a", false))
+        compare(counters.eq, 1)
     }
 
     function test_pair_a_phone() {

@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import "EqFormat.js" as EqFormat
 
 Page {
     id: page
@@ -11,11 +12,13 @@ Page {
     property QtObject outputControl: null
     property QtObject rgbControl: null
     property QtObject bridge: null
+    property var eq: null
     property bool overlay: false
     property bool animated: true
     property bool screenOff: false
     property bool foldersOpen: false
     property bool aboutOpen: false
+    property int eqRevision: 0
     property var folders: []
     property var shownValues: ({})
 
@@ -54,6 +57,9 @@ Page {
     readonly property string hpAmpValue: page.usbActive ? "built in only" : page.hpAmp
     readonly property string rateValue: page.graphRate > 0 ? "on " + page.graphRate : "on"
     readonly property string gameModeTitle: page.overlay ? "close player" : "game mode"
+    readonly property bool hasEq: page.eq !== null && page.eq !== undefined
+    readonly property string eqOutput: page.hasEq && page.eq.activeOutput !== undefined ? String(page.eq.activeOutput) : ""
+    readonly property string eqValue: page.eqText(page.eqOutput, page.eqRevision)
     readonly property string accent: page.settings !== null && page.settings.accent !== undefined ? String(page.settings.accent) : String(Ui.accent)
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
@@ -79,6 +85,7 @@ Page {
     property alias repeater: repeater
 
     signal pairPhone()
+    signal openEq()
     signal gameModeRequested()
     signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve, int from)
     signal settle()
@@ -140,6 +147,12 @@ Page {
         return Number(page.current.sampleRate) + " hz" + (depth > 0 ? " " + depth + " bit" : "")
     }
 
+    function eqText(output: string, revision: int): string {
+        if (!page.hasEq || output === "" || typeof page.eq.profileMap !== "function")
+            return "off"
+        return EqFormat.profileText(page.eq.profileMap(output))
+    }
+
     function label(title: string): var {
         return { kind: "label", key: "label-" + title, title: title, value: "", readOnly: true }
     }
@@ -163,6 +176,7 @@ Page {
         out.push(page.row("codec", "bluetooth codec", page.codec, false))
         out.push(page.row("rate", "sample rate follow", page.rateValue, true))
         out.push(page.row("replaygain", "replaygain", "off", true))
+        out.push(page.row("eq", "eq", page.eqValue, true))
         out.push(page.row("pair", "pair a phone", page.overlay ? "pair in dap mode" : "", true))
         out.push(page.label("library"))
         out.push(page.row("folders", "library folders", page.roots.length + " on", true))
@@ -467,6 +481,9 @@ Page {
             if (!page.overlay)
                 page.pairPhone()
             return true
+        case "eq":
+            page.openEq()
+            return true
         case "folders":
             page.foldersOpen = !page.foldersOpen
             page.refreshFrom(page.focusIndex + 1)
@@ -579,6 +596,15 @@ Page {
         id: d
 
         property int pendingFrom: -1
+    }
+
+    Connections {
+        target: page.hasEq ? page.eq : null
+        ignoreUnknownSignals: true
+
+        function onProfilesChanged() {
+            page.eqRevision++
+        }
     }
 
     component SettingsRow: Item {

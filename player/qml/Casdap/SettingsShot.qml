@@ -65,6 +65,18 @@ Item {
         readonly property bool supported: true
     }
 
+    QtObject {
+        id: sampleEq
+
+        readonly property string activeOutput: "headphones"
+
+        signal profilesChanged()
+
+        function profileMap(output) {
+            return { key: "/home/armada/.config/casdap/eq/Sennheiser HD 600 ParametricEQ.txt", name: "Sennheiser HD 600 ParametricEQ", missing: false, preamp: -6.5, bands: [] }
+        }
+    }
+
     SettingsScreen {
         id: screen
 
@@ -77,6 +89,7 @@ Item {
         audioInfo: sampleAudio
         outputControl: sampleOutput
         rgbControl: sampleRgb
+        eq: sampleEq
         folders: ["/home/armada/Music", "/run/media/armada/SD"]
 
         Component.onCompleted: screen.completeAll()

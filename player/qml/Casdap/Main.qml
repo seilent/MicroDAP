@@ -26,6 +26,7 @@ Window {
     property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
+    property var eq: root.screenshot || typeof Eq === "undefined" ? null : Eq
     property var stateStore: root.screenshot || typeof PlayerState === "undefined" ? null : PlayerState
     readonly property int playlistCount: root.library !== null && root.library.playlistCount !== undefined ? root.library.playlistCount : -1
 
@@ -194,6 +195,9 @@ Window {
         case "settings":
             pages.push(settingsComponent, {})
             break
+        case "eq":
+            pages.push(eqComponent, {})
+            break
         default:
             console.info("casdap: navigate " + name)
             break
@@ -251,6 +255,7 @@ Window {
         case "playlists":
         case "history":
         case "settings":
+        case "eq":
             root.navigate(name)
             return true
         case "artist":
@@ -720,7 +725,20 @@ Window {
             outputControl: root.outputControl
             rgbControl: root.rgbControl
             bridge: root.bridge
+            eq: root.eq
             onPairPhone: root.openPairing()
+            onOpenEq: root.navigate("eq")
+        }
+    }
+
+    Component {
+        id: eqComponent
+
+        EqScreen {
+            objectName: "eq"
+            animated: !root.hidden
+            screenOff: root.off
+            eq: root.eq
         }
     }
 
@@ -776,7 +794,13 @@ Window {
             : root.shotScreen === "jump" ? jumpShotComponent
             : root.shotScreen === "playlists" ? playlistsShotComponent
             : root.shotScreen === "history" ? historyShotComponent
+            : root.shotScreen === "eq" ? eqShotComponent
             : null
+    }
+
+    Component {
+        id: eqShotComponent
+        EqShot {}
     }
 
     Component {
