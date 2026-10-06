@@ -2,6 +2,7 @@
 #include "Player.h"
 #include "PowerBridge.h"
 #include "Settings.h"
+#include "SleepInhibitor.h"
 #include "State.h"
 #include "StatusModel.h"
 
@@ -15,6 +16,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -71,6 +73,7 @@ public slots:
 
 private slots:
     void initTestCase();
+    void cleanupTestCase();
     void registered();
     void secondInstanceNotRegistered();
     void screenOff();
@@ -79,6 +82,8 @@ private slots:
     void overlayNotSupported();
     void volume();
     void verbs();
+    void powerBinPath();
+    void sleepWatch();
     void keepMarker();
     void keepInBackground();
     void closeAndSwitch();
@@ -94,8 +99,13 @@ private:
     bool writeStub(const QString &name, const QString &exitCode = QStringLiteral("0"));
     int logLines() const;
     QVariant savedState(const QString &key) const;
+    bool startLogin1();
+    QDBusMessage login1(const QString &method, const QList<QVariant> &arguments = {});
+    int login1Count(const QString &method);
 
     QTemporaryDir m_dir;
+    QProcess m_login1;
+    bool m_login1Running = false;
     QString m_stubDir;
     QString m_emptyDir;
     QString m_log;
@@ -150,6 +160,42 @@ QVariant PowerTest::savedState(const QString &key) const
     return savedValue(m_stateFile, key);
 }
 
+bool PowerTest::startLogin1()
+{
+    m_login1.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    m_login1.start(QStringLiteral("python3"), {QStringLiteral(CASDAP_FAKE_LOGIN1)});
+    if (!m_login1.waitForStarted(busTimeoutMs))
+        return false;
+    QDBusConnectionInterface *iface = QDBusConnection::sessionBus().interface();
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < busTimeoutMs) {
+        if (iface->isServiceRegistered(SleepInhibitor::service()))
+            return true;
+        if (m_login1.state() != QProcess::Running)
+            return false;
+        QTest::qWait(50);
+    }
+    return false;
+}
+
+QDBusMessage PowerTest::login1(const QString &method, const QList<QVariant> &arguments)
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(SleepInhibitor::service(),
+                                                       QStringLiteral("/org/casdap/FakeLogin1"),
+                                                       QStringLiteral("org.casdap.FakeLogin1"), method);
+    call.setArguments(arguments);
+    return QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+}
+
+int PowerTest::login1Count(const QString &method)
+{
+    const QDBusMessage reply = login1(method);
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return -1;
+    return reply.arguments().value(0).toInt();
+}
+
 void PowerTest::initTestCase()
 {
     QDBusConnection bus = QDBusConnection::sessionBus();
@@ -175,14 +221,19 @@ void PowerTest::initTestCase()
     QVERIFY(writeFile(m_bootIdFile, QStringLiteral("  0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10 \n")));
     qputenv("CASDAP_DRIFT_FILE", m_driftFile.toUtf8());
     qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
+    qputenv("CASDAP_POWER_BIN", (m_stubDir + QStringLiteral("/casdap-power")).toUtf8());
     qputenv("CASDAP_KEEP_FILE", m_keepFile.toUtf8());
     qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
     qputenv("CASDAP_SWITCH_TIMEOUT_MS", QByteArrayLiteral("400"));
     qputenv("PATH", m_stubDir.toUtf8() + ':' + qgetenv("PATH"));
+    m_login1Running = startLogin1();
+    if (m_login1Running)
+        qputenv("CASDAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
 
     m_bridge = std::make_unique<PowerBridge>(nullptr, bus);
     QVERIFY(m_bridge->isRegistered());
     QCOMPARE(m_bridge->state(), nullptr);
+    QCOMPARE(m_bridge->sleep(), nullptr);
     m_player = std::make_unique<Player>();
     m_state = std::make_unique<State>(m_player.get(), m_stateFile);
     m_bridge->setState(m_state.get());
@@ -200,6 +251,18 @@ void PowerTest::initTestCase()
                                                 PowerBridge::objectPath(),
                                                 PowerBridge::interfaceName(), bus);
     QVERIFY2(m_remote->isValid(), qPrintable(m_remote->lastError().message()));
+}
+
+void PowerTest::cleanupTestCase()
+{
+    m_bridge.reset();
+    if (m_login1.state() == QProcess::Running) {
+        login1(QStringLiteral("Quit"));
+        if (!m_login1.waitForFinished(busTimeoutMs)) {
+            m_login1.terminate();
+            m_login1.waitForFinished(busTimeoutMs);
+        }
+    }
 }
 
 void PowerTest::registered()
@@ -552,13 +615,78 @@ void PowerTest::verbs()
     QCoreApplication::processEvents();
     QCOMPARE(logLines(), 4);
 
-    qputenv("CASDAP_VERB_DIR", m_emptyDir.toUtf8());
+    qputenv("CASDAP_POWER_BIN", (m_emptyDir + QStringLiteral("/casdap-power")).toUtf8());
     QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
     QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
     QCOMPARE(logLines(), 4);
-    qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
+    qputenv("CASDAP_POWER_BIN", (m_stubDir + QStringLiteral("/casdap-power")).toUtf8());
     QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 5, busTimeoutMs);
+}
+
+void PowerTest::powerBinPath()
+{
+    const QByteArray saved = qgetenv("CASDAP_POWER_BIN");
+    qunsetenv("CASDAP_POWER_BIN");
+    QCOMPARE(PowerBridge::powerBin(), QStringLiteral("/usr/libexec/casdap/casdap-power"));
+    QCOMPARE(PowerBridge::commandFor(QStringLiteral("screen-off")),
+             QStringList({QStringLiteral("/usr/libexec/casdap/casdap-power"), QStringLiteral("screen-off")}));
+    QCOMPARE(PowerBridge::commandFor(QStringLiteral("suspend")).constFirst(),
+             QStringLiteral("/usr/libexec/casdap/casdap-power"));
+    QCOMPARE(PowerBridge::commandFor(QStringLiteral("poweroff")).constFirst(),
+             QStringLiteral("/usr/libexec/casdap/casdap-power"));
+    QCOMPARE(PowerBridge::wakeCommand(),
+             QStringList({QStringLiteral("/usr/libexec/casdap/casdap-power"), QStringLiteral("screen-on")}));
+    QCOMPARE(PowerBridge::commandFor(QStringLiteral("game-mode")).constFirst(), QStringLiteral("systemctl"));
+    qputenv("CASDAP_POWER_BIN", saved);
+    QCOMPARE(PowerBridge::powerBin(), QString::fromUtf8(saved));
+}
+
+void PowerTest::sleepWatch()
+{
+    if (!m_login1Running)
+        QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
+    QFile::remove(m_log);
+    QFile::remove(m_stateFile);
+    QCOMPARE(login1Count(QStringLiteral("InhibitCount")), 0);
+
+    m_bridge->enableSleepWatch();
+    QVERIFY(m_bridge->sleep() != nullptr);
+    QVERIFY(m_bridge->sleep()->subscribed());
+    QVERIFY(m_bridge->sleep()->held());
+    QCOMPARE(m_bridge->sleep()->takeCount(), 1);
+    QCOMPARE(login1Count(QStringLiteral("InhibitCount")), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(login1Count(QStringLiteral("OpenFds")), 1, busTimeoutMs);
+    const QDBusMessage last = login1(QStringLiteral("LastInhibit"));
+    QCOMPARE(last.arguments().value(0).toStringList(),
+             QStringList({QStringLiteral("sleep"), QStringLiteral("casdap"), QStringLiteral("save state"),
+                          QStringLiteral("delay")}));
+    m_bridge->enableSleepWatch();
+    QCOMPARE(m_bridge->sleep()->takeCount(), 1);
+
+    QElapsedTimer timer;
+    timer.start();
+    login1(QStringLiteral("EmitPrepareForSleep"), {true});
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->sleep()->held(), busTimeoutMs);
+    QVERIFY(timer.elapsed() < 5000);
+    QVERIFY(QFile::exists(m_stateFile));
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
+    QCOMPARE(savedState(QStringLiteral("status")).toString(), QStringLiteral("stopped"));
+    QTRY_COMPARE_WITH_TIMEOUT(login1Count(QStringLiteral("OpenFds")), 0, busTimeoutMs);
+    QCoreApplication::processEvents();
+    QCOMPARE(logLines(), 0);
+
+    QSignalSpy wake(m_bridge.get(), &PowerBridge::wakeFinished);
+    login1(QStringLiteral("EmitPrepareForSleep"), {false});
+    QTRY_VERIFY_WITH_TIMEOUT(m_bridge->sleep()->held(), busTimeoutMs);
+    QCOMPARE(m_bridge->sleep()->takeCount(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(login1Count(QStringLiteral("InhibitCount")), 2, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(wake.count(), 1, busTimeoutMs);
+    QCOMPARE(wake.at(0).at(0).toBool(), true);
+    QVERIFY(!m_bridge->waking());
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QCOMPARE(readFile(m_log), QStringLiteral("casdap-power screen-on\n"));
+    QCOMPARE(m_player->status(), Player::Stopped);
 }
 
 void PowerTest::drift()
@@ -589,7 +717,10 @@ void PowerTest::settingsPersist()
     {
         Settings settings(path);
         QCOMPARE(settings.path(), path);
-        QCOMPARE(settings.output(), QStringLiteral("speaker"));
+        QCOMPARE(settings.output(), QStringLiteral("auto"));
+        QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
+        QCOMPARE(Settings::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones")}));
+        QCOMPARE(Settings::codecs(), QStringList({QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"), QStringLiteral("ldac"), QStringLiteral("sbc")}));
         QCOMPARE(settings.roots(), Settings::defaultRoots());
         QCOMPARE(settings.accent(), QStringLiteral("#FA2A55"));
         QCOMPARE(settings.scale(), 1.0);
@@ -613,7 +744,17 @@ void PowerTest::settingsPersist()
 
         settings.setOutput(QStringLiteral("headphones"));
         settings.setOutput(QStringLiteral("tape"));
+        settings.setOutput(QStringLiteral("bt"));
         QCOMPARE(settings.output(), QStringLiteral("headphones"));
+
+        QSignalSpy codecSpy(&settings, &Settings::btCodecChanged);
+        settings.setBtCodec(QStringLiteral("AAC"));
+        QCOMPARE(codecSpy.count(), 1);
+        QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
+        settings.setBtCodec(QStringLiteral("aac"));
+        settings.setBtCodec(QStringLiteral("mp3"));
+        QCOMPARE(codecSpy.count(), 1);
+        QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
 
         settings.setAccent(QStringLiteral("#1ba1e2"));
         QCOMPARE(settings.accent(), QStringLiteral("#1BA1E2"));
@@ -635,9 +776,11 @@ void PowerTest::settingsPersist()
     }
     QVERIFY(QFile::exists(path));
     QVERIFY(readFile(path).contains(QStringLiteral("keepPhoneInGameMode=true")));
+    QVERIFY(readFile(path).contains(QStringLiteral("btCodec=aac")));
 
     Settings again(path);
     QCOMPARE(again.output(), QStringLiteral("headphones"));
+    QCOMPARE(again.btCodec(), QStringLiteral("aac"));
     QCOMPARE(again.roots(), QStringList({QStringLiteral("/tmp/a"), QStringLiteral("/tmp/b")}));
     QCOMPARE(again.accent(), QStringLiteral("#1BA1E2"));
     QCOMPARE(again.scale(), 1.1);

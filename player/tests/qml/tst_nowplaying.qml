@@ -371,6 +371,12 @@ TestCase {
         fuzzyCompare(tc.ringCenterX(page, 2), Ui.px(216 + span * 0.87), 0.01)
         fuzzyCompare(page.ring(1).y + page.ring(1).height / 2, Ui.px(Ui.canvasH - 40), 0.01)
         fuzzyCompare(page.statusStrip.row.y, Ui.px(10), 0.01)
+        fakeBluez.activate()
+        compare(page.shownVariant, true)
+        compare(page.fromLabel.visible, true)
+        fuzzyCompare(page.fromLabel.x, Ui.px(216), 0.01)
+        fuzzyCompare(tc.baselineOf(page.fromLabel), Ui.px(39), 0.5)
+        compare(Ui.npFromBaselineLandscape, 39)
     }
 
     function test_battery_low() {

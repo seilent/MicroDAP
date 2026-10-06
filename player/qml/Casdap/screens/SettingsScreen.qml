@@ -8,6 +8,9 @@ Page {
     property QtObject power: null
     property QtObject player: null
     property QtObject audioInfo: null
+    property QtObject outputControl: null
+    property QtObject bridge: null
+    property bool overlay: false
     property bool animated: true
     property bool screenOff: false
     property bool foldersOpen: false
@@ -17,12 +20,21 @@ Page {
 
     readonly property bool live: page.animated && !page.screenOff
     readonly property var outputs: ["auto", "speaker", "headphones"]
+    readonly property var codecs: ["auto", "aptx", "aac", "ldac", "sbc"]
     readonly property var saverSteps: [10, 15, 30, 60, 120, 300]
     readonly property var screenOffSteps: [0, 60, 120, 300, 600, 1800]
     readonly property var suspendSteps: [0, 5, 10, 30, 60]
     readonly property var scaleSteps: page.buildScaleSteps()
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
+    readonly property string codec: page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto"
+    readonly property bool overlayToasts: page.settings !== null && page.settings.overlayToasts === true
+    readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
+    readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
+    readonly property int graphRate: page.audioInfo !== null && page.audioInfo.graphRate !== undefined ? Number(page.audioInfo.graphRate) : 0
+    readonly property string outputValue: page.output === "headphones" && !page.jackPresent ? "no jack" : page.output
+    readonly property string rateValue: page.graphRate > 0 ? "on " + page.graphRate : "on"
+    readonly property string gameModeTitle: page.overlay ? "close player" : "game mode"
     readonly property string accent: page.settings !== null && page.settings.accent !== undefined ? String(page.settings.accent) : String(Ui.accent)
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
@@ -93,8 +105,11 @@ Page {
     function buildRows(): var {
         const out = []
         out.push(page.label("output"))
-        out.push(page.row("output", "output", page.output, false))
-        out.push(page.row("pair", "pair a phone", "", true))
+        out.push(page.row("output", "output", page.outputValue, false))
+        out.push(page.row("codec", "bluetooth codec", page.codec, false))
+        out.push(page.row("rate", "sample rate follow", page.rateValue, true))
+        out.push(page.row("replaygain", "replaygain", "off", true))
+        out.push(page.row("pair", "pair a phone", page.overlay ? "pair in dap mode" : "", true))
         out.push(page.label("library"))
         out.push(page.row("folders", "library folders", page.roots.length + " on", true))
         if (page.foldersOpen) {
@@ -106,12 +121,13 @@ Page {
         out.push(page.row("orientation", "orientation", Ui.landscape ? "landscape" : "portrait", true))
         out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
+        out.push(page.row("toasts", "overlay toasts", page.overlayToasts ? "on" : "off", false))
         out.push(page.label("power"))
         out.push(page.row("screenOff", "screen off after", page.offOr(Math.round(page.screenOffSeconds / 60), "min"), false))
         out.push(page.row("suspend", "suspend after", page.offOr(page.suspendMinutes, "min"), false))
         out.push(page.row("pocket", "pocket controls", page.pocketControls ? "on" : "off", false))
         out.push(page.row("wifi", "wi-fi when off", page.wifiOffScreenOff ? "off" : "keep", false))
-        out.push(page.row("gameMode", "game mode", "", true))
+        out.push(page.row("gameMode", page.gameModeTitle, "", true))
         out.push(page.row("about", "about", page.version, true))
         if (page.aboutOpen) {
             const image = page.manifest.IMAGE_VERSION === undefined ? "" : String(page.manifest.IMAGE_VERSION)
@@ -287,6 +303,12 @@ Page {
         case "output":
             page.set("output", page.cycle(page.outputs, page.output, delta))
             return true
+        case "codec":
+            page.set("btCodec", page.cycle(page.codecs, page.codec, delta))
+            return true
+        case "toasts":
+            page.set("overlayToasts", !page.overlayToasts)
+            return true
         case "accent": {
             const list = Ui.accentOptions
             const i = list.indexOf(page.accent.toUpperCase())
@@ -329,6 +351,13 @@ Page {
 
     function runGameMode() {
         page.gameModeRequested()
+        if (page.overlay) {
+            if (page.bridge !== null && typeof page.bridge.closePlayer === "function")
+                page.bridge.closePlayer()
+            else
+                console.info("casdap: close player")
+            return
+        }
         if (page.power === null) {
             console.info("casdap: game mode")
             return
@@ -354,20 +383,23 @@ Page {
         }
         switch (r.key) {
         case "pair":
-            page.pairPhone()
+            if (!page.overlay)
+                page.pairPhone()
             return true
         case "folders":
             page.foldersOpen = !page.foldersOpen
             return true
         case "gameMode":
-            sheet.title = "game mode"
-            sheet.items = ["switch to game mode"]
+            sheet.title = page.gameModeTitle
+            sheet.items = [page.overlay ? "close player" : "switch to game mode"]
             sheet.open()
             return true
         case "about":
             page.aboutOpen = !page.aboutOpen
             return true
         case "orientation":
+        case "rate":
+        case "replaygain":
             return true
         default:
             return page.step(1)
@@ -434,6 +466,8 @@ Page {
     }
 
     Component.onCompleted: {
+        if (page.audioInfo !== null && typeof page.audioInfo.refreshGraphRate === "function")
+            page.audioInfo.refreshGraphRate()
         const list = page.roots.slice()
         for (const f of page.folders) {
             if (list.indexOf(f) < 0)
@@ -514,7 +548,7 @@ Page {
             text: item.modelData.title
             color: Ui.white(item.titleAlpha)
             font: Ui.font(item.titleRole)
-            elide: Text.ElideRight
+            clip: true
 
             Behavior on color {
                 enabled: page.live

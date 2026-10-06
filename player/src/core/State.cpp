@@ -108,7 +108,7 @@ void State::onStatusChanged()
         m_timer.stop();
 }
 
-QJsonObject State::snapshot(const Player *player, bool handoff)
+QJsonObject State::snapshot(const Player *player, bool handoff, const QJsonArray &stack)
 {
     const Queue *queue = player->queue();
     QJsonArray items;
@@ -123,6 +123,7 @@ QJsonObject State::snapshot(const Player *player, bool handoff)
     object.insert(QStringLiteral("status"), statusName(player->status()));
     object.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
     object.insert(QStringLiteral("handoff"), handoff);
+    object.insert(QStringLiteral("stack"), stack);
     return object;
 }
 
@@ -152,7 +153,7 @@ bool State::read(const QString &path, QJsonObject &object)
 
 bool State::save(bool handoff)
 {
-    const bool ok = write(m_path, snapshot(m_player, handoff));
+    const bool ok = write(m_path, snapshot(m_player, handoff, m_stack));
     if (!ok)
         qWarning() << "casdap state: cannot write" << m_path;
     return ok;
@@ -168,14 +169,43 @@ bool State::saveExit()
     return save(true);
 }
 
-void State::quit()
+void State::quit(bool handoff)
 {
-    saveExit();
+    save(handoff);
     QCoreApplication *app = QCoreApplication::instance();
     if (!app)
         return;
     disconnect(app, &QCoreApplication::aboutToQuit, this, &State::saveExit);
     app->quit();
+}
+
+QVariantList State::stack() const
+{
+    return m_stack.toVariantList();
+}
+
+void State::setStack(const QVariantList &stack)
+{
+    QJsonArray out;
+    for (const QVariant &entry : stack) {
+        const QVariantMap map = entry.toMap();
+        const QString name = map.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            continue;
+        QJsonObject row;
+        row.insert(QStringLiteral("name"), name);
+        row.insert(QStringLiteral("id"), map.value(QStringLiteral("id"), -1).toLongLong());
+        out.append(row);
+    }
+    m_stack = out;
+}
+
+QJsonArray State::savedStack(const QString &path)
+{
+    QJsonObject object;
+    if (!read(path, object))
+        return {};
+    return object.value(QStringLiteral("stack")).toArray();
 }
 
 bool State::loadInto(Player *player, const QString &path)
@@ -206,6 +236,7 @@ bool State::loadInto(Player *player, const QString &path)
 
 bool State::load()
 {
+    m_stack = savedStack(m_path);
     return loadInto(m_player, m_path);
 }
 

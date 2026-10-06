@@ -33,6 +33,27 @@ void setCardinal(xcb_connection_t *connection, xcb_window_t window, xcb_atom_t p
                         &value);
 }
 
+bool applyOverlayAtoms(QWindow *window, bool fullscreen)
+{
+    if (!window)
+        return false;
+    auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
+    if (!x11) {
+        QTextStream(stderr) << "casdap-player: overlay mode needs the xcb platform\n";
+        return false;
+    }
+    if (!window->handle())
+        window->create();
+    if (fullscreen)
+        window->setWindowState(Qt::WindowFullScreen);
+    xcb_connection_t *connection = x11->connection();
+    const auto id = static_cast<xcb_window_t>(window->winId());
+    setCardinal(connection, id, atom(connection, "STEAM_OVERLAY"), 1);
+    setCardinal(connection, id, atom(connection, "GAMESCOPE_NO_FOCUS"), 1);
+    xcb_flush(connection);
+    return true;
+}
+
 }
 
 void claimGamescopeFocus(QWindow *window)
@@ -57,22 +78,12 @@ void claimGamescopeFocus(QWindow *window)
 
 bool setOverlayAtoms(QWindow *window)
 {
-    if (!window)
-        return false;
-    auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
-    if (!x11) {
-        QTextStream(stderr) << "casdap-player: overlay mode needs the xcb platform\n";
-        return false;
-    }
-    if (!window->handle())
-        window->create();
-    window->setWindowState(Qt::WindowFullScreen);
-    xcb_connection_t *connection = x11->connection();
-    const auto id = static_cast<xcb_window_t>(window->winId());
-    setCardinal(connection, id, atom(connection, "STEAM_OVERLAY"), 1);
-    setCardinal(connection, id, atom(connection, "GAMESCOPE_NO_FOCUS"), 1);
-    xcb_flush(connection);
-    return true;
+    return applyOverlayAtoms(window, true);
+}
+
+bool setToastAtoms(QWindow *window)
+{
+    return applyOverlayAtoms(window, false);
 }
 
 }

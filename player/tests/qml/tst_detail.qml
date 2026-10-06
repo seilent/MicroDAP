@@ -557,6 +557,8 @@ TestCase {
         compare(third.rowItem.playingDot, true)
         compare(third.rowItem.dotItem.visible, true)
         compare(third.rowItem.dotItem.width, Ui.px(4))
+        compare(third.rowItem.dotItem.height, Ui.px(4))
+        compare(third.rowItem.dotItem.radius, Ui.px(2))
         compare(third.rowItem.dotItem.color, Ui.accent)
         verify(third.rowItem.dotItem.x + third.rowItem.dotItem.width <= Ui.px(20))
         compare(third.rowItem.playing, false)

@@ -9,6 +9,7 @@ Page {
     property var historyModel: null
     property var newModel: null
     property bool animated: true
+    property bool overlay: false
     property bool quickplayShown: false
     property real pan: 0
     property real peekEnter: 1
@@ -62,8 +63,16 @@ Page {
     signal playRequested(var entry)
     signal pinRequested(var entry, bool pin)
     signal shuffleAll()
+    signal hideRequested()
 
     focusCount: home.menu.length
+
+    function release(name: string) {
+        if (name === "a")
+            home.pressed = false
+        if (name === "b" && home.overlay && !home.quickplayShown && !sheet.shown)
+            home.hideRequested()
+    }
 
     function itemBaseline(index: int): real {
         return Ui.px(Ui.homeFirstBaseline + index * home.pitch)

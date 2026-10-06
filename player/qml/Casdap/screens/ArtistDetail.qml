@@ -49,6 +49,7 @@ Page {
     signal sheetAction(string action, string kind, int id)
 
     list: page.activeList
+    pageId: page.artistId
 
     function callLibrary(method: string, arg: var): var {
         if (page.library === null || typeof page.library[method] !== "function")
@@ -519,7 +520,7 @@ Page {
             maximumLineCount: Ui.detailTitleLines
             lineHeightMode: Text.FixedHeight
             lineHeight: Ui.px(Ui.detailTitlePitch)
-            elide: Text.ElideRight
+            clip: true
 
             Behavior on color {
                 enabled: page.live
@@ -538,7 +539,7 @@ Page {
             text: row.modelData.subtitle
             color: Ui.white(Ui.detailSub.alpha)
             font: Ui.font(Ui.detailSub)
-            elide: Text.ElideRight
+            clip: true
         }
     }
 
@@ -659,7 +660,7 @@ Page {
         text: page.name
         color: Ui.white(Ui.detailName.alpha)
         font: Ui.font(Ui.detailName)
-        elide: Text.ElideRight
+        clip: true
     }
 
     Repeater {

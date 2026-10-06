@@ -1,4 +1,5 @@
 #include "FakeBluezModel.h"
+#include "CodecFragment.h"
 #include "DbusPad.h"
 #include "Gamescope.h"
 #include "Intercept.h"
@@ -6,6 +7,7 @@
 #include "Library.h"
 #include "Models.h"
 #include "Mpris.h"
+#include "OutputControl.h"
 #include "OverlayBridge.h"
 #include "Pad.h"
 #include "Player.h"
@@ -133,6 +135,7 @@ int main(int argc, char *argv[])
         options.state = parser.value(stateOption);
         options.library = parser.value(libraryOption);
         options.pivot = parser.value(pivotOption);
+        options.overlay = parser.isSet(overlayOption);
         return casdap::screenshot(options);
     }
 
@@ -173,31 +176,53 @@ int main(int argc, char *argv[])
     }
     if (!overlayMode) {
         casdap::Keep::clear();
+        power.runScreenOn();
         power.setState(&state);
+        power.enableSleepWatch();
     }
     casdap::StatusModel status;
+
+    std::unique_ptr<casdap::OutputControl> outputControl;
+    std::unique_ptr<casdap::CodecFragment> codecFragment;
+    if (!overlayMode) {
+        outputControl = std::make_unique<casdap::OutputControl>();
+        outputControl->apply(settings.output());
+        QObject::connect(&settings, &casdap::Settings::outputChanged, outputControl.get(),
+                         [&settings, control = outputControl.get()] { control->apply(settings.output()); });
+        codecFragment = std::make_unique<casdap::CodecFragment>();
+        codecFragment->setBluez(bluez.get());
+        codecFragment->apply(settings.btCodec());
+        QObject::connect(&settings, &casdap::Settings::btCodecChanged, codecFragment.get(),
+                         [&settings, fragment = codecFragment.get()] { fragment->apply(settings.btCodec()); });
+    }
 
     std::unique_ptr<casdap::PadSource> pad;
     std::unique_ptr<casdap::OverlayBridge> overlay;
     if (overlayMode) {
         auto dbusPad = std::make_unique<casdap::DbusPad>(casdap::Intercept::bus());
         overlay = std::make_unique<casdap::OverlayBridge>(dbusPad.get(), &player);
+        overlay->setState(&state);
         power.setOverlay(overlay.get());
         pad = std::move(dbusPad);
     } else {
         pad = std::make_unique<casdap::Pad>();
     }
 
-    auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get()] {
+    auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get(),
+                        control = outputControl.get()] {
         const bool active = !power.screenOff() && (!bridge || bridge->mapped());
         status.setActive(active);
         audioInfo.setActive(active);
         model->setActive(active);
+        if (control)
+            control->setActive(active);
     };
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status, applyActive);
     if (overlay) {
         QObject::connect(overlay.get(), &casdap::OverlayBridge::mappedChanged, &status, applyActive);
         applyActive();
+    } else {
+        outputControl->setActive(true);
     }
     pad->setPocketControls(settings.pocketControls());
     QObject::connect(&settings, &casdap::Settings::pocketControlsChanged, pad.get(),
@@ -211,6 +236,10 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"), &historyNew);
     engine.rootContext()->setContextProperty(QStringLiteral("Playlists"), &playlists);
     engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);
+    engine.rootContext()->setContextProperty(QStringLiteral("OutputControl"),
+                                             static_cast<QObject *>(outputControl.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("CodecFragment"),
+                                             static_cast<QObject *>(codecFragment.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("Artists"), &artists);
     engine.rootContext()->setContextProperty(QStringLiteral("Albums"), &albums);
     engine.rootContext()->setContextProperty(QStringLiteral("Songs"), &songs);
@@ -220,6 +249,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Pad"), pad.get());
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);
+    engine.rootContext()->setContextProperty(QStringLiteral("PlayerState"), &state);
     engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);
     engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"),
                                              static_cast<QObject *>(bluez.get()));
@@ -230,10 +260,14 @@ int main(int argc, char *argv[])
     engine.loadFromModule("Casdap", "Main");
     if (!engine.rootObjects().isEmpty()) {
         auto *root = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
-        if (overlayMode)
+        if (overlayMode) {
             overlay->setWindow(root, casdap::setOverlayAtoms);
-        else
+            auto *toast = qobject_cast<QWindow *>(qvariant_cast<QObject *>(root->property("toastWindow")));
+            if (toast)
+                overlay->setToastWindow(toast, casdap::setToastAtoms);
+        } else {
             casdap::claimGamescopeFocus(root);
+        }
     }
 
     const QString grabOut = qEnvironmentVariable("CASDAP_GRAB_OUT");

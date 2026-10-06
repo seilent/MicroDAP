@@ -8,6 +8,7 @@ Window {
     property string shotScreen: ""
     property string shotPivot: "albums"
     property real shotAngle: 40
+    property bool shotOverlay: false
     property int shotWidth: Screen.width
     property int shotHeight: Screen.height
 
@@ -20,39 +21,65 @@ Window {
     readonly property var genres: typeof Genres === "undefined" ? null : Genres
     readonly property var pins: typeof Pins === "undefined" ? null : Pins
     readonly property var playlists: typeof Playlists === "undefined" ? null : Playlists
-    readonly property var library: root.screenshot || typeof Library === "undefined" ? null : Library
-    readonly property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
-    readonly property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
+    property var library: root.screenshot || typeof Library === "undefined" ? null : Library
+    property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
+    property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
+    property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
+    property var stateStore: root.screenshot || typeof PlayerState === "undefined" ? null : PlayerState
     readonly property int playlistCount: root.library !== null && root.library.playlistCount !== undefined ? root.library.playlistCount : -1
 
     property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
     property var player: root.screenshot || typeof Player === "undefined" ? null : Player
     readonly property var status: root.screenshot || typeof StatusModel === "undefined" ? null : StatusModel
     readonly property bool powerScreenOff: root.power !== null && root.power.screenOff === true
+    readonly property bool switching: root.power !== null && root.power.switching === true
     readonly property var bridge: root.screenshot || typeof OverlayBridge === "undefined" ? null : OverlayBridge
     readonly property string topScreen: pages.currentItem !== null ? pages.currentItem.objectName : ""
     readonly property int statusPlaying: 1
     readonly property bool playing: root.player !== null && root.player.status === root.statusPlaying
-    readonly property bool hasTrack: root.player !== null && root.player.current !== undefined && root.player.current !== null
-        && root.player.current.id !== undefined
+    readonly property var current: root.player !== null && root.player.current !== undefined && root.player.current !== null
+        ? root.player.current : ({})
+    readonly property bool hasTrack: root.current.id !== undefined && root.current.id !== null
     readonly property bool phoneActive: root.bluez !== null && root.bluez.transportActive === true
+    readonly property int saverSeconds: root.settings !== null && root.settings.saverSeconds !== undefined ? Number(root.settings.saverSeconds) : 0
+    readonly property int screenOffSeconds: root.settings !== null && root.settings.screenOffSeconds !== undefined ? Number(root.settings.screenOffSeconds) : 0
+    readonly property bool overlayToasts: root.settings !== null && root.settings.overlayToasts === true
+    readonly property bool pocketControls: !root.overlay && root.settings !== null && root.settings.pocketControls === true
 
     property bool overlay: root.bridge !== null
     property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
     property real overlayFade: root.bridge !== null ? root.bridge.opacity : 1
+    property bool restoring: false
+    property bool blackFrame: false
+    property bool pendingHide: false
+    property bool rootHidden: false
+    property bool toastShown: false
+    property var lastToastId: null
     readonly property bool hidden: root.overlay && !root.overlayMapped
     readonly property bool off: root.powerScreenOff || root.hidden
+    readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && root.playing
+        && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown
+    readonly property bool screenOffArmed: !root.overlay && !root.off && !root.screenshot && root.power !== null
+        && root.screenOffSeconds > 0 && !root.switching
     property alias pageStack: pages
     property alias overlayLayer: overlays
     property alias background: bg
     property alias switchPrompt: switchPrompt
+    property alias powerMenu: powerMenu
+    property alias saver: saver
     property alias router: router
+    property alias saverTimer: saverTimer
+    property alias screenOffTimer: screenOffTimer
+    property alias toastWindow: toastWindow
+    property alias hiddenToast: hiddenToast
+
+    signal hideOverlayRequested()
 
     width: shotWidth
     height: shotHeight
     visible: !root.overlay
     visibility: screenshot ? Window.Windowed : root.overlay ? Window.AutomaticVisibility : Window.FullScreen
-    color: Ui.bg
+    color: root.blackFrame ? Ui.black : Ui.bg
 
     onWidthChanged: Ui.windowW = root.width
     onHeightChanged: Ui.windowH = root.height
@@ -62,13 +89,42 @@ Window {
         pages.completeAll()
         overlays.completeAll()
         switchPrompt.complete()
+        powerMenu.complete()
+        saver.land()
     }
+    onPowerScreenOffChanged: {
+        if (root.powerScreenOff) {
+            pages.completeAll()
+            overlays.completeAll()
+            switchPrompt.complete()
+            powerMenu.complete()
+            saver.hide()
+            saver.land()
+            root.pendingHide = true
+            root.blackFrame = true
+            return
+        }
+        root.pendingHide = false
+        root.blackFrame = false
+        root.rootHidden = false
+    }
+    onFrameSwapped: {
+        if (!root.pendingHide)
+            return
+        root.pendingHide = false
+        root.rootHidden = true
+    }
+    onSaverArmedChanged: root.armSaver()
+    onScreenOffArmedChanged: root.armScreenOff()
     Component.onCompleted: {
         Ui.windowW = root.width
         Ui.windowH = root.height
         root.applySettings()
+        root.lastToastId = root.trackId(root.current)
         if (!root.screenshot)
-            pages.push(homeComponent)
+            root.restoreStack(root.stateStore !== null && typeof root.stateStore.stack === "function" ? root.stateStore.stack() : [])
+        root.armSaver()
+        root.armScreenOff()
     }
 
     function applySettings() {
@@ -78,6 +134,46 @@ Window {
             Ui.userScale = Math.max(Ui.sMin, Math.min(Ui.sMax, Number(root.settings.scale)))
         if (root.settings.accent !== undefined && String(root.settings.accent) !== "")
             Ui.accent = root.settings.accent
+    }
+
+    function trackId(map: var): var {
+        if (map === undefined || map === null || map.id === undefined)
+            return null
+        return map.id
+    }
+
+    function field(name: string): string {
+        const v = root.current[name]
+        return v === undefined || v === null ? "" : String(v)
+    }
+
+    function armSaver(): void {
+        if (root.saverArmed)
+            saverTimer.restart()
+        else
+            saverTimer.stop()
+    }
+
+    function armScreenOff(): void {
+        if (root.screenOffArmed)
+            screenOffTimer.restart()
+        else
+            screenOffTimer.stop()
+    }
+
+    function touch(): void {
+        if (saverTimer.running)
+            saverTimer.restart()
+        if (screenOffTimer.running)
+            screenOffTimer.restart()
+    }
+
+    function requestScreenOff(): void {
+        if (root.power === null || typeof root.power.runVerb !== "function") {
+            console.info("casdap: screen off timer, no power bridge")
+            return
+        }
+        root.power.runVerb("screen-off")
     }
 
     function navigate(name: string) {
@@ -140,6 +236,73 @@ Window {
             console.info("casdap: navigate " + kind + " " + id)
     }
 
+    function hasInfo(method: string, id: int, key: string): bool {
+        if (root.library === null || typeof root.library[method] !== "function")
+            return false
+        const info = root.library[method](id)
+        return info !== undefined && info !== null && info[key] !== undefined && info[key] !== null
+    }
+
+    function pushNamed(name: string, id: int): bool {
+        switch (name) {
+        case "music":
+        case "bluetooth":
+        case "playlists":
+        case "history":
+        case "settings":
+            root.navigate(name)
+            return true
+        case "artist":
+            if (!root.hasInfo("artistInfo", id, "name"))
+                return false
+            root.openArtist(id)
+            return true
+        case "album":
+            if (!root.hasInfo("albumInfo", id, "title"))
+                return false
+            root.openAlbum(id)
+            return true
+        case "nowplaying":
+            if (!root.hasTrack && !root.phoneActive)
+                return false
+            root.openNowPlaying()
+            return true
+        case "queue":
+            root.openQueue()
+            return true
+        default:
+            return false
+        }
+    }
+
+    function restoreStack(list: var): void {
+        const animate = pages.animate
+        pages.animate = false
+        root.restoring = true
+        pages.clear()
+        pages.push(homeComponent)
+        const entries = list === undefined || list === null ? [] : list
+        for (let i = 0; i < entries.length; i++) {
+            const e = entries[i]
+            if (e === undefined || e === null)
+                break
+            const name = String(e.name)
+            if (i === 0 && name === "home")
+                continue
+            if (!root.pushNamed(name, Number(e.id)))
+                break
+        }
+        root.restoring = false
+        pages.animate = animate
+        root.syncStack()
+    }
+
+    function syncStack(): void {
+        if (root.restoring || root.stateStore === null || typeof root.stateStore.setStack !== "function")
+            return
+        root.stateStore.setStack(pages.serialize())
+    }
+
     function setPinned(kind: string, id: int, pin: bool): void {
         const verb = pin ? "pin " : "unpin "
         if (root.library === null) {
@@ -196,13 +359,64 @@ Window {
             return
         }
         root.closeSheets()
+        if (powerMenu.shown)
+            powerMenu.close()
+        if (saver.shown)
+            saver.hide()
         switchPrompt.show(root.playing)
+    }
+
+    function showPowerMenu() {
+        if (root.off) {
+            console.info("casdap: ShowPowerMenu ignored, screen off")
+            return
+        }
+        if (root.overlay) {
+            console.info("casdap: ShowPowerMenu ignored in overlay mode")
+            return
+        }
+        root.closeSheets()
+        if (switchPrompt.shown)
+            switchPrompt.close()
+        if (saver.shown)
+            saver.hide()
+        powerMenu.open()
     }
 
     function switchFailed() {
         if (switchPrompt.shown)
             switchPrompt.close()
         overlays.toast.show("", "switch failed")
+    }
+
+    function hideOverlay(): void {
+        root.hideOverlayRequested()
+        if (root.bridge !== null && typeof root.bridge.hide === "function")
+            root.bridge.hide()
+    }
+
+    function showHiddenToast(artist: string, title: string): void {
+        if (root.bridge !== null && typeof root.bridge.prepareToast === "function" && !root.bridge.prepareToast())
+            return
+        root.toastShown = true
+        hiddenToast.show(artist, title)
+    }
+
+    function endHiddenToast(): void {
+        root.toastShown = false
+        hiddenToast.hide()
+        if (root.bridge !== null && typeof root.bridge.releaseToast === "function")
+            root.bridge.releaseToast()
+    }
+
+    function trackChangedWhileHidden(): void {
+        const id = root.trackId(root.current)
+        if (id === root.lastToastId)
+            return
+        root.lastToastId = id
+        if (id === null || !root.hidden || !root.overlayToasts)
+            return
+        root.showHiddenToast(root.field("artist"), root.field("title"))
     }
 
     Connections {
@@ -213,8 +427,37 @@ Window {
             root.showSwitchPrompt()
         }
 
+        function onShowPowerMenu() {
+            root.showPowerMenu()
+        }
+
         function onSwitchFailed() {
             root.switchFailed()
+        }
+    }
+
+    Connections {
+        target: root.player
+        ignoreUnknownSignals: true
+
+        function onCurrentChanged() {
+            root.trackChangedWhileHidden()
+        }
+    }
+
+    Connections {
+        target: pages
+
+        function onDepthChanged() {
+            root.syncStack()
+        }
+    }
+
+    Connections {
+        target: router
+
+        function onRouted() {
+            root.touch()
         }
     }
 
@@ -225,19 +468,47 @@ Window {
         when: root.overlay
     }
 
+    Timer {
+        id: saverTimer
+
+        interval: Math.max(1, root.saverSeconds) * 1000
+        repeat: false
+        onTriggered: saver.show()
+    }
+
+    Timer {
+        id: screenOffTimer
+
+        interval: Math.max(1, root.screenOffSeconds) * 1000
+        repeat: false
+        onTriggered: root.requestScreenOff()
+    }
+
     Rectangle {
         id: bg
 
         anchors.fill: parent
-        color: Ui.bg
+        color: root.blackFrame ? Ui.black : Ui.bg
     }
 
     PageStack {
         id: pages
 
         anchors.fill: parent
-        visible: !root.screenshot && !root.hidden
-        dialogFade: switchPrompt.scrim.opacity
+        visible: !root.screenshot && !root.hidden && !root.rootHidden
+        opacity: 1 - saver.progress
+        dialogFade: Math.max(switchPrompt.scrim.opacity, powerMenu.scrim.opacity)
+    }
+
+    Saver {
+        id: saver
+
+        anchors.fill: parent
+        screenOff: root.off
+        title: root.field("title")
+        artist: root.field("artist")
+        album: root.field("album")
+        artPath: root.field("artPath")
     }
 
     PadRouter {
@@ -245,11 +516,12 @@ Window {
 
         anchors.fill: parent
         stack: pages
-        modal: switchPrompt
+        modal: powerMenu.shown ? powerMenu : switchPrompt
+        saver: saver
         pad: typeof Pad === "undefined" ? null : Pad
-        player: typeof Player === "undefined" ? null : Player
+        player: root.player
         screenOff: root.off
-        pocketControls: !root.overlay && (typeof Settings === "undefined" ? false : Settings.pocketControls)
+        pocketControls: root.pocketControls
         onNowPlaying: root.openNowPlaying()
     }
 
@@ -268,16 +540,56 @@ Window {
         }
     }
 
+    PowerMenu {
+        id: powerMenu
+
+        anchors.fill: parent
+        screenOff: root.off
+        onVerb: (word) => {
+            if (root.power !== null && typeof root.power.runVerb === "function")
+                root.power.runVerb(word)
+            else
+                console.info("casdap: power menu " + word)
+        }
+        onGameMode: root.showSwitchPrompt()
+    }
+
     OverlayLayer {
         id: overlays
 
         anchors.fill: parent
-        visible: !root.screenshot && !root.hidden
+        visible: !root.screenshot && !root.hidden && !root.rootHidden
         power: root.power
         bluez: root.screenshot ? null : root.bluez
         player: root.player
         screenOff: root.off
         topScreen: root.topScreen
+    }
+
+    Window {
+        id: toastWindow
+
+        x: 0
+        y: 0
+        width: root.width
+        height: Ui.px(Ui.toastHeight)
+        flags: Qt.FramelessWindowHint
+        transientParent: null
+        color: Ui.black
+        visible: root.toastShown && !root.screenshot
+
+        Toast {
+            id: hiddenToast
+
+            x: 0
+            y: 0
+            width: toastWindow.width
+            screenOff: false
+            onPhaseChanged: {
+                if (hiddenToast.phase === "hidden" && root.toastShown)
+                    root.endHiddenToast()
+            }
+        }
     }
 
     Component {
@@ -286,6 +598,7 @@ Window {
         Home {
             objectName: "home"
             animated: !root.hidden
+            overlay: root.overlay
             bluez: root.bluez
             historyModel: root.historyRecent
             newModel: root.historyNew
@@ -296,6 +609,7 @@ Window {
             onPlayRequested: (entry) => root.playEntry(entry)
             onPinRequested: (entry, pin) => root.setPinned(entry.kind === undefined ? "" : String(entry.kind), Number(entry.id), pin)
             onShuffleAll: console.info("casdap: shuffle all")
+            onHideRequested: root.hideOverlay()
         }
     }
 
@@ -305,6 +619,7 @@ Window {
         Bluetooth {
             objectName: "bluetooth"
             animated: !root.hidden
+            overlay: root.overlay
             bluez: root.bluez
             screenOff: root.off
             onOpenNowPlaying: root.openNowPlaying()
@@ -395,10 +710,13 @@ Window {
             objectName: "settings"
             animated: !root.hidden
             screenOff: root.off
+            overlay: root.overlay
             settings: root.settings
             power: root.power
             player: root.player
             audioInfo: root.audioInfo
+            outputControl: root.outputControl
+            bridge: root.bridge
             onPairPhone: root.openPairing()
         }
     }
@@ -443,6 +761,9 @@ Window {
             : root.shotScreen === "quickplay" ? quickplayShotComponent
             : root.shotScreen === "bluetooth" ? bluetoothShotComponent
             : root.shotScreen === "prompt" ? promptShotComponent
+            : root.shotScreen === "power" ? powerShotComponent
+            : root.shotScreen === "saver" ? saverShotComponent
+            : root.shotScreen === "saver-dim" ? saverDimShotComponent
             : root.shotScreen === "hub" ? hubShotComponent
             : root.shotScreen === "nowplaying" ? nowPlayingShotComponent
             : root.shotScreen === "queue" ? queueShotComponent
@@ -457,7 +778,26 @@ Window {
 
     Component {
         id: settingsShotComponent
-        SettingsShot {}
+        SettingsShot {
+            overlay: root.shotOverlay
+        }
+    }
+
+    Component {
+        id: powerShotComponent
+        PowerShot {}
+    }
+
+    Component {
+        id: saverShotComponent
+        SaverShot {}
+    }
+
+    Component {
+        id: saverDimShotComponent
+        SaverShot {
+            dim: true
+        }
     }
 
     Component {
@@ -548,7 +888,9 @@ Window {
 
     Component {
         id: homeShotComponent
-        HomeShot {}
+        HomeShot {
+            overlay: root.shotOverlay
+        }
     }
 
     Component {

@@ -58,6 +58,7 @@ Page {
     signal sheetAction(string action, string kind, int id)
 
     list: trackList
+    pageId: page.albumId
 
     function callLibrary(method: string, arg: var): var {
         if (page.library === null || typeof page.library[method] !== "function")
@@ -325,7 +326,7 @@ Page {
         text: page.artist
         color: Ui.white(Ui.npArtist.alpha)
         font: Ui.font(Ui.npArtist)
-        elide: Text.ElideRight
+        clip: true
     }
 
     Text {
@@ -337,7 +338,7 @@ Page {
         text: page.title
         color: Ui.white(Ui.npAlbum.alpha)
         font: Ui.font(Ui.npAlbum)
-        elide: Text.ElideRight
+        clip: true
     }
 
     Tile {

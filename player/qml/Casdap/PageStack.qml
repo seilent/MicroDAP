@@ -183,6 +183,21 @@ Item {
         d.finish()
     }
 
+    function serialize(): var {
+        const out = []
+        for (const holder of root.pages) {
+            const content = holder.content
+            if (content === null || content === undefined)
+                continue
+            const name = String(content.objectName)
+            if (name === "")
+                continue
+            const id = content.pageId === undefined ? -1 : Number(content.pageId)
+            out.push({ name: name, id: id })
+        }
+        return out
+    }
+
     function clear() {
         root.completeAll()
         const holders = root.pages

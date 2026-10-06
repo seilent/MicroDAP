@@ -16,6 +16,7 @@ namespace casdap {
 class OverlayBridge;
 class Player;
 class PowerBridge;
+class SleepInhibitor;
 class State;
 
 class PowerBridgeAdaptor : public QDBusAbstractAdaptor
@@ -67,8 +68,11 @@ public:
     static QString hotkeysInterface();
     static QString notSupportedError();
     static QStringList verbs();
+    static QString powerBin();
     static QStringList commandFor(const QString &verb);
     static QStringList switchCommand();
+    static QStringList wakeCommand();
+    void runScreenOn();
     static int switchTimeoutMs();
     static QString driftFile();
 
@@ -79,6 +83,9 @@ public:
     bool overlayMode() const;
     State *state() const;
     void setState(State *state);
+    void enableSleepWatch();
+    SleepInhibitor *sleep() const;
+    bool waking() const;
 
     bool screenOff() const;
     void setScreenOff(bool off);
@@ -107,12 +114,16 @@ signals:
     void showSwitchPrompt();
     void switchFailed();
     void switchingChanged();
+    void wakeFinished(bool ok);
 
 private slots:
     void onVolumeChanged(double level);
     void onSwitchFinished(int code, QProcess::ExitStatus status);
     void onSwitchError(QProcess::ProcessError error);
     void onSwitchTimeout();
+    void onPrepareForSleep(bool start);
+    void onWakeFinished(int code, QProcess::ExitStatus status);
+    void onWakeError(QProcess::ProcessError error);
 
 private:
     bool rejectWithoutOverlay(const char *member);
@@ -120,6 +131,7 @@ private:
     void startSwitch();
     void failSwitch(const QString &reason);
     void dropSwitchProcess();
+    void dropWakeProcess();
     void notifyPlaybackStatus();
     void notifyOverlayShown();
     void emitPropertiesChanged(const QVariantMap &changed);
@@ -130,7 +142,9 @@ private:
     PowerBridgeAdaptor *m_adaptor;
     OverlayBridge *m_overlay = nullptr;
     State *m_state = nullptr;
+    SleepInhibitor *m_sleep = nullptr;
     QProcess *m_switch = nullptr;
+    QProcess *m_wake = nullptr;
     QTimer m_switchTimer;
     bool m_switching = false;
     bool m_registered = false;

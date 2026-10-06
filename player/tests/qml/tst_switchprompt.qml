@@ -211,9 +211,11 @@ TestCase {
     function test_page_focus_hides_under_dialog() {
         compare(main.pageStack.dialogFade, 0)
         compare(home.dialogFade, 0)
+        compare(home.dialogUp, false)
         fuzzyCompare(home.focusBar.opacity, 1, 1e-6)
         fakePower.showSwitchPrompt()
         prompt.complete()
+        compare(home.dialogUp, true)
         compare(prompt.scrim.opacity, 1)
         compare(main.pageStack.dialogFade, 1)
         compare(home.focusOpacity, 0)
@@ -223,7 +225,9 @@ TestCase {
         verify(home.focusBar.opacity < 1)
         prompt.complete()
         compare(main.pageStack.dialogFade, 0)
+        compare(home.dialogUp, false)
         fuzzyCompare(home.focusBar.opacity, 1, 1e-6)
+        compare(main.powerMenu.shown, false)
     }
 
     function test_switch_failed_toasts() {

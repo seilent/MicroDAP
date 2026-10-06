@@ -4,6 +4,8 @@ import QtQuick
 Item {
     id: root
 
+    property bool overlay: false
+
     Rectangle {
         anchors.fill: parent
         color: Ui.bg
@@ -13,11 +15,13 @@ Item {
         id: sampleSettings
 
         property string output: "speaker"
+        property string btCodec: "auto"
         property var roots: ["/home/armada/Music", "/run/media/armada/SD"]
         property string accent: String(Ui.accent).toUpperCase()
         property real scale: 1.0
         property bool pocketControls: false
         property int saverSeconds: 30
+        property bool overlayToasts: false
         property int screenOffSeconds: 300
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
@@ -39,6 +43,13 @@ Item {
         id: sampleAudio
 
         readonly property string pcmFormat: "44100 S24_LE"
+        readonly property int graphRate: 44100
+    }
+
+    QtObject {
+        id: sampleOutput
+
+        readonly property bool jackPresent: true
     }
 
     SettingsScreen {
@@ -46,10 +57,12 @@ Item {
 
         anchors.fill: parent
         animated: false
+        overlay: root.overlay
         settings: sampleSettings
         power: samplePower
         player: samplePlayer
         audioInfo: sampleAudio
+        outputControl: sampleOutput
         folders: ["/home/armada/Music", "/run/media/armada/SD"]
 
         Component.onCompleted: screen.completeAll()

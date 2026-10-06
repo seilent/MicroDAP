@@ -44,6 +44,7 @@ PressScale {
         anchors.baselineOffset: -Ui.px(Ui.playingDot)
         width: Ui.px(Ui.playingDot)
         height: Ui.px(Ui.playingDot)
+        radius: dot.width / 2
         color: Ui.accent
     }
 
@@ -79,7 +80,7 @@ PressScale {
         text: root.primary
         color: root.primaryColor
         font: Ui.font(root.primaryRole)
-        elide: Text.ElideRight
+        clip: true
 
         Behavior on color {
             enabled: root.animated
@@ -100,7 +101,7 @@ PressScale {
         text: root.secondary
         color: Ui.white(root.secondaryRole.alpha)
         font: Ui.font(root.secondaryRole)
-        elide: Text.ElideRight
+        clip: true
     }
 
     Text {

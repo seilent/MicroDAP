@@ -3,6 +3,7 @@
 #include "Keep.h"
 #include "OverlayBridge.h"
 #include "Player.h"
+#include "SleepInhibitor.h"
 #include "State.h"
 
 #include <QDBusMessage>
@@ -116,6 +117,7 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
 PowerBridge::~PowerBridge()
 {
     dropSwitchProcess();
+    dropWakeProcess();
     if (!m_registered)
         return;
     m_bus.unregisterService(serviceName());
@@ -162,23 +164,33 @@ QStringList PowerBridge::verbs()
     };
 }
 
+QString PowerBridge::powerBin()
+{
+    return qEnvironmentVariable("CASDAP_POWER_BIN", QStringLiteral("/usr/libexec/casdap/casdap-power"));
+}
+
 QStringList PowerBridge::commandFor(const QString &verb)
 {
     if (verb == QLatin1StringView("screen-off"))
-        return {QStringLiteral("casdap-power"), QStringLiteral("screen-off")};
+        return {powerBin(), QStringLiteral("screen-off")};
     if (verb == QLatin1StringView("game-mode"))
         return {QStringLiteral("systemctl"), QStringLiteral("start"),
                 QStringLiteral("casdap-switch-back.service")};
     if (verb == QLatin1StringView("suspend"))
-        return {QStringLiteral("casdap-power"), QStringLiteral("suspend")};
+        return {powerBin(), QStringLiteral("suspend")};
     if (verb == QLatin1StringView("poweroff"))
-        return {QStringLiteral("casdap-power"), QStringLiteral("poweroff")};
+        return {powerBin(), QStringLiteral("poweroff")};
     return {};
 }
 
 QStringList PowerBridge::switchCommand()
 {
     return {QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("casdap-switch-back.service")};
+}
+
+QStringList PowerBridge::wakeCommand()
+{
+    return {powerBin(), QStringLiteral("screen-on")};
 }
 
 int PowerBridge::switchTimeoutMs()
@@ -217,6 +229,11 @@ void PowerBridge::setOverlay(OverlayBridge *overlay)
     m_overlay = overlay;
     if (!m_overlay)
         return;
+    if (m_sleep) {
+        m_sleep->release();
+        m_sleep->deleteLater();
+        m_sleep = nullptr;
+    }
     connect(m_overlay, &OverlayBridge::shownChanged, this, &PowerBridge::notifyOverlayShown);
     connect(m_overlay, &QObject::destroyed, this, [this] { m_overlay = nullptr; });
 }
@@ -295,9 +312,85 @@ bool PowerBridge::switching() const
 QString PowerBridge::programPath(const QString &name) const
 {
     const QString dir = qEnvironmentVariable("CASDAP_VERB_DIR");
-    if (dir.isEmpty())
+    if (dir.isEmpty() || name.contains(QLatin1Char('/')))
         return name;
     return dir + QLatin1Char('/') + name;
+}
+
+void PowerBridge::enableSleepWatch()
+{
+    if (m_sleep || m_overlay)
+        return;
+    m_sleep = new SleepInhibitor(QStringLiteral("save state"), this);
+    connect(m_sleep, &SleepInhibitor::prepareForSleep, this, &PowerBridge::onPrepareForSleep);
+    m_sleep->take();
+}
+
+SleepInhibitor *PowerBridge::sleep() const
+{
+    return m_sleep;
+}
+
+bool PowerBridge::waking() const
+{
+    return m_wake != nullptr;
+}
+
+void PowerBridge::onPrepareForSleep(bool start)
+{
+    if (start) {
+        if (m_player && m_player->status() == Player::Playing)
+            m_player->pause();
+        if (m_state)
+            m_state->save(false);
+        m_sleep->release();
+        return;
+    }
+    runScreenOn();
+    m_sleep->take();
+}
+
+void PowerBridge::runScreenOn()
+{
+    dropWakeProcess();
+    QStringList command = wakeCommand();
+    const QString program = command.takeFirst();
+    qInfo() << "casdap power: screen-on" << program << command;
+    m_wake = new QProcess(this);
+    connect(m_wake, &QProcess::finished, this, &PowerBridge::onWakeFinished);
+    connect(m_wake, &QProcess::errorOccurred, this, &PowerBridge::onWakeError);
+    m_wake->start(program, command);
+}
+
+void PowerBridge::onWakeFinished(int code, QProcess::ExitStatus status)
+{
+    const bool ok = status == QProcess::NormalExit && code == 0;
+    if (!ok)
+        qWarning() << "casdap power: screen-on after wake exited" << code;
+    dropWakeProcess();
+    emit wakeFinished(ok);
+}
+
+void PowerBridge::onWakeError(QProcess::ProcessError error)
+{
+    if (error != QProcess::FailedToStart)
+        return;
+    qWarning() << "casdap power: cannot start" << wakeCommand().constFirst() << "after wake";
+    dropWakeProcess();
+    emit wakeFinished(false);
+}
+
+void PowerBridge::dropWakeProcess()
+{
+    if (!m_wake)
+        return;
+    m_wake->disconnect(this);
+    if (m_wake->state() != QProcess::NotRunning) {
+        m_wake->kill();
+        m_wake->waitForFinished(1000);
+    }
+    m_wake->deleteLater();
+    m_wake = nullptr;
 }
 
 bool PowerBridge::runVerb(const QString &verb)

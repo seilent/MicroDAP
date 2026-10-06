@@ -84,6 +84,9 @@ const QStringList &screens()
         QStringLiteral("jump"),
         QStringLiteral("playlists"),
         QStringLiteral("history"),
+        QStringLiteral("power"),
+        QStringLiteral("saver"),
+        QStringLiteral("saver-dim"),
     };
     return names;
 }
@@ -251,6 +254,7 @@ int screenshot(const ScreenshotOptions &options)
         {QStringLiteral("shotScreen"), options.screen},
         {QStringLiteral("shotAngle"), options.angle},
         {QStringLiteral("shotPivot"), pivot},
+        {QStringLiteral("shotOverlay"), options.overlay},
         {QStringLiteral("shotWidth"), width},
         {QStringLiteral("shotHeight"), height},
     });

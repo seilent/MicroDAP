@@ -14,6 +14,7 @@ struct ScreenshotOptions
     QString state;
     QString library;
     QString pivot;
+    bool overlay = false;
 };
 
 int screenshot(const ScreenshotOptions &options);

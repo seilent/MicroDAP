@@ -5,6 +5,7 @@ Item {
     id: root
 
     property bool quickplay: false
+    property bool overlay: false
 
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var contextRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
@@ -56,6 +57,7 @@ Item {
 
         anchors.fill: parent
         animated: false
+        overlay: root.overlay
         bluez: root.contextBluez
         historyModel: root.contextRecent !== null ? root.contextRecent : sampleHistory
         newModel: root.contextNew !== null ? root.contextNew : sampleNew

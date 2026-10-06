@@ -8,11 +8,13 @@ Item {
     property QtObject pad: null
     property QtObject player: null
     property Item modal: null
+    property Item saver: null
     property bool screenOff: false
     property bool pocketControls: false
     property bool keyboard: true
     readonly property bool locked: router.stack !== null && router.stack.inputLocked
     readonly property bool modalUp: router.modal !== null && router.modal.shown === true
+    readonly property bool saverUp: router.saver !== null && router.saver.shown === true
     readonly property var keyMap: ({
         [Qt.Key_Up]: "up",
         [Qt.Key_Down]: "down",
@@ -78,6 +80,11 @@ Item {
             router.dropped(name, repeat)
             return false
         }
+        if (router.saverUp) {
+            router.saver.hide()
+            router.routed(name, repeat, true)
+            return true
+        }
         if (router.modalUp) {
             const taken = router.modal.handleAction(name, repeat)
             router.routed(name, repeat, taken)
@@ -103,7 +110,7 @@ Item {
     }
 
     function press(name: string) {
-        if (name === "" || router.screenOff || router.locked || router.modalUp)
+        if (name === "" || router.screenOff || router.locked || router.modalUp || router.saverUp)
             return
         const target = router.page()
         if (target !== null && typeof target.press === "function")

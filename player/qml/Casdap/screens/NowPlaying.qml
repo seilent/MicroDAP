@@ -81,9 +81,7 @@ Page {
     readonly property real textX: Ui.px(Ui.landscape ? Ui.npColumnRight : Ui.edge)
     readonly property real artistBaseline: Ui.px(Ui.landscape ? Ui.npArtistBaselineLandscape : Ui.npTextTop)
     readonly property real albumBaseline: Ui.px(Ui.landscape ? Ui.npAlbumBaselineLandscape : Ui.npAlbumBaseline)
-    readonly property real fromBaseline: Ui.px(Ui.landscape
-        ? Ui.npArtistBaselineLandscape - (Ui.npTextTop - Ui.npFromBaseline)
-        : Ui.npFromBaseline)
+    readonly property real fromBaseline: Ui.px(Ui.landscape ? Ui.npFromBaselineLandscape : Ui.npFromBaseline)
     readonly property real titleBaseline: Ui.px(Ui.landscape ? Ui.npTitleBaselineLandscape : Ui.npTitleY)
     readonly property real nextBaseline: Ui.px(Ui.landscape ? Ui.npNextBaselineLandscape : Ui.npTitleY + Ui.npNextPitch)
     readonly property real progressY: Ui.px(Ui.landscape

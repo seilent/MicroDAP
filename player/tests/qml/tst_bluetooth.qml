@@ -296,12 +296,16 @@ TestCase {
         compare(page.pairingRing.arcSweep, 0)
         compare(page.hintText.text, "press a to make this device discoverable")
         compare(page.hintText.font.pixelSize, Ui.fontPx(11))
+        compare(page.hintText.font.styleName, "Light")
         compare(page.hintText.font.capitalization, Font.AllUppercase)
+        fuzzyCompare(page.hintText.color.a, 0.6, 1 / 255)
         compare(page.hintText.horizontalAlignment, Text.AlignHCenter)
         compare(page.hintText.lineHeight, Ui.px(11))
         fuzzyCompare(page.hintText.y + page.hintText.baselineOffset, Ui.px(tc.contentTop + 90 + 32 + 16), 0.5)
         fuzzyCompare(page.hintText.x, Ui.px(20), 0.01)
         compare(page.hintText.width, Ui.px(tc.canvasW - 40))
+        compare(page.dapModeText.visible, false)
+        compare(page.overlay, false)
     }
 
     function test_a_starts_pairing() {

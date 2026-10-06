@@ -405,7 +405,7 @@ Item {
                                 width: parent.width - 2 * qp.padPx
                                 wrapMode: Text.WordWrap
                                 maximumLineCount: 3
-                                elide: Text.ElideRight
+                                clip: true
                                 text: qp.phoneName
                                 color: Ui.white(phone.focused ? Ui.listPlaylist.alpha : Ui.listPlaylist.alphaDim)
                                 font: Ui.font(Ui.listPlaylist)

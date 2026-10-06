@@ -7,6 +7,7 @@ Page {
     property QtObject bluez: null
     property bool animated: true
     property bool screenOff: false
+    property bool overlay: false
     property int pivotIndex: 0
     property int shownPivot: 0
     property int pairingTimeout: 120
@@ -26,6 +27,7 @@ Page {
     readonly property string trackArtist: page.bluez !== null && page.bluez.artist !== undefined ? page.bluez.artist : ""
     readonly property string stateLine: page.transportActive ? "audio active" : page.connected ? "connected" : "disconnected"
     readonly property string instructions: page.pairing ? "pair from your phone, b to stop" : "press a to make this device discoverable"
+    readonly property string pairingTitle: page.overlay ? "pair in dap mode" : "discoverable"
     readonly property real arcSweep: page.pairing && page.pairingTimeout > 0
         ? 360 * Math.max(0, Math.min(1, page.pairingRemaining / page.pairingTimeout))
         : 0
@@ -50,6 +52,7 @@ Page {
     property alias transportRow: transportRow
     property alias focusBar: focusBar
     property alias discoverableText: discoverableText
+    property alias dapModeText: dapModeText
     property alias pairingRing: pairingRing
     property alias pulseHolder: pulseHolder
     property alias hintText: hintText
@@ -136,7 +139,7 @@ Page {
             if (repeat)
                 return true
             if (page.pivotIndex === 1) {
-                if (!page.pairing)
+                if (!page.pairing && !page.overlay)
                     page.call("startPairing", page.pairingTimeout)
                 return true
             }
@@ -222,7 +225,7 @@ Page {
             text: page.deviceName
             color: Ui.white(Ui.npArtist.alpha)
             font: Ui.font(Ui.npArtist)
-            elide: Text.ElideRight
+            clip: true
         }
 
         Text {
@@ -285,9 +288,21 @@ Page {
 
             x: Ui.px(Ui.hubEdge)
             y: Ui.px(page.nameBaseline) - discoverableText.baselineOffset
+            visible: !page.overlay
             text: "discoverable"
             color: Ui.white(Ui.npArtist.alpha)
             font: Ui.font(Ui.npArtist)
+        }
+
+        Text {
+            id: dapModeText
+
+            x: Ui.px(Ui.hubEdge)
+            y: Ui.px(page.nameBaseline) - dapModeText.baselineOffset
+            visible: page.overlay
+            text: "pair in dap mode"
+            color: Ui.white(Ui.listCount.alpha)
+            font: Ui.font(Ui.listCount)
         }
 
         Item {
@@ -297,6 +312,7 @@ Page {
             y: Ui.px(page.ringCenterY) - pulseHolder.height / 2
             width: pairingRing.width
             height: pairingRing.height
+            visible: !page.overlay
             transformOrigin: Item.Center
 
             Ring {
@@ -317,13 +333,14 @@ Page {
             x: Ui.px(Ui.hubEdge)
             y: Ui.px(page.hintBaseline) - hintText.baselineOffset
             width: page.width - 2 * Ui.px(Ui.hubEdge)
+            visible: !page.overlay
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             lineHeight: Ui.px(Ui.qpHintPitch)
             lineHeightMode: Text.FixedHeight
             text: page.instructions
-            color: Ui.white(Ui.quickplayHint.alpha)
-            font: Ui.font(Ui.quickplayHint)
+            color: Ui.white(Ui.listCount.alpha)
+            font: Ui.font(Ui.listCount)
         }
     }
 

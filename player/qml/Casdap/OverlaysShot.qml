@@ -10,6 +10,9 @@ Item {
     readonly property real lowerHeight: root.height - root.lowerTop
     readonly property real splitX: Math.round(root.width * 0.6)
     readonly property real dialogHeight: Math.round(root.lowerHeight * 0.6)
+    readonly property real volumeW: Math.max(root.splitX, Ui.px(Ui.minCanvasW))
+    readonly property real volumeH: Math.max(root.lowerHeight, Ui.px(Ui.minCanvasH))
+    property alias volumeBox: volumeBox
 
     Rectangle {
         anchors.fill: parent
@@ -60,10 +63,12 @@ Item {
     }
 
     Item {
+        id: volumeBox
+
         x: 0
         y: root.lowerTop
-        width: root.splitX
-        height: root.lowerHeight
+        width: root.volumeW
+        height: root.volumeH
         clip: true
 
         VolumeOverlay {

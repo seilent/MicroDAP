@@ -61,6 +61,7 @@ casdap_test_env(pad)
 set_property(TEST pad APPEND PROPERTY ENVIRONMENT "SDL_JOYSTICK_HIDAPI=0")
 
 qt_add_executable(tst_power core/tst_power.cpp)
+target_compile_definitions(tst_power PRIVATE CASDAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py")
 target_link_libraries(tst_power PRIVATE casdapcore Qt6::DBus Qt6::Test)
 if(DBUS_RUN_SESSION)
     add_test(NAME power COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_power>)
@@ -74,6 +75,16 @@ qt_add_executable(tst_audioinfo core/tst_audioinfo.cpp)
 target_link_libraries(tst_audioinfo PRIVATE casdapcore Qt6::Test)
 add_test(NAME audioinfo COMMAND tst_audioinfo)
 casdap_test_env(audioinfo)
+
+qt_add_executable(tst_output core/tst_output.cpp)
+target_link_libraries(tst_output PRIVATE casdapcore Qt6::Test)
+add_test(NAME output COMMAND tst_output)
+casdap_test_env(output)
+
+qt_add_executable(tst_codec core/tst_codec.cpp)
+target_link_libraries(tst_codec PRIVATE casdapcore Qt6::Test)
+add_test(NAME codec COMMAND tst_codec)
+casdap_test_env(codec)
 
 qt_add_executable(tst_bluez core/tst_bluez.cpp)
 target_compile_definitions(tst_bluez PRIVATE CASDAP_FIXTURE_MUSIC="${fixtures}")
@@ -103,7 +114,10 @@ endif()
 casdap_test_env(dbuspad)
 
 qt_add_executable(tst_overlay core/tst_overlay.cpp)
-target_compile_definitions(tst_overlay PRIVATE CASDAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py")
+target_compile_definitions(tst_overlay PRIVATE
+    CASDAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py"
+    CASDAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py"
+)
 target_link_libraries(tst_overlay PRIVATE casdapcore casdapuiplugin Qt6::DBus Qt6::Gui Qt6::Quick Qt6::Test)
 if(DBUS_RUN_SESSION)
     add_test(NAME overlay COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_overlay>)
@@ -299,7 +313,7 @@ add_test(NAME screenshot-queue-landscape
 casdap_test_env(screenshot-queue-landscape)
 set_property(TEST screenshot-queue-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 
-foreach(screen IN ITEMS artist album settings playlists history)
+foreach(screen IN ITEMS artist album settings playlists history power saver saver-dim)
     add_test(NAME screenshot-${screen}-portrait
         COMMAND casdap-player --screenshot ${screen} --size 640x960 --out ${shots}/${screen}-640x960.png
     )
@@ -311,6 +325,20 @@ foreach(screen IN ITEMS artist album settings playlists history)
     )
     casdap_test_env(screenshot-${screen}-landscape)
     set_property(TEST screenshot-${screen}-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+endforeach()
+
+foreach(screen IN ITEMS home settings)
+    add_test(NAME screenshot-${screen}-overlay-portrait
+        COMMAND casdap-player --screenshot ${screen} --overlay --size 640x960 --out ${shots}/${screen}-overlay-640x960.png
+    )
+    casdap_test_env(screenshot-${screen}-overlay-portrait)
+    set_property(TEST screenshot-${screen}-overlay-portrait APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+    add_test(NAME screenshot-${screen}-overlay-landscape
+        COMMAND casdap-player --screenshot ${screen} --overlay --size 960x640 --out ${shots}/${screen}-overlay-960x640.png
+    )
+    casdap_test_env(screenshot-${screen}-overlay-landscape)
+    set_property(TEST screenshot-${screen}-overlay-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 endforeach()
 
 add_test(NAME screenshot-jump-portrait

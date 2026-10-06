@@ -1,8 +1,12 @@
 #include "OverlayBridge.h"
 
 #include "DbusPad.h"
+#include "Keep.h"
 #include "Player.h"
+#include "SleepInhibitor.h"
+#include "State.h"
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QtGlobal>
 
@@ -20,6 +24,7 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     : QObject(parent)
     , m_pad(pad)
     , m_player(player)
+    , m_sleep(new SleepInhibitor(QStringLiteral("hide overlay"), this))
 {
     m_fade.setStartValue(0.0);
     m_fade.setEndValue(0.0);
@@ -27,6 +32,8 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
             [this](const QVariant &value) { setOpacity(value.toReal()); });
     connect(&m_fade, &QVariantAnimation::finished, this, &OverlayBridge::onFadeFinished);
     connect(&m_fade, &QVariantAnimation::stateChanged, this, &OverlayBridge::onFadeState);
+    connect(m_sleep, &SleepInhibitor::prepareForSleep, this, &OverlayBridge::onPrepareForSleep);
+    m_sleep->take();
 
     if (m_player)
         m_player->setPositionPollEnabled(false);
@@ -99,6 +106,38 @@ void OverlayBridge::setWindow(QWindow *window, WindowPrepare prepare)
     notifyReady();
 }
 
+QWindow *OverlayBridge::toastWindow() const
+{
+    return m_toast;
+}
+
+void OverlayBridge::setToastWindow(QWindow *window, WindowPrepare prepare)
+{
+    m_toast = window;
+    m_prepareToast = prepare ? std::move(prepare) : WindowPrepare([](QWindow *target) { target->create(); });
+}
+
+State *OverlayBridge::state() const
+{
+    return m_state;
+}
+
+void OverlayBridge::setState(State *state)
+{
+    if (m_state == state)
+        return;
+    if (m_state)
+        disconnect(m_state, nullptr, this, nullptr);
+    m_state = state;
+    if (m_state)
+        connect(m_state, &QObject::destroyed, this, [this] { m_state = nullptr; });
+}
+
+SleepInhibitor *OverlayBridge::sleep() const
+{
+    return m_sleep;
+}
+
 bool OverlayBridge::ready() const
 {
     return m_ready;
@@ -124,9 +163,19 @@ bool OverlayBridge::fading() const
     return m_fading;
 }
 
+bool OverlayBridge::sleeping() const
+{
+    return m_sleeping;
+}
+
 int OverlayBridge::mapCount() const
 {
     return m_mapCount;
+}
+
+int OverlayBridge::toastMapCount() const
+{
+    return m_toastMapCount;
 }
 
 bool OverlayBridge::watchdogActive() const
@@ -170,6 +219,39 @@ void OverlayBridge::toggle()
         show();
 }
 
+void OverlayBridge::closePlayer()
+{
+    qInfo() << "casdap overlay: close player";
+    if (m_pad)
+        m_pad->setShown(false);
+    Keep::clear();
+    releaseToast();
+    if (m_state) {
+        m_state->quit(false);
+        return;
+    }
+    if (QCoreApplication *app = QCoreApplication::instance())
+        app->quit();
+}
+
+bool OverlayBridge::prepareToast()
+{
+    if (!m_toast)
+        return false;
+    if (!m_toast->handle())
+        m_prepareToast(m_toast);
+    ++m_toastMapCount;
+    return m_toast->handle() != nullptr;
+}
+
+void OverlayBridge::releaseToast()
+{
+    if (!m_toast || !m_toast->handle())
+        return;
+    m_toast->setVisible(false);
+    m_toast->destroy();
+}
+
 void OverlayBridge::fadeTo(qreal to, int ms, QEasingCurve::Type curve)
 {
     m_fade.stop();
@@ -189,6 +271,10 @@ void OverlayBridge::onFadeFinished()
     destroyWindow();
     if (m_player)
         m_player->setPositionPollEnabled(false);
+    if (m_state)
+        m_state->save(false);
+    if (m_sleeping)
+        m_sleep->release();
 }
 
 void OverlayBridge::onFadeState()
@@ -198,6 +284,27 @@ void OverlayBridge::onFadeState()
         return;
     m_fading = fading;
     emit fadingChanged();
+}
+
+void OverlayBridge::onPrepareForSleep(bool start)
+{
+    if (start) {
+        setSleeping(true);
+        if (m_shown) {
+            hide();
+            return;
+        }
+        if (m_pad)
+            m_pad->setShown(false);
+        if (m_state)
+            m_state->save(false);
+        m_sleep->release();
+        return;
+    }
+    setSleeping(false);
+    if (m_pad)
+        m_pad->setShown(false);
+    m_sleep->take();
 }
 
 void OverlayBridge::setOpacity(qreal value)
@@ -216,6 +323,14 @@ void OverlayBridge::setMapped(bool mapped)
     if (mapped)
         ++m_mapCount;
     emit mappedChanged();
+}
+
+void OverlayBridge::setSleeping(bool sleeping)
+{
+    if (m_sleeping == sleeping)
+        return;
+    m_sleeping = sleeping;
+    emit sleepingChanged();
 }
 
 void OverlayBridge::mapWindow()

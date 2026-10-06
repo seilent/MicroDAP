@@ -21,6 +21,8 @@ QtObject {
     readonly property real sMax: Math.floor(ui.minU / ui.baseU * 10 + 1e-6) / 10
     readonly property real sMin: 0.8
     readonly property real sStep: 0.1
+    readonly property real minCanvasW: ui.landscape ? 480 : 272
+    readonly property real minCanvasH: ui.landscape ? 260 : 420
 
     readonly property real minTextPx: 12
 
@@ -127,6 +129,7 @@ QtObject {
     readonly property color textFaint: Qt.rgba(1, 1, 1, 0.08)
     readonly property color scrimSheet: Qt.rgba(17 / 255, 17 / 255, 17 / 255, 0.55)
     readonly property color scrimOverlay: Qt.rgba(0, 0, 0, 0.8)
+    readonly property color black: "#000000"
     readonly property real dimAlpha: 0.6
     readonly property var backdropStops: [[0.0, 0.15], [0.55, 0.35], [1.0, 0.75]]
     readonly property var accentOptions: ["#FA2A55", "#F09609", "#1BA1E2", "#339933", "#A200FF"]
@@ -227,6 +230,7 @@ QtObject {
     readonly property real npTextTop: 117
     readonly property real npAlbumBaseline: 141
     readonly property real npFromBaseline: 97
+    readonly property real npFromBaselineLandscape: 39
     readonly property real npArtTop: 155
     readonly property real npArt: ui.landscape
         ? Math.min(168, ui.canvasH - 106)
@@ -263,6 +267,13 @@ QtObject {
     readonly property real statusGap: 8
     readonly property real lockBar: 11
     readonly property real saverArt: 56
+    readonly property real saverBottomMargin: 24
+    readonly property real saverArtY: ui.canvasH - ui.saverBottomMargin - ui.saverArt
+    readonly property real saverTextX: ui.edge + ui.saverArt + ui.tileLGutter
+    readonly property real saverTitleDrop: ui.capHeight * ui.saverTitle.size
+    readonly property real saverArtistPitch: ui.saverArtist.size
+    readonly property real saverAlbumPitch: ui.saverAlbum.size
+    readonly property real saverClockBaseline: ui.edge + ui.capHeight * ui.saverClock.size
     readonly property real overlayRing: 64
     readonly property real overlayGlyph: 20
     readonly property real overlayGlyphOffset: 80

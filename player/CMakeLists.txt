@@ -17,6 +17,8 @@ qt_standard_project_setup(REQUIRES 6.11)
 add_library(casdapcore STATIC
     src/core/BluezModel.cpp
     src/core/BluezModel.h
+    src/core/CodecFragment.cpp
+    src/core/CodecFragment.h
     src/core/DbusPad.cpp
     src/core/DbusPad.h
     src/core/FakeBluezModel.cpp
@@ -25,6 +27,7 @@ add_library(casdapcore STATIC
     src/core/Intercept.h
     src/core/Keep.cpp
     src/core/AudioInfo.cpp
+    src/core/AudioInfo.h
     src/core/Keep.h
     src/core/Library.cpp
     src/core/Library.h
@@ -32,6 +35,8 @@ add_library(casdapcore STATIC
     src/core/Models.h
     src/core/Mpris.cpp
     src/core/Mpris.h
+    src/core/OutputControl.cpp
+    src/core/OutputControl.h
     src/core/OverlayBridge.cpp
     src/core/OverlayBridge.h
     src/core/Pad.cpp
@@ -47,6 +52,8 @@ add_library(casdapcore STATIC
     src/core/Scanner.h
     src/core/Settings.cpp
     src/core/Settings.h
+    src/core/SleepInhibitor.cpp
+    src/core/SleepInhibitor.h
     src/core/State.cpp
     src/core/State.h
     src/core/StatusModel.cpp
@@ -121,9 +128,13 @@ set(casdap_qml
     qml/Casdap/screens/JumpGrid.qml
     qml/Casdap/screens/PlaylistsScreen.qml
     qml/Casdap/screens/HistoryScreen.qml
+    qml/Casdap/screens/Saver.qml
+    qml/Casdap/screens/PowerMenu.qml
     qml/Casdap/OverlayLayer.qml
     qml/Casdap/BluetoothShot.qml
     qml/Casdap/PromptShot.qml
+    qml/Casdap/PowerShot.qml
+    qml/Casdap/SaverShot.qml
     qml/Casdap/HubShot.qml
     qml/Casdap/NowPlayingShot.qml
     qml/Casdap/QueueShot.qml
