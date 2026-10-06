@@ -21,7 +21,9 @@ Page {
 
     readonly property bool live: page.animated && !page.screenOff
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
-    readonly property var outputs: ["auto", "speaker", "headphones"]
+    readonly property bool usbPresent: page.outputControl !== null && page.outputControl.usbPresent === true
+    readonly property bool usbActive: page.outputControl !== null && page.outputControl.activeOutput === "usb"
+    readonly property var outputs: page.usbPresent ? ["auto", "speaker", "headphones", "usb"] : ["auto", "speaker", "headphones"]
     readonly property var codecs: ["auto", "aptx", "aac", "ldac", "sbc"]
     readonly property var hpGains: ["low", "normal", "high"]
     readonly property var hpAmps: ["lohifi", "ulp", "hifi"]
@@ -46,7 +48,10 @@ Page {
     readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
     readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
     readonly property int graphRate: page.audioInfo !== null && page.audioInfo.graphRate !== undefined ? Number(page.audioInfo.graphRate) : 0
-    readonly property string outputValue: page.output === "headphones" && !page.jackPresent ? "no jack" : page.output
+    readonly property string outputValue: page.output === "headphones" && !page.jackPresent ? "no jack"
+        : page.output === "usb" && !page.usbPresent ? "usb (not present)" : page.output
+    readonly property string hpGainValue: page.usbActive ? "built in only" : page.hpGain
+    readonly property string hpAmpValue: page.usbActive ? "built in only" : page.hpAmp
     readonly property string rateValue: page.graphRate > 0 ? "on " + page.graphRate : "on"
     readonly property string gameModeTitle: page.overlay ? "close player" : "game mode"
     readonly property string accent: page.settings !== null && page.settings.accent !== undefined ? String(page.settings.accent) : String(Ui.accent)
@@ -151,8 +156,8 @@ Page {
         const out = []
         out.push(page.label("output"))
         out.push(page.row("output", "output", page.outputValue, false))
-        out.push(page.row("hpGain", "headphone gain", page.hpGain, false))
-        out.push(page.row("hpAmp", "headphone amp", page.hpAmp, false))
+        out.push(page.row("hpGain", "headphone gain", page.hpGainValue, page.usbActive))
+        out.push(page.row("hpAmp", "headphone amp", page.hpAmpValue, page.usbActive))
         out.push(page.row("spkGain", "speaker digital gain", page.spkGainText(page.spkGain), false))
         out.push(page.row("volumeStep", "volume step", page.volumeStep + "%", false))
         out.push(page.row("codec", "bluetooth codec", page.codec, false))
@@ -355,9 +360,13 @@ Page {
             page.set("output", page.cycle(page.outputs, page.output, delta, wrap))
             return true
         case "hpGain":
+            if (page.usbActive)
+                return false
             page.set("hpGain", page.cycle(page.hpGains, page.hpGain, delta, wrap))
             return true
         case "hpAmp":
+            if (page.usbActive)
+                return false
             page.set("hpAmp", page.cycle(page.hpAmps, page.hpAmp, delta, wrap))
             return true
         case "spkGain":
@@ -477,6 +486,11 @@ Page {
             return true
         case "rgb":
             if (!page.rgbSupported)
+                return true
+            return page.step(1, true)
+        case "hpGain":
+        case "hpAmp":
+            if (page.usbActive)
                 return true
             return page.step(1, true)
         default:

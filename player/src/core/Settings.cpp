@@ -137,7 +137,7 @@ QString Settings::defaultPath()
 
 QStringList Settings::outputs()
 {
-    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones")};
+    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")};
 }
 
 QStringList Settings::codecs()

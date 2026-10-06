@@ -9,7 +9,7 @@ namespace casdap {
 
 namespace {
 
-constexpr int jackPollMs = 2000;
+constexpr int pollMs = 2000;
 constexpr int processTimeoutMs = 5000;
 
 QString binary(const char *env, const QString &fallback)
@@ -24,21 +24,21 @@ OutputControl::OutputControl(QObject *parent)
     : QObject(parent)
     , m_output(QStringLiteral("auto"))
 {
-    m_jackTimer.setInterval(jackPollMs);
-    connect(&m_jackTimer, &QTimer::timeout, this, &OutputControl::refreshJack);
+    m_pollTimer.setInterval(pollMs);
+    connect(&m_pollTimer, &QTimer::timeout, this, &OutputControl::refresh);
 }
 
 OutputControl::~OutputControl()
 {
     drop(m_apply);
     drop(m_jack);
-    drop(m_status);
+    drop(m_sinkList);
     drop(m_word);
 }
 
 QStringList OutputControl::outputs()
 {
-    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones")};
+    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")};
 }
 
 QString OutputControl::speakerSink()
@@ -51,13 +51,9 @@ QString OutputControl::headphonesSink()
     return QStringLiteral("alsa_output.platform-sound.HiFi__Headphones__sink");
 }
 
-QString OutputControl::sinkFor(const QString &output)
+QString OutputControl::usbPrefix()
 {
-    if (output == QLatin1StringView("speaker"))
-        return speakerSink();
-    if (output == QLatin1StringView("headphones"))
-        return headphonesSink();
-    return {};
+    return QStringLiteral("alsa_output.usb-");
 }
 
 QString OutputControl::wpctlPath()
@@ -65,9 +61,9 @@ QString OutputControl::wpctlPath()
     return binary("CASDAP_WPCTL_BIN", QStringLiteral("wpctl"));
 }
 
-QString OutputControl::pwMetadataPath()
+QString OutputControl::pactlPath()
 {
-    return binary("CASDAP_PW_METADATA_BIN", QStringLiteral("pw-metadata"));
+    return binary("CASDAP_PACTL_BIN", QStringLiteral("pactl"));
 }
 
 QString OutputControl::amixerPath()
@@ -80,26 +76,27 @@ QString OutputControl::systemctlPath()
     return binary("CASDAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
 }
 
-int OutputControl::sinkId(const QString &status, const QString &name)
+QStringList OutputControl::parseSinks(const QString &text)
 {
-    const QRegularExpression re(QStringLiteral("(\\d+)\\.\\s+") + QRegularExpression::escape(name)
-                                + QStringLiteral("(?=\\s|$)"));
-    const QRegularExpressionMatch match = re.match(status);
-    if (!match.hasMatch())
-        return -1;
-    return match.captured(1).toInt();
+    QStringList names;
+    for (const QString &line : text.split(QLatin1Char('\n'))) {
+        const QStringList fields = line.split(QLatin1Char('\t'));
+        if (fields.size() < 2)
+            continue;
+        const QString name = fields.at(1).trimmed();
+        if (!name.isEmpty())
+            names.append(name);
+    }
+    return names;
 }
 
-QString OutputControl::defaultSink(const QString &status)
+QString OutputControl::usbSinkIn(const QStringList &sinks)
 {
-    const int sinks = status.indexOf(QLatin1StringView("Sinks:"));
-    if (sinks < 0)
-        return {};
-    const int sources = status.indexOf(QLatin1StringView("Sources:"), sinks);
-    const QString block = status.mid(sinks, sources < 0 ? -1 : sources - sinks);
-    static const QRegularExpression re(QStringLiteral("\\*\\s+\\d+\\.\\s+(\\S+)"));
-    const QRegularExpressionMatch match = re.match(block);
-    return match.hasMatch() ? match.captured(1) : QString();
+    for (const QString &name : sinks) {
+        if (name.startsWith(usbPrefix()))
+            return name;
+    }
+    return {};
 }
 
 bool OutputControl::parseJack(const QString &text)
@@ -107,6 +104,17 @@ bool OutputControl::parseJack(const QString &text)
     static const QRegularExpression re(QStringLiteral("name='Headphone Jack'[^\\n]*\\n(?:[^\\n]*\\n)?\\s*:\\s*values=(on|off)\\b"));
     const QRegularExpressionMatch match = re.match(text);
     return match.hasMatch() && match.captured(1) == QLatin1StringView("on");
+}
+
+QString OutputControl::resolve(const QString &output, bool jack, bool usb)
+{
+    if (output == QLatin1StringView("speaker"))
+        return QStringLiteral("speaker");
+    if (output == QLatin1StringView("headphones"))
+        return QStringLiteral("headphones");
+    if (usb)
+        return QStringLiteral("usb");
+    return jack ? QStringLiteral("headphones") : QStringLiteral("speaker");
 }
 
 QString OutputControl::unitFor(const QString &word)
@@ -119,14 +127,24 @@ QString OutputControl::output() const
     return m_output;
 }
 
+QString OutputControl::activeOutput() const
+{
+    return m_activeOutput;
+}
+
 bool OutputControl::jackPresent() const
 {
     return m_jackPresent;
 }
 
-bool OutputControl::headphonesDefault() const
+QString OutputControl::usbSink() const
 {
-    return m_headphonesDefault;
+    return m_usbSink;
+}
+
+bool OutputControl::usbPresent() const
+{
+    return !m_usbSink.isEmpty();
 }
 
 bool OutputControl::busy() const
@@ -145,10 +163,10 @@ void OutputControl::setActive(bool active)
         return;
     m_active = active;
     if (m_active) {
-        refreshJack();
-        m_jackTimer.start();
+        refresh();
+        m_pollTimer.start();
     } else {
-        m_jackTimer.stop();
+        m_pollTimer.stop();
     }
     emit activeChanged();
 }
@@ -179,42 +197,77 @@ void OutputControl::apply(const QString &output)
         emit outputChanged();
     }
     drop(m_apply);
+    drop(m_jack);
+    drop(m_sinkList);
+    m_reading = false;
     m_applying = true;
+    m_everApplied = true;
     updateBusy();
     qInfo() << "casdap output: apply" << output;
+    readBoth([this] { resolveAndSet(); });
+}
 
-    const QString sink = sinkFor(output);
-    if (sink.isEmpty()) {
-        run(m_apply, pwMetadataPath(),
-            {QStringLiteral("-d"), QStringLiteral("0"), QStringLiteral("default.configured.audio.sink")},
-            [this](bool ok, const QByteArray &) { finish(ok); });
+void OutputControl::refresh()
+{
+    if (m_applying || m_reading)
         return;
-    }
-
-    run(m_apply, wpctlPath(), {QStringLiteral("status"), QStringLiteral("--name")},
-        [this, sink](bool ok, const QByteArray &out) {
-        if (!ok) {
-            finish(false);
+    m_reading = true;
+    const bool jack = m_jackPresent;
+    const QString usb = m_usbSink;
+    readBoth([this, jack, usb] {
+        m_reading = false;
+        if (!m_everApplied || (jack == m_jackPresent && usb == m_usbSink))
             return;
-        }
-        const int id = sinkId(QString::fromUtf8(out), sink);
-        if (id < 0) {
-            qWarning() << "casdap output: sink not listed" << sink;
-            finish(false);
-            return;
-        }
-        run(m_apply, wpctlPath(), {QStringLiteral("set-default"), QString::number(id)},
-            [this](bool ok, const QByteArray &) { finish(ok); });
+        qInfo() << "casdap output: edge, jack" << m_jackPresent << "usb" << m_usbSink;
+        apply(m_output);
     });
 }
 
-void OutputControl::refreshJack()
+void OutputControl::readBoth(std::function<void()> done)
 {
-    if (m_jack)
+    readJack([this, done](bool, const QByteArray &) {
+        readSinks([done](bool, const QByteArray &) { done(); });
+    });
+}
+
+void OutputControl::readJack(Handler done)
+{
+    run(m_jack, amixerPath(), {QStringLiteral("-c0"), QStringLiteral("contents")},
+        [this, done](bool ok, const QByteArray &out) {
+        if (ok)
+            setJackPresent(parseJack(QString::fromUtf8(out)));
+        done(ok, out);
+    });
+}
+
+void OutputControl::readSinks(Handler done)
+{
+    run(m_sinkList, pactlPath(), {QStringLiteral("list"), QStringLiteral("sinks"), QStringLiteral("short")},
+        [this, done](bool ok, const QByteArray &out) {
+        if (ok) {
+            m_sinks = parseSinks(QString::fromUtf8(out));
+            setUsbSink(usbSinkIn(m_sinks));
+        }
+        done(ok, out);
+    });
+}
+
+void OutputControl::resolveAndSet()
+{
+    const QString active = resolve(m_output, m_jackPresent, usbPresent());
+    const QString sink = active == QLatin1StringView("usb") ? m_usbSink
+        : active == QLatin1StringView("headphones") ? headphonesSink() : speakerSink();
+    if (!m_sinks.contains(sink)) {
+        qWarning() << "casdap output: sink not listed" << sink;
+        finish(false);
         return;
-    run(m_jack, amixerPath(),
-        {QStringLiteral("-c0"), QStringLiteral("contents")},
-        [this](bool ok, const QByteArray &out) { setJackPresent(ok && parseJack(QString::fromUtf8(out))); });
+    }
+    run(m_apply, wpctlPath(), {QStringLiteral("set-default"), sink},
+        [this, active](bool ok, const QByteArray &) {
+        if (ok)
+            setActiveOutput(active);
+        finish(ok);
+    });
 }
 
 void OutputControl::setHeadphone(const QString &gain, const QString &amp)
@@ -233,7 +286,8 @@ void OutputControl::setHeadphone(const QString &gain, const QString &amp)
         m_hpAmp = a;
         emit hpAmpChanged();
     }
-    refreshDefault();
+    if (!m_applying)
+        applyHeadphone();
 }
 
 void OutputControl::setSpkGain(int step)
@@ -249,22 +303,11 @@ void OutputControl::setSpkGain(int step)
     startWords({QStringLiteral("spk-gain-") + QString::number(step)});
 }
 
-void OutputControl::refreshDefault()
-{
-    run(m_status, wpctlPath(), {QStringLiteral("status"), QStringLiteral("--name")},
-        [this](bool ok, const QByteArray &out) {
-        if (ok)
-            setHeadphonesDefault(defaultSink(QString::fromUtf8(out)) == headphonesSink());
-        if (!m_applying)
-            applyHeadphone();
-    });
-}
-
 void OutputControl::applyHeadphone()
 {
     if (m_hpGain.isEmpty() || m_hpAmp.isEmpty())
         return;
-    if (m_output != QLatin1StringView("headphones") && !m_headphonesDefault) {
+    if (m_activeOutput != QLatin1StringView("headphones")) {
         qInfo() << "casdap output: headphones not active, hp words skipped";
         return;
     }
@@ -335,8 +378,9 @@ void OutputControl::drop(QProcess *&slot)
     slot = nullptr;
     process->disconnect(this);
     if (process->state() != QProcess::NotRunning) {
+        connect(process, &QProcess::finished, process, &QObject::deleteLater);
         process->kill();
-        process->waitForFinished(1000);
+        return;
     }
     process->deleteLater();
 }
@@ -345,10 +389,10 @@ void OutputControl::finish(bool ok)
 {
     m_applying = false;
     updateBusy();
-    qInfo() << "casdap output: applied" << m_output << ok;
+    qInfo() << "casdap output: applied" << m_output << "as" << m_activeOutput << ok;
     emit applied(m_output, ok);
-    refreshJack();
-    refreshDefault();
+    if (ok)
+        applyHeadphone();
 }
 
 void OutputControl::updateBusy()
@@ -362,22 +406,26 @@ void OutputControl::updateBusy()
 
 void OutputControl::setJackPresent(bool present)
 {
-    const bool first = !m_jackRead;
-    m_jackRead = true;
     if (m_jackPresent == present)
         return;
     m_jackPresent = present;
     emit jackPresentChanged();
-    if (present && !first)
-        refreshDefault();
 }
 
-void OutputControl::setHeadphonesDefault(bool headphones)
+void OutputControl::setUsbSink(const QString &sink)
 {
-    if (m_headphonesDefault == headphones)
+    if (m_usbSink == sink)
         return;
-    m_headphonesDefault = headphones;
-    emit headphonesDefaultChanged();
+    m_usbSink = sink;
+    emit usbSinkChanged();
+}
+
+void OutputControl::setActiveOutput(const QString &output)
+{
+    if (m_activeOutput == output)
+        return;
+    m_activeOutput = output;
+    emit activeOutputChanged();
 }
 
 }

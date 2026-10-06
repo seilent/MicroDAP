@@ -55,6 +55,8 @@ Item {
         id: sampleOutput
 
         readonly property bool jackPresent: true
+        readonly property bool usbPresent: false
+        readonly property string activeOutput: "headphones"
     }
 
     QtObject {

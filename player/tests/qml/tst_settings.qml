@@ -103,6 +103,8 @@ TestCase {
         id: fakeOutput
 
         property bool jackPresent: true
+        property bool usbPresent: false
+        property string activeOutput: "headphones"
     }
 
     QtObject {
@@ -183,6 +185,8 @@ TestCase {
         fakeAudio.pcmFormat = "44100 S24_LE"
         fakeAudio.graphRate = 44100
         fakeOutput.jackPresent = true
+        fakeOutput.usbPresent = false
+        fakeOutput.activeOutput = "headphones"
         fakeRgb.supported = true
         fakePower.verbs = []
         fakePower.switches = 0
@@ -342,6 +346,77 @@ TestCase {
         const bare = open({ outputControl: null })
         fakeSettings.output = "headphones"
         compare(tc.rowOf(bare, "output").value, "headphones")
+    }
+
+    function test_output_usb_in_cycle() {
+        const page = open()
+        compare(JSON.stringify(page.outputs), JSON.stringify(["auto", "speaker", "headphones"]))
+        fakeOutput.usbPresent = true
+        compare(JSON.stringify(page.outputs), JSON.stringify(["auto", "speaker", "headphones", "usb"]))
+        router.dispatch("right", false)
+        router.dispatch("right", false)
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.output, "usb")
+        compare(tc.rowOf(page, "output").value, "usb")
+        compare(tc.rowItem(page, 1).valueItem.text, "usb")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.output, "usb")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.output, "auto")
+        fakeSettings.output = "headphones"
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.output, "usb")
+        fakeOutput.usbPresent = false
+        compare(JSON.stringify(page.outputs), JSON.stringify(["auto", "speaker", "headphones"]))
+    }
+
+    function test_output_usb_not_present() {
+        const page = open()
+        fakeSettings.output = "usb"
+        compare(tc.rowOf(page, "output").value, "usb (not present)")
+        compare(tc.rowItem(page, 1).valueItem.text, "usb (not present)")
+        compare(fakeSettings.output, "usb")
+        fakeOutput.usbPresent = true
+        compare(tc.rowOf(page, "output").value, "usb")
+        fakeOutput.usbPresent = false
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.output, "speaker")
+        fakeSettings.output = "usb"
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.output, "auto")
+        const bare = open({ outputControl: null })
+        fakeSettings.output = "usb"
+        compare(tc.rowOf(bare, "output").value, "usb (not present)")
+    }
+
+    function test_headphone_rows_built_in_only() {
+        const page = open()
+        fakeOutput.activeOutput = "usb"
+        compare(tc.rowOf(page, "hpGain").value, "built in only")
+        compare(tc.rowOf(page, "hpGain").readOnly, true)
+        compare(tc.rowOf(page, "hpAmp").value, "built in only")
+        compare(tc.rowOf(page, "hpAmp").readOnly, true)
+        compare(tc.itemOf(page, "hpGain").valueItem.text, "built in only")
+        compare(tc.itemOf(page, "hpGain").valueItem.font.capitalization, Font.AllUppercase)
+        tc.focusKey(page, "hpGain")
+        compare(router.dispatch("right", false), false)
+        compare(router.dispatch("left", false), false)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.hpGain, "normal")
+        tc.focusKey(page, "hpAmp")
+        compare(router.dispatch("right", false), false)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.hpAmp, "lohifi")
+        fakeOutput.activeOutput = "headphones"
+        compare(tc.rowOf(page, "hpGain").value, "normal")
+        compare(tc.rowOf(page, "hpGain").readOnly, false)
+        compare(tc.rowOf(page, "hpAmp").value, "lohifi")
+        tc.focusKey(page, "hpGain")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.hpGain, "high")
+        fakeOutput.activeOutput = "speaker"
+        compare(tc.rowOf(page, "hpGain").value, "high")
+        compare(tc.rowOf(page, "hpGain").readOnly, false)
     }
 
     function test_codec_cycles() {

@@ -719,7 +719,7 @@ void PowerTest::settingsPersist()
         QCOMPARE(settings.path(), path);
         QCOMPARE(settings.output(), QStringLiteral("auto"));
         QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
-        QCOMPARE(Settings::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones")}));
+        QCOMPARE(Settings::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")}));
         QCOMPARE(Settings::codecs(), QStringList({QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"), QStringLiteral("ldac"), QStringLiteral("sbc")}));
         QCOMPARE(settings.roots(), Settings::defaultRoots());
         QCOMPARE(settings.accent(), QStringLiteral("#FA2A55"));
