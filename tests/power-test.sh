@@ -136,6 +136,18 @@ expect_marker off
 expect_no_marker wifi
 [[ "$(cat "${STATE}/marker-at-call")" == 1 ]] || fail "off marker written after SetScreenOff"
 [[ -e "${STATE}/idle-timer" ]] || fail "idle timer not armed"
+[[ "$(cat "${CASDAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${CASDAP_RUNTIME_DIR}/last-ms")'"
+
+begin "screen-off waits for the lock"
+mkdir -p "${CASDAP_RUNTIME_DIR}"
+( flock 9; sleep 1 ) 9>"${CASDAP_RUNTIME_DIR}/lock" &
+sleep 0.2
+run screen-off
+wait
+expect_rc 0
+expect_call "${off_true}"
+expect_call "${arm_timer}"
+expect_marker off
 
 begin "screen-off twice"
 run screen-off
@@ -265,7 +277,7 @@ expect_rc 0
 expect_sequence "${stop_timer}" "${cpu_dap}" "${bl_on}" "${off_false}"
 expect_no_marker off
 [[ -e "${STATE}/idle-timer" ]] && fail "idle timer left armed" || true
-[[ "$(cat "${CASDAP_RUNTIME_DIR}/screen-on-ms")" =~ ^[0-9]{13}$ ]] || fail "screen-on-ms is '$(cat "${CASDAP_RUNTIME_DIR}/screen-on-ms")'"
+[[ "$(cat "${CASDAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${CASDAP_RUNTIME_DIR}/last-ms")'"
 
 begin "screen-on with the wifi marker"
 marker off
@@ -371,11 +383,12 @@ expect_no_call "casdap-priv@rgb"
 begin "toggle with rgb accent"
 printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
 mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo 1000 > "${CASDAP_RUNTIME_DIR}/screen-on-ms"
+echo 1000 > "${CASDAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_call "${rgb_sleep}"
 expect_no_call "${rgb_wake}"
 : > "${STATE}/calls"
+echo 1000 > "${CASDAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_call "${rgb_wake}"
 expect_no_call "${rgb_sleep}"
@@ -383,7 +396,7 @@ expect_no_marker off
 
 begin "toggle to off"
 mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo 1000 > "${CASDAP_RUNTIME_DIR}/screen-on-ms"
+echo 1000 > "${CASDAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_call "${off_true}"
@@ -400,16 +413,25 @@ expect_no_marker off
 
 begin "toggle within the debounce"
 mkdir -p "${CASDAP_RUNTIME_DIR}"
-date +%s%3N > "${CASDAP_RUNTIME_DIR}/screen-on-ms"
+date +%s%3N > "${CASDAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_calls 0
 expect_no_marker off
-expect_log "toggle within 2000 ms of screen on, ignored"
+expect_log "toggle within 2000 ms of the last transition, ignored"
 
-begin "toggle with a corrupt screen-on-ms"
+begin "toggle to on within the debounce"
+marker off
+date +%s%3N > "${CASDAP_RUNTIME_DIR}/last-ms"
+run toggle
+expect_rc 0
+expect_calls 0
+expect_marker off
+expect_log "toggle within 2000 ms of the last transition, ignored"
+
+begin "toggle with a corrupt last-ms"
 mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo bogus > "${CASDAP_RUNTIME_DIR}/screen-on-ms"
+echo bogus > "${CASDAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_marker off
@@ -421,7 +443,27 @@ run toggle
 expect_rc 0
 expect_no_call "${off_true}"
 expect_no_marker off
-expect_log "toggle within 2000 ms of screen on, ignored"
+expect_log "toggle within 2000 ms of the last transition, ignored"
+
+begin "toggle after screen-off within the debounce"
+run screen-off
+: > "${STATE}/calls"
+run toggle
+expect_rc 0
+expect_calls 0
+expect_marker off
+expect_log "toggle within 2000 ms of the last transition, ignored"
+
+begin "toggle during a transition"
+mkdir -p "${CASDAP_RUNTIME_DIR}"
+( flock 9; sleep 3 ) 9>"${CASDAP_RUNTIME_DIR}/lock" &
+sleep 0.2
+run toggle
+expect_rc 0
+expect_calls 0
+expect_no_marker off
+expect_log "toggle during a transition, ignored"
+wait
 
 begin "toggle outside the session" inactive
 run toggle

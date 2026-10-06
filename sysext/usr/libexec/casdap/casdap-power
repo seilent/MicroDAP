@@ -9,10 +9,25 @@ idle_period="${CASDAP_POWER_IDLE_PERIOD:-60}"
 self=/usr/libexec/casdap/casdap-power
 session=gamescope-session-plus@casdap.service
 player=(org.casdap.Player /org/casdap/Player org.casdap.Player)
+lock_held=
 
 log() { logger -t casdap-power -- "$*"; }
 
 now_ms() { date +%s%3N; }
+
+take_lock() {
+    mkdir -p "${runtime}"
+    if [[ -z "${lock_held}" ]]; then
+        exec 9>"${runtime}/lock"
+    fi
+    if [[ "$1" == try ]]; then
+        flock -n 9 || return 1
+    elif ! flock -w 10 9; then
+        log "lock timeout"
+        exit 1
+    fi
+    lock_held=1
+}
 
 run() {
     "$@" || log "failed: $* (rc=$?)"
@@ -59,8 +74,8 @@ arm_idle() {
 
 screen_off() {
     require_session screen-off
+    take_lock blocking
     log "screen off"
-    mkdir -p "${runtime}"
     : > "${runtime}/off"
     set_screen_off true
     run systemctl start casdap-priv@backlight-off.service
@@ -76,13 +91,14 @@ screen_off() {
         fi
     fi
     arm_idle
+    now_ms > "${runtime}/last-ms"
 }
 
 screen_on() {
     local state
     state=$(session_state)
+    take_lock blocking
     log "screen on (session ${state:-unknown})"
-    mkdir -p "${runtime}"
     stop_idle
     if [[ -e "${runtime}/wifi" ]]; then
         run nmcli radio wifi on
@@ -104,24 +120,28 @@ screen_on() {
         set_screen_off false
     fi
     rm -f -- "${runtime}/off"
-    now_ms > "${runtime}/screen-on-ms"
+    now_ms > "${runtime}/last-ms"
 }
 
 toggle() {
     local now last
     require_session toggle
-    if [[ -e "${runtime}/off" ]]; then
-        screen_on
+    if ! take_lock try; then
+        log "toggle during a transition, ignored"
         return 0
     fi
     now=$(now_ms)
-    last=$(cat "${runtime}/screen-on-ms" 2>/dev/null || echo 0)
+    last=$(cat "${runtime}/last-ms" 2>/dev/null || echo 0)
     [[ "${last}" =~ ^[0-9]+$ ]] || last=0
     if (( now - last < debounce_ms )); then
-        log "toggle within ${debounce_ms} ms of screen on, ignored"
+        log "toggle within ${debounce_ms} ms of the last transition, ignored"
         return 0
     fi
-    screen_off
+    if [[ -e "${runtime}/off" ]]; then
+        screen_on
+    else
+        screen_off
+    fi
 }
 
 cpu_apply() {
