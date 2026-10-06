@@ -684,7 +684,7 @@ without the binary it is the `hw_params` rate. Read with `pcmFormat` every 2 s w
 list first (`refresh()`), then resolves `activeOutput` (`usb`, `headphones`, `speaker`) by the priority USB,
 headphones, speaker: `auto` is the USB sink when one is listed, else the headphones sink while the jack is in,
 else the speaker; `speaker` and `headphones` are that sink; `usb` is the USB sink when listed, else as `auto`.
-The resolved sink is set with `wpctl set-default <node name>`; a resolved sink missing from the list fails the
+The resolved sink is set with `pactl set-default-sink <node name>`; a resolved sink missing from the list fails the
 apply. The sink list is `pactl list sinks short` (`CASDAP_PACTL_BIN`), name column: `usbSink` is the first
 name starting with `alsa_output.usb-` (empty when none), `usbPresent` follows it, the built in sinks are
 `alsa_output.platform-sound.HiFi__Speaker__sink` and `HiFi__Headphones__sink`. `jackPresent` reads the

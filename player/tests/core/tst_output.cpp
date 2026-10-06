@@ -72,7 +72,7 @@ QString readFile(const QString &path)
 
 QString setDefault(const QString &sink)
 {
-    return QStringLiteral("wpctl set-default ") + sink + QStringLiteral("\n");
+    return QStringLiteral("pactl set-default-sink ") + sink + QStringLiteral("\n");
 }
 
 }
@@ -118,7 +118,8 @@ void OutputTest::initTestCase()
                             + QStringLiteral("\"\n");
     QVERIFY(writeFile(m_bin + QStringLiteral("/wpctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/pactl"),
-                      QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("cat \"") + m_sinksFile + QStringLiteral("\"\n"),
+                      QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("[ \"$1\" = list ] && cat \"") + m_sinksFile
+                          + QStringLiteral("\"\nexit 0\n"),
                       true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/amixer"),

@@ -262,7 +262,7 @@ void OutputControl::resolveAndSet()
         finish(false);
         return;
     }
-    run(m_apply, wpctlPath(), {QStringLiteral("set-default"), sink},
+    run(m_apply, pactlPath(), {QStringLiteral("set-default-sink"), sink},
         [this, active](bool ok, const QByteArray &) {
         if (ok)
             setActiveOutput(active);
