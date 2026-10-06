@@ -48,6 +48,11 @@ echo "casdap-intercept $*" >> "${STATE}/calls"
 cat "${STATE}/intercept"
 EOF
 
+cat > "${T}/bin/casdap-power" <<'EOF'
+#!/usr/bin/bash
+echo "casdap-power $*" >> "${STATE}/calls"
+EOF
+
 cat > "${T}/bin/pgrep" <<'EOF'
 #!/usr/bin/bash
 case "$*" in
@@ -97,6 +102,7 @@ export CASDAP_HOTKEYD_DEVICE_WAIT_SEC=0
 export CASDAP_HOTKEYD_DEVICE_NAME=casdap-test-node
 export CASDAP_HOTKEYD_VOLUME_NAMES=casdap-test-volup:casdap-test-voldown
 export CASDAP_DEV_INPUT="${T}/nodev" CASDAP_SYS_INPUT="${T}/nosys"
+export CASDAP_RUNTIME_DIR="${T}/power"
 
 failures=0
 case_name=
@@ -139,6 +145,7 @@ toggle="busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.
 prompt="busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt"
 restart="systemctl --user restart casdap-overlay.service"
 intercept="casdap-intercept get"
+screen_on="casdap-power screen-on"
 
 run_case "no device" game 0 0 "press"
 [[ "${rc}" == 0 ]] || fail "exit ${rc} without device"
@@ -248,6 +255,37 @@ expect_calls 2
 run_case "tap in casdap" casdap 0 0 "press;sleep 0.05;release"
 expect_call "${playpause}"
 expect_no_call "${prompt}"
+expect_calls 1
+
+mkdir -p "${CASDAP_RUNTIME_DIR}"
+: > "${CASDAP_RUNTIME_DIR}/off"
+
+run_case "hold in casdap while the screen is off" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${screen_on}"
+expect_no_call "${prompt}"
+expect_no_call "${back}"
+expect_calls 1
+expect_log "screen off, turning it on"
+
+run_case "hold in casdap while the screen is off dry run" casdap 0 0 "press;sleep 0.4;release" 1
+expect_calls 0
+expect_log "would: ${screen_on}"
+
+run_case "tap in casdap while the screen is off" casdap 0 0 "press;sleep 0.05;release"
+expect_call "${playpause}"
+expect_no_call "${screen_on}"
+expect_calls 1
+
+run_case "hold in game while the casdap marker is left" game 0 0 "press;sleep 0.4;release"
+expect_call "${switch}"
+expect_no_call "${screen_on}"
+expect_calls 1
+
+rm -f "${CASDAP_RUNTIME_DIR}/off"
+
+run_case "hold in casdap after the screen came back" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${prompt}"
+expect_no_call "${screen_on}"
 expect_calls 1
 
 run_case "hold in other with plasma" other 0 1 "press;sleep 0.4;release"

@@ -10,6 +10,7 @@ DRY_RUN="${CASDAP_HOTKEYD_DRY_RUN:-0}"
 KEY="${CASDAP_HOTKEYD_KEY:-KEY_F13}"
 DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
 SYS_INPUT="${CASDAP_SYS_INPUT:-/sys/class/input}"
+POWER_RUNTIME="${CASDAP_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/casdap-power}"
 PATH="${PATH}:/usr/libexec/casdap"
 
 log() { logger -t casdap-hotkeyd -- "$*"; }
@@ -162,7 +163,12 @@ on_hold() {
             run systemctl start casdap-switch.service
             ;;
         casdap)
-            show_switch_prompt
+            if [[ -e "${POWER_RUNTIME}/off" ]]; then
+                log "screen off, turning it on"
+                run casdap-power screen-on
+            else
+                show_switch_prompt
+            fi
             ;;
         other)
             if plasma_running; then
