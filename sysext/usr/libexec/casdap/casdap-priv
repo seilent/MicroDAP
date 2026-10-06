@@ -1,7 +1,11 @@
 #!/usr/bin/bash
 set -eu
 
-sysfs="${CASDAP_SYSFS:-/sys}"
+sysfs="${CASDAP_SYSFS_ROOT:-/sys}"
+before="${CASDAP_CPU_BEFORE_FILE:-/run/casdap/cpu-before}"
+cpu="${sysfs}/devices/system/cpu"
+gpu="${sysfs}/class/devfreq/3d00000.gpu"
+failed=0
 
 backlight() {
     local bl
@@ -12,10 +16,86 @@ backlight() {
     return 0
 }
 
-case "${1:-}" in
+put() {
+    if [[ ! -e "$1" ]]; then
+        echo "casdap-priv: $1 missing" >&2
+        failed=1
+        return 0
+    fi
+    if ! echo "$2" > "$1" 2>/dev/null; then
+        echo "casdap-priv: write $2 to $1 failed" >&2
+        failed=1
+    fi
+    return 0
+}
+
+save() {
+    local tmp p
+    if [[ -e "${before}" ]]; then
+        return 0
+    fi
+    mkdir -p "$(dirname "${before}")"
+    tmp="${before}.tmp"
+    : > "${tmp}"
+    for p in "${cpu}"/cpufreq/policy*/scaling_max_freq "${cpu}"/cpu[0-9]*/online "${gpu}/governor" "${gpu}/max_freq"; do
+        [[ -r "${p}" ]] || continue
+        printf '%s %s\n' "${p}" "$(< "${p}")" >> "${tmp}"
+    done
+    mv "${tmp}" "${before}"
+}
+
+cpu_dap() {
+    local n
+    save
+    for n in 1 2 3; do
+        put "${cpu}/cpu${n}/online" 1
+    done
+    put "${cpu}/cpufreq/policy0/scaling_max_freq" 787200
+    for n in 4 5 6 7; do
+        put "${cpu}/cpu${n}/online" 0
+    done
+    put "${gpu}/governor" simple_ondemand
+    put "${gpu}/max_freq" 305000000
+}
+
+cpu_off() {
+    local n
+    save
+    for n in 1 2 3 4 5 6 7; do
+        put "${cpu}/cpu${n}/online" 0
+    done
+    put "${cpu}/cpufreq/policy0/scaling_max_freq" 518400
+}
+
+cpu_restore() {
+    local n path value
+    for n in 1 2 3 4 5 6 7; do
+        put "${cpu}/cpu${n}/online" 1
+    done
+    if [[ ! -e "${before}" ]]; then
+        echo "casdap-priv: ${before} missing, cores online only" >&2
+        return 0
+    fi
+    while read -r path value; do
+        [[ -n "${path}" && "${path}" != */online ]] || continue
+        put "${path}" "${value}"
+    done < "${before}"
+    if (( failed == 0 )); then
+        rm -f -- "${before}"
+    fi
+}
+
+[[ $# -eq 1 ]] || exit 1
+
+case "$1" in
     bt-class-headphones) btmgmt class 4 24 ;;
     bt-class-default)    btmgmt class 0 0 ;;
     backlight-off)       backlight 4 ;;
     backlight-on)        backlight 0 ;;
+    cpu-dap)             cpu_dap ;;
+    cpu-off)             cpu_off ;;
+    cpu-restore)         cpu_restore ;;
     *) exit 1 ;;
 esac
+
+exit "${failed}"
