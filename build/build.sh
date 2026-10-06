@@ -35,7 +35,9 @@ done
 build/fonts.sh build/cache/fonts "${dist}"
 
 if [[ -f player/CMakeLists.txt ]]; then
-    cmake -S player -B build/player -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    export CCACHE_DIR="${PWD}/build/cache/ccache"
+    cmake -S player -B build/player -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
     cmake --build build/player
     DESTDIR="${PWD}/${dist}" cmake --install build/player
 fi

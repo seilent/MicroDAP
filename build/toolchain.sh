@@ -49,7 +49,7 @@ pinned() {
 
 before=$(snapshot)
 
-dnf_install cmake ninja-build meson patch squashfs-tools jq git unzip
+dnf_install cmake ninja-build meson patch squashfs-tools jq git unzip ccache
 
 pinned libstdc++ gcc gcc-c++ cpp libstdc++-devel
 pinned glibc glibc-devel
