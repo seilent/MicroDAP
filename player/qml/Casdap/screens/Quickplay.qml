@@ -26,6 +26,7 @@ Item {
     readonly property real rowPitch: qp.tilePx + qp.gutterPx
     readonly property real gridW: 2 * qp.tilePx + qp.gutterPx
     property alias flick: flick
+    property alias newSection: newSection
     property alias phoneItem: phone
     property alias pinsHeader: pinsHeader
     property alias historyHeader: historyHeader
@@ -251,8 +252,13 @@ Item {
         if (item === null)
             return
         qp.layout()
-        const top = item.mapToItem(content, 0, 0).y
+        let top = item.mapToItem(content, 0, 0).y
         const bottom = top + item.height
+        const p = qp.sectionOf(qp.focusIndex)
+        if (p.local < 2) {
+            const header = p.section === 2 ? newSection : p.section === 1 ? historySection : pinsSection
+            top = qp.pinsCount === 0 && p.section === 1 ? 0 : header.mapToItem(content, 0, 0).y
+        }
         const maxY = Math.max(0, flick.contentHeight - flick.height)
         let y = scrollAnim.running ? scrollAnim.to : flick.contentY
         if (top < y)

@@ -105,7 +105,7 @@ POWER`. Y plays shuffle all; focus is the 2 u bar left of the item with the othe
 forward (T6: the panel scales 0.30 to 1 and moves y 130 to 0 while the menu shrinks to a column on the
 right at 0.6 whole, bar and focused label included); right or B pans back. In landscape both sit side
 by side and the panel without focus is at 0.6 whole. The `casdap` watermark (14 u Light, alpha 0.08) sits in
-the menu column at HOME_TEXT_X on baseline H - EDGE and hides while Quickplay is in front. Quickplay tiles carry
+the menu column at HOME_TEXT_X on baseline H - EDGE and hides while Quickplay is in front. Focus on the first row of a section scrolls the panel to that section's header (to the top when Pins is empty and History holds focus), so the headers stay reachable from the pad. Quickplay tiles carry
 `section` and `kind`: `Pins` lists `Pins` (the phone tile first while a phone is connected, kind `phone`),
 `History` the recent songs (kind `song`), `New` the newest albums (kind `album`). X on a tile opens the
 sheet `pin to quickplay` (`unpin` on a Pins tile), A on it runs `Library.pin` or `unpin` with the tile's kind

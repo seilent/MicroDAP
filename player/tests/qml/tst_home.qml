@@ -409,6 +409,25 @@ TestCase {
         verify(qp.flick.contentY > 0)
     }
 
+    function test_scroll_back_reveals_headers() {
+        fill(history, "History", 20)
+        fill(fresh, "New", 6)
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        for (let i = 0; i < 12; i++)
+            router.dispatch("down", false)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        verify(qp.flick.contentY > 0)
+        const newTop = qp.newSection.mapToItem(qp.flick.contentItem, 0, 0).y
+        verify(qp.flick.contentY <= newTop + 0.5)
+        for (let i = 0; i < 12; i++)
+            router.dispatch("up", false)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        compare(qp.focusIndex, 0)
+        compare(qp.flick.contentY, 0)
+    }
+
     function test_a_navigates() {
         const page = open()
         const names = ["music", "bluetooth", "playlists", "history", "settings"]
