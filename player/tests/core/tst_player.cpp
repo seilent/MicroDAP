@@ -18,6 +18,7 @@
 #include <gst/gst.h>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 
 using namespace casdap;
@@ -132,6 +133,7 @@ private slots:
     void rating();
     void stateRoundTrip();
     void stateHandoff();
+    void eqFilter();
 
 private:
     int historyCount() const;
@@ -611,6 +613,92 @@ void PlayerTest::stateHandoff()
     QCOMPARE(saved(QStringLiteral("status")).toString(), QStringLiteral("paused"));
     QCOMPARE(saved(QStringLiteral("handoff")).toBool(), true);
     QCOMPARE(restored(), Player::Paused);
+}
+
+void PlayerTest::eqFilter()
+{
+    {
+        qputenv("CASDAP_EQ_DISABLE", QByteArrayLiteral("1"));
+        Player player;
+        qunsetenv("CASDAP_EQ_DISABLE");
+        QVERIFY(player.isValid());
+        QVERIFY(!player.audioFilter());
+    }
+
+    Player player;
+    QVERIFY(player.audioFilter());
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp");
+    GstElement *eq = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-eq");
+    QVERIFY(preamp);
+    QVERIFY(eq);
+    QCOMPARE(gst_child_proxy_get_children_count(GST_CHILD_PROXY(eq)), guint(EqProfile::bandCount));
+    GObject *band0 = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), 0);
+    GObject *band1 = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), 1);
+    QVERIFY(band0);
+    QVERIFY(band1);
+
+    double volume = 0.0;
+    double gain = -1.0;
+    g_object_get(preamp, "volume", &volume, nullptr);
+    g_object_get(band0, "gain", &gain, nullptr);
+    QCOMPARE(volume, 1.0);
+    QCOMPARE(gain, 0.0);
+
+    EqProfile profile = EqProfile::flat();
+    profile.preamp = -6.0;
+    profile.bands[0].type = EqBand::LowShelf;
+    profile.bands[0].freq = 105.0;
+    profile.bands[0].freqIndex = -1;
+    profile.bands[0].gain = 4.5;
+    profile.bands[0].q = 0.7;
+    profile.bands[1].enabled = false;
+    profile.bands[1].gain = 3.0;
+    profile.bands[2].type = EqBand::HighShelf;
+    profile.bands[2].freq = 10000.0;
+    profile.bands[2].freqIndex = -1;
+    profile.bands[2].gain = -2.0;
+    profile.bands[2].q = 0.7;
+    for (int i = 3; i < EqProfile::bandCount; ++i)
+        profile.bands[i].enabled = false;
+
+    player.play(m_tracks, 0);
+    QCOMPARE(player.status(), Player::Playing);
+    player.applyEq(profile);
+    QCOMPARE(player.status(), Player::Playing);
+
+    double freq = 0.0;
+    double bandwidth = 0.0;
+    gint type = -1;
+    g_object_get(preamp, "volume", &volume, nullptr);
+    g_object_get(band0, "gain", &gain, "freq", &freq, "bandwidth", &bandwidth, "type", &type, nullptr);
+    QVERIFY(std::abs(volume - std::pow(10.0, -0.3)) < 1e-6);
+    QVERIFY(std::abs(gain - 4.5) < 1e-6);
+    QVERIFY(std::abs(freq - 105.0) < 1e-6);
+    QVERIFY(std::abs(bandwidth - 150.0) < 1e-6);
+    QCOMPARE(type, gint(EqBand::LowShelf));
+    g_object_get(band1, "gain", &gain, nullptr);
+    QCOMPARE(gain, 0.0);
+    GObject *band2 = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), 2);
+    QVERIFY(band2);
+    g_object_get(band2, "gain", &gain, "freq", &freq, "type", &type, nullptr);
+    QVERIFY(std::abs(gain + 2.0) < 1e-6);
+    QVERIFY(std::abs(freq - 10000.0) < 1e-6);
+    QCOMPARE(type, gint(EqBand::HighShelf));
+
+    player.applyEq(EqProfile::off());
+    g_object_get(preamp, "volume", &volume, nullptr);
+    g_object_get(band0, "gain", &gain, nullptr);
+    QCOMPARE(volume, 1.0);
+    QCOMPARE(gain, 0.0);
+    g_object_get(band2, "gain", &gain, nullptr);
+    QCOMPARE(gain, 0.0);
+    player.stop();
+
+    g_object_unref(band0);
+    g_object_unref(band1);
+    g_object_unref(band2);
+    gst_object_unref(eq);
+    gst_object_unref(preamp);
 }
 
 QTEST_GUILESS_MAIN(PlayerTest)

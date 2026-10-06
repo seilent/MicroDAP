@@ -94,6 +94,21 @@ QString keyRgb()
     return QStringLiteral("rgb");
 }
 
+QString keyEqHeadphones()
+{
+    return QStringLiteral("eqHeadphones");
+}
+
+QString keyEqUsb()
+{
+    return QStringLiteral("eqUsb");
+}
+
+QString keyEqSpeaker()
+{
+    return QStringLiteral("eqSpeaker");
+}
+
 double normalizeScale(double scale)
 {
     const double stepped = qRound(scale * 10.0) / 10.0;
@@ -237,6 +252,9 @@ void Settings::load()
     m_volumeStep = volumeSteps().contains(volumeStep) ? volumeStep : 5;
     const QString rgb = m_settings.value(keyRgb()).toString().toLower();
     m_rgb = rgbModes().contains(rgb) ? rgb : QStringLiteral("armada");
+    m_eqHeadphones = normalizeEq(m_settings.value(keyEqHeadphones()).toString());
+    m_eqUsb = normalizeEq(m_settings.value(keyEqUsb()).toString());
+    m_eqSpeaker = normalizeEq(m_settings.value(keyEqSpeaker()).toString());
 }
 
 QString Settings::path() const
@@ -507,6 +525,81 @@ void Settings::setRgb(const QString &mode)
     m_rgb = value;
     store(keyRgb(), m_rgb);
     emit rgbChanged();
+}
+
+QString Settings::normalizeEq(const QString &key)
+{
+    if (key == QLatin1StringView("custom"))
+        return key;
+    if (!key.isEmpty() && QDir::isAbsolutePath(key))
+        return QDir::cleanPath(key);
+    return QStringLiteral("off");
+}
+
+QString Settings::eqHeadphones() const
+{
+    return m_eqHeadphones;
+}
+
+void Settings::setEqHeadphones(const QString &key)
+{
+    const QString value = normalizeEq(key);
+    if (m_eqHeadphones == value)
+        return;
+    m_eqHeadphones = value;
+    store(keyEqHeadphones(), m_eqHeadphones);
+    emit eqHeadphonesChanged();
+}
+
+QString Settings::eqUsb() const
+{
+    return m_eqUsb;
+}
+
+void Settings::setEqUsb(const QString &key)
+{
+    const QString value = normalizeEq(key);
+    if (m_eqUsb == value)
+        return;
+    m_eqUsb = value;
+    store(keyEqUsb(), m_eqUsb);
+    emit eqUsbChanged();
+}
+
+QString Settings::eqSpeaker() const
+{
+    return m_eqSpeaker;
+}
+
+void Settings::setEqSpeaker(const QString &key)
+{
+    const QString value = normalizeEq(key);
+    if (m_eqSpeaker == value)
+        return;
+    m_eqSpeaker = value;
+    store(keyEqSpeaker(), m_eqSpeaker);
+    emit eqSpeakerChanged();
+}
+
+QString Settings::eq(const QString &output) const
+{
+    if (output == QLatin1StringView("headphones"))
+        return m_eqHeadphones;
+    if (output == QLatin1StringView("usb"))
+        return m_eqUsb;
+    if (output == QLatin1StringView("speaker"))
+        return m_eqSpeaker;
+    return QStringLiteral("off");
+}
+
+void Settings::setEq(const QString &output, const QString &key)
+{
+    if (output == QLatin1StringView("headphones"))
+        setEqHeadphones(key);
+    else if (output == QLatin1StringView("usb"))
+        setEqUsb(key);
+    else if (output == QLatin1StringView("speaker"))
+        setEqSpeaker(key);
 }
 
 }

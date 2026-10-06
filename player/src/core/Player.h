@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Eq.h"
 #include "Queue.h"
 
 #include <QList>
@@ -52,6 +53,8 @@ public:
     void setBluez(BluezModel *bluez);
     bool positionPollEnabled() const;
     void setPositionPollEnabled(bool on);
+    GstElement *audioFilter() const;
+    void applyEq(const casdap::EqProfile &profile);
 
     void play(const QList<QueueEntry> &entries, int start = 0);
     Q_INVOKABLE void playTracks(const QVariantList &trackIds, int start = 0);
@@ -92,6 +95,7 @@ private:
 
     static void aboutToFinish(GstElement *element, gpointer data);
 
+    void buildEq();
     void pollBus();
     void pollPosition();
     void handleStreamStart();
@@ -118,6 +122,9 @@ private:
     Queue *m_queue;
     BluezModel *m_bluez = nullptr;
     GstElement *m_playbin = nullptr;
+    GstElement *m_eqFilter = nullptr;
+    GstElement *m_preamp = nullptr;
+    QList<GObject *> m_eqBands;
     GstBus *m_bus = nullptr;
     gulong m_aboutToFinishId = 0;
     QSocketNotifier *m_busNotifier = nullptr;

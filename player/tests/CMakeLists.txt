@@ -87,6 +87,11 @@ target_link_libraries(tst_output PRIVATE casdapcore Qt6::Test)
 add_test(NAME output COMMAND tst_output)
 casdap_test_env(output)
 
+qt_add_executable(tst_eq core/tst_eq.cpp)
+target_link_libraries(tst_eq PRIVATE casdapcore Qt6::Test)
+add_test(NAME eq COMMAND tst_eq)
+casdap_test_env(eq)
+
 qt_add_executable(tst_codec core/tst_codec.cpp)
 target_link_libraries(tst_codec PRIVATE casdapcore Qt6::Test)
 add_test(NAME codec COMMAND tst_codec)
@@ -319,7 +324,7 @@ add_test(NAME screenshot-queue-landscape
 casdap_test_env(screenshot-queue-landscape)
 set_property(TEST screenshot-queue-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 
-foreach(screen IN ITEMS artist album settings playlists history power saver saver-dim)
+foreach(screen IN ITEMS artist album settings playlists history eq power saver saver-dim)
     add_test(NAME screenshot-${screen}-portrait
         COMMAND casdap-player --screenshot ${screen} --size 640x960 --out ${shots}/${screen}-640x960.png
     )

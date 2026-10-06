@@ -1,6 +1,7 @@
 #include "FakeBluezModel.h"
 #include "CodecFragment.h"
 #include "DbusPad.h"
+#include "Eq.h"
 #include "Gamescope.h"
 #include "Intercept.h"
 #include "Keep.h"
@@ -165,12 +166,23 @@ int main(int argc, char *argv[])
         bluez = std::make_unique<casdap::SystemBluezModel>(QDBusConnection::systemBus(),
                                                            QDBusConnection::sessionBus());
     player.setBluez(bluez.get());
+    const bool overlayMode = parser.isSet(overlayOption);
+    std::unique_ptr<casdap::EqControl> eqControl = std::make_unique<casdap::EqControl>(&settings);
+    QObject::connect(eqControl.get(), &casdap::EqControl::profileApplied, &player, &casdap::Player::applyEq);
+    const QString sinkOutput = casdap::EqControl::defaultSinkOutput();
+    eqControl->setActiveOutput(sinkOutput.isEmpty() ? QStringLiteral("speaker") : sinkOutput);
+    QObject::connect(&library, &casdap::Library::scanningChanged, eqControl.get(), [&library, eq = eqControl.get()] {
+        if (!library.scanning())
+            eq->relist();
+    });
+    QObject::connect(&settings, &casdap::Settings::rootsChanged, eqControl.get(), &casdap::EqControl::relist);
+    if (overlayMode)
+        eqControl->startSinkPoll();
     casdap::State state(&player);
     state.installSignalHandlers();
     state.load();
     casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
     casdap::PowerBridge power(&player, QDBusConnection::sessionBus());
-    const bool overlayMode = parser.isSet(overlayOption);
     if (overlayMode && !power.isRegistered()) {
         qWarning() << "casdap overlay: another player owns org.casdap.Player, exiting";
         return 0;
@@ -191,6 +203,7 @@ int main(int argc, char *argv[])
         outputControl->setHeadphone(settings.hpGain(), settings.hpAmp());
         outputControl->setSpkGain(settings.spkGain());
         outputControl->apply(settings.output());
+        eqControl->setOutputControl(outputControl.get());
         QObject::connect(&settings, &casdap::Settings::outputChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->apply(settings.output()); });
         auto applyHeadphone = [&settings, control = outputControl.get()] {
@@ -259,6 +272,8 @@ int main(int argc, char *argv[])
                                              static_cast<QObject *>(codecFragment.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("RgbControl"),
                                              static_cast<QObject *>(rgbControl.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("Eq"),
+                                             static_cast<QObject *>(eqControl.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("Artists"), &artists);
     engine.rootContext()->setContextProperty(QStringLiteral("Albums"), &albums);
     engine.rootContext()->setContextProperty(QStringLiteral("Songs"), &songs);

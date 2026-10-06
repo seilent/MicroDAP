@@ -18,6 +18,9 @@ namespace {
 constexpr int positionIntervalMs = 250;
 constexpr qint64 restartThresholdMs = 3000;
 constexpr guint audioOnlyFlags = 0x2;
+constexpr const char *eqDescription =
+    "audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp "
+    "! equalizer-nbands name=casdap-eq num-bands=10 ! audioconvert";
 
 int remapMoved(int r, int start, int end, int row)
 {
@@ -64,6 +67,8 @@ Player::Player(Library *library, QObject *parent)
             g_object_set(m_playbin, "audio-sink", sink, nullptr);
         }
         g_clear_error(&err);
+        if (qEnvironmentVariableIntValue("CASDAP_EQ_DISABLE") != 1)
+            buildEq();
         m_bus = gst_element_get_bus(m_playbin);
         GPollFD fd;
         gst_bus_get_pollfd(m_bus, &fd);
@@ -98,6 +103,11 @@ Player::~Player()
             g_signal_handler_disconnect(m_playbin, m_aboutToFinishId);
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
+    for (GObject *band : std::as_const(m_eqBands))
+        g_object_unref(band);
+    m_eqBands.clear();
+    if (m_preamp)
+        gst_object_unref(m_preamp);
     if (m_bus) {
         gst_bus_set_flushing(m_bus, TRUE);
         gst_object_unref(m_bus);
@@ -155,6 +165,64 @@ Library *Player::library() const
 bool Player::isValid() const
 {
     return m_playbin != nullptr;
+}
+
+void Player::buildEq()
+{
+    GError *err = nullptr;
+    GstElement *filter = gst_parse_bin_from_description(eqDescription, TRUE, &err);
+    if (!filter || err) {
+        qWarning() << "casdap player: eq filter" << (err ? err->message : "failed");
+        g_clear_error(&err);
+        if (filter)
+            gst_object_unref(gst_object_ref_sink(filter));
+        return;
+    }
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(filter), "casdap-preamp");
+    GstElement *eq = gst_bin_get_by_name(GST_BIN(filter), "casdap-eq");
+    QList<GObject *> bands;
+    if (eq) {
+        for (guint i = 0; i < guint(EqProfile::bandCount); ++i) {
+            if (GObject *band = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), i))
+                bands.append(band);
+        }
+        gst_object_unref(eq);
+    }
+    if (!preamp || bands.size() != EqProfile::bandCount) {
+        qWarning() << "casdap player: eq filter incomplete";
+        for (GObject *band : std::as_const(bands))
+            g_object_unref(band);
+        if (preamp)
+            gst_object_unref(preamp);
+        gst_object_unref(gst_object_ref_sink(filter));
+        return;
+    }
+    g_object_set(m_playbin, "audio-filter", filter, nullptr);
+    m_eqFilter = filter;
+    m_preamp = preamp;
+    m_eqBands = bands;
+    applyEq(EqProfile::off());
+}
+
+GstElement *Player::audioFilter() const
+{
+    return m_eqFilter;
+}
+
+void Player::applyEq(const EqProfile &profile)
+{
+    if (!m_preamp || m_eqBands.size() != EqProfile::bandCount)
+        return;
+    g_object_set(m_preamp, "volume", profile.preampVolume(), nullptr);
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        const EqBand &band = profile.bands[i];
+        g_object_set(m_eqBands.at(i),
+                     "type", static_cast<gint>(band.type),
+                     "freq", band.freq,
+                     "bandwidth", EqProfile::bandwidth(band),
+                     "gain", band.enabled ? band.gain : 0.0,
+                     nullptr);
+    }
 }
 
 BluezModel *Player::bluez() const

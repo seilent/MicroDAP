@@ -29,6 +29,9 @@ class Settings : public QObject
     Q_PROPERTY(int spkGain READ spkGain WRITE setSpkGain NOTIFY spkGainChanged)
     Q_PROPERTY(int volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
     Q_PROPERTY(QString rgb READ rgb WRITE setRgb NOTIFY rgbChanged)
+    Q_PROPERTY(QString eqHeadphones READ eqHeadphones WRITE setEqHeadphones NOTIFY eqHeadphonesChanged)
+    Q_PROPERTY(QString eqUsb READ eqUsb WRITE setEqUsb NOTIFY eqUsbChanged)
+    Q_PROPERTY(QString eqSpeaker READ eqSpeaker WRITE setEqSpeaker NOTIFY eqSpeakerChanged)
     Q_PROPERTY(QString path READ path CONSTANT)
 
 public:
@@ -90,6 +93,16 @@ public:
     void setVolumeStep(int step);
     QString rgb() const;
     void setRgb(const QString &mode);
+    QString eqHeadphones() const;
+    void setEqHeadphones(const QString &key);
+    QString eqUsb() const;
+    void setEqUsb(const QString &key);
+    QString eqSpeaker() const;
+    void setEqSpeaker(const QString &key);
+
+    static QString normalizeEq(const QString &key);
+    Q_INVOKABLE QString eq(const QString &output) const;
+    Q_INVOKABLE void setEq(const QString &output, const QString &key);
 
     Q_INVOKABLE void sync();
 
@@ -111,6 +124,9 @@ signals:
     void spkGainChanged();
     void volumeStepChanged();
     void rgbChanged();
+    void eqHeadphonesChanged();
+    void eqUsbChanged();
+    void eqSpeakerChanged();
 
 private:
     void load();
@@ -136,6 +152,9 @@ private:
     int m_spkGain = 102;
     int m_volumeStep = 5;
     QString m_rgb;
+    QString m_eqHeadphones;
+    QString m_eqUsb;
+    QString m_eqSpeaker;
 };
 
 }

@@ -1,5 +1,6 @@
 #include "Screenshot.h"
 
+#include "Eq.h"
 #include "FakeBluezModel.h"
 #include "Library.h"
 #include "Models.h"
@@ -28,6 +29,13 @@ namespace {
 constexpr int frameTimeoutMs = 5000;
 constexpr int scanTimeoutMs = 60000;
 constexpr int historyRows = 4;
+constexpr const char *sampleEq =
+    "Preamp: -6.5 dB\n"
+    "Filter 1: ON LSC Fc 105 Hz Gain 5.5 dB Q 0.70\n"
+    "Filter 2: ON PK Fc 158 Hz Gain -2.1 dB Q 0.64\n"
+    "Filter 3: ON PK Fc 2482 Hz Gain 3.4 dB Q 2.11\n"
+    "Filter 4: ON PK Fc 5345 Hz Gain -4.2 dB Q 3.07\n"
+    "Filter 5: ON HSC Fc 10000 Hz Gain 1.6 dB Q 0.70\n";
 
 void fail(const QString &message)
 {
@@ -84,6 +92,7 @@ const QStringList &screens()
         QStringLiteral("jump"),
         QStringLiteral("playlists"),
         QStringLiteral("history"),
+        QStringLiteral("eq"),
         QStringLiteral("power"),
         QStringLiteral("saver"),
         QStringLiteral("saver-dim"),
@@ -233,7 +242,12 @@ int screenshot(const ScreenshotOptions &options)
         pins = std::make_unique<PinsModel>(library.get());
     }
 
+    EqControl eq(nullptr);
+    if (const std::optional<EqProfile> sample = EqParser::parse(QString::fromUtf8(sampleEq)))
+        eq.setCustom(QStringLiteral("headphones"), *sample);
+    eq.setActiveOutput(QStringLiteral("headphones"));
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("Eq"), &eq);
     engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"), &bluez);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"),
                                              static_cast<QObject *>(recent.get()));

@@ -21,6 +21,8 @@ add_library(casdapcore STATIC
     src/core/CodecFragment.h
     src/core/DbusPad.cpp
     src/core/DbusPad.h
+    src/core/Eq.cpp
+    src/core/Eq.h
     src/core/FakeBluezModel.cpp
     src/core/FakeBluezModel.h
     src/core/Intercept.cpp
@@ -113,6 +115,7 @@ set(casdap_qml
     qml/Casdap/components/VolumeOverlay.qml
     qml/Casdap/components/JumpLetter.qml
     qml/Casdap/GlyphPaths.js
+    qml/Casdap/EqFormat.js
     qml/Casdap/ComponentsShot.qml
     qml/Casdap/OverlaysShot.qml
     qml/Casdap/VolumeShot.qml
@@ -130,6 +133,7 @@ set(casdap_qml
     qml/Casdap/screens/JumpGrid.qml
     qml/Casdap/screens/PlaylistsScreen.qml
     qml/Casdap/screens/HistoryScreen.qml
+    qml/Casdap/screens/EqScreen.qml
     qml/Casdap/screens/Saver.qml
     qml/Casdap/screens/PowerMenu.qml
     qml/Casdap/OverlayLayer.qml
@@ -144,6 +148,7 @@ set(casdap_qml
     qml/Casdap/SettingsShot.qml
     qml/Casdap/PlaylistsShot.qml
     qml/Casdap/HistoryShot.qml
+    qml/Casdap/EqShot.qml
 )
 foreach(file IN LISTS casdap_qml)
     get_filename_component(alias ${file} NAME)
