@@ -12,7 +12,6 @@ Page {
     property bool screenOff: false
     property int pivotIndex: 0
     property int shownPivot: 0
-    property int col: 0
     property var recentRows: []
     property var newRows: []
     property var sheetEntry: null
@@ -20,20 +19,17 @@ Page {
     readonly property bool live: page.animated && !page.screenOff
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property var pivots: ["recent", "new"]
-    readonly property int cols: Ui.historyCols
-    readonly property real tilePx: Ui.px(Ui.qpTile)
-    readonly property real cellPitch: Ui.qpTile + Ui.qpGutter
     readonly property var panes: [recentPane, newPane]
     readonly property FocusList activeList: page.panes[page.pivotIndex]
     readonly property var currentRows: page.pivotIndex === 0 ? page.recentRows : page.newRows
     readonly property int rowIndex: page.activeList.focusIndex
-    readonly property var focusedRow: page.currentRows[page.rowIndex] === undefined ? null : page.currentRows[page.rowIndex]
-    readonly property var focusedEntry: page.focusedRow !== null && page.focusedRow[page.col] !== undefined ? page.focusedRow[page.col] : null
+    readonly property var focusedEntry: page.currentRows[page.rowIndex] === undefined ? null : page.currentRows[page.rowIndex]
     readonly property bool switching: pivotAnim.running
     property alias header: header
     property alias strip: strip
     property alias recentPane: recentPane
     property alias newPane: newPane
+    property alias focusBar: focusBar
     property alias sheet: sheet
 
     signal play(string kind, int id)
@@ -61,70 +57,43 @@ Page {
                 kind: kind,
                 id: e.id === undefined ? -1 : Number(e.id),
                 title: e.title === undefined || e.title === null ? "" : String(e.title),
-                subtitle: e.subtitle === undefined || e.subtitle === null ? "" : String(e.subtitle),
-                artPath: e.artPath === undefined || e.artPath === null ? "" : String(e.artPath)
+                subtitle: e.subtitle === undefined || e.subtitle === null ? "" : String(e.subtitle)
             })
         }
         return out
     }
 
-    function chunk(cells: var): var {
-        const rows = []
-        for (let i = 0; i < cells.length; i += page.cols)
-            rows.push(cells.slice(i, i + page.cols))
-        return rows
-    }
-
-    function rebuild(pivot: int) {
+    function rebuild(pivot: int): void {
         if (pivot === 0)
-            page.recentRows = page.chunk(page.entries(page.historyModel, "song"))
+            page.recentRows = page.entries(page.historyModel, "song")
         else
-            page.newRows = page.chunk(page.entries(page.newModel, "album"))
+            page.newRows = page.entries(page.newModel, "album")
         const pane = page.panes[pivot]
         pane.forceLayout()
         if (pane.count > 0)
             pane.snapTo(Math.min(pane.focusIndex, pane.count - 1))
-        page.clampCol()
         page.focusIndex = page.activeList.focusIndex
         if (d.ready && pivot === page.shownPivot && page.live && !page.arriving && !page.switching)
             Qt.callLater(page.runRefresh)
     }
 
-    function runRefresh() {
+    function runRefresh(): void {
         if (!page.live)
             return
         page.panes[page.shownPivot].refresh()
-    }
-
-    function clampCol() {
-        if (page.focusedRow === null)
-            return
-        page.col = Math.max(0, Math.min(page.focusedRow.length - 1, page.col))
     }
 
     function moveRow(delta: int): bool {
         const before = page.activeList.focusIndex
         page.activeList.moveFocus(delta)
         page.focusIndex = page.activeList.focusIndex
-        page.clampCol()
         return page.activeList.focusIndex !== before
     }
 
     function pageRow(dir: int): bool {
         const moved = page.activeList.pageFocus(dir)
         page.focusIndex = page.activeList.focusIndex
-        page.clampCol()
         return moved
-    }
-
-    function moveCol(delta: int): bool {
-        if (page.focusedRow === null)
-            return false
-        const target = Math.max(0, Math.min(page.focusedRow.length - 1, page.col + delta))
-        if (target === page.col)
-            return false
-        page.col = target
-        return true
     }
 
     function albumIds(id: int): var {
@@ -136,7 +105,7 @@ Page {
         return ids
     }
 
-    function playEntry(e: var) {
+    function playEntry(e: var): void {
         const ids = e.kind === "song" ? [e.id] : e.kind === "album" ? page.albumIds(e.id) : []
         if (page.player !== null && typeof page.player.playTracks === "function" && ids.length > 0) {
             page.player.playTracks(ids, 0)
@@ -162,7 +131,7 @@ Page {
         return true
     }
 
-    function runSheet(index: int) {
+    function runSheet(index: int): void {
         const e = page.sheetEntry
         if (e === null)
             return
@@ -173,7 +142,7 @@ Page {
             page.sheetAction(action, e.kind, e.id)
     }
 
-    function landPivot() {
+    function landPivot(): void {
         pivotAnim.stop()
         for (const pane of page.panes) {
             pane.x = 0
@@ -193,7 +162,6 @@ Page {
         d.internal = true
         page.pivotIndex = target
         d.internal = false
-        page.clampCol()
         page.focusIndex = page.activeList.focusIndex
         if (!page.live) {
             page.shownPivot = target
@@ -206,7 +174,7 @@ Page {
         return true
     }
 
-    function completeAll() {
+    function completeAll(): void {
         page.landPivot()
         for (const pane of page.panes)
             pane.completeScroll()
@@ -228,10 +196,6 @@ Page {
             return page.moveRow(-1)
         case "down":
             return page.moveRow(1)
-        case "left":
-            return page.moveCol(-1)
-        case "right":
-            return page.moveCol(1)
         case "lt":
             return page.pageRow(-1)
         case "rt":
@@ -256,6 +220,8 @@ Page {
             if (!repeat && page.focusedEntry !== null)
                 page.sheetAction("add to queue", page.focusedEntry.kind, page.focusedEntry.id)
             return true
+        case "back":
+            return true
         case "b":
             if (repeat)
                 return false
@@ -268,7 +234,6 @@ Page {
     onPivotIndexChanged: {
         if (!d.internal)
             page.landPivot()
-        page.clampCol()
         page.focusIndex = page.activeList.focusIndex
     }
 
@@ -279,10 +244,6 @@ Page {
 
     onHistoryModelChanged: page.rebuild(0)
     onNewModelChanged: page.rebuild(1)
-    onColsChanged: {
-        page.rebuild(0)
-        page.rebuild(1)
-    }
 
     onLiveChanged: {
         if (!page.live)
@@ -341,23 +302,19 @@ Page {
         pivot: 1
     }
 
-    component TileRow: Item {
+    component HistoryRow: Item {
         id: row
 
         required property int index
         required property var modelData
         readonly property var pane: row.ListView.view
-        readonly property bool isFocusedRow: page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
-        readonly property int cellCount: cells.count
+        readonly property bool isFocused: page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
+        readonly property Item rowItem: listRow
         property real enter: page.arriving ? 0 : 1
         property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
         property int enterDuration: 0
         property var enterCurve: Motion.strip
-
-        function cellAt(col: int): Item {
-            return cells.itemAt(col)
-        }
 
         width: row.pane.width
         height: row.pane.rowPitch
@@ -401,28 +358,15 @@ Page {
             }
         }
 
-        Repeater {
-            id: cells
+        ListRow {
+            id: listRow
 
-            model: row.modelData
-
-            delegate: Tile {
-                id: cell
-
-                required property int index
-                required property var modelData
-
-                x: Ui.px(Ui.hubEdge + cell.index * page.cellPitch)
-                y: 0
-                size: Ui.qpTile
-                source: cell.modelData.artPath !== "" ? "file://" + cell.modelData.artPath : ""
-                title: cell.modelData.title
-                subtitle: cell.modelData.subtitle
-                captioned: false
-                focused: row.isFocusedRow && page.col === cell.index
-                pressed: cell.focused && page.pressed
-                animated: page.live
-            }
+            width: row.width
+            primary: row.modelData.title
+            secondary: row.modelData.subtitle
+            focused: row.isFocused
+            pressed: row.isFocused && page.pressed
+            animated: page.live
         }
     }
 
@@ -452,7 +396,6 @@ Page {
         y: Ui.px(Ui.contentTop)
         width: page.width
         height: page.height - pane.y
-        rowPitch: Ui.px(Ui.historyRowPitch)
         visible: page.shownPivot === pane.pivot
     }
 
@@ -465,7 +408,7 @@ Page {
 
         pivot: 0
         model: page.recentRows
-        delegate: TileRow {}
+        delegate: HistoryRow {}
     }
 
     Pane {
@@ -473,7 +416,17 @@ Page {
 
         pivot: 1
         model: page.newRows
-        delegate: TileRow {}
+        delegate: HistoryRow {}
+    }
+
+    FocusBar {
+        id: focusBar
+
+        visible: page.shownPivot === page.pivotIndex && page.focusedEntry !== null
+        rowY: page.activeList.y + page.activeList.focusY
+        rowHeight: page.activeList.rowPitch
+        opacity: page.activeList.opacity * page.focusOpacity
+        animated: page.live
     }
 
     CroppedHeader {
