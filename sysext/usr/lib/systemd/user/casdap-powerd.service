@@ -1,0 +1,11 @@
+[Unit]
+Description=CASDAP power key daemon
+PartOf=gamescope-session-plus@casdap.service
+BindsTo=gamescope-session-plus@casdap.service
+After=gamescope-session-plus@casdap.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/systemd-inhibit --what=handle-power-key:handle-suspend-key --who=casdap-powerd --why="casdap owns the power key" --mode=block /usr/libexec/casdap/casdap-powerd
+Restart=always
+RestartSec=1
