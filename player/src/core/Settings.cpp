@@ -69,6 +69,31 @@ QString keyOverlayToasts()
     return QStringLiteral("overlayToasts");
 }
 
+QString keyHpGain()
+{
+    return QStringLiteral("hpGain");
+}
+
+QString keyHpAmp()
+{
+    return QStringLiteral("hpAmp");
+}
+
+QString keySpkGain()
+{
+    return QStringLiteral("spkGain");
+}
+
+QString keyVolumeStep()
+{
+    return QStringLiteral("volumeStep");
+}
+
+QString keyRgb()
+{
+    return QStringLiteral("rgb");
+}
+
 double normalizeScale(double scale)
 {
     const double stepped = qRound(scale * 10.0) / 10.0;
@@ -132,6 +157,31 @@ QStringList Settings::accents()
     };
 }
 
+QStringList Settings::hpGains()
+{
+    return {QStringLiteral("low"), QStringLiteral("normal"), QStringLiteral("high")};
+}
+
+QStringList Settings::hpAmps()
+{
+    return {QStringLiteral("lohifi"), QStringLiteral("ulp"), QStringLiteral("hifi")};
+}
+
+QList<int> Settings::spkGains()
+{
+    return {84, 90, 96, 99, 102, 105, 108};
+}
+
+QList<int> Settings::volumeSteps()
+{
+    return {2, 5, 10};
+}
+
+QStringList Settings::rgbModes()
+{
+    return {QStringLiteral("accent"), QStringLiteral("off"), QStringLiteral("armada")};
+}
+
 QStringList Settings::defaultRoots()
 {
     return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
@@ -176,6 +226,17 @@ void Settings::load()
     const QString codec = m_settings.value(keyBtCodec()).toString().toLower();
     m_btCodec = codecs().contains(codec) ? codec : codecs().first();
     m_overlayToasts = m_settings.value(keyOverlayToasts(), false).toBool();
+
+    const QString hpGain = m_settings.value(keyHpGain()).toString().toLower();
+    m_hpGain = hpGains().contains(hpGain) ? hpGain : QStringLiteral("normal");
+    const QString hpAmp = m_settings.value(keyHpAmp()).toString().toLower();
+    m_hpAmp = hpAmps().contains(hpAmp) ? hpAmp : QStringLiteral("lohifi");
+    const int spkGain = m_settings.value(keySpkGain(), 102).toInt();
+    m_spkGain = spkGains().contains(spkGain) ? spkGain : 102;
+    const int volumeStep = m_settings.value(keyVolumeStep(), 5).toInt();
+    m_volumeStep = volumeSteps().contains(volumeStep) ? volumeStep : 5;
+    const QString rgb = m_settings.value(keyRgb()).toString().toLower();
+    m_rgb = rgbModes().contains(rgb) ? rgb : QStringLiteral("armada");
 }
 
 QString Settings::path() const
@@ -373,6 +434,79 @@ void Settings::setOverlayToasts(bool on)
     m_overlayToasts = on;
     store(keyOverlayToasts(), m_overlayToasts);
     emit overlayToastsChanged();
+}
+
+QString Settings::hpGain() const
+{
+    return m_hpGain;
+}
+
+void Settings::setHpGain(const QString &gain)
+{
+    const QString value = gain.toLower();
+    if (!hpGains().contains(value) || m_hpGain == value)
+        return;
+    m_hpGain = value;
+    store(keyHpGain(), m_hpGain);
+    emit hpGainChanged();
+}
+
+QString Settings::hpAmp() const
+{
+    return m_hpAmp;
+}
+
+void Settings::setHpAmp(const QString &amp)
+{
+    const QString value = amp.toLower();
+    if (!hpAmps().contains(value) || m_hpAmp == value)
+        return;
+    m_hpAmp = value;
+    store(keyHpAmp(), m_hpAmp);
+    emit hpAmpChanged();
+}
+
+int Settings::spkGain() const
+{
+    return m_spkGain;
+}
+
+void Settings::setSpkGain(int step)
+{
+    if (!spkGains().contains(step) || m_spkGain == step)
+        return;
+    m_spkGain = step;
+    store(keySpkGain(), m_spkGain);
+    emit spkGainChanged();
+}
+
+int Settings::volumeStep() const
+{
+    return m_volumeStep;
+}
+
+void Settings::setVolumeStep(int step)
+{
+    if (!volumeSteps().contains(step) || m_volumeStep == step)
+        return;
+    m_volumeStep = step;
+    store(keyVolumeStep(), m_volumeStep);
+    emit volumeStepChanged();
+}
+
+QString Settings::rgb() const
+{
+    return m_rgb;
+}
+
+void Settings::setRgb(const QString &mode)
+{
+    const QString value = mode.toLower();
+    if (!rgbModes().contains(value) || m_rgb == value)
+        return;
+    m_rgb = value;
+    store(keyRgb(), m_rgb);
+    emit rgbChanged();
 }
 
 }

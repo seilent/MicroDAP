@@ -25,6 +25,7 @@ Window {
     property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
     property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
+    property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var stateStore: root.screenshot || typeof PlayerState === "undefined" ? null : PlayerState
     readonly property int playlistCount: root.library !== null && root.library.playlistCount !== undefined ? root.library.playlistCount : -1
 
@@ -717,6 +718,7 @@ Window {
             player: root.player
             audioInfo: root.audioInfo
             outputControl: root.outputControl
+            rgbControl: root.rgbControl
             bridge: root.bridge
             onPairPhone: root.openPairing()
         }

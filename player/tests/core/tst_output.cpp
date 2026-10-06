@@ -29,6 +29,15 @@ const char *statusText =
     " ├─ Sources:\n"
     " │      49. alsa_input.platform-sound.HiFi__Mic__source       [vol: 1.00]\n";
 
+const char *statusHeadphones =
+    "Audio\n"
+    " ├─ Sinks:\n"
+    " │      47. alsa_output.platform-sound.HiFi__Speaker__sink    [vol: 0.20]\n"
+    " │  *   48. alsa_output.platform-sound.HiFi__Headphones__sink [vol: 1.00]\n"
+    " │\n"
+    " ├─ Sources:\n"
+    " │  *   49. alsa_input.platform-sound.HiFi__Mic__source       [vol: 1.00]\n";
+
 const char *jackOn =
     "numid=19,iface=MIXER,name='HPHL Volume'\n"
     "  ; type=INTEGER,access=rw---R--,values=1,min=0,max=24,step=0\n"
@@ -80,11 +89,15 @@ private slots:
     void initTestCase();
     void init();
     void parsesStatus();
+    void parsesDefaultSink();
     void parsesJack();
     void speakerAndHeadphones();
     void autoClearsPin();
     void missingSink();
     void jackPolling();
+    void speakerGainWords();
+    void headphoneWordsGated();
+    void headphoneWordsOnJackEdge();
     void missingBinaries();
 
 private:
@@ -109,6 +122,7 @@ void OutputTest::initTestCase()
                           + QStringLiteral("[ \"$1\" = status ] && cat \"") + m_statusFile + QStringLiteral("\"\nexit 0\n"),
                       true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/pw-metadata"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
+    QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/amixer"),
                       QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("cat \"") + m_jackFile + QStringLiteral("\"\n"),
                       true));
@@ -117,9 +131,11 @@ void OutputTest::initTestCase()
     qputenv("CASDAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
     qputenv("CASDAP_PW_METADATA_BIN", (m_bin + QStringLiteral("/pw-metadata")).toUtf8());
     qputenv("CASDAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
+    qputenv("CASDAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
     QCOMPARE(OutputControl::wpctlPath(), m_bin + QStringLiteral("/wpctl"));
     QCOMPARE(OutputControl::pwMetadataPath(), m_bin + QStringLiteral("/pw-metadata"));
     QCOMPARE(OutputControl::amixerPath(), m_bin + QStringLiteral("/amixer"));
+    QCOMPARE(OutputControl::systemctlPath(), m_bin + QStringLiteral("/systemctl"));
 }
 
 void OutputTest::init()
@@ -140,6 +156,15 @@ void OutputTest::parsesStatus()
     QCOMPARE(OutputControl::sinkFor(QStringLiteral("speaker")), OutputControl::speakerSink());
     QCOMPARE(OutputControl::sinkFor(QStringLiteral("headphones")), OutputControl::headphonesSink());
     QCOMPARE(OutputControl::sinkFor(QStringLiteral("auto")), QString());
+}
+
+void OutputTest::parsesDefaultSink()
+{
+    QCOMPARE(OutputControl::defaultSink(QString::fromUtf8(statusText)), OutputControl::speakerSink());
+    QCOMPARE(OutputControl::defaultSink(QString::fromUtf8(statusHeadphones)), OutputControl::headphonesSink());
+    QCOMPARE(OutputControl::defaultSink(QString()), QString());
+    QCOMPARE(OutputControl::defaultSink(QStringLiteral("Audio\n ├─ Sinks:\n │      47. x [vol: 0.20]\n")), QString());
+    QCOMPARE(OutputControl::unitFor(QStringLiteral("hp-gain-low")), QStringLiteral("casdap-priv@hp-gain-low.service"));
 }
 
 void OutputTest::parsesJack()
@@ -166,8 +191,10 @@ void OutputTest::speakerAndHeadphones()
     QVERIFY(applied.at(0).at(1).toBool());
     QVERIFY(!control.busy());
     QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("amixer -c0 contents\n")), waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QStringLiteral("wpctl status --name\n")), 2, waitMs);
     QString log = readFile(m_log);
     QVERIFY2(log.startsWith(QStringLiteral("wpctl status --name\nwpctl set-default 47\n")), qPrintable(log));
+    QVERIFY(!log.contains(QStringLiteral("systemctl")));
     QTRY_VERIFY_WITH_TIMEOUT(control.jackPresent(), waitMs);
 
     QFile::remove(m_log);
@@ -177,12 +204,14 @@ void OutputTest::speakerAndHeadphones()
     log = readFile(m_log);
     QVERIFY2(log.startsWith(QStringLiteral("wpctl status --name\nwpctl set-default 48\n")), qPrintable(log));
     QCOMPARE(control.output(), QStringLiteral("headphones"));
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QStringLiteral("wpctl status --name\n")), 2, waitMs);
 
     QFile::remove(m_log);
     control.apply(QStringLiteral("headphones"));
     QCOMPARE(outputSpy.count(), 2);
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
     QVERIFY(readFile(m_log).contains(QStringLiteral("wpctl set-default 48\n")));
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QStringLiteral("wpctl status --name\n")), 2, waitMs);
 }
 
 void OutputTest::autoClearsPin()
@@ -194,7 +223,128 @@ void OutputTest::autoClearsPin()
     QVERIFY(applied.at(0).at(1).toBool());
     const QString log = readFile(m_log);
     QVERIFY2(log.startsWith(QStringLiteral("pw-metadata -d 0 default.configured.audio.sink\n")), qPrintable(log));
-    QVERIFY(!log.contains(QStringLiteral("wpctl")));
+    QVERIFY(!log.contains(QStringLiteral("set-default")));
+    QVERIFY(!log.contains(QStringLiteral("systemctl")));
+}
+
+void OutputTest::speakerGainWords()
+{
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    QSignalSpy busy(&control, &OutputControl::busyChanged);
+    QCOMPARE(control.spkGain(), 0);
+    control.setSpkGain(90);
+    QCOMPARE(control.spkGain(), 90);
+    QVERIFY(control.busy());
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("spk-gain-90"));
+    QVERIFY(applied.at(0).at(1).toBool());
+    QVERIFY(!control.busy());
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-priv@spk-gain-90.service\n"));
+
+    QFile::remove(m_log);
+    control.setSpkGain(90);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-priv@spk-gain-90.service\n"));
+
+    QFile::remove(m_log);
+    QTest::ignoreMessage(QtWarningMsg, "casdap output: unknown speaker gain 91");
+    control.setSpkGain(91);
+    QCOMPARE(control.spkGain(), 90);
+    QTest::qWait(200);
+    QVERIFY(!QFile::exists(m_log));
+    QCOMPARE(busy.count(), 4);
+}
+
+void OutputTest::headphoneWordsGated()
+{
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    QSignalSpy defaultSpy(&control, &OutputControl::headphonesDefaultChanged);
+    QVERIFY(!control.headphonesDefault());
+
+    control.setHeadphone(QStringLiteral("low"), QStringLiteral("ulp"));
+    QCOMPARE(control.hpGain(), QStringLiteral("low"));
+    QCOMPARE(control.hpAmp(), QStringLiteral("ulp"));
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("wpctl status --name\n")), waitMs);
+    QTest::qWait(300);
+    QVERIFY(!control.headphonesDefault());
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
+    QCOMPARE(applied.count(), 0);
+
+    QFile::remove(m_log);
+    control.apply(QStringLiteral("headphones"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("headphones"));
+    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("hp-gain-low"));
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("hp-amp-ulp"));
+    QVERIFY(applied.at(1).at(1).toBool());
+    QVERIFY(applied.at(2).at(1).toBool());
+    QString log = readFile(m_log);
+    QVERIFY2(log.contains(QStringLiteral("systemctl start casdap-priv@hp-gain-low.service\nsystemctl start casdap-priv@hp-amp-ulp.service\n")), qPrintable(log));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+
+    QFile::remove(m_log);
+    control.setHeadphone(QStringLiteral("high"), QStringLiteral("hifi"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("hp-gain-high"));
+    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("hp-amp-hifi"));
+    log = readFile(m_log);
+    QVERIFY2(log.startsWith(QStringLiteral("wpctl status --name\nsystemctl start casdap-priv@hp-gain-high.service\nsystemctl start casdap-priv@hp-amp-hifi.service\n")), qPrintable(log));
+
+    QFile::remove(m_log);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
+    QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("auto"));
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 6);
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
+
+    QVERIFY(writeFile(m_statusFile, QString::fromUtf8(statusHeadphones)));
+    QFile::remove(m_log);
+    control.setHeadphone(QStringLiteral("normal"), QStringLiteral("lohifi"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 8, waitMs);
+    QVERIFY(control.headphonesDefault());
+    QCOMPARE(defaultSpy.count(), 1);
+    QCOMPARE(applied.at(6).at(0).toString(), QStringLiteral("hp-gain-normal"));
+    QCOMPARE(applied.at(7).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
+
+    QFile::remove(m_log);
+    QTest::ignoreMessage(QtWarningMsg, "casdap output: unknown headphone setting \"max\" \"lohifi\"");
+    control.setHeadphone(QStringLiteral("max"), QStringLiteral("lohifi"));
+    QCOMPARE(control.hpGain(), QStringLiteral("normal"));
+    QTest::qWait(200);
+    QVERIFY(!QFile::exists(m_log));
+}
+
+void OutputTest::headphoneWordsOnJackEdge()
+{
+    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.setHeadphone(QStringLiteral("low"), QStringLiteral("lohifi"));
+    control.setActive(true);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("amixer -c0 contents\n")), waitMs);
+    QTest::qWait(300);
+    QVERIFY(!control.jackPresent());
+    QCOMPARE(applied.count(), 0);
+
+    QVERIFY(writeFile(m_statusFile, QString::fromUtf8(statusHeadphones)));
+    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
+    QFile::remove(m_log);
+    control.refreshJack();
+    QTRY_VERIFY_WITH_TIMEOUT(control.jackPresent(), waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("hp-gain-low"));
+    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
+    QVERIFY(control.headphonesDefault());
+
+    QFile::remove(m_log);
+    control.refreshJack();
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 2);
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
+    control.setActive(false);
 }
 
 void OutputTest::missingSink()

@@ -15,6 +15,11 @@ Item {
         id: sampleSettings
 
         property string output: "speaker"
+        property string hpGain: "normal"
+        property string hpAmp: "lohifi"
+        property int spkGain: 102
+        property int volumeStep: 5
+        property string rgb: "accent"
         property string btCodec: "auto"
         property var roots: ["/home/armada/Music", "/run/media/armada/SD"]
         property string accent: String(Ui.accent).toUpperCase()
@@ -52,6 +57,12 @@ Item {
         readonly property bool jackPresent: true
     }
 
+    QtObject {
+        id: sampleRgb
+
+        readonly property bool supported: true
+    }
+
     SettingsScreen {
         id: screen
 
@@ -63,6 +74,7 @@ Item {
         player: samplePlayer
         audioInfo: sampleAudio
         outputControl: sampleOutput
+        rgbControl: sampleRgb
         folders: ["/home/armada/Music", "/run/media/armada/SD"]
 
         Component.onCompleted: screen.completeAll()

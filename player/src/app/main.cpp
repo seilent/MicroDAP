@@ -12,6 +12,7 @@
 #include "Pad.h"
 #include "Player.h"
 #include "PowerBridge.h"
+#include "RgbControl.h"
 #include "Screenshot.h"
 #include "Settings.h"
 #include "State.h"
@@ -184,16 +185,32 @@ int main(int argc, char *argv[])
 
     std::unique_ptr<casdap::OutputControl> outputControl;
     std::unique_ptr<casdap::CodecFragment> codecFragment;
+    std::unique_ptr<casdap::RgbControl> rgbControl;
     if (!overlayMode) {
         outputControl = std::make_unique<casdap::OutputControl>();
+        outputControl->setHeadphone(settings.hpGain(), settings.hpAmp());
+        outputControl->setSpkGain(settings.spkGain());
         outputControl->apply(settings.output());
         QObject::connect(&settings, &casdap::Settings::outputChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->apply(settings.output()); });
+        auto applyHeadphone = [&settings, control = outputControl.get()] {
+            control->setHeadphone(settings.hpGain(), settings.hpAmp());
+        };
+        QObject::connect(&settings, &casdap::Settings::hpGainChanged, outputControl.get(), applyHeadphone);
+        QObject::connect(&settings, &casdap::Settings::hpAmpChanged, outputControl.get(), applyHeadphone);
+        QObject::connect(&settings, &casdap::Settings::spkGainChanged, outputControl.get(),
+                         [&settings, control = outputControl.get()] { control->setSpkGain(settings.spkGain()); });
         codecFragment = std::make_unique<casdap::CodecFragment>();
         codecFragment->setBluez(bluez.get());
         codecFragment->apply(settings.btCodec());
         QObject::connect(&settings, &casdap::Settings::btCodecChanged, codecFragment.get(),
                          [&settings, fragment = codecFragment.get()] { fragment->apply(settings.btCodec()); });
+        rgbControl = std::make_unique<casdap::RgbControl>();
+        rgbControl->start(settings.rgb(), settings.accent());
+        QObject::connect(&settings, &casdap::Settings::rgbChanged, rgbControl.get(),
+                         [&settings, rgb = rgbControl.get()] { rgb->setMode(settings.rgb()); });
+        QObject::connect(&settings, &casdap::Settings::accentChanged, rgbControl.get(),
+                         [&settings, rgb = rgbControl.get()] { rgb->setAccent(settings.accent()); });
     }
 
     std::unique_ptr<casdap::PadSource> pad;
@@ -240,6 +257,8 @@ int main(int argc, char *argv[])
                                              static_cast<QObject *>(outputControl.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("CodecFragment"),
                                              static_cast<QObject *>(codecFragment.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("RgbControl"),
+                                             static_cast<QObject *>(rgbControl.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("Artists"), &artists);
     engine.rootContext()->setContextProperty(QStringLiteral("Albums"), &albums);
     engine.rootContext()->setContextProperty(QStringLiteral("Songs"), &songs);

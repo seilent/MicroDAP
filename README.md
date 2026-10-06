@@ -14,8 +14,8 @@ Player and screen off state are not written yet.
 | `sysext/` | Static overlay, copied into `dist/` as is. `/usr` only, nothing under `/etc`. |
 | `patches/<class>/<path>.patch` | Patches against files of the Armada image. `armada/` Armada scripts, `generic/` InputPlumber profile, `pm2/` Pocket MICRO 2 capability map. |
 | `build/` | `base.env` (pinned image), `Containerfile`, `toolchain.sh`, `build.sh`, device scripts for the dev loop. |
-| `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. Playback is `playbin`, audio only, sink from `CASDAP_AUDIO_SINK` (default `pulsesink`), gapless through `about-to-finish`. Queue, index, position, shuffle, repeat, `status` (`playing`, `paused`, `stopped`), `savedAt` (unix seconds), `handoff` and `stack` (the page stack as `name` and `id` pairs from each page's `objectName` and `pageId`, sheets, dialogs, the jump grid and the saver left out) persist in `~/.config/casdap/state.json`, written every 10 s while playing with `handoff` false, on quit and on SIGTERM with `handoff` true, on every overlay hide and on `PrepareForSleep(true)` with `handoff` false, and by the switch prompt before the switch starts (KEEP IN BACKGROUND `handoff` true, CLOSE PLAYER `handoff` false; the session switch ends the player with SIGKILL, so nothing is written at exit); a start resumes playing when `handoff` is true, `status` is `playing` and `savedAt` is under 60 s old, every other file restores the queue paused; both modes restore the saved `stack` at start (an id gone from the library truncates it at that page, no key gives the home). Every play start adds a `history` row. The library (`library.db`, `PRAGMA user_version` 2) reads `ARTISTS` or `ARTIST` tag values as a list, splits a single value on `; `, ` / ` and `, ` unless the whole value equals the album artist (not on ` feat. `), stores each per track in `track_artists(track_id, artist_id, pos)`, keeps `tracks.artist` as the joined display string and `albums.artist` as the album artist; `ArtistsModel` lists individual artists with album and song counts, `Library.artistAlbums(id)` and `artistTracks(id)` resolve through `track_artists`, and a version 1 database gets the table and every track marked for reread on the next scan. Pins live in `pins(id, kind, ref_id, pos)`: `Library.pin(kind, refId)` (kinds `album`, `artist`, `song`, `playlist`; appends at max pos + 1, false on a duplicate or an unknown kind), `unpin(kind, refId)`, `isPinned(kind, refId)`, signal `pinsChanged`; a scan deletes every pin whose ref no longer exists and emits `pinsChanged` when it removed one. `PinsModel` (context property `Pins`) lists the pins in pos order with roles `id` (the ref id), `kind`, `title`, `subtitle`, `artPath`, `section` (`pins`): album title, album artist and art; artist name, `N ALBUMS` and the first album art; song title, artist and its album art; playlist name, `N SONGS`, no art; a pin whose ref is missing is skipped. `Mpris` registers `org.mpris.MediaPlayer2.casdap` at `/org/mpris/MediaPlayer2` on the session bus (root and `Player` interfaces, XML in `player/dbus/`, installed to `share/dbus-1/interfaces`): `Identity` is `CASDAP`, no `DesktopEntry`, track ids are `/org/casdap/track/<id>`, `Volume` reads 1.0 and ignores writes, `OpenUri` plays one `file://` uri, `Seeked` and `PropertiesChanged` are emitted for status, metadata, shuffle and loop. `PowerBridge` registers `org.casdap.Player` at `/org/casdap/Player` (`SetScreenOff(b)`, `ShowPowerMenu()`, `ShowOverlay()`, `HideOverlay()`, `ToggleOverlay()`, `ShowSwitchPrompt()`, `ScreenOff`, `PlaybackStatus`, `OverlayShown`, signal `ScreenOffChanged`; the three overlay methods answer `org.casdap.Error.NotSupported` and `OverlayShown` reads false in DAP mode, `ShowSwitchPrompt` answers `NotSupported` in overlay mode and emits `showSwitchPrompt` to QML in DAP mode), listens to `org.casdap.Hotkeys.VolumeChanged(d)`, reads `/run/casdap/drift` and runs only the verbs `screen-off`, `game-mode`, `suspend`, `poweroff` (`/usr/libexec/casdap/casdap-power <verb>`, `CASDAP_POWER_BIN` overrides the path; `systemctl start casdap-switch-back.service`); settings live in `~/.config/casdap/settings.ini` (`output` `auto`, `speaker`, `headphones`; `btCodec`; `overlayToasts`; `roots`, `accent`, `scale`, `pocketControls`, `saverSeconds`, `screenOffSeconds`, `suspendMinutes`, `wifiOffScreenOff`, written 500 ms after the last change and on quit), battery comes from UPower `DisplayDevice` with a `/sys/class/power_supply` fallback, and local playback pauses while the Bluetooth transport is active. `CASDAP_BLUEZ_FAKE=1` wires `FakeBluezModel` in place of the Bluetooth model. Removing the current queue row starts the next one or stops when none follows. Pad input is SDL3 gamepad events (Guide never mapped), polled every 16 ms while a pad is open and the screen is on, every 1 s while no pad is open, every 50 ms with the screen off only when pocket controls are on, otherwise not at all; d-pad and stick repeat at 300 ms then 80 ms, `CASDAP_PAD_LOG=1` logs each action. `Pad` and `DbusPad` derive from `PadSource` (the `Action` enum, `screenOff`, `pocketControls`, `connected`, `actionName`, `action`, `pressed`, `released`); `main.cpp` hands `Pad` to QML as `Pad`, `DbusPad` under `--overlay`. `DbusPad` reads `org.shadowblip.Input.DBusDevice.InputEvent(s,d)` from InputPlumber on the system bus (`CASDAP_INPUTPLUMBER_BUS` overrides the address): `ui_up/down/left/right`, `ui_accept` A, `ui_back` B, `ui_context` X, `ui_action` Y, `ui_l1` LB, `ui_r1` RB, `ui_l2` LT, `ui_r2` RT, `ui_option` Start, `ui_select` Back, value >= 0.5 press, below release, same 300/80 repeat; `ui_guide`, `ui_quick`, `ui_l3` and unknown names are logged once and dropped; `connected` while a `devices/target/dbus*` path exists; `pocketControls` does nothing. Its `Intercept` writes `InterceptMode` on every `org.shadowblip.Input.CompositeDevice` from `GetManagedObjects` on `/org/shadowblip/InputPlumber`: 3 on `setShown(true)` and on a device added while shown, 0 on `setShown(false)` and in the destructor. |
-| `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`, `busctl`. `bt-test.sh` runs `bt-test.py` under `dbus-run-session` with a fake `org.bluez` (needs `dbus-python` and `python3-gobject`). `keep-test.sh` drives `casdap-keep` through `CASDAP_KEEP_FILE` and `CASDAP_BOOT_ID_FILE`; `power-test.sh` drives `casdap-power` with stubbed `busctl`, `systemctl`, `systemd-run`, `nmcli` and `CASDAP_RUNTIME_DIR`, `CASDAP_SETTINGS_FILE`, `CASDAP_CPU_BEFORE_FILE`; `powerd-test.sh` replays `evtest` lines and profile reads into `casdap-powerd`; `wait-x-test.sh` drives `casdap-wait-x` with a stubbed `xprop` and `CASDAP_X_SOCKET_DIR`; `overlay-unit-test.sh` greps `casdap-overlay.service` and its drop in under `sysext/` and runs `systemd-analyze --user verify` where the image units and the player binary exist (`skip:` otherwise). Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures; `tst_mpris`, `tst_power`, `tst_systembluez`, `tst_dbuspad` and `tst_overlay` run under `dbus-run-session`, `tst_dbuspad` and `tst_overlay` against `fake_inputplumber.py`, `tst_overlay` and `tst_power` against `fake_login1.py` (a fake `org.freedesktop.login1` with `Inhibit` and `PrepareForSleep` on the private bus, `CASDAP_LOGIN1_BUS`), `tst_overlay` also against a unix datagram `NOTIFY_SOCKET`; each `player/tests/qml/tst_*.qml` is its own ctest entry `qml-<name>` running `tst_qml -input <file>`). |
+| `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. Playback is `playbin`, audio only, sink from `CASDAP_AUDIO_SINK` (default `pulsesink`), gapless through `about-to-finish`. Queue, index, position, shuffle, repeat, `status` (`playing`, `paused`, `stopped`), `savedAt` (unix seconds), `handoff` and `stack` (the page stack as `name` and `id` pairs from each page's `objectName` and `pageId`, sheets, dialogs, the jump grid and the saver left out) persist in `~/.config/casdap/state.json`, written every 10 s while playing with `handoff` false, on quit and on SIGTERM with `handoff` true, on every overlay hide and on `PrepareForSleep(true)` with `handoff` false, and by the switch prompt before the switch starts (KEEP IN BACKGROUND `handoff` true, CLOSE PLAYER `handoff` false; the session switch ends the player with SIGKILL, so nothing is written at exit); a start resumes playing when `handoff` is true, `status` is `playing` and `savedAt` is under 60 s old, every other file restores the queue paused; both modes restore the saved `stack` at start (an id gone from the library truncates it at that page, no key gives the home). Every play start adds a `history` row. The library (`library.db`, `PRAGMA user_version` 2) reads `ARTISTS` or `ARTIST` tag values as a list, splits a single value on `; `, ` / ` and `, ` unless the whole value equals the album artist (not on ` feat. `), stores each per track in `track_artists(track_id, artist_id, pos)`, keeps `tracks.artist` as the joined display string and `albums.artist` as the album artist; `ArtistsModel` lists individual artists with album and song counts, `Library.artistAlbums(id)` and `artistTracks(id)` resolve through `track_artists`, and a version 1 database gets the table and every track marked for reread on the next scan. Pins live in `pins(id, kind, ref_id, pos)`: `Library.pin(kind, refId)` (kinds `album`, `artist`, `song`, `playlist`; appends at max pos + 1, false on a duplicate or an unknown kind), `unpin(kind, refId)`, `isPinned(kind, refId)`, signal `pinsChanged`; a scan deletes every pin whose ref no longer exists and emits `pinsChanged` when it removed one. `PinsModel` (context property `Pins`) lists the pins in pos order with roles `id` (the ref id), `kind`, `title`, `subtitle`, `artPath`, `section` (`pins`): album title, album artist and art; artist name, `N ALBUMS` and the first album art; song title, artist and its album art; playlist name, `N SONGS`, no art; a pin whose ref is missing is skipped. `Mpris` registers `org.mpris.MediaPlayer2.casdap` at `/org/mpris/MediaPlayer2` on the session bus (root and `Player` interfaces, XML in `player/dbus/`, installed to `share/dbus-1/interfaces`): `Identity` is `CASDAP`, no `DesktopEntry`, track ids are `/org/casdap/track/<id>`, `Volume` reads 1.0 and ignores writes, `OpenUri` plays one `file://` uri, `Seeked` and `PropertiesChanged` are emitted for status, metadata, shuffle and loop. `PowerBridge` registers `org.casdap.Player` at `/org/casdap/Player` (`SetScreenOff(b)`, `ShowPowerMenu()`, `ShowOverlay()`, `HideOverlay()`, `ToggleOverlay()`, `ShowSwitchPrompt()`, `ScreenOff`, `PlaybackStatus`, `OverlayShown`, signal `ScreenOffChanged`; the three overlay methods answer `org.casdap.Error.NotSupported` and `OverlayShown` reads false in DAP mode, `ShowSwitchPrompt` answers `NotSupported` in overlay mode and emits `showSwitchPrompt` to QML in DAP mode), listens to `org.casdap.Hotkeys.VolumeChanged(d)`, reads `/run/casdap/drift` and runs only the verbs `screen-off`, `game-mode`, `suspend`, `poweroff` (`/usr/libexec/casdap/casdap-power <verb>`, `CASDAP_POWER_BIN` overrides the path; `systemctl start casdap-switch-back.service`); settings live in `~/.config/casdap/settings.ini` (`output` `auto`, `speaker`, `headphones`; `btCodec`; `hpGain` `low`, `normal`, `high`, default `normal`; `hpAmp` `lohifi`, `ulp`, `hifi`, default `lohifi`; `spkGain` 84, 90, 96, 99, 102, 105, 108, default 102; `volumeStep` 2, 5, 10, default 5; `rgb` `accent`, `off`, `armada`, default `armada`; `overlayToasts`; `roots`, `accent`, `scale`, `pocketControls`, `saverSeconds`, `screenOffSeconds`, `suspendMinutes`, `wifiOffScreenOff`, written 500 ms after the last change and on quit), battery comes from UPower `DisplayDevice` with a `/sys/class/power_supply` fallback, and local playback pauses while the Bluetooth transport is active. `CASDAP_BLUEZ_FAKE=1` wires `FakeBluezModel` in place of the Bluetooth model. Removing the current queue row starts the next one or stops when none follows. Pad input is SDL3 gamepad events (Guide never mapped), polled every 16 ms while a pad is open and the screen is on, every 1 s while no pad is open, every 50 ms with the screen off only when pocket controls are on, otherwise not at all; d-pad and stick repeat at 300 ms then 80 ms, `CASDAP_PAD_LOG=1` logs each action. `Pad` and `DbusPad` derive from `PadSource` (the `Action` enum, `screenOff`, `pocketControls`, `connected`, `actionName`, `action`, `pressed`, `released`); `main.cpp` hands `Pad` to QML as `Pad`, `DbusPad` under `--overlay`. `DbusPad` reads `org.shadowblip.Input.DBusDevice.InputEvent(s,d)` from InputPlumber on the system bus (`CASDAP_INPUTPLUMBER_BUS` overrides the address): `ui_up/down/left/right`, `ui_accept` A, `ui_back` B, `ui_context` X, `ui_action` Y, `ui_l1` LB, `ui_r1` RB, `ui_l2` LT, `ui_r2` RT, `ui_option` Start, `ui_select` Back, value >= 0.5 press, below release, same 300/80 repeat; `ui_guide`, `ui_quick`, `ui_l3` and unknown names are logged once and dropped; `connected` while a `devices/target/dbus*` path exists; `pocketControls` does nothing. Its `Intercept` writes `InterceptMode` on every `org.shadowblip.Input.CompositeDevice` from `GetManagedObjects` on `/org/shadowblip/InputPlumber`: 3 on `setShown(true)` and on a device added while shown, 0 on `setShown(false)` and in the destructor. |
+| `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`, `busctl`, `amixer`, `armada-rgb`. `bt-test.sh` runs `bt-test.py` under `dbus-run-session` with a fake `org.bluez` (needs `dbus-python` and `python3-gobject`). `keep-test.sh` drives `casdap-keep` through `CASDAP_KEEP_FILE` and `CASDAP_BOOT_ID_FILE`; `power-test.sh` drives `casdap-power` with stubbed `busctl`, `systemctl`, `systemd-run`, `nmcli` and `CASDAP_RUNTIME_DIR`, `CASDAP_SETTINGS_FILE`, `CASDAP_CPU_BEFORE_FILE`; `powerd-test.sh` replays `evtest` lines and profile reads into `casdap-powerd`; `wait-x-test.sh` drives `casdap-wait-x` with a stubbed `xprop` and `CASDAP_X_SOCKET_DIR`; `overlay-unit-test.sh` greps `casdap-overlay.service` and its drop in under `sysext/` and runs `systemd-analyze --user verify` where the image units and the player binary exist (`skip:` otherwise). Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures; `tst_mpris`, `tst_power`, `tst_systembluez`, `tst_dbuspad` and `tst_overlay` run under `dbus-run-session`, `tst_dbuspad` and `tst_overlay` against `fake_inputplumber.py`, `tst_overlay` and `tst_power` against `fake_login1.py` (a fake `org.freedesktop.login1` with `Inhibit` and `PrepareForSleep` on the private bus, `CASDAP_LOGIN1_BUS`), `tst_overlay` also against a unix datagram `NOTIFY_SOCKET`; each `player/tests/qml/tst_*.qml` is its own ctest entry `qml-<name>` running `tst_qml -input <file>`). |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
 The two patched files (`/usr/libexec/armada/session-control`,
@@ -205,7 +205,11 @@ labels (the 8 u Regular upper case section label role at HUB_EDGE, ROW_HEIGHT ta
 row bottom, skipped by focus) and SETTINGS_PITCH rows (17 u Bold upper case title at HUB_EDGE, 11 u Light
 upper case value right aligned at W - HUB_EDGE; focused 1.0 and 0.85, others 0.6 and 0.4). OUTPUT: `OUTPUT`
 (`AUTO`, `SPEAKER`, `HEADPHONES` from `Settings.output`; the value reads `NO JACK` while it is `headphones`
-and `OutputControl.jackPresent` is false, the setting is kept), `BLUETOOTH CODEC` (`AUTO`, `APTX`, `AAC`,
+and `OutputControl.jackPresent` is false, the setting is kept), `HEADPHONE GAIN` (`LOW`, `NORMAL`, `HIGH` on
+`Settings.hpGain`), `HEADPHONE AMP` (`LOHIFI`, `ULP`, `HIFI` on `Settings.hpAmp`), `SPEAKER DIGITAL GAIN`
+(84 to 108 on `Settings.spkGain`, shown as dB from 84: `0 DB`, `+6 DB`, `+12 DB`, `+15 DB`, `+18 DB`, `+21 DB`,
+`+24 DB`; the hardware takes the value when playback restarts), `VOLUME STEP` (`2%`, `5%`, `10%` on
+`Settings.volumeStep`), `BLUETOOTH CODEC` (`AUTO`, `APTX`, `AAC`,
 `LDAC`, `SBC` on `Settings.btCodec`), `SAMPLE RATE FOLLOW` (read only, `ON <AudioInfo.graphRate>`, `ON`
 without a rate), `REPLAYGAIN` (read only `OFF`), `PAIR A PHONE` (A emits `pairPhone`, Main pushes
 `Bluetooth` on its PAIRING pivot; in overlay mode the value reads `PAIR IN DAP MODE` and A does nothing).
@@ -215,7 +219,9 @@ LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in
 one with the 2 u border; left/right and A move it and write `Ui.accent` and `Settings.accent`),
 `ORIENTATION` (read only, the current orientation), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps; `Ui.userScale` and
 `Settings.scale` follow live, focus and the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
-`Settings.saverSeconds`), `OVERLAY TOASTS` (`ON`, `OFF` on `Settings.overlayToasts`). POWER: `SCREEN OFF AFTER`
+`Settings.saverSeconds`), `RGB` (`ACCENT`, `OFF`, `ARMADA` on `Settings.rgb`; reads `UNSUPPORTED` and ignores
+left/right and A while `RgbControl.supported` is false; absent in overlay mode), `OVERLAY TOASTS` (`ON`, `OFF`
+on `Settings.overlayToasts`). POWER: `SCREEN OFF AFTER`
 (`OFF`, 1, 2, 5, 10, 30 MIN on `Settings.screenOffSeconds`),
 `SUSPEND AFTER` (`OFF`, 5, 10, 30, 60 MIN on `Settings.suspendMinutes`), `POCKET CONTROLS` (`ON`, `OFF`),
 `WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), `GAME MODE` (A opens the sheet `game mode`
@@ -378,7 +384,7 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just base` | Reads `IMAGE_VERSION`, `VERSION_ID` and the booted image digest from the device into `build/base.env`. |
 | `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, installs the Selawik 1.01 TTFs (`build/fonts.sh`, sha256 pinned, cached in `build/cache/`) to `usr/share/fonts/casdap/`, runs `build/aptx.sh` (the aptX codec rpms, sha256 pinned, cached in `build/cache/aptx/`, into `usr/lib64/`), writes `version` and `build-manifest`. |
 | `just build` | `dist` plus `casdap-<ver>-armada<VERSION_ID>-arm64.raw` (squashfs, zstd). |
-| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`, and restarts the user `pipewire pipewire-pulse wireplumber` when a file under `usr/share/pipewire/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed. |
+| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`, and restarts the user `pipewire pipewire-pulse wireplumber` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just test-player` | ctest of `build/player` inside the builder (after `just dist`); prints `skip: no builder image` where the image is absent. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
@@ -482,7 +488,30 @@ tracked is logged and does nothing.
 Polkit boundary: any process running as `armada` may start `casdap-switch.service`,
 `casdap-switch-back.service`, `casdap-priv@<verb>.service` and `armada-controller-type.service`.
 The verbs are fixed words (`bt-class-headphones`, `bt-class-default`, `backlight-off`, `backlight-on`,
-`cpu-dap`, `cpu-off`, `cpu-restore`); `casdap-priv` exits 1 on anything else.
+`cpu-dap`, `cpu-off`, `cpu-restore`, `hp-gain-low`, `hp-gain-normal`, `hp-gain-high`, `hp-amp-lohifi`,
+`hp-amp-ulp`, `hp-amp-hifi`, `spk-gain-84`, `spk-gain-90`, `spk-gain-96`, `spk-gain-99`, `spk-gain-102`,
+`spk-gain-105`, `spk-gain-108`, `rgb-accent-pink`, `rgb-accent-orange`, `rgb-accent-cyan`,
+`rgb-accent-lime`, `rgb-accent-purple`, `rgb-off`, `rgb-sleep`, `rgb-wake`, `rgb-restore`);
+`casdap-priv` exits 1 on anything else. No value from the caller reaches root: the mixer step and
+the color are part of the word.
+
+Mixer words: `hp-gain-low`, `hp-gain-normal`, `hp-gain-high` write `HPHL Volume` then `HPHR Volume` 8, 20,
+24; `hp-amp-lohifi`, `hp-amp-ulp`, `hp-amp-hifi` write `RX HPH Mode` CLS_H_LOHIFI, CLS_H_ULP, CLS_H_HIFI
+then `RX_HPH PWR Mode` LOHIFI, ULP, LOHIFI; `spk-gain-<n>` writes `WSA_RX0 Digital Volume` then
+`WSA_RX1 Digital Volume` at `<n>`. Every write is `amixer -D hw:0 cset name='<control>' <value>`
+(`CASDAP_AMIXER_BIN` replaces the binary); a refused write is logged, the second control is still written
+and the word exits 1.
+
+RGB words run `/usr/libexec/armada/armada-rgb-env` (`CASDAP_RGB_BIN`) against `/etc/armada/rgb.json`
+(`CASDAP_RGB_CONFIG`) with the save file `/run/casdap/rgb-before.json` (`CASDAP_RGB_BEFORE_FILE`).
+`rgb-accent-<name>` copies the config to the save while the save is absent (no config saves a zero byte
+file), reads `brightness` and `maxBrightness` from `armada-rgb get` (a `maxBrightness` of 0 becomes 50) and
+runs `set --enabled true --link-brightness true --color <hex> --brightness <b> --max-brightness <m>` with
+pink `FA2A55`, orange `F09609`, cyan `1BA1E2`, lime `339933`, purple `A200FF`. `rgb-off` saves the same way
+and runs `off`. `rgb-sleep` and `rgb-wake` run `sleep` and `wake` and touch no file. `rgb-restore` with a
+non empty save writes it over the config (temp file then rename), runs `apply` and removes the save; with
+a zero byte save removes the config, runs `apply` and removes the save; without a save runs nothing and
+exits 0. A failed `get`, `set`, `off` or `apply` exits 1 and keeps the save.
 
 CPU and GPU floor: the three `cpu-*` words write cpufreq and devfreq under `CASDAP_SYSFS_ROOT` (default
 `/sys`) and save the values they replace in `CASDAP_CPU_BEFORE_FILE` (default `/run/casdap/cpu-before`,
@@ -498,17 +527,19 @@ Power: `casdap-power <verb>` (`/usr/libexec/casdap/`, runs as `armada`) has `scr
 `toggle`, `suspend`, `poweroff`, `idle-check` and `cpu-apply`; anything else exits 1. Markers live under
 `CASDAP_RUNTIME_DIR` (default `$XDG_RUNTIME_DIR/casdap-power`): `off`, `wifi`, `idle-since`, `screen-on-ms`.
 Settings come from `CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.ini`, keys `wifiOffScreenOff`,
-`suspendMinutes`). `screen-off`, `toggle` and `cpu-apply` exit 1 unless `systemctl --user is-active
+`suspendMinutes`, `rgb`). `screen-off`, `toggle` and `cpu-apply` exit 1 unless `systemctl --user is-active
 gamescope-session-plus@casdap.service` prints `active`; `screen-on` runs in every state. `screen-off`, in
 order: the `off` marker, `busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player
 SetScreenOff b true` (a failed call is logged), `casdap-priv@backlight-off.service`,
-`casdap-priv@cpu-off.service`, `nmcli radio wifi off` with the `wifi` marker when `wifiOffScreenOff=true`
+`casdap-priv@cpu-off.service`, `casdap-priv@rgb-sleep.service` when `rgb=accent`, `nmcli radio wifi off`
+with the `wifi` marker when `wifiOffScreenOff=true`
 and the marker is absent, then `systemctl --user stop casdap-idle.timer` and `systemd-run --user
 --unit=casdap-idle --on-active=60 --on-unit-inactive=60 --timer-property=AccuracySec=1min casdap-power
 idle-check`. `screen-on` reverses: stops the timer, `nmcli radio wifi on` when the `wifi` marker exists,
 then with the session `active` starts `cpu-restore` (only without the `off` marker and with
 `CASDAP_CPU_BEFORE_FILE` present) and `cpu-dap`, in any other state `cpu-restore`; then
-`casdap-priv@backlight-on.service`, `SetScreenOff b false` (session `active` only), removes the `off` marker
+`casdap-priv@rgb-wake.service` when `rgb=accent`, `casdap-priv@backlight-on.service`, `SetScreenOff b false`
+(session `active` only), removes the `off` marker
 and writes `screen-on-ms`. `toggle` runs `screen-on` with the `off` marker, else `screen-off`, and does nothing
 within 2 s of `screen-on-ms` (`CASDAP_POWER_DEBOUNCE_MS`). `cpu-apply` starts `cpu-off` with the `off` marker,
 else `cpu-dap`. `idle-check` exits 0 outside the session; busy (`PlaybackStatus` contains `Playing`, or any
@@ -516,8 +547,10 @@ else `cpu-dap`. `idle-check` exits 0 outside the session; busy (`PlaybackStatus`
 0 removes `idle-since`; idle writes it with the current unix time when absent and runs `systemctl suspend`
 once it is `suspendMinutes` old. `suspend` and `poweroff` run `systemctl suspend` and `systemctl poweroff`.
 Every verb is idempotent. `gamescope-session-plus@casdap.service.d/30-casdap-power.conf` wants
-`casdap-powerd.service` and runs `ExecStopPost=/usr/libexec/casdap/casdap-power screen-on`, so every session
-stop restores backlight, cpufreq, devfreq and Wi-Fi and stops the timer.
+`casdap-powerd.service` and runs `ExecStopPost=/usr/libexec/casdap/casdap-power screen-on`, then
+`ExecStopPost=systemctl start casdap-priv@hp-gain-normal.service`, `@hp-amp-lohifi`, `@spk-gain-102` and
+`@rgb-restore`, so every session stop restores backlight, cpufreq, devfreq and Wi-Fi, stops the timer and
+puts the mixer and the stick lights back to the values Steam had.
 
 `casdap-powerd.service` (user unit, `PartOf=`, `BindsTo=` and `After=` the casdap session, `Restart=always`,
 `RestartSec=1`, `StartLimitIntervalSec=0`) runs `casdap-powerd` under `systemd-inhibit
@@ -560,8 +593,9 @@ screen off (`$CASDAP_RUNTIME_DIR/off`, default `$XDG_RUNTIME_DIR/casdap-power/of
 casdap sends `PlayPause` to `org.mpris.MediaPlayer2.casdap`. In Plasma a hold switches; in any other session it
 logs. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
 list override `CASDAP_HOTKEYD_VOLUME_NAMES=a:b`, read with their own `evtest` streams) step
-`wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@` by 5% per press and autorepeat (volume up also
-unmutes the sink) and emit
+`wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@` per press and autorepeat by the `volumeStep` key of
+`CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.ini`, read at each press; 2, 5 or 10, anything
+else 5) in percent (volume up also unmutes the sink) and emit
 `org.casdap.Hotkeys.VolumeChanged(d)` at `/org/casdap/Hotkeys` with the level from `wpctl get-volume`;
 in every other session they are left to Steam. `CASDAP_HOTKEYD_DRY_RUN=1` (runtime drop-in under
 `~/.config/systemd/user/`) logs `would:` lines instead of acting.
@@ -625,6 +659,19 @@ one stream active, the graph and the PCM switch to that stream's rate when the s
 48 kHz stream keeps the graph at 48000 and the other stream is resampled. PipeWire reads the fragment at
 start.
 
+`wireplumber.conf.d/50-casdap-soft-mixer.conf` sets `api.alsa.soft-mixer = true` on every device whose
+`device.name` matches `~alsa_card.platform-sound.*` through `monitor.alsa.rules`, so the sink volume is applied in the PipeWire
+sink node and the hardware mixer stays at the UCM boot values (`SpkrLeft PA Volume` 12, `HPHL Volume` and
+`HPHR Volume` 20). WirePlumber reads the fragment at start; the user audio stack restarts once after the
+merge.
+
+Manual mixer controls are the `casdap-priv` words `hp-gain-low`, `hp-gain-normal`, `hp-gain-high` (`HPHL
+Volume` and `HPHR Volume` 8, 20, 24: -18, 0, +6 dB), `hp-amp-lohifi`, `hp-amp-ulp`, `hp-amp-hifi` (`RX HPH
+Mode` with `RX_HPH PWR Mode`) and `spk-gain-84` to `spk-gain-108` (`WSA_RX0 Digital Volume` and `WSA_RX1
+Digital Volume`; 84 is 0 dB, 1 dB per step, 102 the UCM value; the value takes effect when playback
+restarts), every write `amixer -D hw:0 cset`. The session stop puts `hp-gain-normal`, `hp-amp-lohifi` and
+`spk-gain-102` back through `30-casdap-power.conf`.
+
 `AudioInfo.graphRate` is the running graph rate: `pw-dump` (`CASDAP_PW_DUMP_BIN`, default `pw-dump` on PATH)
 gives the default sink node's `clock.rate`, else its `Format` rate, else the `settings` metadata `clock.rate`;
 without the binary it is the `hw_params` rate. Read with `pcmFormat` every 2 s while `active`.
@@ -636,7 +683,26 @@ without the binary it is the `hw_params` rate. Read with `pcmFormat` every 2 s w
 `pw-metadata -d 0 default.configured.audio.sink`, so WirePlumber picks the sink by route priority again.
 `jackPresent` reads the `Headphone Jack` block of `amixer -c0 contents` (`values=on`; the CARD control has no cget name), polled every 2 s while `active`
 and after every apply. `busy` is true while a command chain runs, `applied(output, ok)` ends it.
-`CASDAP_WPCTL_BIN`, `CASDAP_PW_METADATA_BIN` and `CASDAP_AMIXER_BIN` replace the binaries.
+`setHeadphone(gain, amp)` takes `Settings.hpGain` and `Settings.hpAmp` at start and on every change and
+starts `casdap-priv@hp-gain-<gain>.service` then `casdap-priv@hp-amp-<amp>.service` only while the
+headphones are the output: `Settings.output` is `headphones`, or the default sink read from `wpctl status
+--name` (`headphonesDefault`) is the headphones sink; otherwise the words are skipped and logged. The
+default sink is read again after every apply and on the jack going present, so plugging in with `auto`
+reruns the words. `setSpkGain(step)` starts `casdap-priv@spk-gain-<step>.service` at start and on every
+change. Every word emits `applied(word, ok)`.
+`CASDAP_WPCTL_BIN`, `CASDAP_PW_METADATA_BIN`, `CASDAP_AMIXER_BIN` and `CASDAP_SYSTEMCTL_BIN` replace the
+binaries.
+
+`RgbControl` (context property, DAP mode only, null under `--overlay`) runs `armada-rgb supported`
+(`/usr/libexec/armada/armada-rgb-env`, `CASDAP_RGB_BIN` overrides) once at start; exit 0 sets `supported`,
+`probed` goes true either way. Supported, it starts `casdap-priv@rgb-restore.service` and then the word for
+`Settings.rgb`: `rgb-off` for `off`, `rgb-accent-<name>` for `accent` with `name` from the fixed table
+`#FA2A55` pink, `#F09609` orange, `#1BA1E2` cyan, `#339933` lime, `#A200FF` purple, nothing more for
+`armada`. A changed `Settings.rgb` starts the word for the new mode (`rgb-restore` for `armada`), a
+changed `Settings.accent` starts the accent word while the mode is `accent`; an accent outside the table
+or an unknown mode is logged and runs nothing. Words run one at a time through `systemctl start`
+(`CASDAP_SYSTEMCTL_BIN`), `busy` is true while one runs or waits, `applied(word, ok)` ends each.
+Unsupported, nothing runs and the settings RGB row reads `UNSUPPORTED`.
 
 aptX: `build/aptx.sh <cache> <dist>` downloads `libfreeaptx` (RPM Fusion free releases/44) and
 `pipewire-codec-aptx-1.6.7-1.fc44` (updates/44), both aarch64 and sha256 pinned, extracts

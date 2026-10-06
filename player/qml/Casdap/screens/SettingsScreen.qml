@@ -9,6 +9,7 @@ Page {
     property QtObject player: null
     property QtObject audioInfo: null
     property QtObject outputControl: null
+    property QtObject rgbControl: null
     property QtObject bridge: null
     property bool overlay: false
     property bool animated: true
@@ -22,6 +23,11 @@ Page {
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property var outputs: ["auto", "speaker", "headphones"]
     readonly property var codecs: ["auto", "aptx", "aac", "ldac", "sbc"]
+    readonly property var hpGains: ["low", "normal", "high"]
+    readonly property var hpAmps: ["lohifi", "ulp", "hifi"]
+    readonly property var spkGainSteps: [84, 90, 96, 99, 102, 105, 108]
+    readonly property var volumeSteps: [2, 5, 10]
+    readonly property var rgbModes: ["accent", "off", "armada"]
     readonly property var saverSteps: [10, 15, 30, 60, 120, 300]
     readonly property var screenOffSteps: [0, 60, 120, 300, 600, 1800]
     readonly property var suspendSteps: [0, 5, 10, 30, 60]
@@ -29,6 +35,13 @@ Page {
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
     readonly property string codec: page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto"
+    readonly property string hpGain: page.settings !== null && page.settings.hpGain !== undefined ? String(page.settings.hpGain) : "normal"
+    readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
+    readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
+    readonly property int volumeStep: page.settings !== null && page.settings.volumeStep !== undefined ? Number(page.settings.volumeStep) : 5
+    readonly property string rgb: page.settings !== null && page.settings.rgb !== undefined ? String(page.settings.rgb) : "armada"
+    readonly property bool rgbSupported: !page.overlay && page.rgbControl !== null && page.rgbControl.supported === true
+    readonly property string rgbValue: page.rgbSupported ? page.rgb : "unsupported"
     readonly property bool overlayToasts: page.settings !== null && page.settings.overlayToasts === true
     readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
     readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
@@ -104,6 +117,11 @@ Page {
         return value <= 0 ? "off" : value + " " + unit
     }
 
+    function spkGainText(step: int): string {
+        const db = step - 84
+        return (db > 0 ? "+" + db : String(db)) + " db"
+    }
+
     function digestTail(image: string): string {
         const at = image.indexOf("sha256:")
         const digest = at >= 0 ? image.substring(at + 7) : image
@@ -133,6 +151,10 @@ Page {
         const out = []
         out.push(page.label("output"))
         out.push(page.row("output", "output", page.outputValue, false))
+        out.push(page.row("hpGain", "headphone gain", page.hpGain, false))
+        out.push(page.row("hpAmp", "headphone amp", page.hpAmp, false))
+        out.push(page.row("spkGain", "speaker digital gain", page.spkGainText(page.spkGain), false))
+        out.push(page.row("volumeStep", "volume step", page.volumeStep + "%", false))
         out.push(page.row("codec", "bluetooth codec", page.codec, false))
         out.push(page.row("rate", "sample rate follow", page.rateValue, true))
         out.push(page.row("replaygain", "replaygain", "off", true))
@@ -148,6 +170,8 @@ Page {
         out.push(page.row("orientation", "orientation", Ui.landscape ? "landscape" : "portrait", true))
         out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
+        if (!page.overlay)
+            out.push(page.row("rgb", "rgb", page.rgbValue, !page.rgbSupported))
         out.push(page.row("toasts", "overlay toasts", page.overlayToasts ? "on" : "off", false))
         out.push(page.label("power"))
         out.push(page.row("screenOff", "screen off after", page.offOr(Math.round(page.screenOffSeconds / 60), "min"), false))
@@ -330,6 +354,23 @@ Page {
         case "output":
             page.set("output", page.cycle(page.outputs, page.output, delta, wrap))
             return true
+        case "hpGain":
+            page.set("hpGain", page.cycle(page.hpGains, page.hpGain, delta, wrap))
+            return true
+        case "hpAmp":
+            page.set("hpAmp", page.cycle(page.hpAmps, page.hpAmp, delta, wrap))
+            return true
+        case "spkGain":
+            page.set("spkGain", page.cycle(page.spkGainSteps, page.spkGain, delta, wrap))
+            return true
+        case "volumeStep":
+            page.set("volumeStep", page.cycle(page.volumeSteps, page.volumeStep, delta, wrap))
+            return true
+        case "rgb":
+            if (!page.rgbSupported)
+                return false
+            page.set("rgb", page.cycle(page.rgbModes, page.rgb, delta, wrap))
+            return true
         case "codec":
             page.set("btCodec", page.cycle(page.codecs, page.codec, delta, wrap))
             return true
@@ -434,6 +475,10 @@ Page {
         case "rate":
         case "replaygain":
             return true
+        case "rgb":
+            if (!page.rgbSupported)
+                return true
+            return page.step(1, true)
         default:
             return page.step(1, true)
         }

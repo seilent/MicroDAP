@@ -31,6 +31,11 @@ TestCase {
         id: fakeSettings
 
         property string output: "auto"
+        property string hpGain: "normal"
+        property string hpAmp: "lohifi"
+        property int spkGain: 102
+        property int volumeStep: 5
+        property string rgb: "armada"
         property string btCodec: "auto"
         property var roots: ["/home/armada/Music"]
         property string accent: "#FA2A55"
@@ -101,6 +106,12 @@ TestCase {
     }
 
     QtObject {
+        id: fakeRgb
+
+        property bool supported: true
+    }
+
+    QtObject {
         id: counters
 
         property int pair: 0
@@ -116,6 +127,7 @@ TestCase {
             player: fakePlayer
             audioInfo: fakeAudio
             outputControl: fakeOutput
+            rgbControl: fakeRgb
             folders: ["/home/armada/Music", "/run/media/armada/SD"]
             onPairPhone: counters.pair++
             onGameModeRequested: counters.gameMode++
@@ -129,12 +141,13 @@ TestCase {
     }
 
     readonly property var expectedKeys: [
-        "label-output", "output", "codec", "rate", "replaygain", "pair",
+        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "pair",
         "label-library", "folders",
-        "label-display", "accent", "orientation", "scale", "saver", "toasts",
+        "label-display", "accent", "orientation", "scale", "saver", "rgb", "toasts",
         "label-power", "screenOff", "suspend", "pocket", "wifi", "gameMode",
         "about"
     ]
+    readonly property var overlayKeys: tc.expectedKeys.filter((k) => k !== "rgb")
 
     function setWindow(w, h) {
         Ui.userScale = 1.0
@@ -152,6 +165,11 @@ TestCase {
         pages.clear()
         pages.animate = false
         fakeSettings.output = "auto"
+        fakeSettings.hpGain = "normal"
+        fakeSettings.hpAmp = "lohifi"
+        fakeSettings.spkGain = 102
+        fakeSettings.volumeStep = 5
+        fakeSettings.rgb = "armada"
         fakeSettings.btCodec = "auto"
         fakeSettings.roots = ["/home/armada/Music"]
         fakeSettings.accent = "#FA2A55"
@@ -165,6 +183,7 @@ TestCase {
         fakeAudio.pcmFormat = "44100 S24_LE"
         fakeAudio.graphRate = 44100
         fakeOutput.jackPresent = true
+        fakeRgb.supported = true
         fakePower.verbs = []
         fakePower.switches = 0
         fakePower.driftPaths = []
@@ -269,7 +288,7 @@ TestCase {
         const page = open()
         compare(router.dispatch("up", false), false)
         compare(page.focusIndex, 1)
-        for (let i = 0; i < 4; i++)
+        for (let i = 0; i < 8; i++)
             verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "pair"))
         verify(router.dispatch("down", false))
@@ -349,6 +368,147 @@ TestCase {
         compare(tc.itemOf(page, "codec").valueItem.font.capitalization, Font.AllUppercase)
     }
 
+    function test_mixer_rows_order() {
+        const page = open()
+        const output = tc.keyIndex(page, "output")
+        compare(JSON.stringify(tc.keys(page).slice(output, output + 6)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec"]))
+        compare(tc.rowOf(page, "hpGain").title, "headphone gain")
+        compare(tc.rowOf(page, "hpGain").value, "normal")
+        compare(tc.rowOf(page, "hpAmp").title, "headphone amp")
+        compare(tc.rowOf(page, "hpAmp").value, "lohifi")
+        compare(tc.rowOf(page, "spkGain").title, "speaker digital gain")
+        compare(tc.rowOf(page, "spkGain").value, "+18 db")
+        compare(tc.rowOf(page, "volumeStep").title, "volume step")
+        compare(tc.rowOf(page, "volumeStep").value, "5%")
+        compare(tc.rowOf(page, "rgb").title, "rgb")
+        compare(tc.rowOf(page, "rgb").value, "armada")
+        verify(tc.keyIndex(page, "rgb") > tc.keyIndex(page, "saver"))
+        verify(tc.keyIndex(page, "rgb") < tc.keyIndex(page, "toasts"))
+        const item = tc.itemOf(page, "spkGain")
+        compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
+        compare(item.valueItem.font.styleName, "Light")
+        compare(item.valueItem.font.capitalization, Font.AllUppercase)
+        compare(item.titleItem.font.pixelSize, Ui.fontPx(17))
+        compare(item.titleItem.font.styleName, "Bold")
+    }
+
+    function test_headphone_gain_cycles() {
+        const page = open()
+        tc.focusKey(page, "hpGain")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.hpGain, "high")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.hpGain, "high")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.hpGain, "low")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.hpGain, "low")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.hpGain, "normal")
+        compare(tc.rowOf(page, "hpGain").value, "normal")
+    }
+
+    function test_headphone_amp_cycles() {
+        const page = open()
+        tc.focusKey(page, "hpAmp")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.hpAmp, "ulp")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.hpAmp, "hifi")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.hpAmp, "hifi")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.hpAmp, "lohifi")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.hpAmp, "lohifi")
+        compare(tc.rowOf(page, "hpAmp").value, "lohifi")
+    }
+
+    function test_speaker_gain_steps() {
+        const page = open()
+        tc.focusKey(page, "spkGain")
+        compare(page.spkGainText(84), "0 db")
+        compare(page.spkGainText(90), "+6 db")
+        compare(page.spkGainText(108), "+24 db")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.spkGain, 105)
+        compare(tc.rowOf(page, "spkGain").value, "+21 db")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.spkGain, 108)
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.spkGain, 108)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.spkGain, 84)
+        compare(tc.rowOf(page, "spkGain").value, "0 db")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.spkGain, 84)
+        for (let i = 0; i < 4; i++)
+            router.dispatch("right", false)
+        compare(fakeSettings.spkGain, 102)
+        compare(tc.rowOf(page, "spkGain").value, "+18 db")
+    }
+
+    function test_volume_step_cycles() {
+        const page = open()
+        tc.focusKey(page, "volumeStep")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.volumeStep, 10)
+        compare(tc.rowOf(page, "volumeStep").value, "10%")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.volumeStep, 10)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.volumeStep, 2)
+        compare(tc.rowOf(page, "volumeStep").value, "2%")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.volumeStep, 2)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.volumeStep, 5)
+    }
+
+    function test_rgb_cycles() {
+        const page = open()
+        tc.focusKey(page, "rgb")
+        compare(tc.rowOf(page, "rgb").readOnly, false)
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.rgb, "armada")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.rgb, "off")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.rgb, "accent")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.rgb, "accent")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.rgb, "off")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.rgb, "armada")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.rgb, "accent")
+        compare(tc.rowOf(page, "rgb").value, "accent")
+    }
+
+    function test_rgb_unsupported() {
+        fakeRgb.supported = false
+        const page = open()
+        tc.focusKey(page, "rgb")
+        compare(tc.rowOf(page, "rgb").value, "unsupported")
+        compare(tc.rowOf(page, "rgb").readOnly, true)
+        compare(tc.itemOf(page, "rgb").valueItem.text, "unsupported")
+        compare(router.dispatch("right", false), false)
+        compare(router.dispatch("left", false), false)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.rgb, "armada")
+        fakeRgb.supported = true
+        compare(tc.rowOf(page, "rgb").value, "armada")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.rgb, "off")
+        const bare = open({ rgbControl: null })
+        tc.focusKey(bare, "rgb")
+        compare(tc.rowOf(bare, "rgb").value, "unsupported")
+        compare(router.dispatch("right", false), false)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.rgb, "off")
+    }
+
     function test_audio_rows_read_only() {
         const page = open()
         compare(tc.rowOf(page, "rate").title, "sample rate follow")
@@ -402,7 +562,9 @@ TestCase {
 
     function test_overlay_mode_rows() {
         const page = open({ overlay: true, bridge: fakeBridge })
-        compare(JSON.stringify(tc.keys(page)), JSON.stringify(tc.expectedKeys))
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(tc.overlayKeys))
+        compare(page.indexOfKey("rgb"), -1)
+        compare(tc.rowOf(page, "hpGain").title, "headphone gain")
         compare(tc.rowOf(page, "gameMode").title, "close player")
         compare(tc.rowOf(page, "pair").value, "pair in dap mode")
         compare(tc.itemOf(page, "pair").valueItem.visible, true)

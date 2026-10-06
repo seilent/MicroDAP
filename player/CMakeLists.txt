@@ -48,6 +48,8 @@ add_library(casdapcore STATIC
     src/core/PowerBridge.h
     src/core/Queue.cpp
     src/core/Queue.h
+    src/core/RgbControl.cpp
+    src/core/RgbControl.h
     src/core/Scanner.cpp
     src/core/Scanner.h
     src/core/Settings.cpp

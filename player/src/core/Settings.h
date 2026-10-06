@@ -24,6 +24,11 @@ class Settings : public QObject
     Q_PROPERTY(bool wifiOffScreenOff READ wifiOffScreenOff WRITE setWifiOffScreenOff NOTIFY wifiOffScreenOffChanged)
     Q_PROPERTY(QString btCodec READ btCodec WRITE setBtCodec NOTIFY btCodecChanged)
     Q_PROPERTY(bool overlayToasts READ overlayToasts WRITE setOverlayToasts NOTIFY overlayToastsChanged)
+    Q_PROPERTY(QString hpGain READ hpGain WRITE setHpGain NOTIFY hpGainChanged)
+    Q_PROPERTY(QString hpAmp READ hpAmp WRITE setHpAmp NOTIFY hpAmpChanged)
+    Q_PROPERTY(int spkGain READ spkGain WRITE setSpkGain NOTIFY spkGainChanged)
+    Q_PROPERTY(int volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
+    Q_PROPERTY(QString rgb READ rgb WRITE setRgb NOTIFY rgbChanged)
     Q_PROPERTY(QString path READ path CONSTANT)
 
 public:
@@ -41,6 +46,11 @@ public:
     static QStringList outputs();
     static QStringList codecs();
     static QStringList accents();
+    static QStringList hpGains();
+    static QStringList hpAmps();
+    static QList<int> spkGains();
+    static QList<int> volumeSteps();
+    static QStringList rgbModes();
     static QStringList defaultRoots();
     Q_INVOKABLE static QStringList candidateRoots();
 
@@ -70,6 +80,16 @@ public:
     void setBtCodec(const QString &codec);
     bool overlayToasts() const;
     void setOverlayToasts(bool on);
+    QString hpGain() const;
+    void setHpGain(const QString &gain);
+    QString hpAmp() const;
+    void setHpAmp(const QString &amp);
+    int spkGain() const;
+    void setSpkGain(int step);
+    int volumeStep() const;
+    void setVolumeStep(int step);
+    QString rgb() const;
+    void setRgb(const QString &mode);
 
     Q_INVOKABLE void sync();
 
@@ -86,6 +106,11 @@ signals:
     void wifiOffScreenOffChanged();
     void btCodecChanged();
     void overlayToastsChanged();
+    void hpGainChanged();
+    void hpAmpChanged();
+    void spkGainChanged();
+    void volumeStepChanged();
+    void rgbChanged();
 
 private:
     void load();
@@ -106,6 +131,11 @@ private:
     bool m_wifiOffScreenOff = false;
     QString m_btCodec;
     bool m_overlayToasts = false;
+    QString m_hpGain;
+    QString m_hpAmp;
+    int m_spkGain = 102;
+    int m_volumeStep = 5;
+    QString m_rgb;
 };
 
 }

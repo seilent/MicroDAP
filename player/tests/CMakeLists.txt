@@ -76,6 +76,12 @@ target_link_libraries(tst_audioinfo PRIVATE casdapcore Qt6::Test)
 add_test(NAME audioinfo COMMAND tst_audioinfo)
 casdap_test_env(audioinfo)
 
+qt_add_executable(tst_rgb core/tst_rgb.cpp)
+target_compile_definitions(tst_rgb PRIVATE CASDAP_UI_QML="${CMAKE_SOURCE_DIR}/qml/Casdap/Ui.qml")
+target_link_libraries(tst_rgb PRIVATE casdapcore Qt6::Test)
+add_test(NAME rgb COMMAND tst_rgb)
+casdap_test_env(rgb)
+
 qt_add_executable(tst_output core/tst_output.cpp)
 target_link_libraries(tst_output PRIVATE casdapcore Qt6::Test)
 add_test(NAME output COMMAND tst_output)
