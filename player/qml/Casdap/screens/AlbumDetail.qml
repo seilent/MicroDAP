@@ -241,6 +241,10 @@ Page {
         }
     }
 
+    PageSurface {
+        anchors.fill: parent
+    }
+
     Backdrop {
         id: backdrop
 

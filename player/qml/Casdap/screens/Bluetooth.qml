@@ -34,7 +34,6 @@ Page {
     readonly property real rowTop: Ui.contentTop + 60
     readonly property real ringCenterY: Ui.contentTop + 90
     readonly property real hintBaseline: page.ringCenterY + Ui.backRing / 2 + Ui.qpHintDrop
-    readonly property real backdropAlpha: Ui.backdropStops[0][1]
     readonly property bool switching: pivotAnim.running
     readonly property bool stateSwapping: stateSwap.running
     readonly property bool pulsing: pulse.running
@@ -201,18 +200,8 @@ Page {
         property bool internal: false
     }
 
-    Rectangle {
+    PageSurface {
         anchors.fill: parent
-        color: Ui.bg
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        gradient: Gradient {
-            orientation: Gradient.Vertical
-            GradientStop { position: 0; color: Qt.rgba(Ui.accent.r, Ui.accent.g, Ui.accent.b, page.backdropAlpha) }
-            GradientStop { position: 1; color: Qt.rgba(Ui.accent.r, Ui.accent.g, Ui.accent.b, 0) }
-        }
     }
 
     Item {

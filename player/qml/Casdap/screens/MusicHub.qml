@@ -841,9 +841,8 @@ Page {
         }
     }
 
-    Rectangle {
+    PageSurface {
         anchors.fill: parent
-        color: Ui.bg
     }
 
     Pane {

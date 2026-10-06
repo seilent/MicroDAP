@@ -22,7 +22,6 @@ Page {
     property real contentOpacity: 1
     property real variantScale: 1
     property real localLayerOpacity: 1
-    property real variantLayerOpacity: 0
     property var shown: ({ id: null, title: "", artist: "", album: "", artPath: "", rating: 0 })
     property var pending: null
     property var nextTitles: []
@@ -106,7 +105,6 @@ Page {
     property alias backdropA: backA
     property alias backdropB: backB
     property alias localLayer: localLayer
-    property alias variantLayer: variantLayer
     property alias content: content
     property alias backRing: backRing
     property alias statusStrip: statusStrip
@@ -286,7 +284,6 @@ Page {
         np.contentOpacity = 1
         np.variantScale = 1
         np.localLayerOpacity = np.variant ? 0 : 1
-        np.variantLayerOpacity = np.variant ? 1 : 0
         if (!np.variant)
             np.trackChanged()
     }
@@ -502,7 +499,6 @@ Page {
         np.ringIndex = 0
         np.shownVariant = np.variant
         np.localLayerOpacity = np.variant ? 0 : 1
-        np.variantLayerOpacity = np.variant ? 1 : 0
         np.applyShown(np.snapshot(np.current))
         np.syncPosition()
         d.ready = true
@@ -586,9 +582,8 @@ Page {
         }
     }
 
-    Rectangle {
+    PageSurface {
         anchors.fill: parent
-        color: Ui.bg
     }
 
     Item {
@@ -616,19 +611,6 @@ Page {
             opacity: np.frontIsA ? np.crossfade : 1
             paused: !np.live || np.shownVariant
             screenOff: np.screenOff
-        }
-    }
-
-    Rectangle {
-        id: variantLayer
-
-        anchors.fill: parent
-        opacity: np.variantLayerOpacity
-        visible: np.variantLayerOpacity > 0
-        gradient: Gradient {
-            orientation: Gradient.Vertical
-            GradientStop { position: 0; color: Qt.rgba(Ui.accent.r, Ui.accent.g, Ui.accent.b, Ui.backdropStops[0][1]) }
-            GradientStop { position: 1; color: Qt.rgba(Ui.accent.r, Ui.accent.g, Ui.accent.b, 0) }
         }
     }
 
@@ -999,14 +981,6 @@ Page {
         ParallelAnimation {
             NumberAnimation {
                 target: np
-                property: "variantLayerOpacity"
-                from: 0
-                to: 1
-                duration: Motion.nowPlayingIn
-                easing.type: Motion.pop
-            }
-            NumberAnimation {
-                target: np
                 property: "variantScale"
                 from: Motion.nowPlayingScale
                 to: 1
@@ -1027,25 +1001,14 @@ Page {
     SequentialAnimation {
         id: variantOut
 
-        ParallelAnimation {
-            NumberAnimation {
-                target: np
-                property: "contentOpacity"
-                from: 1
-                to: 0
-                duration: Motion.variantFade
-                easing.type: Motion.bezier
-                easing.bezierCurve: Motion.decel
-            }
-            NumberAnimation {
-                target: np
-                property: "variantLayerOpacity"
-                from: 1
-                to: 0
-                duration: Motion.variantFade
-                easing.type: Motion.bezier
-                easing.bezierCurve: Motion.decel
-            }
+        NumberAnimation {
+            target: np
+            property: "contentOpacity"
+            from: 1
+            to: 0
+            duration: Motion.variantFade
+            easing.type: Motion.bezier
+            easing.bezierCurve: Motion.decel
         }
         ScriptAction {
             script: {

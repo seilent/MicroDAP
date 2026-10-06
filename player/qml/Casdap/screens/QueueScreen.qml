@@ -349,9 +349,8 @@ Page {
         }
     }
 
-    Rectangle {
+    PageSurface {
         anchors.fill: parent
-        color: Ui.bg
     }
 
     FocusList {

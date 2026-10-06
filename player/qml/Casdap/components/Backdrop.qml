@@ -21,6 +21,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Ui.bg
+        visible: root.hasArt
     }
 
     Image {
@@ -47,6 +48,7 @@ Item {
         id: shade
 
         anchors.fill: parent
+        visible: root.hasArt
         gradient: Gradient {
             orientation: Gradient.Vertical
             GradientStop { position: root.stops[0][0]; color: Ui.bgAlpha(root.stops[0][1]) }

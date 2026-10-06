@@ -63,7 +63,11 @@ Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Sha
 from `Ui.ringArcStart`, and runs the F4 swap (scale 0.7 to 1 in 400 ms, opacity in 200 ms) on every
 glyph change after the first one. `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
 `Ring` and `FocusBar` take `animated` (default true); cleared, every Behavior is off and a running
-swap jumps to its end. `Backdrop` pauses its loops while `paused`, `screenOff` or not `visible`.
+swap jumps to its end. `PageSurface` is `Ui.bg` under a vertical gradient from accent at alpha
+`Ui.backdropStops[0][1]` (0.15) to accent at 0, the first child of every page except `Home` (`MusicHub`,
+`QueueScreen`, `ArtistDetail`, `AlbumDetail`, `NowPlaying`, `Bluetooth`), so the turnstile swings a
+visible page. `Backdrop` draws its `Ui.bg` fill, image and shade only with a source (`hasArt`), else the
+`PageSurface` under it shows, and pauses its loops while `paused`, `screenOff` or not `visible`.
 `Toast.show()` during the exit restarts the entrance from the strip's current position. The volume
 overlay ring is `focused` inside the 0.4 group, so it reads at 0.4 (O20). `CroppedHeader` is 70 u
 tall with the x-height bottom at 66 u in both orientations.

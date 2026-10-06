@@ -447,4 +447,70 @@ TestCase {
         r.glyph = "play"
         verify(icon.opacity < 1 || icon.scale < 1)
     }
+
+    PageSurface {
+        id: surface
+
+        width: 640
+        height: 960
+        visible: false
+    }
+
+    Component {
+        id: hubComponent
+        MusicHub {}
+    }
+
+    Component {
+        id: queueComponent
+        QueueScreen {}
+    }
+
+    Component {
+        id: artistComponent
+        ArtistDetail {}
+    }
+
+    Component {
+        id: albumComponent
+        AlbumDetail {}
+    }
+
+    Component {
+        id: nowPlayingComponent
+        NowPlaying {}
+    }
+
+    Component {
+        id: bluetoothComponent
+        Bluetooth {}
+    }
+
+    function test_pagesurface_stops() {
+        const stops = surface.shade.gradient.stops
+        compare(stops.length, 2)
+        fuzzyCompare(stops[0].position, 0.0, 1e-9)
+        fuzzyCompare(stops[1].position, 1.0, 1e-9)
+        fuzzyCompare(stops[0].color.a, Ui.backdropStops[0][1], 0.005)
+        fuzzyCompare(stops[0].color.a, 0.15, 0.005)
+        fuzzyCompare(stops[1].color.a, 0, 0.005)
+        fuzzyCompare(stops[0].color.r, Ui.accent.r, 0.005)
+        fuzzyCompare(stops[0].color.g, Ui.accent.g, 0.005)
+        fuzzyCompare(stops[0].color.b, Ui.accent.b, 0.005)
+        compare(surface.shade.gradient.orientation, Gradient.Vertical)
+        compare(surface.children.length, 2)
+        compare(Qt.colorEqual(surface.children[0].color, Ui.bg), true)
+    }
+
+    function test_pagesurface_first_child() {
+        const screens = [hubComponent, queueComponent, artistComponent, albumComponent, nowPlayingComponent, bluetoothComponent]
+        for (let i = 0; i < screens.length; i++) {
+            const page = createTemporaryObject(screens[i], tc, { width: 640, height: 960, visible: false })
+            verify(page !== null)
+            const first = page.children[0]
+            verify(first instanceof PageSurface, "screen " + i + " first child")
+            compare(first.width, page.width)
+            compare(first.height, page.height)
+        }
+    }
 }

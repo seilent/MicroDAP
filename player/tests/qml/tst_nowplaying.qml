@@ -333,7 +333,6 @@ TestCase {
         compare(Qt.colorEqual(page.statusStrip.batteryGlyph.color, Ui.textFull), true)
         compare(page.backdropA.source.toString(), "")
         compare(page.localLayer.visible, true)
-        compare(page.variantLayer.visible, false)
     }
 
     function test_art_minimum() {
@@ -587,7 +586,6 @@ TestCase {
         compare(page.ring(2).glyph, "repeat")
         compare(page.statusStrip.bluetoothGlyph.visible, true)
         compare(page.localLayer.visible, false)
-        compare(page.variantLayer.visible, true)
         fakeBluez.durationMs = 0
         compare(page.progressItem.visible, false)
     }
@@ -630,7 +628,6 @@ TestCase {
         tryCompare(page, "variantAnimating", false, 2000)
         compare(page.contentOpacity, 1)
         compare(page.localLayerOpacity, 1)
-        compare(page.variantLayerOpacity, 0)
         compare(page.fromLabel.visible, false)
         compare(page.titleItem.text, "Song 1")
         compare(fakePlayer.status, 2)

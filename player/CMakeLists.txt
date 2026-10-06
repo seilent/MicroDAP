@@ -95,6 +95,7 @@ set(casdap_qml
     qml/Casdap/components/Tile.qml
     qml/Casdap/components/LetterTile.qml
     qml/Casdap/components/Backdrop.qml
+    qml/Casdap/components/PageSurface.qml
     qml/Casdap/components/StatusStrip.qml
     qml/Casdap/components/Sheet.qml
     qml/Casdap/components/Dialog.qml
