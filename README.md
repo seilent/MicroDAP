@@ -3,9 +3,12 @@
 Console As DAP. A music player session and Bluetooth A2DP receiver for Linux gaming handhelds,
 shipped as a systemd-sysext overlay for [Armada](https://github.com/armada-os/armada).
 
-Status: prototype. The session, the switch units, the guide button mapping, the hold daemon,
-the pad target, the boot guard and the Bluetooth agent exist and run on an AYANEO Pocket MICRO 2.
-Player and screen off state are not written yet.
+Status: prototype, runs on an AYANEO Pocket MICRO 2. The session, the switch units, the guide button
+mapping, the hold daemon, the pad target, the boot guard, the Bluetooth receiver with codec choice and
+aptX, the in game overlay, the power key daemon with the screen off state and the CPU floor, USB DAC
+output and the player (home, hub, artist and album detail, now playing, queue, playlists, history, jump
+grid, settings, saver, power menu) are written. Open: the session in native portrait, the power
+measurement run and the release image.
 
 ## Layout
 
@@ -216,9 +219,10 @@ ignore left, right and A while `OutputControl.activeOutput` is `usb`), `SPEAKER 
 `LDAC`, `SBC` on `Settings.btCodec`), `SAMPLE RATE FOLLOW` (read only, `ON <AudioInfo.graphRate>`, `ON`
 without a rate), `REPLAYGAIN` (read only `OFF`), `PAIR A PHONE` (A emits `pairPhone`, Main pushes
 `Bluetooth` on its PAIRING pivot; in overlay mode the value reads `PAIR IN DAP MODE` and A does nothing).
-LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in
-`folders` plus `Settings.roots`, path as written in 11 u Light with `ON` or `OFF`, A toggles it in
-`Settings.roots`). DISPLAY: `ACCENT` (the five `Ui.accentOptions` as 12 u swatches at 4 u gap, the current
+LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in `Settings.candidateRoots()` (`~/Music`,
+`/run/media` and every mount under `/run/media/<user>/`, its `Music` subfolder when present, `CASDAP_MEDIA_ROOT`
+overrides the base) plus `Settings.roots`, path as written in 11 u Light with `ON` or `OFF`, A toggles it in
+`Settings.roots`; the last root stays on). DISPLAY: `ACCENT` (the five `Ui.accentOptions` as 12 u swatches at 4 u gap, the current
 one with the 2 u border; left/right and A move it and write `Ui.accent` and `Settings.accent`),
 `ORIENTATION` (read only, the current orientation), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps; `Ui.userScale` and
 `Settings.scale` follow live, focus and the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
@@ -228,8 +232,8 @@ on `Settings.overlayToasts`). POWER: `SCREEN OFF AFTER`
 (`OFF`, 1, 2, 5, 10, 30 MIN on `Settings.screenOffSeconds`),
 `SUSPEND AFTER` (`OFF`, 5, 10, 30, 60 MIN on `Settings.suspendMinutes`), `POCKET CONTROLS` (`ON`, `OFF`),
 `WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), `GAME MODE` (A opens the sheet `game mode`
-with `switch to game mode`, T12; accepting calls `PowerBridge.runVerb("game-mode")`, or `closeAndSwitch()` on
-a bridge without `runVerb`; in overlay mode the row reads `CLOSE PLAYER`, the sheet `close player` and
+with `switch to game mode`, T12; accepting calls `PowerBridge.closeAndSwitch()`, or `runVerb("game-mode")` on
+a bridge without `closeAndSwitch`; in overlay mode the row reads `CLOSE PLAYER`, the sheet `close player` and
 accepting calls `OverlayBridge.closePlayer()`). `ABOUT` is the last row with the version (`Env.version`) as its value; A opens
 read only lines in the value role: `ARMADA <IMAGE_VERSION>` and `IMAGE <digest>` from `Env.manifest` (the
 `key=value` head of `/usr/share/casdap/build-manifest`, `CASDAP_MANIFEST_FILE` overrides), `DRIFT N FILES`
@@ -387,7 +391,7 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just base` | Reads `IMAGE_VERSION`, `VERSION_ID` and the booted image digest from the device into `build/base.env`. |
 | `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, installs the Selawik 1.01 TTFs (`build/fonts.sh`, sha256 pinned, cached in `build/cache/`) to `usr/share/fonts/casdap/`, runs `build/aptx.sh` (the aptX codec rpms, sha256 pinned, cached in `build/cache/aptx/`, into `usr/lib64/`), writes `version` and `build-manifest`. |
 | `just build` | `dist` plus `casdap-<ver>-armada<VERSION_ID>-arm64.raw` (squashfs, zstd). |
-| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/`, `systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, `systemctl --user daemon-reload`, and restarts the user `pipewire pipewire-pulse wireplumber` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed. |
+| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/` and `build/device-apply` to `/tmp/casdap-apply`, runs it as root (`systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, touches `/tmp/casdap-restart-audio` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed), then as the user `systemctl --user daemon-reload`, restarts `casdap-hotkeyd.service` and, with the marker present, the user `pipewire pipewire-pulse wireplumber`. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just test-player` | ctest of `build/player` inside the builder (after `just dist`); prints `skip: no builder image` where the image is absent. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
@@ -481,8 +485,10 @@ written before the start. KEEP IN BACKGROUND saves `state.json` with `handoff` t
 `~/.config/casdap/keep` with the running boot id (`Keep::write`, temp file next to it then rename),
 then starts the switch; a failed state or marker write skips the start and is a failed switch.
 CLOSE PLAYER saves `state.json` with `handoff` false, deletes the marker and starts the switch. The
-DAP session client start deletes the marker as well; `--overlay`, `--screenshot` and `--scan-only`
-runs never touch it. The start process ending with a non zero code, failing to start, or
+DAP session client start deletes the marker as well and runs `casdap-power screen-on` once through the same
+tracked `QProcess` (`PowerBridge::runScreenOn`), so the CPU floor and the backlight are set before the first
+frame; `--overlay`, `--screenshot` and `--scan-only`
+runs never touch either. The start process ending with a non zero code, failing to start, or
 `CASDAP_SWITCH_TIMEOUT_MS` (default 30000) passing with neither `finished` nor SIGTERM is a failed
 switch: the marker is deleted, `state.json` is saved with `handoff` false, the prompt closed and the
 toast `switch failed` shown. A second `keepInBackground()` or `closeAndSwitch()` while a start is
@@ -677,7 +683,9 @@ restarts), every write `amixer -D hw:0 cset`. The session stop puts `hp-gain-nor
 
 `AudioInfo.graphRate` is the running graph rate: `pw-dump` (`CASDAP_PW_DUMP_BIN`, default `pw-dump` on PATH)
 gives the default sink node's `clock.rate`, else its `Format` rate, else the `settings` metadata `clock.rate`;
-without the binary it is the `hw_params` rate. Read with `pcmFormat` every 2 s while `active`.
+without the binary it is the `hw_params` rate. `pcmFormat` is read every 2 s while `active`; `graphRate` is
+read by `refreshGraphRate()`, which the settings page calls when it opens, and falls back to the latest
+`hw_params` rate when `pw-dump` is absent, fails or is killed after its timeout.
 
 `OutputControl` (context property, DAP mode only, null under `--overlay`) applies `Settings.output`
 (`auto`, `speaker`, `headphones`, `usb`) at start and on every change. Every apply reads the jack and the sink
