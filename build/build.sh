@@ -33,6 +33,7 @@ for p in $(find patches -type f -name '*.patch' | sort); do
 done
 
 build/fonts.sh build/cache/fonts "${dist}"
+bash build/aptx.sh build/cache/aptx "${dist}"
 
 if [[ -f player/CMakeLists.txt ]]; then
     export CCACHE_DIR="${PWD}/build/cache/ccache"
@@ -40,10 +41,6 @@ if [[ -f player/CMakeLists.txt ]]; then
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
     cmake --build build/player
     DESTDIR="${PWD}/${dist}" cmake --install build/player
-fi
-
-if [[ -d aptx ]]; then
-    aptx/fetch.sh "${dist}"
 fi
 
 echo "${version}" > "${share}/version"
