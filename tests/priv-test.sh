@@ -18,12 +18,39 @@ done
 export STATE="${T}/state"
 export CASDAP_SYSFS_ROOT="${sys}"
 export CASDAP_CPU_BEFORE_FILE="${T}/run/cpu-before"
+export CASDAP_AMIXER_BIN="${T}/bin/amixer"
+export CASDAP_RGB_BIN="${T}/bin/armada-rgb"
+export CASDAP_RGB_CONFIG="${T}/etc/armada/rgb.json"
+export CASDAP_RGB_BEFORE_FILE="${T}/run/rgb-before.json"
+export RGB_GET="${T}/rgb-get"
+export AMIXER_FAIL="${T}/amixer-fail"
+export RGB_FAIL="${T}/rgb-fail"
 
 cat > "${T}/bin/btmgmt" <<'EOF'
 #!/usr/bin/bash
 echo "btmgmt $*" >> "${STATE}"
 EOF
-chmod 0755 "${T}/bin/btmgmt"
+cat > "${T}/bin/amixer" <<'EOF'
+#!/usr/bin/bash
+{ printf 'amixer'; printf '[%s]' "$@"; echo; } >> "${STATE}"
+[[ -e "${AMIXER_FAIL}" ]] && { echo "amixer: Cannot find the given element from control hw:0" >&2; exit 1; }
+echo "numid=1,iface=MIXER,name='$4'"
+EOF
+cat > "${T}/bin/armada-rgb" <<'EOF'
+#!/usr/bin/bash
+{ printf 'armada-rgb'; printf '[%s]' "$@"; echo; } >> "${STATE}"
+case "$1" in
+    get)
+        [[ -e "${RGB_FAIL}" && "$(cat "${RGB_FAIL}")" == get ]] && { echo "Error: no profile" >&2; exit 1; }
+        cat "${RGB_GET}"
+        ;;
+    set|off|apply|sleep|wake)
+        [[ -e "${RGB_FAIL}" && "$(cat "${RGB_FAIL}")" == "$1" ]] && { echo "Error: /dev/ttyHS2 busy" >&2; exit 1; }
+        ;;
+esac
+exit 0
+EOF
+chmod 0755 "${T}/bin/btmgmt" "${T}/bin/amixer" "${T}/bin/armada-rgb"
 export PATH="${T}/bin:${PATH}"
 
 failures=0
@@ -41,7 +68,24 @@ reset() {
     done
     echo userspace > "${gpu}/governor"
     echo 587000000 > "${gpu}/max_freq"
-    rm -rf "${T}/run"
+    rm -rf "${T}/run" "${T}/etc" "${AMIXER_FAIL}" "${RGB_FAIL}"
+    printf '{\n  "version": 1,\n  "enabled": true,\n  "linkBrightness": true,\n  "brightness": 30,\n  "maxBrightness": 60,\n  "color": "FFFFFF",\n  "saturation": 100\n}\n' > "${RGB_GET}"
+}
+
+rgb_config() {
+    mkdir -p "$(dirname "${CASDAP_RGB_CONFIG}")"
+    printf '%s\n' "$1" > "${CASDAP_RGB_CONFIG}"
+}
+
+expect_calls() {
+    local expected
+    expected=$(printf '%s\n' "$@")
+    [[ "$(cat "${STATE}")" == "${expected}" ]] || fail "${case_name}: calls were:"$'\n'"$(cat "${STATE}")"$'\n'"expected:"$'\n'"${expected}"
+}
+
+expect_no_rgb_files() {
+    [[ ! -e "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save file written"
+    [[ ! -e "${CASDAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
 }
 
 run() {
@@ -232,15 +276,281 @@ run cpu-restore
 expect_untouched_sysfs
 [[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore retry left the save file"
 
-for verb in bogus "" "cores-offline;id" "bt-class-headphones;id" "backlight-off --help" "cpu-dap;id" cpu "cpu-restore " CPU-DAP; do
+for pair in "low 8" "normal 20" "high 24"; do
+    read -r name value <<< "${pair}"
+    case_name="hp-gain-${name}"
+    reset
+    run "hp-gain-${name}"
+    [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+    expect_calls "amixer[-D][hw:0][cset][name=HPHL Volume][${value}]" "amixer[-D][hw:0][cset][name=HPHR Volume][${value}]"
+    expect_untouched_sysfs
+    [[ ! -e "${T}/run" ]] || fail "${case_name} wrote a save file"
+done
+
+for triple in "lohifi CLS_H_LOHIFI LOHIFI" "ulp CLS_H_ULP ULP" "hifi CLS_H_HIFI LOHIFI"; do
+    read -r name mode pwr <<< "${triple}"
+    case_name="hp-amp-${name}"
+    reset
+    run "hp-amp-${name}"
+    [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+    expect_calls "amixer[-D][hw:0][cset][name=RX HPH Mode][${mode}]" "amixer[-D][hw:0][cset][name=RX_HPH PWR Mode][${pwr}]"
+    expect_untouched_sysfs
+done
+
+for step in 84 90 96 99 102 105 108; do
+    case_name="spk-gain-${step}"
+    reset
+    run "spk-gain-${step}"
+    [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+    expect_calls "amixer[-D][hw:0][cset][name=WSA_RX0 Digital Volume][${step}]" "amixer[-D][hw:0][cset][name=WSA_RX1 Digital Volume][${step}]"
+    expect_untouched_sysfs
+done
+
+case_name="hp-gain-low with a refused cset"
+reset
+: > "${AMIXER_FAIL}"
+run hp-gain-low
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+expect_calls "amixer[-D][hw:0][cset][name=HPHL Volume][8]" "amixer[-D][hw:0][cset][name=HPHR Volume][8]"
+
+case_name="spk-gain-102 with a refused cset"
+reset
+: > "${AMIXER_FAIL}"
+run spk-gain-102
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+expect_calls "amixer[-D][hw:0][cset][name=WSA_RX0 Digital Volume][102]" "amixer[-D][hw:0][cset][name=WSA_RX1 Digital Volume][102]"
+
+accent_set="armada-rgb[set][--enabled][true][--link-brightness][true][--color]"
+rgb_get="armada-rgb[get]"
+rgb_off="armada-rgb[off]"
+rgb_apply="armada-rgb[apply]"
+steam_config='{"version":1,"enabled":true,"linkBrightness":false,"brightness":40,"maxBrightness":50,"color":"00FF00","saturation":100}'
+
+accent_call() { printf '%s[%s][--brightness][%s][--max-brightness][%s]' "${accent_set}" "$1" "$2" "$3"; }
+
+for pair in "pink FA2A55" "orange F09609" "cyan 1BA1E2" "lime 339933" "purple A200FF"; do
+    read -r name hex <<< "${pair}"
+    case_name="rgb-accent-${name}"
+    reset
+    rgb_config "${steam_config}"
+    run "rgb-accent-${name}"
+    [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+    expect_calls "${rgb_get}" "$(accent_call "${hex}" 30 60)"
+    [[ -f "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
+    [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
+    [[ ! -e "${CASDAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
+    [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config rewritten by the word"
+    expect_untouched_sysfs
+    [[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "${case_name} wrote the cpu save file"
+done
+
+case_name="rgb-accent-cyan with a save present"
+reset
+rgb_config "${steam_config}"
+mkdir -p "${T}/run"
+echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
+run rgb-accent-cyan
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
+expect_calls "${rgb_get}" "$(accent_call 1BA1E2 30 60)"
+
+case_name="rgb-accent-lime without a config"
+reset
+run rgb-accent-lime
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ -f "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
+[[ ! -s "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
+[[ ! -e "${CASDAP_RGB_CONFIG}" ]] || fail "${case_name}: config created by the word"
+expect_calls "${rgb_get}" "$(accent_call 339933 30 60)"
+
+case_name="rgb-accent-pink with maxBrightness 0"
+reset
+rgb_config "${steam_config}"
+printf '{\n  "version": 1,\n  "enabled": false,\n  "linkBrightness": false,\n  "brightness": 0,\n  "maxBrightness": 0,\n  "color": "FFFFFF",\n  "saturation": 100\n}\n' > "${RGB_GET}"
+run rgb-accent-pink
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_get}" "$(accent_call FA2A55 0 50)"
+
+case_name="rgb-accent-cyan with a failing set"
+reset
+rgb_config "${steam_config}"
+echo set > "${RGB_FAIL}"
+run rgb-accent-cyan
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+expect_calls "${rgb_get}" "$(accent_call 1BA1E2 30 60)"
+
+case_name="rgb-accent-cyan with a failing get"
+reset
+rgb_config "${steam_config}"
+echo get > "${RGB_FAIL}"
+run rgb-accent-cyan
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+expect_calls "${rgb_get}"
+
+case_name="rgb-accent-cyan with a get lacking brightness"
+reset
+rgb_config "${steam_config}"
+printf '{\n  "version": 1\n}\n' > "${RGB_GET}"
+run rgb-accent-cyan
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+expect_calls "${rgb_get}"
+
+case_name="rgb-off"
+reset
+rgb_config "${steam_config}"
+run rgb-off
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_off}"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
+expect_untouched_sysfs
+
+case_name="rgb-off without a config"
+reset
+run rgb-off
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ -f "${CASDAP_RGB_BEFORE_FILE}" && ! -s "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
+expect_calls "${rgb_off}"
+
+case_name="rgb-off with a save present"
+reset
+rgb_config "${steam_config}"
+mkdir -p "${T}/run"
+echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
+run rgb-off
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
+
+case_name="rgb-off with a failing off"
+reset
+rgb_config "${steam_config}"
+echo off > "${RGB_FAIL}"
+run rgb-off
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+
+case_name="rgb-sleep"
+reset
+rgb_config "${steam_config}"
+run rgb-sleep
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "armada-rgb[sleep]"
+expect_no_rgb_files
+[[ ! -e "${T}/run" ]] || fail "${case_name} created the save directory"
+[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
+expect_untouched_sysfs
+
+case_name="rgb-wake"
+reset
+rgb_config "${steam_config}"
+run rgb-wake
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "armada-rgb[wake]"
+expect_no_rgb_files
+[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
+
+case_name="rgb-sleep with a save present"
+reset
+mkdir -p "${T}/run"
+echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
+run rgb-sleep
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save touched"
+
+case_name="rgb-wake with a failing wake"
+reset
+echo wake > "${RGB_FAIL}"
+run rgb-wake
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+expect_no_rgb_files
+
+case_name="rgb-restore with a saved config"
+reset
+rgb_config '{"version":1,"enabled":true,"brightness":30,"color":"1BA1E2"}'
+mkdir -p "${T}/run"
+printf '%s\n' "${steam_config}" > "${CASDAP_RGB_BEFORE_FILE}"
+run rgb-restore
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_apply}"
+[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
+[[ ! -e "${CASDAP_RGB_CONFIG}.tmp" ]] || fail "${case_name}: config temp file left"
+expect_no_rgb_files
+expect_untouched_sysfs
+
+case_name="rgb-restore with a zero byte save"
+reset
+rgb_config '{"version":1,"enabled":true,"brightness":30,"color":"1BA1E2"}'
+mkdir -p "${T}/run"
+: > "${CASDAP_RGB_BEFORE_FILE}"
+run rgb-restore
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_apply}"
+[[ ! -e "${CASDAP_RGB_CONFIG}" ]] || fail "${case_name}: config left"
+expect_no_rgb_files
+
+case_name="rgb-restore with a zero byte save and no config"
+reset
+mkdir -p "${T}/run"
+: > "${CASDAP_RGB_BEFORE_FILE}"
+run rgb-restore
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_apply}"
+expect_no_rgb_files
+
+case_name="rgb-restore without a save"
+reset
+rgb_config "${steam_config}"
+run rgb-restore
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ ! -s "${STATE}" ]] || fail "${case_name} ran $(cat "${STATE}")"
+[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
+[[ ! -e "${T}/run" ]] || fail "${case_name} created the save directory"
+
+case_name="rgb-restore with a failing apply"
+reset
+rgb_config '{"version":1,"enabled":true,"brightness":30,"color":"1BA1E2"}'
+mkdir -p "${T}/run"
+printf '%s\n' "${steam_config}" > "${CASDAP_RGB_BEFORE_FILE}"
+echo apply > "${RGB_FAIL}"
+run rgb-restore
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+expect_calls "${rgb_apply}"
+[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save removed"
+
+case_name="rgb-restore retry"
+rm -f "${RGB_FAIL}"
+: > "${STATE}"
+run rgb-restore
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_apply}"
+expect_no_rgb_files
+
+case_name="rgb-accent then rgb-restore"
+reset
+rgb_config "${steam_config}"
+run rgb-accent-purple
+run rgb-off
+run rgb-restore
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_get}" "$(accent_call A200FF 30 60)" "${rgb_off}" "${rgb_apply}"
+[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
+expect_no_rgb_files
+
+for verb in bogus "" "cores-offline;id" "bt-class-headphones;id" "backlight-off --help" "cpu-dap;id" cpu "cpu-restore " CPU-DAP \
+    hp-gain hp-gain-8 hp-gain-medium hp-amp hp-amp-cls_h_ulp spk-gain spk-gain-120 spk-gain-0 "spk-gain-102 " \
+    rgb rgb-accent rgb-accent-red rgb-accent-FA2A55 "rgb-restore;id" RGB-OFF "rgb-sleep "; do
     case_name="verb '${verb}'"
     reset
+    rgb_config "${steam_config}"
     run "${verb}"
     [[ "${rc}" == 1 ]] || fail "verb '${verb}' exit ${rc}, expected 1"
     [[ -s "${STATE}" ]] && fail "verb '${verb}' ran $(cat "${STATE}")" || true
     [[ "$(cat "${sys}/class/backlight/panel0/bl_power")" == 0 ]] || fail "verb '${verb}' touched sysfs"
     expect_untouched_sysfs
     [[ ! -e "${T}/run" ]] || fail "verb '${verb}' wrote a save file"
+    [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "verb '${verb}' touched the rgb config"
 done
 
 case_name="no verb"

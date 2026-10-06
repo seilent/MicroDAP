@@ -12,7 +12,7 @@ if [[ -n "${input}" ]] || grep -q 'usr/share/inputplumber/' <<<"${changed}"; the
     systemctl restart inputplumber.service
     systemctl start armada-controller-type.service
 fi
-if grep -qE 'usr/share/pipewire/|usr/lib64/spa-0\.2/|usr/lib64/libfreeaptx' <<<"${changed}"; then
+if grep -qE 'usr/share/pipewire/|usr/share/wireplumber/|usr/lib64/spa-0\.2/|usr/lib64/libfreeaptx' <<<"${changed}"; then
     : > /tmp/casdap-restart-audio
     chown "${SUDO_USER:-root}" /tmp/casdap-restart-audio
 fi

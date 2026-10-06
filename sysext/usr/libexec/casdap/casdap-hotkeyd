@@ -11,6 +11,7 @@ KEY="${CASDAP_HOTKEYD_KEY:-KEY_F13}"
 DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
 SYS_INPUT="${CASDAP_SYS_INPUT:-/sys/class/input}"
 POWER_RUNTIME="${CASDAP_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/casdap-power}"
+SETTINGS="${CASDAP_SETTINGS_FILE:-${HOME}/.config/casdap/settings.ini}"
 PATH="${PATH}:/usr/libexec/casdap"
 
 log() { logger -t casdap-hotkeyd -- "$*"; }
@@ -180,15 +181,31 @@ on_hold() {
     esac
 }
 
+volume_step() {
+    local line value=
+    if [[ -r "${SETTINGS}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line%$'\r'}"
+            [[ "${line}" == volumeStep=* ]] || continue
+            value="${line#*=}"
+        done < "${SETTINGS}"
+    fi
+    case "${value}" in
+        2|5|10) printf '%s\n' "${value}" ;;
+        *) printf '5\n' ;;
+    esac
+}
+
 on_volume() {
-    local dir=$1 value=$2 label level rest
+    local dir=$1 value=$2 label level rest step
     if [[ "${value}" == 1 || "${dir}" != "${vol_key}" ]]; then
         vol_key=${dir}
         vol_session=$(session_state)
     fi
     [[ "${vol_session}" == casdap ]] || return 0
+    step=$(volume_step)
     [[ "${dir}" == + ]] && run wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
-    run wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "5%${dir}"
+    run wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "${step}%${dir}"
     read -r label level rest < <(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
     if [[ "${label:-}" != Volume: || -z "${level:-}" ]]; then
         log "wpctl get-volume gave no level"

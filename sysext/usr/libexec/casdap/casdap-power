@@ -65,6 +65,9 @@ screen_off() {
     set_screen_off true
     run systemctl start casdap-priv@backlight-off.service
     run systemctl start casdap-priv@cpu-off.service
+    if [[ "$(setting rgb armada)" == accent ]]; then
+        run systemctl start casdap-priv@rgb-sleep.service
+    fi
     if [[ "$(setting wifiOffScreenOff false)" == true && ! -e "${runtime}/wifi" ]]; then
         if nmcli radio wifi off; then
             : > "${runtime}/wifi"
@@ -92,6 +95,9 @@ screen_on() {
         run systemctl start casdap-priv@cpu-dap.service
     else
         run systemctl start casdap-priv@cpu-restore.service
+    fi
+    if [[ "$(setting rgb armada)" == accent ]]; then
+        run systemctl start casdap-priv@rgb-wake.service
     fi
     run systemctl start casdap-priv@backlight-on.service
     if [[ "${state}" == active ]]; then

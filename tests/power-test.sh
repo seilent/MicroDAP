@@ -123,6 +123,8 @@ cpu_dap="systemctl start casdap-priv@cpu-dap.service"
 cpu_restore="systemctl start casdap-priv@cpu-restore.service"
 wifi_off="nmcli radio wifi off"
 wifi_on="nmcli radio wifi on"
+rgb_sleep="systemctl start casdap-priv@rgb-sleep.service"
+rgb_wake="systemctl start casdap-priv@rgb-wake.service"
 stop_timer="systemctl --user stop casdap-idle.timer"
 arm_timer="systemd-run --user --unit=casdap-idle --on-active=60 --on-unit-inactive=60 --timer-property=AccuracySec=1min /usr/libexec/casdap/casdap-power idle-check"
 
@@ -208,6 +210,47 @@ expect_calls 0
 expect_no_marker off
 expect_log "screen-off outside the casdap session (inactive)"
 
+begin "screen-off with rgb accent"
+printf '[General]\nrgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+run screen-off
+expect_rc 0
+expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${stop_timer}" "${arm_timer}"
+expect_marker off
+
+begin "screen-off with rgb accent and wifi off"
+printf 'rgb=accent\nwifiOffScreenOff=true\n' > "${CASDAP_SETTINGS_FILE}"
+run screen-off
+expect_rc 0
+expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
+
+begin "screen-off with rgb accent and a failing rgb-sleep"
+printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+echo rgb-sleep > "${STATE}/fail-unit"
+run screen-off
+expect_rc 0
+expect_call "${rgb_sleep}"
+expect_call "${arm_timer}"
+expect_log "failed: ${rgb_sleep}"
+expect_marker off
+
+begin "screen-off with rgb off"
+printf 'rgb=off\n' > "${CASDAP_SETTINGS_FILE}"
+run screen-off
+expect_rc 0
+expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
+
+begin "screen-off with rgb armada"
+printf 'rgb=armada\n' > "${CASDAP_SETTINGS_FILE}"
+run screen-off
+expect_rc 0
+expect_no_call "casdap-priv@rgb"
+
+begin "screen-off with a bogus rgb value"
+printf 'rgb=Accent\n' > "${CASDAP_SETTINGS_FILE}"
+run screen-off
+expect_rc 0
+expect_no_call "casdap-priv@rgb"
+
 begin "screen-off while deactivating" deactivating
 run screen-off
 expect_rc 1
@@ -275,6 +318,67 @@ run screen-on
 expect_rc 0
 expect_call "${off_false}"
 expect_log "failed: ${off_false}"
+expect_no_marker off
+
+begin "screen-on with rgb accent"
+printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+marker off
+run screen-on
+expect_rc 0
+expect_sequence "${stop_timer}" "${cpu_dap}" "${rgb_wake}" "${bl_on}" "${off_false}"
+expect_no_marker off
+
+begin "screen-on with rgb accent and the wifi marker"
+printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+marker off
+marker wifi
+run screen-on
+expect_rc 0
+expect_sequence "${stop_timer}" "${wifi_on}" "${cpu_dap}" "${rgb_wake}" "${bl_on}" "${off_false}"
+
+begin "screen-on with rgb accent while inactive" inactive
+printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+run screen-on
+expect_rc 0
+expect_sequence "${stop_timer}" "${cpu_restore}" "${rgb_wake}" "${bl_on}"
+
+begin "screen-on with rgb accent and a failing rgb-wake"
+printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+marker off
+echo rgb-wake > "${STATE}/fail-unit"
+run screen-on
+expect_rc 0
+expect_call "${rgb_wake}"
+expect_call "${bl_on}"
+expect_call "${off_false}"
+expect_log "failed: ${rgb_wake}"
+expect_no_marker off
+
+begin "screen-on with rgb off"
+printf 'rgb=off\n' > "${CASDAP_SETTINGS_FILE}"
+marker off
+run screen-on
+expect_rc 0
+expect_sequence "${stop_timer}" "${cpu_dap}" "${bl_on}" "${off_false}"
+
+begin "screen-on with rgb armada"
+printf 'rgb=armada\n' > "${CASDAP_SETTINGS_FILE}"
+marker off
+run screen-on
+expect_rc 0
+expect_no_call "casdap-priv@rgb"
+
+begin "toggle with rgb accent"
+printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+mkdir -p "${CASDAP_RUNTIME_DIR}"
+echo 1000 > "${CASDAP_RUNTIME_DIR}/screen-on-ms"
+run toggle
+expect_call "${rgb_sleep}"
+expect_no_call "${rgb_wake}"
+: > "${STATE}/calls"
+run toggle
+expect_call "${rgb_wake}"
+expect_no_call "${rgb_sleep}"
 expect_no_marker off
 
 begin "toggle to off"
@@ -473,6 +577,13 @@ expect_calls 0
 begin "drop in"
 grep -qxF 'ExecStopPost=/usr/libexec/casdap/casdap-power screen-on' "${dropin}" || fail "drop in lacks ExecStopPost screen-on"
 grep -qxF 'Wants=casdap-powerd.service' "${dropin}" || fail "drop in lacks Wants=casdap-powerd.service"
+for word in hp-gain-normal hp-amp-lohifi spk-gain-102 rgb-restore; do
+    grep -qxF "ExecStopPost=systemctl start casdap-priv@${word}.service" "${dropin}" || fail "drop in lacks ExecStopPost casdap-priv@${word}"
+done
+[[ "$(grep -c '^ExecStopPost=' "${dropin}")" == 5 ]] || fail "drop in has $(grep -c '^ExecStopPost=' "${dropin}") ExecStopPost lines, expected 5"
+[[ "$(grep -n '^ExecStopPost=' "${dropin}" | head -n 1)" == *"casdap-power screen-on" ]] || fail "screen-on is not the first ExecStopPost"
+LC_ALL=C grep -q -P '\xe2\x80[\x93\x94]' "${dropin}" && fail "drop in has a dash" || true
+grep -q '^#' "${dropin}" && fail "drop in has a comment" || true
 
 if (( failures )); then
     echo "power-test: ${failures} failure(s)" >&2

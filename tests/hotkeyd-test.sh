@@ -103,6 +103,7 @@ export CASDAP_HOTKEYD_DEVICE_NAME=casdap-test-node
 export CASDAP_HOTKEYD_VOLUME_NAMES=casdap-test-volup:casdap-test-voldown
 export CASDAP_DEV_INPUT="${T}/nodev" CASDAP_SYS_INPUT="${T}/nosys"
 export CASDAP_RUNTIME_DIR="${T}/power"
+export CASDAP_SETTINGS_FILE="${T}/settings.ini"
 
 failures=0
 case_name=
@@ -320,6 +321,42 @@ expect_call "${voldown}"
 expect_no_call "${unmute}"
 expect_call "${emit}"
 expect_calls 3
+
+printf '[General]\nvolumeStep=10\n' > "${CASDAP_SETTINGS_FILE}"
+run_case "volume up with volumeStep 10" casdap 0 0 "" 0 "up;sleep 0.05;up-release"
+expect_call "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 10%+"
+expect_no_call "${volup}"
+expect_call "${emit}"
+expect_calls 4
+
+printf 'volumeStep=2\r\n' > "${CASDAP_SETTINGS_FILE}"
+run_case "volume down with volumeStep 2" casdap 0 0 "" 0 "down;sleep 0.05;down-release"
+expect_call "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 2%-"
+expect_no_call "${voldown}"
+expect_calls 3
+
+printf 'volumeStep=7\n' > "${CASDAP_SETTINGS_FILE}"
+run_case "volume up with a bogus volumeStep" casdap 0 0 "" 0 "up;sleep 0.05;up-release"
+expect_call "${volup}"
+expect_calls 4
+
+printf 'volumeStep=\n' > "${CASDAP_SETTINGS_FILE}"
+run_case "volume up with an empty volumeStep" casdap 0 0 "" 0 "up;sleep 0.05;up-release"
+expect_call "${volup}"
+
+printf 'volumeStep=2\nvolumeStep=10\n' > "${CASDAP_SETTINGS_FILE}"
+run_case "volume up with a repeated volumeStep takes the last" casdap 0 0 "" 0 "up;sleep 0.05;up-release"
+expect_call "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 10%+"
+
+printf 'volumeStep=2\n' > "${CASDAP_SETTINGS_FILE}"
+run_case "volumeStep 2 dry run" casdap 0 0 "" 1 "up;sleep 0.05;up-release"
+expect_log "would: wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 2%+"
+expect_calls 1
+
+rm -f "${CASDAP_SETTINGS_FILE}"
+run_case "volume up without a settings file" casdap 0 0 "" 0 "up;sleep 0.05;up-release"
+expect_call "${volup}"
+expect_calls 4
 
 run_case "volume up in casdap while muted" casdap 0 0 "" 0 "up;sleep 0.05;up-release" 1
 expect_call "${unmute}"

@@ -5,6 +5,10 @@ sysfs="${CASDAP_SYSFS_ROOT:-/sys}"
 before="${CASDAP_CPU_BEFORE_FILE:-/run/casdap/cpu-before}"
 cpu="${sysfs}/devices/system/cpu"
 gpu="${sysfs}/class/devfreq/3d00000.gpu"
+amixer="${CASDAP_AMIXER_BIN:-amixer}"
+rgb="${CASDAP_RGB_BIN:-/usr/libexec/armada/armada-rgb-env}"
+rgb_config="${CASDAP_RGB_CONFIG:-/etc/armada/rgb.json}"
+rgb_before="${CASDAP_RGB_BEFORE_FILE:-/run/casdap/rgb-before.json}"
 failed=0
 
 backlight() {
@@ -85,6 +89,97 @@ cpu_restore() {
     fi
 }
 
+cset() {
+    if ! "${amixer}" -D hw:0 cset name="$1" "$2" > /dev/null; then
+        echo "casdap-priv: cset $1 $2 failed" >&2
+        failed=1
+    fi
+    return 0
+}
+
+hp_gain() {
+    cset 'HPHL Volume' "$1"
+    cset 'HPHR Volume' "$1"
+}
+
+hp_amp() {
+    cset 'RX HPH Mode' "$1"
+    cset 'RX_HPH PWR Mode' "$2"
+}
+
+spk_gain() {
+    cset 'WSA_RX0 Digital Volume' "$1"
+    cset 'WSA_RX1 Digital Volume' "$1"
+}
+
+rgb_run() {
+    if ! "${rgb}" "$@" > /dev/null; then
+        echo "casdap-priv: armada-rgb $* failed" >&2
+        failed=1
+    fi
+    return 0
+}
+
+rgb_save() {
+    local tmp
+    if [[ -e "${rgb_before}" ]]; then
+        return 0
+    fi
+    mkdir -p "$(dirname "${rgb_before}")"
+    tmp="${rgb_before}.tmp"
+    if [[ -e "${rgb_config}" ]]; then
+        cp -- "${rgb_config}" "${tmp}"
+    else
+        : > "${tmp}"
+    fi
+    mv "${tmp}" "${rgb_before}"
+}
+
+rgb_accent() {
+    local out line brightness= max=
+    rgb_save
+    if ! out=$("${rgb}" get); then
+        echo "casdap-priv: armada-rgb get failed" >&2
+        exit 1
+    fi
+    while IFS= read -r line; do
+        [[ "${line}" =~ ^[[:space:]]*\"([A-Za-z]+)\":[[:space:]]*([0-9]+) ]] || continue
+        case "${BASH_REMATCH[1]}" in
+            brightness)    brightness=${BASH_REMATCH[2]} ;;
+            maxBrightness) max=${BASH_REMATCH[2]} ;;
+        esac
+    done <<< "${out}"
+    if [[ -z "${brightness}" || -z "${max}" ]]; then
+        echo "casdap-priv: armada-rgb get gave no brightness" >&2
+        exit 1
+    fi
+    if (( max == 0 )); then
+        max=50
+    fi
+    rgb_run set --enabled true --link-brightness true --color "$1" --brightness "${brightness}" --max-brightness "${max}"
+}
+
+rgb_off() {
+    rgb_save
+    rgb_run off
+}
+
+rgb_restore() {
+    local tmp
+    [[ -e "${rgb_before}" ]] || return 0
+    if [[ -s "${rgb_before}" ]]; then
+        tmp="${rgb_config}.tmp"
+        cp -- "${rgb_before}" "${tmp}"
+        mv "${tmp}" "${rgb_config}"
+    else
+        rm -f -- "${rgb_config}"
+    fi
+    rgb_run apply
+    if (( failed == 0 )); then
+        rm -f -- "${rgb_before}"
+    fi
+}
+
 [[ $# -eq 1 ]] || exit 1
 
 case "$1" in
@@ -95,6 +190,28 @@ case "$1" in
     cpu-dap)             cpu_dap ;;
     cpu-off)             cpu_off ;;
     cpu-restore)         cpu_restore ;;
+    hp-gain-low)         hp_gain 8 ;;
+    hp-gain-normal)      hp_gain 20 ;;
+    hp-gain-high)        hp_gain 24 ;;
+    hp-amp-lohifi)       hp_amp CLS_H_LOHIFI LOHIFI ;;
+    hp-amp-ulp)          hp_amp CLS_H_ULP ULP ;;
+    hp-amp-hifi)         hp_amp CLS_H_HIFI LOHIFI ;;
+    spk-gain-84)         spk_gain 84 ;;
+    spk-gain-90)         spk_gain 90 ;;
+    spk-gain-96)         spk_gain 96 ;;
+    spk-gain-99)         spk_gain 99 ;;
+    spk-gain-102)        spk_gain 102 ;;
+    spk-gain-105)        spk_gain 105 ;;
+    spk-gain-108)        spk_gain 108 ;;
+    rgb-accent-pink)     rgb_accent FA2A55 ;;
+    rgb-accent-orange)   rgb_accent F09609 ;;
+    rgb-accent-cyan)     rgb_accent 1BA1E2 ;;
+    rgb-accent-lime)     rgb_accent 339933 ;;
+    rgb-accent-purple)   rgb_accent A200FF ;;
+    rgb-off)             rgb_off ;;
+    rgb-sleep)           rgb_run sleep ;;
+    rgb-wake)            rgb_run wake ;;
+    rgb-restore)         rgb_restore ;;
     *) exit 1 ;;
 esac
 
