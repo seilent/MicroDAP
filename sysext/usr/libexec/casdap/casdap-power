@@ -1,0 +1,187 @@
+#!/usr/bin/bash
+set -eu
+
+runtime="${CASDAP_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/casdap-power}"
+settings="${CASDAP_SETTINGS_FILE:-${HOME}/.config/casdap/settings.ini}"
+before="${CASDAP_CPU_BEFORE_FILE:-/run/casdap/cpu-before}"
+debounce_ms="${CASDAP_POWER_DEBOUNCE_MS:-2000}"
+idle_period="${CASDAP_POWER_IDLE_PERIOD:-60}"
+self=/usr/libexec/casdap/casdap-power
+session=gamescope-session-plus@casdap.service
+player=(org.casdap.Player /org/casdap/Player org.casdap.Player)
+
+log() { logger -t casdap-power -- "$*"; }
+
+now_ms() { date +%s%3N; }
+
+run() {
+    "$@" || log "failed: $* (rc=$?)"
+}
+
+session_state() {
+    systemctl --user is-active "${session}" 2>/dev/null || true
+}
+
+require_session() {
+    local state
+    state=$(session_state)
+    if [[ "${state}" != active ]]; then
+        log "$1 outside the casdap session (${state:-unknown}), ignored"
+        exit 1
+    fi
+}
+
+setting() {
+    local line value=
+    if [[ -r "${settings}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line%$'\r'}"
+            [[ "${line}" == "$1="* ]] || continue
+            value="${line#*=}"
+        done < "${settings}"
+    fi
+    printf '%s\n' "${value:-$2}"
+}
+
+set_screen_off() {
+    run busctl --user --timeout=2 call "${player[@]}" SetScreenOff b "$1"
+}
+
+stop_idle() {
+    systemctl --user stop casdap-idle.timer 2>/dev/null || true
+}
+
+arm_idle() {
+    stop_idle
+    run systemd-run --user --unit=casdap-idle --on-active="${idle_period}" --on-unit-inactive="${idle_period}" \
+        --timer-property=AccuracySec=1min "${self}" idle-check
+}
+
+screen_off() {
+    require_session screen-off
+    log "screen off"
+    mkdir -p "${runtime}"
+    : > "${runtime}/off"
+    set_screen_off true
+    run systemctl start casdap-priv@backlight-off.service
+    run systemctl start casdap-priv@cpu-off.service
+    if [[ "$(setting wifiOffScreenOff false)" == true && ! -e "${runtime}/wifi" ]]; then
+        if nmcli radio wifi off; then
+            : > "${runtime}/wifi"
+        else
+            log "failed: nmcli radio wifi off (rc=$?)"
+        fi
+    fi
+    arm_idle
+}
+
+screen_on() {
+    local state
+    state=$(session_state)
+    log "screen on (session ${state:-unknown})"
+    mkdir -p "${runtime}"
+    stop_idle
+    if [[ -e "${runtime}/wifi" ]]; then
+        run nmcli radio wifi on
+        rm -f -- "${runtime}/wifi"
+    fi
+    if [[ "${state}" == active ]]; then
+        if [[ ! -e "${runtime}/off" && -e "${before}" ]]; then
+            run systemctl start casdap-priv@cpu-restore.service
+        fi
+        run systemctl start casdap-priv@cpu-dap.service
+    else
+        run systemctl start casdap-priv@cpu-restore.service
+    fi
+    run systemctl start casdap-priv@backlight-on.service
+    if [[ "${state}" == active ]]; then
+        set_screen_off false
+    fi
+    rm -f -- "${runtime}/off"
+    now_ms > "${runtime}/screen-on-ms"
+}
+
+toggle() {
+    local now last
+    require_session toggle
+    if [[ -e "${runtime}/off" ]]; then
+        screen_on
+        return 0
+    fi
+    now=$(now_ms)
+    last=$(cat "${runtime}/screen-on-ms" 2>/dev/null || echo 0)
+    [[ "${last}" =~ ^[0-9]+$ ]] || last=0
+    if (( now - last < debounce_ms )); then
+        log "toggle within ${debounce_ms} ms of screen on, ignored"
+        return 0
+    fi
+    screen_off
+}
+
+cpu_apply() {
+    require_session cpu-apply
+    if [[ -e "${runtime}/off" ]]; then
+        run systemctl start casdap-priv@cpu-off.service
+    else
+        run systemctl start casdap-priv@cpu-dap.service
+    fi
+}
+
+playing() {
+    local status
+    status=$(busctl --user get-property "${player[@]}" PlaybackStatus 2>/dev/null) || return 1
+    [[ "${status}" == *Playing* ]]
+}
+
+transport_active() {
+    local path value
+    while read -r path; do
+        [[ -n "${path}" ]] || continue
+        value=$(busctl --system get-property org.bluez "${path}" org.bluez.MediaTransport1 State 2>/dev/null) || continue
+        if [[ "${value}" == 's "active"' ]]; then
+            return 0
+        fi
+    done < <(busctl --system tree --list org.bluez 2>/dev/null | grep -E '/fd[0-9]+$' || true)
+    return 1
+}
+
+idle_check() {
+    local minutes since now
+    [[ "$(session_state)" == active ]] || return 0
+    if playing || transport_active; then
+        rm -f -- "${runtime}/idle-since"
+        return 0
+    fi
+    minutes=$(setting suspendMinutes 10)
+    [[ "${minutes}" =~ ^[0-9]+$ ]] || minutes=0
+    if (( minutes == 0 )); then
+        rm -f -- "${runtime}/idle-since"
+        return 0
+    fi
+    now=$(date +%s)
+    if [[ ! -e "${runtime}/idle-since" ]]; then
+        mkdir -p "${runtime}"
+        echo "${now}" > "${runtime}/idle-since"
+        return 0
+    fi
+    since=$(cat "${runtime}/idle-since")
+    [[ "${since}" =~ ^[0-9]+$ ]] || since=${now}
+    if (( now - since >= minutes * 60 )); then
+        log "idle for ${minutes} min, suspending"
+        rm -f -- "${runtime}/idle-since"
+        systemctl suspend
+    fi
+}
+
+[[ $# -eq 1 ]] || exit 1
+
+case "$1" in
+    screen-off) screen_off ;;
+    screen-on)  screen_on ;;
+    toggle)     toggle ;;
+    cpu-apply)  cpu_apply ;;
+    idle-check) idle_check ;;
+    suspend)    systemctl suspend ;;
+    poweroff)   systemctl poweroff ;;
+    *) exit 1 ;;
+esac
