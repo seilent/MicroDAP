@@ -180,6 +180,8 @@ void SectionedModel::build()
 {
     m_rows.clear();
     m_groups.clear();
+    m_letters.clear();
+    m_letterGroup.clear();
     m_sourceToRow.clear();
     if (!m_active || !m_source.model())
         return;
@@ -189,8 +191,12 @@ void SectionedModel::build()
     for (int r = 0; r < n; ++r) {
         QString letter = m_source.letter(r);
         if (m_groups.isEmpty() || m_groups.constLast().letter != letter) {
+            const int created = static_cast<int>(m_groups.size());
+            m_letters.append(letter);
+            if (!m_letterGroup.contains(letter))
+                m_letterGroup.insert(letter, created);
             m_groups.append({std::move(letter), static_cast<int>(m_rows.size()), 0});
-            m_rows.append({-1, static_cast<int>(m_groups.size()) - 1});
+            m_rows.append({-1, created});
         }
         const int g = static_cast<int>(m_groups.size()) - 1;
         ++m_groups[g].size;
@@ -405,40 +411,29 @@ QVariantMap SectionedModel::get(int row) const
 
 bool SectionedModel::isFocusable(int row) const
 {
-    return row >= 0 && row < m_rows.size() && m_rows.at(row).source >= 0;
+    return row >= 0 && row < m_rows.size();
 }
 
 int SectionedModel::nearestFocusable(int from, int dir) const
 {
-    const int step = dir >= 0 ? 1 : -1;
     const int n = count();
-    for (int i = from; i >= 0 && i < n; i += step) {
-        if (isFocusable(i))
-            return i;
-    }
-    for (int i = from - step; i >= 0 && i < n; i -= step) {
-        if (isFocusable(i))
-            return i;
-    }
-    return -1;
+    if (n <= 0)
+        return -1;
+    if (from >= 0 && from < n)
+        return from;
+    const int back = from - (dir >= 0 ? 1 : -1);
+    return back >= 0 && back < n ? back : -1;
 }
 
 QStringList SectionedModel::letters() const
 {
-    QStringList out;
-    out.reserve(m_groups.size());
-    for (const Group &group : m_groups)
-        out.append(group.letter);
-    return out;
+    return m_letters;
 }
 
 int SectionedModel::rowOfLetter(const QString &letter) const
 {
-    for (const Group &group : m_groups) {
-        if (group.letter == letter)
-            return group.divider;
-    }
-    return -1;
+    const auto it = m_letterGroup.constFind(letter);
+    return it == m_letterGroup.cend() ? -1 : m_groups.at(it.value()).divider;
 }
 
 int SectionedModel::firstRowOfLetter(const QString &letter) const
@@ -539,6 +534,8 @@ void AlbumGridModel::connectSource()
 void AlbumGridModel::build()
 {
     m_cells.clear();
+    m_letters.clear();
+    m_letterCell.clear();
     m_sourceToCell.clear();
     m_idToCell.clear();
     if (!m_active || !m_source.model())
@@ -549,8 +546,12 @@ void AlbumGridModel::build()
     m_idToCell.reserve(n);
     for (int r = 0; r < n; ++r) {
         QString letter = m_source.letter(r);
-        if (m_cells.isEmpty() || m_cells.constLast().letter != letter)
+        if (m_cells.isEmpty() || m_cells.constLast().letter != letter) {
+            m_letters.append(letter);
+            if (!m_letterCell.contains(letter))
+                m_letterCell.insert(letter, static_cast<int>(m_cells.size()));
             m_cells.append({-1, letter});
+        }
         const int cell = static_cast<int>(m_cells.size());
         m_sourceToCell[r] = cell;
         m_idToCell.insert(m_source.id(r).toLongLong(), cell);
@@ -668,22 +669,12 @@ int AlbumGridModel::cellCount(int row) const
 
 QStringList AlbumGridModel::letters() const
 {
-    QStringList out;
-    for (const Cell &cell : m_cells) {
-        if (cell.source < 0)
-            out.append(cell.letter);
-    }
-    return out;
+    return m_letters;
 }
 
 QVariantMap AlbumGridModel::cellOfLetter(const QString &letter) const
 {
-    for (qsizetype i = 0; i < m_cells.size(); ++i) {
-        const Cell &cell = m_cells.at(i);
-        if (cell.source < 0 && cell.letter == letter)
-            return position(static_cast<int>(i));
-    }
-    return position(-1);
+    return position(m_letterCell.value(letter, -1));
 }
 
 int AlbumGridModel::rowOfLetter(const QString &letter) const

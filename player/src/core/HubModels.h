@@ -117,6 +117,8 @@ private:
     int m_lastCount = 0;
     QList<Row> m_rows;
     QList<Group> m_groups;
+    QStringList m_letters;
+    QHash<QString, int> m_letterGroup;
     QList<int> m_sourceToRow;
     QList<QMetaObject::Connection> m_connections;
 };
@@ -184,6 +186,8 @@ private:
     bool m_active = false;
     int m_lastCount = 0;
     QList<Cell> m_cells;
+    QStringList m_letters;
+    QHash<QString, int> m_letterCell;
     QList<int> m_sourceToCell;
     QHash<qint64, int> m_idToCell;
     QList<QMetaObject::Connection> m_connections;

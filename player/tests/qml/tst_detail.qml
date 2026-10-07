@@ -535,6 +535,8 @@ TestCase {
         const hub = pages.currentItem
         hub.completeAll()
         compare(hub.entryAt(0, 1).kind, "artist")
+        compare(hub.rowIndex, 0)
+        verify(router.dispatch("down", false))
         compare(hub.rowIndex, 1)
         router.dispatch("a", false)
         compare(counters.opened.length, 1)

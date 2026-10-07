@@ -170,7 +170,8 @@ after NFKC, a leading kana goes to its row (katakana read as hiragana, small, vo
 ヴ as う, ゐ ゑ を ん as わ, ー, ゝ ゞ ヽ ヾ and the voicing marks skipped), a leading Han ideograph to 漢, anything else
 to `#`; groups sort in that order, Latin by the lower case name, kana by the folded hiragana (ties by the unfolded
 one), 漢 by code point, equal keys by id. Artists, songs and genres get a divider row per letter (ROW_HEIGHT, the 20 u Regular letter at
-HUB_EDGE on the LETTER_TILE baseline inset), skipped by focus (`isFocusable`, `nearestFocusable`); albums are rows of
+HUB_EDGE on the LETTER_TILE baseline inset), focusable like the album letter cells (every row `isFocusable`,
+`nearestFocusable` clamps to the list; the focus bar spans the divider row, the letter stays at 1.0); albums are rows of
 `Ui.gridCols` cells (3 portrait, 6 at W 483, `cells(row)`) with a `LetterTile` cell before each letter group and a `Tile` per album, one
 `Loader` per cell choosing the two; the cell
 is TILE_S + 24 tall, rows at TILE_S + 24 + GUTTER pitch; a column change keeps focus on the same album (`cellOfAlbum`). Artist rows carry the count line (`1 ALBUM, 3 SONGS`) in the upper case
@@ -182,13 +183,15 @@ through the pane, left/right move within a grid row (no wrap), LB/RB switch pivo
 either end. A on a song calls `Player.playSource("all", 0, "play", id)` (the whole library in the `Songs` order from
 that song; without a player it emits `play`); A on a genre or playlist calls `Player.playSource(kind, id, "play", -1)`
 (without a player both emit `play(kind, id)`); A on an
-album or artist emits `open(kind, id)` (Main pushes `AlbumDetail` for `album` and `ArtistDetail` for `artist`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
-`jumpRequested` and opens the `JumpGrid` over the hub with the model's `letters()` (T14: the grid is full screen on `Ui.bg` over the list, swiveling in about
+album or artist emits `open(kind, id)` (Main pushes `AlbumDetail` for `album` and `ArtistDetail` for `artist`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell or a divider, or Back/View on an alphabetic pivot, emits
+`jumpRequested(letter)` with the focused letter and opens the `JumpGrid` over the hub with the model's `letters()` (T14: the grid is full screen on `Ui.bg` over the list, swiveling in about
 a horizontal center hinge from -30 degrees over 350 expOut6, out to 30 over 250 expIn1). `jumpTo(letter)` from
-the grid snaps the pane so the letter's divider (`rowOfLetter`, or the letter cell from `cellOfLetter`) sits at the top, focuses the first row under it
-(`firstRowOfLetter`, the cell itself on albums) and shows the 120 u `JumpLetter` (T15). LT/RT show the focused row's letter in the
+the grid snaps the pane so the letter's divider (`rowOfLetter`, or the letter cell from `cellOfLetter`) sits at the top, focuses that divider
+(the letter cell on albums), so A opens the grid again and down enters the rows, and shows the 120 u `JumpLetter` (T15). `letters()`, `rowOfLetter`,
+`firstRowOfLetter` and `cellOfLetter` read a letter index built with the rows (rebuilt on a reset), every focus step and LT/RT page is one
+model call. LT/RT show the focused row's letter (a divider's own letter) in the
 same `JumpLetter`. X opens the sheet `play`, `play next`, `add to queue`, `shuffle`, `pin to quickplay` (no
-`shuffle` on a song; `play` and `add to queue` only on a genre); Y is `add to queue`; `play` on a song, genre or
+`shuffle` on a song; `play` and `add to queue` only on a genre); Y is `add to queue`; X and Y on a divider or a letter cell do nothing; `play` on a song, genre or
 playlist plays, every other verb emits `sheetAction(action, kind, id)` and runs through Main's queue verbs. B pops. After
 `Library.scanning` went true then false, the next change of a bound hub model runs F12 on the shown pane (rows `x` -5 to 0,
 `o` 0 to 1, 220 decel, `min(i, 10) * 50` stagger); a change during the scan runs it when the scan ends. A row
@@ -203,8 +206,11 @@ and 5) and 8 u gap from EDGE, the first row starting after `Ui.jumpExitCells` (2
 so `exit` sits in the first slot, the block centered vertically with its top at least EDGE (`Ui.jumpTop`; 49 u tiles
 from y 16 at 640x960, 42.7 u from y 37.3 at 960x640). `open(letters, letter)` takes
 the letters that have rows and the hub's focused letter; a letter without rows draws at 0.4 and is skipped;
-left/right step to the next letter with rows, up/down the next in the same column. A emits `jumpTo(letter)`
-and closes, B, Back/View and Start close with the hub focus unchanged. `screenOff` lands the swivel.
+left/right step to the next letter with rows, up/down the next in the same column. `exit` is a focus stop in its slot:
+left from the first letter with rows, or up from the column under it with no letter with rows in between, reaches it;
+focused, the label reads 1.0 with the 2 u bar at EDGE - 8 spanning the slot; right goes to the first letter with rows,
+down to the next in its column; a grid opened with no letters starts on it. A emits `jumpTo(letter)`
+and closes, A on `exit`, B, Back/View and Start close with the hub focus unchanged. `screenOff` lands the swivel.
 
 `PlaylistsScreen` is the `playlists` page: header `playlists`, the count `N PLAYLISTS` in the 11 u count role
 at HUB_EDGE on the pivot row baseline, the hub PLAYLISTS rows in a `FocusList` from CONTENT_TOP: `NOW PLAYING`
@@ -640,9 +646,10 @@ else `cpu-dap`. `idle-check` exits 0 outside the session; busy (`PlaybackStatus`
 0 removes `idle-since`; idle writes it with the current unix time when absent and runs `systemctl suspend`
 once it is `suspendMinutes` old. `suspend` and `poweroff` run `systemctl suspend` and `systemctl poweroff`.
 Every verb is idempotent. `gamescope-session-plus@casdap.service.d/30-casdap-power.conf` wants
-`casdap-powerd.service` and runs `ExecStopPost=/usr/libexec/casdap/casdap-power screen-on`, then
-`ExecStopPost=systemctl start casdap-priv@hp-gain-normal.service`, `@hp-amp-lohifi`, `@spk-gain-102` and
-`@rgb-restore`, so every session stop restores backlight, cpufreq, devfreq and Wi-Fi, stops the timer and
+`casdap-powerd.service` and runs, each as its own `ExecStopPost=-` step so a failed one never skips the rest,
+`systemctl start casdap-priv@rgb-restore.service`, `/usr/libexec/casdap/casdap-power screen-on`, then
+`casdap-priv@hp-gain-normal.service`, `@hp-amp-lohifi` and `@spk-gain-102`, so every session stop (the switch to
+Steam with KEEP IN BACKGROUND included; the overlay player never drives the lights) restores backlight, cpufreq, devfreq and Wi-Fi, stops the timer and
 puts the mixer and the stick lights back to the values Steam had.
 
 `casdap-powerd.service` (user unit, `PartOf=`, `BindsTo=` and `After=` the casdap session, `Restart=always`,

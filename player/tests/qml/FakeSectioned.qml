@@ -53,20 +53,16 @@ ListModel {
     }
 
     function isFocusable(row: int): bool {
-        return row >= 0 && row < model.count && model.get(row).kind !== "divider"
+        return row >= 0 && row < model.count
     }
 
     function nearestFocusable(from: int, dir: int): int {
-        const step = dir >= 0 ? 1 : -1
-        for (let i = from; i >= 0 && i < model.count; i += step) {
-            if (model.isFocusable(i))
-                return i
-        }
-        for (let i = from - step; i >= 0 && i < model.count; i -= step) {
-            if (model.isFocusable(i))
-                return i
-        }
-        return -1
+        if (model.count <= 0)
+            return -1
+        if (from >= 0 && from < model.count)
+            return from
+        const back = from - (dir >= 0 ? 1 : -1)
+        return back >= 0 && back < model.count ? back : -1
     }
 
     function letters(): var {

@@ -29,7 +29,10 @@ Item {
         : Motion.swivelAngle * root.curved
     readonly property real visualOpacity: root.opening ? root.curved : 1 - root.curved
     readonly property string focusLetter: root.letters[root.focusIndex] === undefined ? "" : root.letters[root.focusIndex]
+    readonly property int exitIndex: -1
+    readonly property bool exitFocused: root.shown && root.focusIndex === root.exitIndex
     property alias exitText: exitText
+    property alias exitBar: exitBar
     property alias cells: cells
     property alias swivel: swivel
 
@@ -76,12 +79,26 @@ Item {
                 return true
             }
         }
+        if (delta < 0 && root.focusIndex !== root.exitIndex) {
+            root.focusIndex = root.exitIndex
+            return true
+        }
         return false
     }
 
     function stepRow(delta: int): bool {
         const step = delta * root.cols
-        for (let i = root.focusIndex + step; i >= 0 && i < root.letters.length; i += step) {
+        const slot = root.focusIndex === root.exitIndex ? 0 : root.focusIndex + root.offset
+        for (let s = slot + step; s >= 0; s += step) {
+            const i = s - root.offset
+            if (i >= root.letters.length)
+                return false
+            if (i < 0) {
+                if (s !== 0)
+                    return false
+                root.focusIndex = root.exitIndex
+                return true
+            }
             if (root.has(root.letters[i])) {
                 root.focusIndex = i
                 return true
@@ -106,7 +123,7 @@ Item {
         root.available = letters === undefined || letters === null ? [] : letters
         const wanted = root.letters.indexOf(letter)
         const start = wanted >= 0 && root.has(letter) ? wanted : root.firstAvailable()
-        root.focusIndex = start < 0 ? 0 : start
+        root.focusIndex = start < 0 ? root.exitIndex : start
         root.shown = true
         root.opening = true
         root.animateTo(1, root.openDuration)
@@ -141,6 +158,10 @@ Item {
         case "a":
             if (repeat)
                 return true
+            if (root.focusIndex === root.exitIndex) {
+                root.close()
+                return true
+            }
             if (root.focusLetter !== "" && root.has(root.focusLetter)) {
                 root.jumpTo(root.focusLetter)
                 root.close()
@@ -194,8 +215,19 @@ Item {
             x: root.gridX
             y: root.gridY + (root.tile - exitText.height) / 2
             text: "exit"
-            color: Ui.white(Ui.overlayLabel.alpha)
+            color: Ui.white(root.exitFocused ? Ui.alphaFull : Ui.overlayLabel.alpha)
             font: Ui.font(Ui.overlayLabel)
+        }
+
+        Rectangle {
+            id: exitBar
+
+            x: root.gridX - Ui.px(Ui.focusBarOffset)
+            y: root.gridY
+            width: Ui.px(Ui.focusBarWidth)
+            height: root.tile
+            color: Ui.white(Ui.alphaFull)
+            opacity: root.exitFocused ? 1 : 0
         }
 
         Repeater {

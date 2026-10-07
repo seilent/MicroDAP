@@ -54,7 +54,7 @@ Page {
 
     signal open(string kind, int id)
     signal nowPlaying()
-    signal jumpRequested()
+    signal jumpRequested(string letter)
     signal play(string kind, int id)
     signal sheetAction(string action, string kind, int id)
 
@@ -356,8 +356,9 @@ Page {
     function openJumpGrid(): bool {
         if (!hub.alphabetic)
             return false
-        hub.jumpRequested()
-        jumpGrid.open(hub.availableLetters(), hub.focusLetter())
+        const letter = hub.focusLetter()
+        hub.jumpRequested(letter)
+        jumpGrid.open(hub.availableLetters(), letter)
         return true
     }
 
@@ -367,7 +368,6 @@ Page {
         if (m === null || m === undefined)
             return
         let top = -1
-        let target = -1
         let col = 0
         if (hub.grid) {
             if (typeof m.cellOfLetter !== "function")
@@ -375,17 +375,15 @@ Page {
             const pos = m.cellOfLetter(letter)
             top = pos === undefined || pos === null ? -1 : Number(pos.row)
             col = pos === undefined || pos === null ? 0 : Number(pos.col)
-            target = top
         } else {
-            if (typeof m.rowOfLetter !== "function" || typeof m.firstRowOfLetter !== "function")
+            if (typeof m.rowOfLetter !== "function")
                 return
             top = m.rowOfLetter(letter)
-            target = m.firstRowOfLetter(letter)
         }
-        if (top < 0 || target < 0)
+        if (top < 0)
             return
         list.completeScroll()
-        list.focusIndex = target
+        list.focusIndex = top
         list.contentY = Math.max(0, Math.min(list.maxContentY, top * list.rowPitch))
         if (hub.grid)
             hub.gridCol = col
@@ -419,6 +417,7 @@ Page {
             return
         switch (t.kind) {
         case "letter":
+        case "divider":
             hub.openJumpGrid()
             break
         case "song":
@@ -430,8 +429,6 @@ Page {
             break
         case "nowplaying":
             hub.nowPlaying()
-            break
-        case "divider":
             break
         default:
             hub.open(t.kind, t.id)
@@ -947,7 +944,7 @@ Page {
         required property string subtitle
         required property string number
         readonly property bool divider: row.kind === "divider"
-        readonly property bool isFocused: !row.divider && row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
+        readonly property bool isFocused: row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
         readonly property Item dividerItem: dividerText
 

@@ -276,6 +276,7 @@ private slots:
     void gridPackingKana();
     void scaleSongs();
     void scaleAlbums();
+    void scaleLookups();
 };
 
 void HubModelsTest::lazyUntilActive()
@@ -382,13 +383,19 @@ void HubModelsTest::invokables()
     QCOMPARE(model.rowForSource(0), 1);
     QCOMPARE(model.rowForSource(4), 7);
     QCOMPARE(model.rowForSource(5), -1);
-    QCOMPARE(model.nearestFocusable(0, 1), 1);
-    QCOMPARE(model.nearestFocusable(3, 1), 4);
-    QCOMPARE(model.nearestFocusable(3, -1), 2);
-    QCOMPARE(model.nearestFocusable(6, 1), 7);
+    QCOMPARE(model.nearestFocusable(0, 1), 0);
+    QCOMPARE(model.nearestFocusable(3, 1), 3);
+    QCOMPARE(model.nearestFocusable(3, -1), 3);
+    QCOMPARE(model.nearestFocusable(6, 1), 6);
+    QCOMPARE(model.nearestFocusable(8, 1), 7);
+    QCOMPARE(model.nearestFocusable(-1, -1), 0);
+    QCOMPARE(model.nearestFocusable(-1, 1), -1);
     QCOMPARE(model.nearestFocusable(9, 1), -1);
-    QVERIFY(!model.isFocusable(0));
+    QVERIFY(model.isFocusable(0));
     QVERIFY(model.isFocusable(1));
+    QVERIFY(model.isFocusable(7));
+    QVERIFY(!model.isFocusable(8));
+    QVERIFY(!model.isFocusable(-1));
     QCOMPARE(model.get(0).value(QStringLiteral("kind")).toString(), QStringLiteral("divider"));
     QVERIFY(model.get(99).isEmpty());
 }
@@ -821,6 +828,63 @@ void HubModelsTest::scaleAlbums()
         QCOMPARE(model.count(), (1200 + 27 + columns - 1) / columns);
         QVERIFY2(ms <= 10, qPrintable(QStringLiteral("%1 ms").arg(ms)));
     }
+}
+
+void HubModelsTest::scaleLookups()
+{
+    FakeSource source(synthetic(8400));
+    SectionedModel model;
+    model.setKind(QStringLiteral("song"));
+    model.setSource(&source);
+    model.setActive(true);
+    const QStringList letters = model.letters();
+    QCOMPARE(letters.size(), 27);
+    const int n = model.count();
+    const int calls = 10000;
+    qint64 sum = 0;
+    QElapsedTimer timer;
+    timer.start();
+    for (int i = 0; i < calls; ++i)
+        sum += model.rowOfLetter(letters.at(i % letters.size()));
+    const qint64 rowUs = timer.nsecsElapsed() / 1000;
+    timer.restart();
+    for (int i = 0; i < calls; ++i)
+        sum += model.firstRowOfLetter(letters.at(i % letters.size()));
+    const qint64 firstUs = timer.nsecsElapsed() / 1000;
+    timer.restart();
+    for (int i = 0; i < calls; ++i)
+        sum += model.nearestFocusable((i * 7919) % (n + 2) - 1, (i & 1) ? 1 : -1);
+    const qint64 nearUs = timer.nsecsElapsed() / 1000;
+    qInfo("casdap perf: sectioned lookups 8400 rows %d calls rowOfLetter %lld us firstRowOfLetter %lld us "
+          "nearestFocusable %lld us",
+          calls, rowUs, firstUs, nearUs);
+    QVERIFY(sum > 0);
+    const int z = model.rowOfLetter(QStringLiteral("z"));
+    QCOMPARE(model.get(z).value(QStringLiteral("kind")).toString(), QStringLiteral("divider"));
+    QCOMPARE(model.get(z).value(QStringLiteral("letter")).toString(), QStringLiteral("z"));
+    QCOMPARE(model.firstRowOfLetter(QStringLiteral("z")), z + 1);
+    QCOMPARE(model.rowOfLetter(QStringLiteral("#")), 0);
+    QCOMPARE(model.nearestFocusable(n, 1), n - 1);
+    QCOMPARE(model.nearestFocusable(z, 1), z);
+    QVERIFY2(rowUs <= 5000, qPrintable(QStringLiteral("rowOfLetter %1 us").arg(rowUs)));
+    QVERIFY2(firstUs <= 5000, qPrintable(QStringLiteral("firstRowOfLetter %1 us").arg(firstUs)));
+    QVERIFY2(nearUs <= 5000, qPrintable(QStringLiteral("nearestFocusable %1 us").arg(nearUs)));
+
+    FakeSource albums(synthetic(1200));
+    AlbumGridModel grid;
+    grid.setSource(&albums);
+    grid.setActive(true);
+    const QStringList gridLetters = grid.letters();
+    QCOMPARE(gridLetters.size(), 27);
+    int hits = 0;
+    timer.restart();
+    for (int i = 0; i < calls; ++i)
+        hits += grid.rowOfLetter(gridLetters.at(i % gridLetters.size())) >= 0 ? 1 : 0;
+    const qint64 gridUs = timer.nsecsElapsed() / 1000;
+    qInfo("casdap perf: album grid lookups 1200 albums %d calls rowOfLetter %lld us", calls, gridUs);
+    QCOMPARE(hits, calls);
+    QCOMPARE(grid.cellOfLetter(QStringLiteral("#")).value(QStringLiteral("col")).toInt(), 0);
+    QVERIFY2(gridUs <= 50000, qPrintable(QStringLiteral("grid rowOfLetter %1 us").arg(gridUs)));
 }
 
 QTEST_GUILESS_MAIN(HubModelsTest)

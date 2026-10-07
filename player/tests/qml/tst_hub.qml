@@ -92,6 +92,7 @@ TestCase {
         property var opened: []
         property int nowPlaying: 0
         property int jumps: 0
+        property string jumpLetter: ""
         property var played: []
         property var sheetActions: []
     }
@@ -106,7 +107,10 @@ TestCase {
             genresModel: genres
             onOpen: (kind, id) => counters.opened = counters.opened.concat([{ kind: kind, id: id }])
             onNowPlaying: counters.nowPlaying++
-            onJumpRequested: counters.jumps++
+            onJumpRequested: (letter) => {
+                counters.jumps++
+                counters.jumpLetter = letter
+            }
             onPlay: (kind, id) => counters.played = counters.played.concat([{ kind: kind, id: id }])
             onSheetAction: (action, kind, id) => counters.sheetActions = counters.sheetActions.concat([{ action: action, kind: kind, id: id }])
         }
@@ -174,6 +178,7 @@ TestCase {
         counters.opened = []
         counters.nowPlaying = 0
         counters.jumps = 0
+        counters.jumpLetter = ""
         counters.played = []
         counters.sheetActions = []
     }
@@ -378,24 +383,39 @@ TestCase {
         tryCompare(row, "enter", 1, 2000)
     }
 
-    function test_dividers_skipped() {
+    function test_dividers_focusable() {
         const page = open()
         compare(page.entryAt(0, 0).kind, "divider")
         compare(page.entryAt(0, 0).letter, "a")
         compare(page.entryAt(0, 1).kind, "artist")
-        compare(page.rowIndex, 1)
+        compare(page.rowIndex, 0)
         verify(router.dispatch("up", false) === false)
-        compare(page.rowIndex, 1)
+        compare(page.rowIndex, 0)
+        const divider = tc.rowAt(page.artistsPane, 0)
+        compare(divider.isFocused, true)
+        compare(page.focusBar.visible, true)
+        fuzzyCompare(page.focusBar.y, Ui.px(128), 0.01)
+        compare(page.focusBar.rowHeight, Ui.px(40))
+        fuzzyCompare(divider.dividerItem.color.a, 1.0, 1 / 255)
         verify(router.dispatch("down", false))
-        compare(page.rowIndex, 2)
+        compare(page.rowIndex, 1)
+        compare(divider.isFocused, false)
+        fuzzyCompare(divider.dividerItem.color.a, 1.0, 1 / 255)
+        verify(router.dispatch("down", false))
         verify(router.dispatch("down", false))
         compare(page.rowIndex, 3)
+        verify(router.dispatch("down", false))
+        compare(page.rowIndex, 4)
+        compare(page.entryAt(0, 4).kind, "divider")
+        compare(page.entryAt(0, 4).letter, "b")
+        compare(tc.rowAt(page.artistsPane, 4).isFocused, true)
+        fuzzyCompare(page.focusBar.y, Ui.px(128) + 4 * Ui.px(40), 0.01)
         verify(router.dispatch("down", false))
         compare(page.rowIndex, 5)
-        compare(page.entryAt(0, 4).kind, "divider")
+        verify(router.dispatch("up", false))
+        compare(page.rowIndex, 4)
         verify(router.dispatch("up", false))
         compare(page.rowIndex, 3)
-        const divider = tc.rowAt(page.artistsPane, 0)
         compare(divider.dividerItem.visible, true)
         compare(divider.rowItem.visible, false)
         compare(divider.dividerItem.text, "a")
@@ -416,9 +436,55 @@ TestCase {
         compare(tc.rowAt(page.artistsPane, 1).rowItem.focused, false)
     }
 
+    function test_divider_a_opens_grid() {
+        const page = open({ pivotIndex: 2, player: fakePlayer, library: fakeLibrary })
+        compare(page.rowIndex, 0)
+        compare(page.entryAt(2, 0).kind, "divider")
+        compare(router.dispatch("x", false), true)
+        compare(page.sheet.shown, false)
+        compare(router.dispatch("y", false), true)
+        compare(counters.sheetActions.length, 0)
+        for (let i = 0; i < 4; i++)
+            verify(router.dispatch("down", false))
+        compare(page.rowIndex, 4)
+        compare(page.entryAt(2, 4).kind, "divider")
+        compare(page.entryAt(2, 4).letter, "b")
+        verify(router.dispatch("a", false))
+        compare(counters.jumps, 1)
+        compare(counters.jumpLetter, "b")
+        compare(fakePlayer.calls.length, 0)
+        compare(counters.played.length, 0)
+        compare(page.jumpGrid.shown, true)
+        compare(page.jumpGrid.focusLetter, "b")
+        verify(router.dispatch("right", false))
+        compare(page.jumpGrid.focusLetter, "c")
+        verify(router.dispatch("a", false))
+        compare(page.jumpGrid.shown, false)
+        compare(page.rowIndex, 8)
+        compare(page.entryAt(2, 8).kind, "divider")
+        compare(page.entryAt(2, 8).letter, "c")
+        compare(page.songsPane.contentY, 8 * page.songsPane.rowPitch)
+        compare(page.jump.letter, "c")
+        verify(router.dispatch("a", false))
+        compare(counters.jumps, 2)
+        compare(counters.jumpLetter, "c")
+        compare(page.jumpGrid.focusLetter, "c")
+        verify(router.dispatch("b", false))
+        compare(page.jumpGrid.shown, false)
+        compare(page.rowIndex, 8)
+        verify(router.dispatch("down", false))
+        compare(page.rowIndex, 9)
+        compare(page.entryAt(2, 9).kind, "song")
+        verify(router.dispatch("a", false))
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].startId, 7)
+    }
+
     function test_songs_rows_and_play() {
         const page = open({ pivotIndex: 2, player: fakePlayer })
         compare(page.entryAt(2, 0).kind, "divider")
+        compare(page.rowIndex, 0)
+        verify(router.dispatch("down", false))
         compare(page.rowIndex, 1)
         const first = page.songsPane.itemAtIndex(1)
         compare(first.rowItem.number, "1")
@@ -435,6 +501,7 @@ TestCase {
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
+        router.dispatch("down", false)
         compare(page.rowIndex, 5)
         router.dispatch("a", false)
         compare(fakePlayer.calls[1].kind, "all")
@@ -444,6 +511,7 @@ TestCase {
 
     function test_song_play_without_player() {
         const page = open({ pivotIndex: 2 })
+        router.dispatch("down", false)
         router.dispatch("a", false)
         compare(counters.played.length, 1)
         compare(counters.played[0].kind, "song")
@@ -474,12 +542,15 @@ TestCase {
         compare(page.gridCol, 2)
         router.dispatch("lb", false)
         compare(page.pivotIndex, 0)
+        compare(page.rowIndex, 0)
+        verify(router.dispatch("down", false))
         router.dispatch("a", false)
         compare(counters.opened[1].kind, "artist")
         compare(counters.opened[1].id, 1)
         page.switchPivot(3)
         compare(page.pivotIndex, 3)
         compare(tc.rowAt(page.genresPane, 1).rowItem.bold, true)
+        verify(router.dispatch("down", false))
         router.dispatch("a", false)
         compare(counters.opened.length, 2)
         compare(counters.played.length, 1)
@@ -490,6 +561,7 @@ TestCase {
 
     function test_genre_plays_and_sheet() {
         const page = open({ pivotIndex: 3, player: fakePlayer, library: fakeLibrary })
+        verify(router.dispatch("down", false))
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
         compare(fakePlayer.calls[0].kind, "genre")
@@ -572,16 +644,26 @@ TestCase {
         verify(router.dispatch("rt", false))
         compare(page.jump.shown, true)
         compare(page.jump.opacity, 1)
-        compare(page.entryAt(2, page.rowIndex).kind, "song")
+        compare(page.rowIndex, page.songsPane.pageRows)
+        compare(page.rowIndex, 8)
+        compare(page.entryAt(2, page.rowIndex).kind, "divider")
         compare(page.jump.letter, page.entryAt(2, page.rowIndex).letter)
-        verify(page.rowIndex > 1)
+        compare(page.jump.letter, "c")
         compare(page.jump.text.font.pixelSize, Ui.fontPx(120))
         page.songsPane.completeScroll()
         compare(page.jump.hold.running, true)
         tryCompare(page.jump, "shown", false, 2000)
+        verify(router.dispatch("rt", false))
+        compare(page.rowIndex, 16)
+        compare(page.entryAt(2, 16).kind, "divider")
+        compare(page.jump.letter, "e")
+        page.songsPane.completeScroll()
+        verify(router.dispatch("lt", false))
+        compare(page.rowIndex, 8)
+        page.songsPane.completeScroll()
         verify(router.dispatch("lt", false))
         compare(page.jump.shown, true)
-        compare(page.rowIndex, 1)
+        compare(page.rowIndex, 0)
         compare(page.jump.letter, "a")
     }
 
@@ -608,6 +690,7 @@ TestCase {
 
     function test_sheet_actions() {
         const page = open({ pivotIndex: 2, player: fakePlayer })
+        verify(router.dispatch("down", false))
         verify(router.dispatch("x", false))
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "a song 1")
@@ -656,6 +739,7 @@ TestCase {
     function test_sheet_unpin_label() {
         fakeLibrary.pinned = ["song:1"]
         const page = open({ pivotIndex: 2, library: fakeLibrary })
+        verify(router.dispatch("down", false))
         verify(router.dispatch("x", false))
         compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "unpin from quickplay"]))
         router.dispatch("down", false)
@@ -773,9 +857,9 @@ TestCase {
         const page = open()
         const bar = page.focusBar
         compare(bar.rowHeight, Ui.px(40))
-        fuzzyCompare(bar.y, Ui.px(128) + Ui.px(40), 0.01)
+        fuzzyCompare(bar.y, Ui.px(128), 0.01)
         router.dispatch("down", false)
-        fuzzyCompare(bar.y, Ui.px(128) + 2 * Ui.px(40), 0.01)
+        fuzzyCompare(bar.y, Ui.px(128) + Ui.px(40), 0.01)
         page.switchPivot(1)
         compare(bar.visible, false)
         page.switchPivot(-1)
