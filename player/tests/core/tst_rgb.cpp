@@ -56,6 +56,9 @@ private slots:
     void unchangedHueSkipped();
     void waitingHueReplaced();
     void screenOffHolds();
+    void saverSleepsAndWakes();
+    void saverArmadaAndOff();
+    void saverScreenOff();
     void unsupportedRunsNothing();
     void missingBinaryUnsupported();
     void failedWordReported();
@@ -292,6 +295,119 @@ void RgbTest::screenOffHolds()
     QVERIFY(!QFile::exists(m_log));
 }
 
+void RgbTest::saverSleepsAndWakes()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    QSignalSpy saverSpy(&control, &RgbControl::saverChanged);
+    startAccent(control, applied, 350);
+
+    control.setSaver(true);
+    QVERIFY(control.saver());
+    QCOMPARE(saverSpy.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-sleep"));
+    QVERIFY(applied.at(2).at(1).toBool());
+    QCOMPARE(control.sentHue(), 350);
+
+    control.setHue(120);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 3);
+
+    control.setSaver(false);
+    QVERIFY(!control.saver());
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-wake"));
+    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("rgb-hue-120"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QCOMPARE(control.sentHue(), 120);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-wake")),
+                                    unit(QStringLiteral("rgb-hue-120"))}));
+
+    QFile::remove(m_log);
+    control.setSaver(true);
+    control.setSaver(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
+    QCOMPARE(applied.count(), 7);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-wake"))}));
+}
+
+void RgbTest::saverArmadaAndOff()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    control.start(QStringLiteral("armada"), 350);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QFile::remove(m_log);
+
+    control.setSaver(true);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-sleep"));
+    control.setHue(120);
+    control.setSaver(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-wake"));
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 3);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-wake"))}));
+
+    control.setMode(QStringLiteral("off"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-off"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QFile::remove(m_log);
+    control.setSaver(true);
+    QTest::qWait(300);
+    control.setSaver(false);
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 4);
+    QVERIFY(!QFile::exists(m_log));
+}
+
+void RgbTest::saverScreenOff()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    startAccent(control, applied, 350);
+
+    control.setSaver(true);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QFile::remove(m_log);
+
+    control.setScreenOff(true);
+    control.setHue(120);
+    control.setSaver(false);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 3);
+    QVERIFY(!QFile::exists(m_log));
+
+    control.setScreenOff(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-hue-120"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-hue-120"))}));
+
+    QFile::remove(m_log);
+    control.setSaver(true);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    control.setScreenOff(true);
+    control.setScreenOff(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
+    QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("rgb-sleep"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    control.setSaver(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
+    QCOMPARE(applied.at(6).at(0).toString(), QStringLiteral("rgb-wake"));
+    QTest::qWait(RgbControl::hueDelayMs + 200);
+    QCOMPARE(applied.count(), 7);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-sleep")),
+                                    unit(QStringLiteral("rgb-wake"))}));
+}
+
 void RgbTest::unsupportedRunsNothing()
 {
     useSupported(false);
@@ -308,6 +424,8 @@ void RgbTest::unsupportedRunsNothing()
     control.setHue(200);
     control.setScreenOff(true);
     control.setScreenOff(false);
+    control.setSaver(true);
+    control.setSaver(false);
     QTest::qWait(RgbControl::hueDelayMs + 200);
     QCOMPARE(applied.count(), 0);
     QCOMPARE(readFile(m_log), QStringLiteral("armada-rgb supported\n"));

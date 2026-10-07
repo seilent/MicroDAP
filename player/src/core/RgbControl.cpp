@@ -4,6 +4,8 @@
 
 #include <QDebug>
 
+#include <utility>
+
 namespace casdap {
 
 namespace {
@@ -29,6 +31,21 @@ bool isHueWord(const QString &word)
 int wordHue(const QString &word)
 {
     return isHueWord(word) ? word.mid(huePrefix().size()).toInt() : -1;
+}
+
+QString sleepWord()
+{
+    return QStringLiteral("rgb-sleep");
+}
+
+QString wakeWord()
+{
+    return QStringLiteral("rgb-wake");
+}
+
+bool keepsHue(const QString &word)
+{
+    return word == sleepWord() || word == wakeWord();
 }
 
 }
@@ -98,6 +115,11 @@ bool RgbControl::screenOff() const
     return m_screenOff;
 }
 
+bool RgbControl::saver() const
+{
+    return m_saver;
+}
+
 int RgbControl::sentHue() const
 {
     return m_sentHue;
@@ -158,12 +180,47 @@ void RgbControl::setScreenOff(bool off)
     m_screenOff = off;
     emit screenOffChanged();
     if (off) {
+        m_asleep = false;
         m_hueTimer.stop();
         m_words.removeIf(isHueWord);
         updateBusy();
         return;
     }
+    if (m_saver) {
+        sleepLights();
+        updateBusy();
+        return;
+    }
     queueHue();
+}
+
+void RgbControl::setSaver(bool on)
+{
+    if (m_saver == on)
+        return;
+    m_saver = on;
+    emit saverChanged();
+    if (on) {
+        m_hueTimer.stop();
+        m_words.removeIf(isHueWord);
+        if (!m_screenOff)
+            sleepLights();
+        updateBusy();
+        return;
+    }
+    if (m_asleep) {
+        m_asleep = false;
+        startWords({wakeWord()});
+    }
+    queueHue();
+}
+
+void RgbControl::sleepLights()
+{
+    if (!ready() || m_asleep || m_mode == QLatin1StringView("off"))
+        return;
+    m_asleep = true;
+    startWords({sleepWord()});
 }
 
 void RgbControl::probe()
@@ -188,6 +245,8 @@ void RgbControl::probe()
         startWords({QStringLiteral("rgb-restore")});
         if (m_mode != QLatin1StringView("armada"))
             applyMode();
+        else if (m_saver && !m_screenOff)
+            sleepLights();
     };
     connect(process, &QProcess::finished, this,
             [done](int code, QProcess::ExitStatus status) { done(status == QProcess::NormalExit && code == 0); });
@@ -210,10 +269,16 @@ void RgbControl::applyMode()
     m_hueTimer.stop();
     if (m_mode == QLatin1StringView("accent")) {
         queueHue();
-        return;
+    } else {
+        m_words.removeIf(isHueWord);
+        startWords({m_mode == QLatin1StringView("off") ? QStringLiteral("rgb-off") : QStringLiteral("rgb-restore")});
     }
-    m_words.removeIf(isHueWord);
-    startWords({m_mode == QLatin1StringView("off") ? QStringLiteral("rgb-off") : QStringLiteral("rgb-restore")});
+    if (m_mode == QLatin1StringView("off")) {
+        m_asleep = false;
+    } else if (m_saver && !m_screenOff) {
+        m_asleep = false;
+        sleepLights();
+    }
 }
 
 void RgbControl::sendHue()
@@ -224,12 +289,14 @@ void RgbControl::sendHue()
 
 void RgbControl::queueHue()
 {
-    if (!ready() || m_screenOff || m_mode != QLatin1StringView("accent"))
+    if (!ready() || m_screenOff || m_saver || m_mode != QLatin1StringView("accent"))
         return;
     m_words.removeIf(isHueWord);
     int tail = m_sentHue;
-    if (!m_words.isEmpty())
-        tail = wordHue(m_words.constLast());
+    for (const QString &word : std::as_const(m_words)) {
+        if (!keepsHue(word))
+            tail = wordHue(word);
+    }
     if (tail == m_hue) {
         updateBusy();
         return;
@@ -252,7 +319,8 @@ void RgbControl::nextWord()
         return;
     }
     const QString word = m_words.takeFirst();
-    m_sentHue = wordHue(word);
+    if (!keepsHue(word))
+        m_sentHue = wordHue(word);
     qInfo() << "casdap rgb: start" << unitFor(word);
     auto *process = new QProcess(this);
     m_word = process;

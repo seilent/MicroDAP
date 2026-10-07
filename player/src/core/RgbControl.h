@@ -17,6 +17,7 @@ class RgbControl : public QObject
     Q_PROPERTY(QString mode READ mode NOTIFY modeChanged)
     Q_PROPERTY(int hue READ hue NOTIFY hueChanged)
     Q_PROPERTY(bool screenOff READ screenOff NOTIFY screenOffChanged)
+    Q_PROPERTY(bool saver READ saver NOTIFY saverChanged)
 
 public:
     static constexpr int hueDelayMs = 500;
@@ -35,12 +36,14 @@ public:
     QString mode() const;
     int hue() const;
     bool screenOff() const;
+    bool saver() const;
     int sentHue() const;
 
     Q_INVOKABLE void start(const QString &mode, int hue);
     Q_INVOKABLE void setMode(const QString &mode);
     Q_INVOKABLE void setHue(int hue);
     Q_INVOKABLE void setScreenOff(bool off);
+    Q_INVOKABLE void setSaver(bool on);
 
 signals:
     void supportedChanged();
@@ -49,6 +52,7 @@ signals:
     void modeChanged();
     void hueChanged();
     void screenOffChanged();
+    void saverChanged();
     void applied(const QString &word, bool ok);
 
 private:
@@ -56,6 +60,7 @@ private:
     void applyMode();
     void sendHue();
     void queueHue();
+    void sleepLights();
     void startWords(const QStringList &words);
     void nextWord();
     void updateBusy();
@@ -66,6 +71,8 @@ private:
     bool m_probed = false;
     bool m_busy = false;
     bool m_screenOff = false;
+    bool m_saver = false;
+    bool m_asleep = false;
     QString m_mode;
     int m_hue = 350;
     int m_sentHue = -1;
