@@ -7,20 +7,22 @@ Page {
     property QtObject player: null
     property bool animated: true
     property bool screenOff: false
-    property var rows: []
     property var sheetItems: []
     property int sheetRow: -1
     property string shownCount: ""
+    property var focusedRow: null
 
     readonly property bool live: screen.animated && !screen.screenOff
     readonly property bool arriving: !screen.arrived && screen.live && screen.stackAnimates
     readonly property var queue: screen.player !== null && screen.player.queue !== undefined && screen.player.queue !== null
         ? screen.player.queue : null
-    readonly property int count: screen.rows.length
+    readonly property var order: screen.queue !== null && screen.queue.playOrder !== undefined && screen.queue.playOrder !== null
+        ? screen.queue.playOrder : null
+    readonly property int count: screen.order !== null && typeof screen.order.count === "number" ? screen.order.count : 0
     readonly property int currentIndex: screen.queue !== null && typeof screen.queue.index === "number" ? screen.queue.index : -1
-    readonly property string countText: (screen.count > 0 && screen.currentIndex >= 0 ? screen.currentIndex + 1 : 0) + " of " + screen.count
+    readonly property int currentSlot: screen.queue !== null && typeof screen.queue.currentSlot === "number" ? screen.queue.currentSlot : screen.currentIndex
+    readonly property string countText: (screen.count > 0 && screen.currentSlot >= 0 ? screen.currentSlot + 1 : 0) + " of " + screen.count
     readonly property int rowIndex: queueList.focusIndex
-    readonly property var focusedRow: screen.rows[screen.rowIndex] === undefined ? null : screen.rows[screen.rowIndex]
     readonly property bool countSwapping: countAnim.running
 
     property alias header: header
@@ -30,54 +32,62 @@ Page {
 
     list: queueList
 
-    function modelCount(): int {
-        if (screen.queue === null)
-            return 0
-        if (typeof screen.queue.count === "number")
-            return screen.queue.count
-        if (typeof screen.queue.rowCount === "function")
-            return screen.queue.rowCount()
-        return 0
+    function slotEntry(slot: int): var {
+        if (screen.order === null || slot < 0 || slot >= screen.count || typeof screen.order.get !== "function")
+            return null
+        const e = screen.order.get(slot)
+        if (e === undefined || e === null)
+            return null
+        return {
+            id: e.id === undefined || e.id === null ? -1 : Number(e.id),
+            title: e.title === undefined || e.title === null ? "" : String(e.title),
+            subtitle: e.artist === undefined || e.artist === null ? "" : String(e.artist),
+            row: e.row === undefined || e.row === null ? slot : Number(e.row)
+        }
     }
 
-    function rebuild() {
-        const rows = []
-        const n = screen.modelCount()
-        for (let i = 0; i < n; i++) {
-            const e = screen.queue.get(i)
-            if (e === undefined || e === null)
-                break
-            rows.push({
-                id: e.id === undefined ? -1 : Number(e.id),
-                title: e.title === undefined || e.title === null ? "" : String(e.title),
-                subtitle: e.artist === undefined || e.artist === null ? "" : String(e.artist),
-                number: String(i + 1),
-                row: i
-            })
+    function rowOf(slot: int): int {
+        const e = screen.slotEntry(slot)
+        return e === null ? -1 : e.row
+    }
+
+    function syncFocus(): void {
+        screen.focusIndex = queueList.focusIndex
+        screen.focusedRow = screen.slotEntry(queueList.focusIndex)
+    }
+
+    function fixFocus(): void {
+        queueList.forceLayout()
+        if (screen.count === 0) {
+            queueList.focusIndex = 0
+            screen.syncFocus()
+            return
         }
-        screen.rows = rows
+        queueList.snapTo(Math.min(queueList.focusIndex, screen.count - 1))
+        screen.syncFocus()
+    }
+
+    function rowsUpdated(from: int): void {
+        d.fixPending = true
+        Qt.callLater(screen.applyFix)
+        screen.refreshFrom(from)
+    }
+
+    function applyFix(): void {
+        if (!d.fixPending)
+            return
+        d.fixPending = false
         screen.fixFocus()
     }
 
-    function fixFocus() {
-        queueList.forceLayout()
-        if (screen.rows.length === 0) {
-            queueList.focusIndex = 0
-            screen.focusIndex = 0
-            return
-        }
-        queueList.snapTo(Math.min(queueList.focusIndex, screen.rows.length - 1))
-        screen.focusIndex = queueList.focusIndex
-    }
-
-    function refreshFrom(index: int) {
-        if (!screen.live)
+    function refreshFrom(index: int): void {
+        if (!screen.live || !d.ready)
             return
         d.pendingFrom = d.pendingFrom < 0 ? index : Math.min(d.pendingFrom, index)
         Qt.callLater(screen.runRefresh)
     }
 
-    function runRefresh() {
+    function runRefresh(): void {
         const from = d.pendingFrom
         d.pendingFrom = -1
         if (from < 0 || !screen.live)
@@ -104,13 +114,19 @@ Page {
         if (target === queueList.focusIndex)
             return false
         queueList.setFocus(target, Motion.scroll)
-        screen.focusIndex = queueList.focusIndex
+        screen.syncFocus()
         return true
+    }
+
+    function pageRow(direction: int): bool {
+        const moved = queueList.pageFocus(direction)
+        screen.syncFocus()
+        return moved
     }
 
     function verbsFor(index: int): var {
         const items = ["remove"]
-        const cur = screen.currentIndex
+        const cur = screen.currentSlot
         if (index !== cur && index !== cur + 1)
             items.push("play next")
         if (index > 0)
@@ -123,26 +139,41 @@ Page {
     function removeRow(index: int): bool {
         if (screen.queue === null || typeof screen.queue.remove !== "function" || index < 0 || index >= screen.count)
             return false
-        screen.queue.remove(index)
+        screen.queue.remove(screen.rowOf(index))
+        screen.applyFix()
         return true
     }
 
     function moveEntry(from: int, to: int): bool {
-        if (screen.queue === null || typeof screen.queue.move !== "function")
+        if (screen.queue === null)
             return false
         if (from < 0 || to < 0 || from >= screen.count || to >= screen.count || from === to)
             return false
-        screen.queue.move(from, to)
+        if (typeof screen.queue.moveSlot === "function")
+            screen.queue.moveSlot(from, to)
+        else if (typeof screen.queue.move === "function")
+            screen.queue.move(from, to)
+        else
+            return false
+        screen.applyFix()
         queueList.setFocus(to, Motion.scroll)
-        screen.focusIndex = queueList.focusIndex
+        screen.syncFocus()
         return true
     }
 
     function playNextRow(index: int): bool {
-        const cur = screen.currentIndex
-        if (cur < 0 || index === cur || index === cur + 1)
+        const cur = screen.currentSlot
+        if (cur < 0 || index === cur || index === cur + 1 || index < 0 || index >= screen.count)
             return false
-        return screen.moveEntry(index, index < cur ? cur : cur + 1)
+        const to = index < cur ? cur : cur + 1
+        if (screen.queue !== null && typeof screen.queue.playNextRow === "function") {
+            screen.queue.playNextRow(screen.rowOf(index))
+            screen.applyFix()
+            queueList.setFocus(to, Motion.scroll)
+            screen.syncFocus()
+            return true
+        }
+        return screen.moveEntry(index, to)
     }
 
     function runVerb(action: string, index: int): bool {
@@ -160,11 +191,11 @@ Page {
         }
     }
 
-    function activate() {
+    function activate(): void {
         if (screen.focusedRow === null)
             return
         if (screen.player !== null && typeof screen.player.playAt === "function") {
-            screen.player.playAt(screen.rowIndex)
+            screen.player.playAt(screen.rowOf(screen.rowIndex))
             return
         }
         console.info("casdap: queue play " + screen.rowIndex)
@@ -181,7 +212,7 @@ Page {
         return true
     }
 
-    function runSheet(index: int) {
+    function runSheet(index: int): void {
         const action = screen.sheetItems[index]
         if (action === undefined || screen.sheetRow < 0)
             return
@@ -202,7 +233,7 @@ Page {
         return true
     }
 
-    function completeAll() {
+    function completeAll(): void {
         queueList.settle()
         queueList.completeScroll()
         countAnim.stop()
@@ -220,9 +251,9 @@ Page {
         case "down":
             return screen.moveRow(1)
         case "lt":
-            return screen.pageFocus(-1)
+            return screen.pageRow(-1)
         case "rt":
-            return screen.pageFocus(1)
+            return screen.pageRow(1)
         case "a":
             if (!repeat)
                 screen.activate()
@@ -262,16 +293,16 @@ Page {
             queueList.feather()
     }
 
-    onQueueChanged: {
+    onOrderChanged: {
         if (d.ready)
-            screen.rebuild()
+            screen.fixFocus()
     }
 
     Component.onCompleted: {
-        screen.rebuild()
+        queueList.forceLayout()
         if (screen.count > 0)
-            queueList.snapTo(Math.max(0, screen.currentIndex))
-        screen.focusIndex = queueList.focusIndex
+            queueList.snapTo(Math.max(0, screen.currentSlot))
+        screen.syncFocus()
         screen.shownCount = screen.countText
         d.ready = true
     }
@@ -280,41 +311,46 @@ Page {
         id: d
 
         property bool ready: false
+        property bool fixPending: false
         property int pendingFrom: -1
     }
 
     Connections {
-        target: screen.queue
+        target: screen.order
         ignoreUnknownSignals: true
 
         function onModelReset() {
-            screen.rebuild()
-            screen.refreshFrom(0)
+            screen.rowsUpdated(queueList.firstVisible())
         }
 
         function onRowsInserted(parent, first, last) {
-            screen.rebuild()
-            screen.refreshFrom(first)
+            screen.rowsUpdated(first)
         }
 
         function onRowsRemoved(parent, first, last) {
-            screen.rebuild()
-            screen.refreshFrom(first)
+            screen.rowsUpdated(first)
         }
 
         function onRowsMoved(parent, start, end, destination, row) {
-            screen.rebuild()
-            screen.refreshFrom(Math.min(start, row))
+            screen.rowsUpdated(Math.min(start, row))
+        }
+
+        function onDataChanged() {
+            if (d.ready)
+                screen.syncFocus()
         }
     }
 
     component QueueRow: Item {
-        id: row
+        id: item
 
         required property int index
-        required property var modelData
-        readonly property bool isFocused: queueList.focusIndex === row.index
-        readonly property bool isPlaying: screen.currentIndex === row.index
+        required property int number
+        required property string title
+        required property string artist
+        required property bool isCurrent
+        readonly property bool isFocused: queueList.focusIndex === item.index
+        readonly property bool isPlaying: item.isCurrent
         readonly property Item rowItem: listRow
         property real enter: screen.arriving ? 0 : 1
         property real shift: screen.arriving ? Motion.pivotShift : Motion.listChangeShift
@@ -324,27 +360,32 @@ Page {
 
         width: queueList.width
         height: queueList.rowPitch
-        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
-        opacity: row.enter
+        transform: Translate { x: Ui.px(item.shift) * (1 - item.enter) }
+        opacity: item.enter
+
+        ListView.onPooled: {
+            enterAnim.stop()
+            item.enter = 1
+        }
 
         Connections {
             target: queueList
 
             function onEntrance(from, shift, stagger, cap, duration, stripCurve) {
-                if (row.index < from)
+                if (item.index < from)
                     return
                 enterAnim.stop()
-                row.shift = shift
-                row.stagger = Math.min(cap, row.index - from) * stagger
-                row.enterDuration = duration
-                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
-                row.enter = 0
+                item.shift = shift
+                item.stagger = Math.min(cap, item.index - from) * stagger
+                item.enterDuration = duration
+                item.enterCurve = stripCurve ? Motion.strip : Motion.decel
+                item.enter = 0
                 enterAnim.start()
             }
 
             function onSettle() {
                 enterAnim.stop()
-                row.enter = 1
+                item.enter = 1
             }
         }
 
@@ -352,30 +393,30 @@ Page {
             id: enterAnim
 
             PauseAnimation {
-                duration: row.stagger
+                duration: item.stagger
             }
 
             NumberAnimation {
-                target: row
+                target: item
                 property: "enter"
                 from: 0
                 to: 1
-                duration: row.enterDuration
+                duration: item.enterDuration
                 easing.type: Motion.bezier
-                easing.bezierCurve: row.enterCurve
+                easing.bezierCurve: item.enterCurve
             }
         }
 
         ListRow {
             id: listRow
 
-            width: row.width
-            number: row.modelData.number
-            primary: row.modelData.title
-            secondary: row.modelData.subtitle
-            playing: row.isPlaying
-            focused: row.isFocused
-            pressed: row.isFocused && screen.pressed
+            width: item.width
+            number: String(item.number)
+            primary: item.title
+            secondary: item.artist
+            playing: item.isPlaying
+            focused: item.isFocused
+            pressed: item.isFocused && screen.pressed
             animated: screen.live
         }
     }
@@ -403,8 +444,12 @@ Page {
         y: Ui.px(Ui.queueRowsTop)
         width: screen.width
         height: screen.height - queueList.y
-        model: screen.rows
+        model: screen.order
         delegate: QueueRow {}
+        onFocusIndexChanged: {
+            if (d.ready)
+                screen.syncFocus()
+        }
     }
 
     FocusBar {

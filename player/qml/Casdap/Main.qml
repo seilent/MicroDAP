@@ -15,9 +15,12 @@ Window {
     readonly property var bluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var historyRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
     readonly property var historyNew: typeof HistoryNew === "undefined" ? null : HistoryNew
-    readonly property var artists: typeof Artists === "undefined" ? null : Artists
-    readonly property var albums: typeof Albums === "undefined" ? null : Albums
-    readonly property var songs: typeof Songs === "undefined" ? null : Songs
+    readonly property var quickplayRecent: typeof QuickplayRecent === "undefined" ? null : QuickplayRecent
+    readonly property var quickplayNew: typeof QuickplayNew === "undefined" ? null : QuickplayNew
+    readonly property var artistsHub: typeof ArtistsHub === "undefined" ? null : ArtistsHub
+    readonly property var albumsGrid: typeof AlbumsGrid === "undefined" ? null : AlbumsGrid
+    readonly property var songsHub: typeof SongsHub === "undefined" ? null : SongsHub
+    readonly property var genresHub: typeof GenresHub === "undefined" ? null : GenresHub
     readonly property var genres: typeof Genres === "undefined" ? null : Genres
     readonly property var pins: typeof Pins === "undefined" ? null : Pins
     readonly property var playlists: typeof Playlists === "undefined" ? null : Playlists
@@ -25,6 +28,7 @@ Window {
     property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
     property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
+    property var codecFragment: root.screenshot || typeof CodecFragment === "undefined" ? null : CodecFragment
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var eq: root.screenshot || typeof Eq === "undefined" ? null : Eq
     property var stateStore: root.screenshot || typeof PlayerState === "undefined" ? null : PlayerState
@@ -57,6 +61,7 @@ Window {
     property bool rootHidden: false
     property bool toastShown: false
     property var lastToastId: null
+    property string addSource: ""
     readonly property bool hidden: root.overlay && !root.overlayMapped
     readonly property bool off: root.powerScreenOff || root.hidden
     readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && root.playing
@@ -115,6 +120,8 @@ Window {
             return
         root.pendingHide = false
         root.rootHidden = true
+        if (typeof root.releaseResources === "function")
+            root.releaseResources()
     }
     onSaverArmedChanged: root.armSaver()
     onScreenOffArmedChanged: root.armScreenOff()
@@ -321,30 +328,103 @@ Window {
     }
 
     function sheetAction(action: string, kind: string, id: int): void {
-        if (action === "pin to quickplay" || action === "unpin from quickplay") {
+        switch (action) {
+        case "pin to quickplay":
+        case "unpin from quickplay":
             root.setPinned(kind, id, action === "pin to quickplay")
             return
+        case "play":
+            root.playEntry({ kind: kind, id: id })
+            return
+        case "shuffle":
+            root.playSource(kind, id, "shuffle", -1)
+            return
+        case "add to queue":
+        case "play next":
+            root.addTracks(action === "play next", kind, id)
+            return
+        default:
+            console.info("casdap: " + action + " " + kind + " " + id)
+            return
         }
-        console.info("casdap: " + action + " " + kind + " " + id)
+    }
+
+    function str(value: var): string {
+        return value === undefined || value === null ? "" : String(value)
+    }
+
+    function callLibrary(method: string, arg: var): var {
+        if (root.library === null || typeof root.library[method] !== "function")
+            return undefined
+        return root.library[method](arg)
+    }
+
+    function playSource(kind: string, id: int, mode: string, startId: int): int {
+        if (root.player === null || typeof root.player.playSource !== "function") {
+            console.info("casdap: " + mode + " " + kind + " " + id)
+            return 0
+        }
+        const n = Number(root.player.playSource(kind, id, mode, startId))
+        return isNaN(n) ? 0 : n
+    }
+
+    function modelTitle(model: var, id: int): string {
+        if (model === null || model === undefined || typeof model.get !== "function")
+            return ""
+        if (typeof model.ensureLoaded === "function")
+            model.ensureLoaded()
+        const n = typeof model.count === "number" ? model.count
+            : typeof model.rowCount === "function" ? model.rowCount() : 0
+        for (let i = 0; i < n; i++) {
+            const e = model.get(i)
+            if (e === undefined || e === null || Number(e.id) !== id)
+                continue
+            return e.title !== undefined && e.title !== null ? String(e.title) : root.str(e.name)
+        }
+        return ""
+    }
+
+    function infoField(method: string, id: int, key: string): string {
+        const info = root.callLibrary(method, id)
+        return info === undefined || info === null ? "" : root.str(info[key])
+    }
+
+    function sourceName(kind: string, id: int): string {
+        switch (kind) {
+        case "album":
+            return root.infoField("albumInfo", id, "title")
+        case "artist":
+            return root.infoField("artistInfo", id, "name")
+        case "playlist":
+            return root.infoField("playlistInfo", id, "name")
+        case "genre":
+            return root.modelTitle(root.genres, id)
+        case "song": {
+            const rows = root.callLibrary("trackRows", [id])
+            return rows === undefined || rows === null || rows.length === 0 ? "" : root.str(rows[0].title)
+        }
+        default:
+            return ""
+        }
+    }
+
+    function addTracks(next: bool, kind: string, id: int): int {
+        root.addSource = root.sourceName(kind, id)
+        const added = root.playSource(kind, id, next ? "next" : "add", -1)
+        root.addSource = ""
+        return added
+    }
+
+    function shuffleAll(): void {
+        if (root.playSource("all", 0, "shuffle", -1) === 0)
+            console.info("casdap: shuffle all, empty library")
     }
 
     function playEntry(entry: var): void {
         const kind = entry.kind === undefined || entry.kind === null ? "" : String(entry.kind)
         const id = Number(entry.id)
-        let ids = []
-        if (kind === "song") {
-            ids = [id]
-        } else if (kind === "album" && root.library !== null) {
-            for (const row of root.library.albumTracks(id))
-                ids.push(Number(row.id))
-        } else if (kind === "artist" && root.library !== null) {
-            ids = root.library.artistTracks(id)
-        }
-        if (root.player === null || ids.length === 0) {
+        if (root.playSource(kind, id, "play", -1) === 0)
             console.info("casdap: play " + kind + " " + id)
-            return
-        }
-        root.player.playTracks(ids, 0)
     }
 
     function closeSheets() {
@@ -449,6 +529,10 @@ Window {
         function onCurrentChanged() {
             root.trackChangedWhileHidden()
         }
+
+        function onAdded(count) {
+            overlays.showAdded(Number(count), root.addSource)
+        }
     }
 
     Connections {
@@ -472,6 +556,13 @@ Window {
         property: "opacity"
         value: root.overlayFade
         when: root.overlay
+    }
+
+    Binding {
+        target: root.albumsGrid
+        property: "columns"
+        value: Ui.gridCols
+        when: root.albumsGrid !== null
     }
 
     Timer {
@@ -606,15 +697,15 @@ Window {
             animated: !root.hidden
             overlay: root.overlay
             bluez: root.bluez
-            historyModel: root.historyRecent
-            newModel: root.historyNew
+            historyModel: root.quickplayRecent
+            newModel: root.quickplayNew
             pinsModel: root.pins
             playlistCount: root.playlistCount
             onNavigate: (name) => root.navigate(name)
             onNowPlayingBluetooth: root.openNowPlaying()
             onPlayRequested: (entry) => root.playEntry(entry)
             onPinRequested: (entry, pin) => root.setPinned(entry.kind === undefined ? "" : String(entry.kind), Number(entry.id), pin)
-            onShuffleAll: console.info("casdap: shuffle all")
+            onShuffleAll: root.shuffleAll()
             onHideRequested: root.hideOverlay()
         }
     }
@@ -664,15 +755,16 @@ Window {
             objectName: "music"
             animated: !root.hidden
             screenOff: root.off
-            artistsModel: root.artists
-            albumsModel: root.albums
-            songsModel: root.songs
-            genresModel: root.genres
+            artistsModel: root.artistsHub
+            albumsModel: root.albumsGrid
+            songsModel: root.songsHub
+            genresModel: root.genresHub
+            playlistsModel: root.playlists
             player: root.player
             library: root.library
             onOpen: (kind, id) => root.openEntry(kind, id)
             onNowPlaying: root.openNowPlaying()
-            onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
@@ -688,7 +780,7 @@ Window {
             player: root.player
             library: root.library
             onNowPlaying: root.openNowPlaying()
-            onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
@@ -704,7 +796,7 @@ Window {
             newModel: root.historyNew
             player: root.player
             library: root.library
-            onPlay: (kind, id) => console.info("casdap: play " + kind + " " + id)
+            onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
@@ -723,6 +815,8 @@ Window {
             player: root.player
             audioInfo: root.audioInfo
             outputControl: root.outputControl
+            codecFragment: root.codecFragment
+            library: root.library
             rgbControl: root.rgbControl
             bridge: root.bridge
             eq: root.eq
@@ -752,6 +846,7 @@ Window {
             library: root.library
             player: root.player
             onOpenAlbum: (id) => root.openAlbum(id)
+            onOpenQueue: root.openQueue()
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
@@ -767,6 +862,7 @@ Window {
             player: root.player
             status: root.status
             bluez: root.bluez
+            onOpenQueue: root.openQueue()
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }

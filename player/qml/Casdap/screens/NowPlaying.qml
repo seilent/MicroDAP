@@ -178,6 +178,15 @@ Page {
         const titles = []
         if (np.queue === null || typeof np.queue.get !== "function")
             return titles
+        if (typeof np.queue.upcoming === "function") {
+            for (const row of np.queue.upcoming(Ui.npNextCount)) {
+                const e = np.queue.get(Number(row))
+                if (e === undefined || e === null)
+                    break
+                titles.push(e.title === undefined || e.title === null ? "" : String(e.title))
+            }
+            return titles
+        }
         const count = typeof np.queue.count === "number" ? np.queue.count : 0
         const start = np.queue.index === undefined ? -1 : np.queue.index
         for (let i = start + 1; i < count && titles.length < Ui.npNextCount; i++) {
@@ -342,13 +351,52 @@ Page {
             console.info("casdap: nowplaying " + (delta < 0 ? "previous" : "next"))
     }
 
+    function seekTarget(from: real, delta: real): real {
+        const target = Math.max(0, from + delta)
+        if (delta <= 0 || np.duration <= 0)
+            return target
+        return Math.max(from, Math.min(np.duration - Ui.seekEndMarginMs, target))
+    }
+
     function seek(delta: int) {
         if (np.shownVariant) {
             np.callPhone(delta < 0 ? "rewind" : "fastForward")
             return
         }
-        if (!np.callPlayer("seek", Math.max(0, np.shownPosition + delta * Ui.seekStepMs)))
+        if (!np.callPlayer("seek", np.seekTarget(np.shownPosition, delta * Ui.seekStepMs)))
             console.info("casdap: nowplaying seek " + delta)
+    }
+
+    function startSeek(delta: int): void {
+        seekTickTimer.stop()
+        d.seekDir = delta
+        d.seekHeld = false
+        d.seekPos = np.shownPosition
+        seekHoldTimer.restart()
+    }
+
+    function seekTick(): void {
+        if (d.seekDir === 0)
+            return
+        d.seekHeld = true
+        d.seekPos = np.seekTarget(d.seekPos, d.seekDir * Ui.seekTickStepMs)
+        if (!np.callPlayer("seek", d.seekPos))
+            console.info("casdap: nowplaying scan " + d.seekDir)
+    }
+
+    function cancelSeek(): void {
+        seekHoldTimer.stop()
+        seekTickTimer.stop()
+        d.seekDir = 0
+        d.seekHeld = false
+    }
+
+    function endSeek(): void {
+        const dir = d.seekDir
+        const held = d.seekHeld
+        np.cancelSeek()
+        if (dir !== 0 && !held)
+            np.seek(dir)
     }
 
     function toggleRing(index: int) {
@@ -452,12 +500,13 @@ Page {
                 np.skip(1)
             return true
         case "lt":
-            if (!repeat)
-                np.seek(-1)
-            return true
         case "rt":
-            if (!repeat)
-                np.seek(1)
+            if (repeat)
+                return true
+            if (np.shownVariant)
+                np.seek(name === "lt" ? -1 : 1)
+            else
+                np.startSeek(name === "lt" ? -1 : 1)
             return true
         case "start":
             if (repeat)
@@ -477,6 +526,8 @@ Page {
             np.pressed = false
         if (np.shownVariant && (name === "lt" || name === "rt"))
             np.callPhone("play")
+        else if (name === "lt" || name === "rt")
+            np.endSeek()
     }
 
     onVariantChanged: {
@@ -491,6 +542,7 @@ Page {
             return
         }
         np.completeAll()
+        np.cancelSeek()
         idleTimer.stop()
         np.idle = false
     }
@@ -514,6 +566,28 @@ Page {
         id: d
 
         property bool ready: false
+        property int seekDir: 0
+        property bool seekHeld: false
+        property real seekPos: 0
+    }
+
+    Timer {
+        id: seekHoldTimer
+
+        interval: Ui.seekHoldMs
+        repeat: false
+        onTriggered: {
+            np.seekTick()
+            seekTickTimer.start()
+        }
+    }
+
+    Timer {
+        id: seekTickTimer
+
+        interval: Ui.seekTickMs
+        repeat: true
+        onTriggered: np.seekTick()
     }
 
     Connections {
@@ -534,11 +608,27 @@ Page {
         target: np.queue
         ignoreUnknownSignals: true
 
-        function onIndexChanged() {
+        function onModelReset() {
+            Qt.callLater(np.refreshNext)
+        }
+
+        function onCurrentSlotChanged() {
             Qt.callLater(np.refreshNext)
         }
 
         function onCountChanged() {
+            Qt.callLater(np.refreshNext)
+        }
+
+        function onRowsMoved() {
+            Qt.callLater(np.refreshNext)
+        }
+
+        function onOrderChanged() {
+            Qt.callLater(np.refreshNext)
+        }
+
+        function onRepeatChanged() {
             Qt.callLater(np.refreshNext)
         }
     }

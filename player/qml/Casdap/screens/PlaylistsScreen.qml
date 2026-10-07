@@ -93,23 +93,13 @@ Page {
         countAnim.start()
     }
 
-    function playlistIds(id: int): var {
-        if (page.library === null || typeof page.library.playlistTracks !== "function")
-            return []
-        const ids = []
-        for (const t of page.library.playlistTracks(id))
-            ids.push(typeof t === "object" && t !== null && t.id !== undefined ? Number(t.id) : Number(t))
-        return ids
-    }
-
     function playRow(r: var) {
         if (r.kind === "nowplaying") {
             page.nowPlaying()
             return
         }
-        const ids = page.playlistIds(r.id)
-        if (page.player !== null && typeof page.player.playTracks === "function" && ids.length > 0) {
-            page.player.playTracks(ids, 0)
+        if (page.player !== null && typeof page.player.playSource === "function") {
+            page.player.playSource("playlist", r.id, "play", -1)
             return
         }
         page.play("playlist", r.id)
@@ -127,7 +117,7 @@ Page {
             return false
         page.sheetRow = r
         sheet.title = r.title
-        sheet.items = ["play", "add to queue", page.pinLabel(r.id)]
+        sheet.items = ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id)]
         sheet.open()
         return true
     }
@@ -299,6 +289,11 @@ Page {
             focused: listView.focusIndex === row.index
             pressed: row.focused && page.pressed
             animated: page.live
+
+            ListView.onPooled: {
+                enterAnim.stop()
+                row.enter = 1
+            }
 
             Connections {
                 target: listView

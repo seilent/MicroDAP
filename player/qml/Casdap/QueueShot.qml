@@ -36,12 +36,26 @@ Item {
         ]
         readonly property int count: sampleQueue.rows.length
         readonly property int index: 2
+        readonly property int currentSlot: 2
         readonly property bool shuffle: false
         readonly property int repeat: 0
+        readonly property var playOrder: sampleOrder
 
         function get(row: int): var {
             const r = sampleQueue.rows[row]
             return { id: row + 1, title: r[0], artist: r[1], album: "", artPath: "", durationMs: 240000 }
+        }
+    }
+
+    ListModel {
+        id: sampleOrder
+
+        function fill(): void {
+            sampleOrder.clear()
+            for (let i = 0; i < sampleQueue.rows.length; i++) {
+                const r = sampleQueue.rows[i]
+                sampleOrder.append({ row: i, slot: i, number: i + 1, id: i + 1, title: r[0], artist: r[1], album: "", durationMs: 240000, isCurrent: i === sampleQueue.index })
+            }
         }
     }
 
@@ -59,6 +73,11 @@ Item {
         animated: false
         player: samplePlayer
 
-        Component.onCompleted: screen.completeAll()
+        Component.onCompleted: {
+            sampleOrder.fill()
+            screen.list.snapTo(sampleQueue.currentSlot)
+            screen.syncFocus()
+            screen.completeAll()
+        }
     }
 }

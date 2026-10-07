@@ -19,6 +19,7 @@ ListView {
     }
 
     interactive: false
+    reuseItems: true
     currentIndex: -1
     keyNavigationEnabled: false
     boundsBehavior: Flickable.StopAtBounds

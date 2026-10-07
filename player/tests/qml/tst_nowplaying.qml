@@ -34,9 +34,23 @@ TestCase {
         property int index: 0
         property bool shuffle: false
         property int repeat: 0
+        property var upcomingRows: null
+
+        signal orderChanged()
+        signal modelReset()
+        signal currentSlotChanged()
 
         function get(row) {
             return fakeQueue.rows[row]
+        }
+
+        function upcoming(n) {
+            if (fakeQueue.upcomingRows !== null)
+                return fakeQueue.upcomingRows.slice(0, n)
+            const out = []
+            for (let i = fakeQueue.index + 1; i < fakeQueue.count && out.length < n; i++)
+                out.push(i)
+            return out
         }
 
         function fill(n) {
@@ -46,6 +60,7 @@ TestCase {
             fakeQueue.rows = rows
             fakeQueue.count = n
             fakeQueue.index = 0
+            fakeQueue.upcomingRows = null
         }
     }
 
@@ -448,8 +463,11 @@ TestCase {
         compare(fakePlayer.status, 2)
         compare(page.statusStrip.playGlyph.name, "pause")
         verify(router.dispatch("lt", false))
+        compare(fakePlayer.calls[fakePlayer.calls.length - 1], "playPause")
+        router.release("lt")
         compare(fakePlayer.calls[fakePlayer.calls.length - 1], "seek 0")
         verify(router.dispatch("rt", false))
+        router.release("rt")
         compare(fakePlayer.calls[fakePlayer.calls.length - 1], "seek 15000")
         verify(router.dispatch("y", false))
         compare(counters.queueOpens, 1)
@@ -458,6 +476,47 @@ TestCase {
         compare(pages.depth, 2)
         verify(router.dispatch("start", false))
         compare(pages.depth, 1)
+    }
+
+    function test_next_rows_follow_play_order() {
+        const page = open()
+        compare(JSON.stringify(page.nextTitles), JSON.stringify(["Song 2", "Song 3", "Song 4"]))
+        fakeQueue.upcomingRows = [5, 2, 7]
+        fakeQueue.orderChanged()
+        tryVerify(() => JSON.stringify(page.nextTitles) === JSON.stringify(["Song 6", "Song 3", "Song 8"]), 1000)
+        fakeQueue.upcomingRows = []
+        fakeQueue.orderChanged()
+        tryVerify(() => page.nextTitles.length === 0, 1000)
+        fakeQueue.upcomingRows = [3]
+        fakeQueue.modelReset()
+        tryVerify(() => JSON.stringify(page.nextTitles) === JSON.stringify(["Song 4"]), 1000)
+        fakeQueue.upcomingRows = [1, 2]
+        fakeQueue.currentSlotChanged()
+        tryVerify(() => JSON.stringify(page.nextTitles) === JSON.stringify(["Song 2", "Song 3"]), 1000)
+    }
+
+    function test_seek_hold_scans() {
+        open()
+        verify(router.dispatch("rt", false))
+        compare(fakePlayer.calls.length, 0)
+        tryVerify(() => fakePlayer.calls.length >= 2, 2000)
+        compare(fakePlayer.calls[0], "seek 6000")
+        compare(fakePlayer.calls[1], "seek 7000")
+        router.release("rt")
+        const n = fakePlayer.calls.length
+        wait(Ui.seekTickMs * 2)
+        compare(fakePlayer.calls.length, n)
+        verify(fakePlayer.calls.indexOf("seek 15000") < 0)
+    }
+
+    function test_seek_rt_clamps_at_end() {
+        fakePlayer.position = 236000
+        const page = open()
+        page.syncPosition()
+        verify(router.dispatch("rt", false))
+        router.release("rt")
+        compare(fakePlayer.calls[fakePlayer.calls.length - 1], "seek 239000")
+        fakePlayer.position = 5000
     }
 
     function test_back_pops() {

@@ -41,7 +41,7 @@ TestCase {
         }
     }
 
-    ListModel {
+    FakeSectioned {
         id: artists
     }
 
@@ -55,8 +55,9 @@ TestCase {
             property int count: 0
         }
 
-        function playTracks(ids, start) {
-            fakePlayer.calls = fakePlayer.calls.concat([{ ids: ids, start: start }])
+        function playSource(kind, id, mode, startId) {
+            fakePlayer.calls = fakePlayer.calls.concat([{ kind: kind, id: id, mode: mode, startId: startId }])
+            return 1
         }
     }
 
@@ -95,6 +96,14 @@ TestCase {
 
         function artistTracks(id) {
             return fakeLibrary.tracks.map((t) => t[0])
+        }
+
+        function artistAlbumRows(id) {
+            return [fakeLibrary.albumInfo(1), fakeLibrary.albumInfo(2)]
+        }
+
+        function artistTrackRows(id) {
+            return fakeLibrary.tracks.map((t) => fakeLibrary.rowOf(t))
         }
 
         function trackRows(ids) {
@@ -172,8 +181,8 @@ TestCase {
         tc.setWindow(640, 960)
         pages.clear()
         pages.animate = false
-        artists.clear()
-        artists.append({ id: 7, title: "Addison Road", subtitle: "2 albums, 6 songs", artPath: "", section: "A" })
+        artists.active = false
+        artists.load([{ id: 7, title: "Addison Road", subtitle: "2 albums, 6 songs", artPath: "", section: "A" }], "artist")
         fakePlayer.calls = []
         fakePlayer.current = { id: 3, title: "Sticking With You", artist: "Addison Road", album: "Addison Road", artPath: "" }
         counters.opened = []
@@ -264,7 +273,6 @@ TestCase {
         compare(page.albumRows[1].subtitle, "")
         compare(page.songRows.length, 6)
         compare(page.songRows[0].number, "1")
-        compare(JSON.stringify(page.songIds), JSON.stringify([1, 2, 3, 4, 5, 6]))
         const row = tc.rowAt(page.albumsPane, 0)
         compare(row.height, Ui.px(124))
         compare(row.tileItem.x, Ui.px(20))
@@ -335,20 +343,26 @@ TestCase {
         const page = openArtist()
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
-        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([1, 2, 3, 4, 5, 6]))
-        compare(fakePlayer.calls[0].start, 0)
+        compare(fakePlayer.calls[0].kind, "artist")
+        compare(fakePlayer.calls[0].id, 7)
+        compare(fakePlayer.calls[0].mode, "play")
+        compare(fakePlayer.calls[0].startId, -1)
         router.dispatch("right", false)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, "add to queue")
+        compare(counters.sheetActions[0].kind, "artist")
+        compare(counters.sheetActions[0].id, 7)
         router.dispatch("right", false)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 2)
-        compare(fakePlayer.calls[1].ids.length, 6)
-        compare(JSON.stringify(tc.sortedIds(fakePlayer.calls[1].ids)), JSON.stringify([1, 2, 3, 4, 5, 6]))
-        compare(fakePlayer.calls[1].start, 0)
+        compare(fakePlayer.calls[1].kind, "artist")
+        compare(fakePlayer.calls[1].mode, "shuffle")
         router.dispatch("y", false)
         compare(fakePlayer.calls.length, 3)
-        compare(JSON.stringify(tc.sortedIds(fakePlayer.calls[2].ids)), JSON.stringify([1, 2, 3, 4, 5, 6]))
+        compare(fakePlayer.calls[2].mode, "shuffle")
+        compare(fakePlayer.calls[2].id, 7)
     }
 
     function test_artist_ring_swap() {
@@ -386,8 +400,9 @@ TestCase {
         router.dispatch("down", false)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
-        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([1, 2, 3, 4, 5, 6]))
-        compare(fakePlayer.calls[0].start, 1)
+        compare(fakePlayer.calls[0].kind, "artist")
+        compare(fakePlayer.calls[0].id, 7)
+        compare(fakePlayer.calls[0].startId, 2)
         const row = tc.rowAt(page.songsPane, 1)
         compare(row.rowItem.number, "2")
         compare(row.rowItem.primary, "All That Matters")
@@ -423,12 +438,14 @@ TestCase {
         verify(router.dispatch("x", false))
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "Addison Road")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay"]))
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
-        compare(fakePlayer.calls[0].start, 0)
+        compare(fakePlayer.calls[0].kind, "artist")
+        compare(fakePlayer.calls[0].mode, "play")
         compare(page.sheet.shown, false)
         router.dispatch("x", false)
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
         compare(counters.sheetActions.length, 1)
@@ -439,8 +456,12 @@ TestCase {
         router.dispatch("x", false)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 2)
-        compare(JSON.stringify(fakePlayer.calls[1].ids), JSON.stringify([1, 2, 3]))
+        compare(fakePlayer.calls[1].kind, "album")
+        compare(fakePlayer.calls[1].id, 1)
+        compare(fakePlayer.calls[1].mode, "play")
         router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
@@ -448,6 +469,28 @@ TestCase {
         compare(counters.sheetActions[1].action, "pin to quickplay")
         compare(counters.sheetActions[1].kind, "album")
         compare(counters.sheetActions[1].id, 1)
+        router.dispatch("y", false)
+        compare(counters.sheetActions.length, 3)
+        compare(counters.sheetActions[2].action, "add to queue")
+        compare(counters.sheetActions[2].kind, "album")
+        compare(counters.sheetActions[2].id, 1)
+        compare(fakePlayer.calls.length, 2)
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions[3].action, "play next")
+        compare(counters.sheetActions[3].kind, "album")
+    }
+
+    function test_detail_back_opens_queue() {
+        const artist = openArtist()
+        let opens = 0
+        const onOpen = function() { opens++ }
+        artist.openQueue.connect(onOpen)
+        verify(router.dispatch("back", false))
+        compare(opens, 1)
+        compare(pages.currentItem, artist)
+        artist.openQueue.disconnect(onOpen)
     }
 
     function test_artist_backdrop() {
@@ -491,7 +534,7 @@ TestCase {
         pages.push(hubComponent, { animated: false })
         const hub = pages.currentItem
         hub.completeAll()
-        compare(hub.artistRows[1].kind, "artist")
+        compare(hub.entryAt(0, 1).kind, "artist")
         compare(hub.rowIndex, 1)
         router.dispatch("a", false)
         compare(counters.opened.length, 1)
@@ -575,8 +618,9 @@ TestCase {
         compare(page.rowIndex, 2)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
-        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([1, 2, 3]))
-        compare(fakePlayer.calls[0].start, 2)
+        compare(fakePlayer.calls[0].kind, "album")
+        compare(fakePlayer.calls[0].id, 1)
+        compare(fakePlayer.calls[0].startId, 3)
         router.dispatch("y", false)
         compare(counters.sheetActions.length, 1)
         compare(counters.sheetActions[0].action, "add to queue")
@@ -607,6 +651,17 @@ TestCase {
         compare(pages.depth, 2)
         verify(router.dispatch("b", false))
         compare(pages.depth, 1)
+    }
+
+    function test_album_back_opens_queue() {
+        const page = openAlbum()
+        let opens = 0
+        const onOpen = function() { opens++ }
+        page.openQueue.connect(onOpen)
+        verify(router.dispatch("back", false))
+        compare(opens, 1)
+        compare(pages.depth, 2)
+        page.openQueue.disconnect(onOpen)
     }
 
     function test_album_landscape() {

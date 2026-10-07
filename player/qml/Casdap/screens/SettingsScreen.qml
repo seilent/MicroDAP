@@ -10,6 +10,8 @@ Page {
     property QtObject player: null
     property QtObject audioInfo: null
     property QtObject outputControl: null
+    property QtObject codecFragment: null
+    property QtObject library: null
     property QtObject rgbControl: null
     property QtObject bridge: null
     property var eq: null
@@ -66,6 +68,12 @@ Page {
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
     readonly property bool pocketControls: page.settings !== null && page.settings.pocketControls === true
     readonly property bool wifiOffScreenOff: page.settings !== null && page.settings.wifiOffScreenOff === true
+    readonly property bool keepPhone: page.settings !== null && page.settings.keepPhoneInGameMode === true
+    readonly property bool codecPending: page.codecFragment !== null && page.codecFragment.pending === true
+    readonly property string codecValue: page.codecPending ? page.codec + " (pending)" : page.codec
+    readonly property bool scanning: page.library !== null && page.library.scanning === true
+    readonly property int songCount: page.library !== null && page.library.songCount !== undefined ? Number(page.library.songCount) : 0
+    readonly property string rescanValue: page.scanning ? "scanning" : page.songCount + (page.songCount === 1 ? " song" : " songs")
     readonly property var current: page.player !== null && page.player.current !== undefined && page.player.current !== null ? page.player.current : null
     readonly property string pcmFormat: page.audioInfo !== null && page.audioInfo.pcmFormat !== undefined ? String(page.audioInfo.pcmFormat) : ""
     readonly property var driftPaths: page.power !== null && page.power.driftPaths !== undefined ? page.power.driftPaths : []
@@ -173,7 +181,7 @@ Page {
         out.push(page.row("hpAmp", "headphone amp", page.hpAmpValue, page.usbActive))
         out.push(page.row("spkGain", "speaker digital gain", page.spkGainText(page.spkGain), false))
         out.push(page.row("volumeStep", "volume step", page.volumeStep + "%", false))
-        out.push(page.row("codec", "bluetooth codec", page.codec, false))
+        out.push(page.row("codec", "bluetooth codec", page.codecValue, false))
         out.push(page.row("rate", "sample rate follow", page.rateValue, true))
         out.push(page.row("replaygain", "replaygain", "off", true))
         out.push(page.row("eq", "eq", page.eqValue, true))
@@ -184,6 +192,7 @@ Page {
             for (const f of page.folders)
                 out.push({ kind: "sub", key: "root:" + f, title: f, value: page.roots.indexOf(f) >= 0 ? "on" : "off", readOnly: true, path: f })
         }
+        out.push(page.row("rescan", "rescan library", page.rescanValue, true))
         out.push(page.label("display"))
         out.push(page.row("accent", "accent", "", false))
         out.push(page.row("orientation", "orientation", Ui.landscape ? "landscape" : "portrait", true))
@@ -197,6 +206,8 @@ Page {
         out.push(page.row("suspend", "suspend after", page.offOr(page.suspendMinutes, "min"), false))
         out.push(page.row("pocket", "pocket controls", page.pocketControls ? "on" : "off", false))
         out.push(page.row("wifi", "wi-fi when off", page.wifiOffScreenOff ? "off" : "keep", false))
+        if (!page.overlay)
+            out.push(page.row("keepPhone", "keep phone in game mode", page.keepPhone ? "on" : "off", false))
         out.push(page.row("gameMode", page.gameModeTitle, "", true))
         out.push(page.row("about", "about", page.version, true))
         if (page.aboutOpen) {
@@ -426,6 +437,9 @@ Page {
         case "wifi":
             page.set("wifiOffScreenOff", !page.wifiOffScreenOff)
             return true
+        case "keepPhone":
+            page.set("keepPhoneInGameMode", !page.keepPhone)
+            return true
         default:
             return false
         }
@@ -495,7 +509,13 @@ Page {
             return true
         case "about":
             page.aboutOpen = !page.aboutOpen
+            if (page.aboutOpen && page.power !== null && typeof page.power.reloadDrift === "function")
+                page.power.reloadDrift()
             page.refreshFrom(page.focusIndex + 1)
+            return true
+        case "rescan":
+            if (!page.scanning && page.library !== null && typeof page.library.rescanRoots === "function")
+                page.library.rescanRoots()
             return true
         case "orientation":
         case "rate":

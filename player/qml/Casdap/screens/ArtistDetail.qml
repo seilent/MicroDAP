@@ -17,7 +17,6 @@ Page {
     property int ringIndex: 0
     property var albumRows: []
     property var songRows: []
-    property var songIds: []
     property var sheetRow: null
 
     readonly property bool live: page.animated && !page.screenOff
@@ -47,6 +46,7 @@ Page {
     property alias backdrop: backdrop
 
     signal openAlbum(int id)
+    signal openQueue()
     signal sheetAction(string action, string kind, int id)
 
     list: page.activeList
@@ -71,31 +71,27 @@ Page {
                 page.artPath = page.str(info.artPath)
         }
         const albums = []
-        const albumIds = page.callLibrary("artistAlbums", page.artistId)
-        if (albumIds !== undefined && albumIds !== null) {
-            for (const id of albumIds) {
-                const a = page.callLibrary("albumInfo", id)
+        const albumRows = page.callLibrary("artistAlbumRows", page.artistId)
+        if (albumRows !== undefined && albumRows !== null) {
+            for (let i = 0; i < albumRows.length; i++) {
+                const a = albumRows[i]
                 if (a === undefined || a === null || a.title === undefined)
                     continue
                 const year = a.year === undefined || a.year === null ? 0 : Number(a.year)
-                albums.push({ kind: "album", id: Number(id), title: page.str(a.title), subtitle: year > 0 ? String(year) : "", artPath: page.str(a.artPath) })
+                albums.push({ kind: "album", id: Number(a.id), title: page.str(a.title), subtitle: year > 0 ? String(year) : "", artPath: page.str(a.artPath) })
             }
         }
         const songs = []
-        const ids = []
-        const trackIds = page.callLibrary("artistTracks", page.artistId)
-        const tracks = trackIds === undefined || trackIds === null ? undefined : page.callLibrary("trackRows", trackIds)
+        const tracks = page.callLibrary("artistTrackRows", page.artistId)
         if (tracks !== undefined && tracks !== null) {
             for (let i = 0; i < tracks.length; i++) {
                 const t = tracks[i]
                 const id = t.id === undefined ? -1 : Number(t.id)
                 songs.push({ kind: "song", id: id, title: page.str(t.title), subtitle: page.str(t.artist), artPath: "", number: String(i + 1) })
-                ids.push(id)
             }
         }
         page.albumRows = albums
         page.songRows = songs
-        page.songIds = ids
         for (const pane of page.panes) {
             pane.forceLayout()
             pane.snapTo(0)
@@ -111,49 +107,28 @@ Page {
         page.panes[page.shownPivot].refresh()
     }
 
-    function shuffled(ids: var): var {
-        const out = ids.slice()
-        for (let i = out.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1))
-            const t = out[i]
-            out[i] = out[j]
-            out[j] = t
-        }
-        return out
-    }
-
-    function play(ids: var, start: int): void {
-        if (page.player !== null && typeof page.player.playTracks === "function") {
-            page.player.playTracks(ids, start)
+    function playSource(kind: string, id: int, mode: string, startId: int): void {
+        if (page.player !== null && typeof page.player.playSource === "function") {
+            page.player.playSource(kind, id, mode, startId)
             return
         }
-        console.info("casdap: play artist " + page.artistId + " " + start)
+        console.info("casdap: " + mode + " " + kind + " " + id)
+    }
+
+    function playArtist(mode: string): void {
+        page.playSource("artist", page.artistId, mode, -1)
     }
 
     function addToQueue() {
-        if (page.player !== null && typeof page.player.enqueueTracks === "function") {
-            page.player.enqueueTracks(page.songIds)
-            return
-        }
-        console.info("casdap: add artist " + page.artistId)
-    }
-
-    function albumTrackIds(albumId: int): var {
-        const rows = page.callLibrary("albumTracks", albumId)
-        const ids = []
-        if (rows === undefined || rows === null)
-            return ids
-        for (const r of rows)
-            ids.push(r.id === undefined ? -1 : Number(r.id))
-        return ids
+        page.sheetAction("add to queue", "artist", page.artistId)
     }
 
     function playAlbum(albumId: int): void {
-        page.play(page.albumTrackIds(albumId), 0)
+        page.playSource("album", albumId, "play", -1)
     }
 
     function playSong(row: var): void {
-        page.play(page.songIds, Math.max(0, page.songIds.indexOf(row.id)))
+        page.playSource("artist", page.artistId, "play", row.id)
     }
 
     function ring(index: int): Item {
@@ -166,11 +141,11 @@ Page {
 
     function activateRing(index: int): void {
         if (index === 0)
-            page.play(page.songIds, 0)
+            page.playArtist("play")
         else if (index === 1)
             page.addToQueue()
         else
-            page.play(page.shuffled(page.songIds), 0)
+            page.playArtist("shuffle")
         const item = page.ring(index)
         if (item !== null)
             item.toggled()
@@ -203,7 +178,19 @@ Page {
     }
 
     function sheetItemsFor(kind: string, id: int): var {
-        return ["play", "add to queue", page.pinLabel(kind, id)]
+        if (kind === "song")
+            return ["play", "play next", "add to queue", page.pinLabel(kind, id)]
+        return ["play", "play next", "add to queue", "shuffle", page.pinLabel(kind, id)]
+    }
+
+    function queueAction(): void {
+        if (page.focusRow === 0) {
+            page.playArtist("shuffle")
+            return
+        }
+        const t = page.focusedRow
+        if (t !== null)
+            page.sheetAction("add to queue", t.kind, t.id)
     }
 
     function openSheet(): bool {
@@ -227,7 +214,7 @@ Page {
             return
         }
         if (t.kind === "artist")
-            page.play(page.songIds, 0)
+            page.playArtist("play")
         else if (t.kind === "album")
             page.playAlbum(t.id)
         else
@@ -364,7 +351,11 @@ Page {
             return true
         case "y":
             if (!repeat)
-                page.play(page.shuffled(page.songIds), 0)
+                page.queueAction()
+            return true
+        case "back":
+            if (!repeat)
+                page.openQueue()
             return true
         case "b":
             if (repeat)
@@ -467,6 +458,11 @@ Page {
         height: row.pane.rowPitch
         transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
+
+        ListView.onPooled: {
+            enterAnim.stop()
+            row.enter = 1
+        }
 
         Connections {
             target: row.pane
@@ -582,6 +578,11 @@ Page {
         height: row.pane.rowPitch
         transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
+
+        ListView.onPooled: {
+            enterAnim.stop()
+            row.enter = 1
+        }
 
         Connections {
             target: row.pane

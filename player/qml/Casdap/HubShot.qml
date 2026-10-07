@@ -13,6 +13,33 @@ Item {
     readonly property var contextSongs: typeof Songs === "undefined" ? null : Songs
     readonly property var contextGenres: typeof Genres === "undefined" ? null : Genres
     readonly property var contextLibrary: typeof Library === "undefined" ? null : Library
+    readonly property var artistsHub: typeof ArtistsHub === "undefined" ? null : ArtistsHub
+    readonly property var albumsGrid: typeof AlbumsGrid === "undefined" ? null : AlbumsGrid
+    readonly property var songsHub: typeof SongsHub === "undefined" ? null : SongsHub
+    readonly property var genresHub: typeof GenresHub === "undefined" ? null : GenresHub
+
+    function attach(hubModel: var, context: var, sample: var): void {
+        if (hubModel !== null && context === null)
+            hubModel.source = sample
+    }
+
+    Component.onCompleted: {
+        sampleArtists.fill()
+        sampleAlbums.fill()
+        sampleSongs.fill()
+        sampleGenres.fill()
+        root.attach(root.artistsHub, root.contextArtists, sampleArtists)
+        root.attach(root.albumsGrid, root.contextAlbums, sampleAlbums)
+        root.attach(root.songsHub, root.contextSongs, sampleSongs)
+        root.attach(root.genresHub, root.contextGenres, sampleGenres)
+        hub.bindPane(hub.pivotIndex)
+        hub.fixFocus(hub.pivotIndex)
+        hub.completeAll()
+        if (root.jump) {
+            hub.openJumpGrid()
+            hub.completeAll()
+        }
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -22,7 +49,7 @@ Item {
     ListModel {
         id: sampleArtists
 
-        Component.onCompleted: {
+        function fill(): void {
             const rows = [
                 ["3 Doors Down", "1 album, 12 songs", "#"],
                 ["Addison Road", "2 albums, 21 songs", "A"],
@@ -42,7 +69,7 @@ Item {
     ListModel {
         id: sampleAlbums
 
-        Component.onCompleted: {
+        function fill(): void {
             const rows = [
                 ["3 Doors Down", "3 Doors Down", "#"],
                 ["Addison Road", "Addison Road", "A"],
@@ -65,7 +92,7 @@ Item {
     ListModel {
         id: sampleSongs
 
-        Component.onCompleted: {
+        function fill(): void {
             const rows = [
                 ["All That Matters", "Addison Road", "A"],
                 ["Always", "Erasure", "A"],
@@ -86,7 +113,7 @@ Item {
     ListModel {
         id: sampleGenres
 
-        Component.onCompleted: {
+        function fill(): void {
             const rows = [
                 ["Alternative", "34 songs", "A"],
                 ["Country", "10 songs", "C"],
@@ -104,18 +131,10 @@ Item {
         anchors.fill: parent
         animated: root.jump
         pivotIndex: Math.max(0, root.pivots.indexOf(root.pivot))
-        artistsModel: root.contextArtists !== null ? root.contextArtists : sampleArtists
-        albumsModel: root.contextAlbums !== null ? root.contextAlbums : sampleAlbums
-        songsModel: root.contextSongs !== null ? root.contextSongs : sampleSongs
-        genresModel: root.contextGenres !== null ? root.contextGenres : sampleGenres
+        artistsModel: root.artistsHub !== null ? root.artistsHub : sampleArtists
+        albumsModel: root.albumsGrid !== null ? root.albumsGrid : sampleAlbums
+        songsModel: root.songsHub !== null ? root.songsHub : sampleSongs
+        genresModel: root.genresHub !== null ? root.genresHub : sampleGenres
         library: root.contextLibrary
-
-        Component.onCompleted: {
-            hub.completeAll()
-            if (root.jump) {
-                hub.openJumpGrid()
-                hub.completeAll()
-            }
-        }
     }
 }

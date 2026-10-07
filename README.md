@@ -17,7 +17,7 @@ measurement run and the release image.
 | `sysext/` | Static overlay, copied into `dist/` as is. `/usr` only, nothing under `/etc`. |
 | `patches/<class>/<path>.patch` | Patches against files of the Armada image. `armada/` Armada scripts, `generic/` InputPlumber profile, `pm2/` Pocket MICRO 2 capability map. |
 | `build/` | `base.env` (pinned image), `Containerfile`, `toolchain.sh`, `build.sh`, device scripts for the dev loop. |
-| `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. Playback is `playbin`, audio only, sink from `CASDAP_AUDIO_SINK` (default `pulsesink`), gapless through `about-to-finish`. Queue, index, position, shuffle, repeat, `status` (`playing`, `paused`, `stopped`), `savedAt` (unix seconds), `handoff` and `stack` (the page stack as `name` and `id` pairs from each page's `objectName` and `pageId`, sheets, dialogs, the jump grid and the saver left out) persist in `~/.config/casdap/state.json`, written every 10 s while playing with `handoff` false, on quit and on SIGTERM with `handoff` true, on every overlay hide and on `PrepareForSleep(true)` with `handoff` false, and by the switch prompt before the switch starts (KEEP IN BACKGROUND `handoff` true, CLOSE PLAYER `handoff` false; the session switch ends the player with SIGKILL, so nothing is written at exit); a start resumes playing when `handoff` is true, `status` is `playing` and `savedAt` is under 60 s old, every other file restores the queue paused; both modes restore the saved `stack` at start (an id gone from the library truncates it at that page, no key gives the home). Every play start adds a `history` row. The library (`library.db`, `PRAGMA user_version` 2) reads `ARTISTS` or `ARTIST` tag values as a list, splits a single value on `; `, ` / ` and `, ` unless the whole value equals the album artist (not on ` feat. `), stores each per track in `track_artists(track_id, artist_id, pos)`, keeps `tracks.artist` as the joined display string and `albums.artist` as the album artist; `ArtistsModel` lists individual artists with album and song counts, `Library.artistAlbums(id)` and `artistTracks(id)` resolve through `track_artists`, and a version 1 database gets the table and every track marked for reread on the next scan. Pins live in `pins(id, kind, ref_id, pos)`: `Library.pin(kind, refId)` (kinds `album`, `artist`, `song`, `playlist`; appends at max pos + 1, false on a duplicate or an unknown kind), `unpin(kind, refId)`, `isPinned(kind, refId)`, signal `pinsChanged`; a scan deletes every pin whose ref no longer exists and emits `pinsChanged` when it removed one. `PinsModel` (context property `Pins`) lists the pins in pos order with roles `id` (the ref id), `kind`, `title`, `subtitle`, `artPath`, `section` (`pins`): album title, album artist and art; artist name, `N ALBUMS` and the first album art; song title, artist and its album art; playlist name, `N SONGS`, no art; a pin whose ref is missing is skipped. `Mpris` registers `org.mpris.MediaPlayer2.casdap` at `/org/mpris/MediaPlayer2` on the session bus (root and `Player` interfaces, XML in `player/dbus/`, installed to `share/dbus-1/interfaces`): `Identity` is `CASDAP`, no `DesktopEntry`, track ids are `/org/casdap/track/<id>`, `Volume` reads 1.0 and ignores writes, `OpenUri` plays one `file://` uri, `Seeked` and `PropertiesChanged` are emitted for status, metadata, shuffle and loop. `PowerBridge` registers `org.casdap.Player` at `/org/casdap/Player` (`SetScreenOff(b)`, `ShowPowerMenu()`, `ShowOverlay()`, `HideOverlay()`, `ToggleOverlay()`, `ShowSwitchPrompt()`, `ScreenOff`, `PlaybackStatus`, `OverlayShown`, signal `ScreenOffChanged`; the three overlay methods answer `org.casdap.Error.NotSupported` and `OverlayShown` reads false in DAP mode, `ShowSwitchPrompt` answers `NotSupported` in overlay mode and emits `showSwitchPrompt` to QML in DAP mode), listens to `org.casdap.Hotkeys.VolumeChanged(d)`, reads `/run/casdap/drift` and runs only the verbs `screen-off`, `game-mode`, `suspend`, `poweroff` (`/usr/libexec/casdap/casdap-power <verb>`, `CASDAP_POWER_BIN` overrides the path; `systemctl start casdap-switch-back.service`); settings live in `~/.config/casdap/settings.ini` (`output` `auto`, `speaker`, `headphones`, `usb`; `btCodec`; `hpGain` `low`, `normal`, `high`, default `normal`; `hpAmp` `lohifi`, `ulp`, `hifi`, default `lohifi`; `spkGain` 84, 90, 96, 99, 102, 105, 108, default 102; `volumeStep` 2, 5, 10, default 5; `rgb` `accent`, `off`, `armada`, default `armada`; `overlayToasts`; `eqHeadphones`, `eqUsb`, `eqSpeaker` (`off`, a profile path, `custom`, default `off`); `roots`, `accent`, `scale`, `pocketControls`, `saverSeconds`, `screenOffSeconds`, `suspendMinutes`, `wifiOffScreenOff`, written 500 ms after the last change and on quit), battery comes from UPower `DisplayDevice` with a `/sys/class/power_supply` fallback, and local playback pauses while the Bluetooth transport is active. `CASDAP_BLUEZ_FAKE=1` wires `FakeBluezModel` in place of the Bluetooth model. Removing the current queue row starts the next one or stops when none follows. Pad input is SDL3 gamepad events (Guide never mapped), polled every 16 ms while a pad is open and the screen is on, every 1 s while no pad is open, every 50 ms with the screen off only when pocket controls are on, otherwise not at all; d-pad and stick repeat at 300 ms then 80 ms, `CASDAP_PAD_LOG=1` logs each action. `Pad` and `DbusPad` derive from `PadSource` (the `Action` enum, `screenOff`, `pocketControls`, `connected`, `actionName`, `action`, `pressed`, `released`); `main.cpp` hands `Pad` to QML as `Pad`, `DbusPad` under `--overlay`. `DbusPad` reads `org.shadowblip.Input.DBusDevice.InputEvent(s,d)` from InputPlumber on the system bus (`CASDAP_INPUTPLUMBER_BUS` overrides the address): `ui_up/down/left/right`, `ui_accept` A, `ui_back` B, `ui_context` X, `ui_action` Y, `ui_l1` LB, `ui_r1` RB, `ui_l2` LT, `ui_r2` RT, `ui_option` Start, `ui_select` Back, value >= 0.5 press, below release, same 300/80 repeat; `ui_guide`, `ui_quick`, `ui_l3` and unknown names are logged once and dropped; `connected` while a `devices/target/dbus*` path exists; `pocketControls` does nothing. Its `Intercept` writes `InterceptMode` on every `org.shadowblip.Input.CompositeDevice` from `GetManagedObjects` on `/org/shadowblip/InputPlumber`: 3 on `setShown(true)` and on a device added while shown, 0 on `setShown(false)` and in the destructor. |
+| `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. Playback is `playbin`, audio only, sink from `CASDAP_AUDIO_SINK` (default `pulsesink`), gapless through `about-to-finish`. Index, position, shuffle, repeat, `status` (`playing`, `paused`, `stopped`), `savedAt` (unix seconds), `handoff`, `stack` (the page stack as `name` and `id` pairs from each page's `objectName` and `pageId`, sheets, dialogs, the jump grid and the saver left out) and `queueRev` persist in `~/.config/casdap/state.json`, written every 10 s while playing with `handoff` false, on quit and on SIGTERM with `handoff` true, on every overlay hide and on `PrepareForSleep(true)` with `handoff` false, and by the switch prompt before the switch starts (KEEP IN BACKGROUND `handoff` true, CLOSE PLAYER `handoff` false; the session switch ends the player with SIGKILL, so nothing is written at exit). The queue lives in `queue.json` next to it: `rev` (counts every queue and order change), `index`, `ids` and `paths` (parallel arrays) and `order` (the shuffle play order as queue rows, empty with shuffle off), written 1000 ms after the last change on a worker thread through `QSaveFile` (one write in flight, a newer request replaces the waiting one); every `state.json` write except the 10 s one writes a `queue.json` that is behind on the calling thread first. A start resumes playing when `handoff` is true, `status` is `playing` and `savedAt` is under 60 s old, every other file restores the queue paused; entries resolve by id through `Library.queueEntries`, an id the library lacks or whose path differs by path, and an entry found by neither keeps its path with the file base name as title; a `queueRev` that differs from the `queue.json` `rev` (or no `state.json`) restores at the `queue.json` index, 0:00, paused; a saved `order` that is a permutation of the restored rows is kept, any other is rebuilt with the current row first; a `state.json` that still holds a `queue` array restores from it, then both files are written once; a resume waits for the first `SystemBluezModel` object read (`BluezModel.ready`) and restores paused while a phone transport is active; both modes restore the saved `stack` at start (an id gone from the library truncates it at that page, no key gives the home). Every play start adds a `history` row and emits `Library.played(id)`; every 100th insert of the process keeps the newest 2000 rows. `HistoryModel` takes `limit` (0 unbounded): a Recent model moves the played row to row 0 or inserts it there and drops the row past `limit`, and reloads on `tracksChanged`; a New model reloads only on `albumsChanged`. The library (`library.db`, `PRAGMA user_version` 5) reads `ARTISTS` or `ARTIST` tag values as a list, splits a single value on `; `, ` / ` and `, ` unless the whole value equals the album artist (not on ` feat. `), stores each per track in `track_artists(track_id, artist_id, pos)`, keeps `tracks.artist` as the joined display string and `albums.artist` as the album artist; `ArtistsModel` lists individual artists with album and song counts, `Library.artistAlbums(id)` and `artistTracks(id)` resolve through `track_artists`, and a version 1 database gets the table and every track marked for reread on the next scan. Scans run in DAP mode only and always cover the whole `Settings.roots` list: at start on the first `frameSwapped` after the state and stack restore, on every `Settings.rootsChanged`, from `Library.rescanRoots()`, and 5000 ms after the last `directoryChanged` of `LibraryWatcher` (a `QFileSystemWatcher` on every directory the last scan walked, breadth first in roots order, plus the nearest existing ancestor of each missing root, the climb stopping at the media base and `$HOME`, at most 4096 directories, `casdap: watch limit 4096 reached` logged once per process), and when the 5000 ms poll of a missing root finds it a directory; a trigger during a scan becomes the one pending request. Overlay mode never scans and builds no watcher. A track whose file is gone is removed under an enabled root that exists, kept under an enabled root that is missing or unreadable, kept when no directory between `/run/media` (`CASDAP_MEDIA_ROOT` replaces it) and the file is an existing mount point, and removed when no enabled root holds it (a folder turned OFF). `.m3u` and `.m3u8` files under the roots are read in the same scan: `.m3u8` as UTF-8, `.m3u` as UTF-8 when the whole file decodes, else Latin-1, a BOM dropped, empty and `#` lines skipped, `file://` decoded, `\` read as `/`, relative entries against the playlist folder; an entry takes the exact `tracks.path` match, else the single case folded match, else it is skipped, counted in `playlists.skipped` and logged as `casdap: playlist <name>: <n> entries not in the library`. `playlists` carries `source` (the file path, unique index), `skipped`, `mtime` and `size`; a playlist whose mtime and size match is not read unless the scan added tracks, a read one upserts by `source`, so a playlist keeps its id and pin, rewrites its `playlist_items` in file order (an entry listed twice plays twice) only when the resolved list differs, an unreadable file leaves its row as it is (`casdap: playlist <path>: unreadable, kept as is`), and a row whose file is gone is dropped by the track rules. A scan with nothing added, updated, removed or read runs no transaction and emits only `scanned`; `tracksChanged`, `albumsChanged` and `countsChanged` follow track changes, `playlistsChanged` and `playlistCountChanged` playlist changes, and the album, artist and art prune runs only after track changes. A version 2 or 3 database gains both columns and drops its playlists without `source`; every older version gains `mtime`, `size` and the `playlist_items(track_id)` index. `PlaylistsModel` sorts by name case folded, then `source`. `Library.songCount`, `allTracks()` (every song id in the `Songs` order) and `genreTracks(id)` (that order filtered to the genre) return song ids for the play verbs; `queueEntries` and `trackRows` query 500 ids per statement and keep the given order, `artistAlbumRows(id)` and `artistTrackRows(id)` return the artist page rows in one query each. Pins live in `pins(id, kind, ref_id, pos)`: `Library.pin(kind, refId)` (kinds `album`, `artist`, `song`, `playlist`; appends at max pos + 1, false on a duplicate or an unknown kind), `unpin(kind, refId)`, `isPinned(kind, refId)`, signal `pinsChanged`; a scan deletes every pin whose ref no longer exists and emits `pinsChanged` when it removed one. `PinsModel` (context property `Pins`) lists the pins in pos order with roles `id` (the ref id), `kind`, `title`, `subtitle`, `artPath`, `section` (`pins`): album title, album artist and art; artist name, `N ALBUMS` and the first album art; song title, artist and its album art; playlist name, `N SONGS`, no art; a pin whose ref is missing is skipped. `Mpris` registers `org.mpris.MediaPlayer2.casdap` at `/org/mpris/MediaPlayer2` on the session bus (root and `Player` interfaces, XML in `player/dbus/`, installed to `share/dbus-1/interfaces`): `Identity` is `CASDAP`, no `DesktopEntry`, track ids are `/org/casdap/track/<id>`, `Volume` reads 1.0 and ignores writes, `OpenUri` plays one `file://` uri, `Seeked` and `PropertiesChanged` are emitted for status, metadata, shuffle and loop. `PowerBridge` registers `org.casdap.Player` at `/org/casdap/Player` (`SetScreenOff(b)`, `ShowPowerMenu()`, `ShowOverlay()`, `HideOverlay()`, `ToggleOverlay()`, `ShowSwitchPrompt()`, `ScreenOff`, `PlaybackStatus`, `OverlayShown`, signal `ScreenOffChanged`; the three overlay methods answer `org.casdap.Error.NotSupported` and `OverlayShown` reads false in DAP mode, `ShowSwitchPrompt` answers `NotSupported` in overlay mode and emits `showSwitchPrompt` to QML in DAP mode), listens to `org.casdap.Hotkeys.VolumeChanged(d)`, reads `/run/casdap/drift` and runs only the verbs `screen-off`, `game-mode`, `suspend`, `poweroff` (`/usr/libexec/casdap/casdap-power <verb>`, `CASDAP_POWER_BIN` overrides the path; `systemctl start casdap-switch-back.service`); settings live in `~/.config/casdap/settings.ini` (`output` `auto`, `speaker`, `headphones`, `usb`; `btCodec`; `hpGain` `low`, `normal`, `high`, default `normal`; `hpAmp` `lohifi`, `ulp`, `hifi`, default `lohifi`; `spkGain` 84, 90, 96, 99, 102, 105, 108, default 102; `volumeStep` 2, 5, 10, default 5; `rgb` `accent`, `off`, `armada`, default `armada`; `overlayToasts`; `eqHeadphones`, `eqUsb`, `eqSpeaker` (`off`, a profile path, `custom`, default `off`); `roots`, `accent`, `scale`, `pocketControls`, `saverSeconds`, `screenOffSeconds`, `suspendMinutes`, `wifiOffScreenOff`, written 500 ms after the last change and on quit), battery comes from UPower `DisplayDevice` with a `/sys/class/power_supply` fallback, and local playback pauses when the Bluetooth transport goes active. Every local start while the transport is active (`play`, `playTracks`, `playAt`, `playPause` and `resume` from paused or stopped, MPRIS `Play`, `PlayPause` and `OpenUri`) emits `localPlayRequested` (wired to `BluezModel.pause`, AVRCP `MediaPlayer1.Pause`), holds the start paused with `playPending` true and starts once the transport leaves `active` or 1000 ms later; `pause` and `stop` drop the pending start. `CASDAP_BLUEZ_FAKE=1` wires `FakeBluezModel` in place of the Bluetooth model. Removing the current queue row starts the next one or stops when none follows. `Player.enqueueTracks(ids)` appends the rows and `playNextTracks(ids)` inserts them after the current row, both dropping ids the library does not know, returning the count added and emitting `added(count)` when it is above 0; on an empty or stopped queue either sets the queue to the added rows (shuffle kept, a new play order) and lands paused at 0:00 on the first one. `Player.playSource(kind, id, mode, startId)` (kinds `album`, `artist`, `playlist`, `genre`, `all` through `Library.entriesFor`, `song` the one track; modes `play` from the `startId` row or the first, `shuffle` with shuffle on from a random row, `add` and `next` with the enqueue and play next rules) returns the rows queued. With shuffle on, turning it on puts the current row in slot 0, an appended row takes a random slot after the current one and a play next row the slot right after it; off returns to list order on the same row. `Queue` reads in play order through `orderedRows()`, `rowAt(slot)`, `slotOf(row)`, `currentSlot` and `upcoming(n)` (the next n rows, wrapping with repeat all); `moveSlot(from, to)` and `playNextRow(row)` edit the play order under shuffle and the list without it, `remove(row)` drops the row from both. An index move emits `dataChanged` on the old and new row, `indexChanged` and `currentSlotChanged`; `set` emits one `modelReset`; `orderChanged` follows a shuffle toggle, an enqueue or play next under shuffle, `moveSlot`, `playNextRow` and `setOrder`. `Queue.playOrder` is a list model in play order (roles `row`, `slot`, `number`, `id`, `title`, `artist`, `album`, `durationMs`, `isCurrent`, `get(slot)`, `count`) with one insert, remove or move per queue edit (an enqueue of more than 64 rows under shuffle, the shuffle toggle and `set` reset it). The gapless chain shares the queue's entry list and resyncs on resets, inserts, removes, moves and order, shuffle and repeat changes. A track error starts the next row in the state the player was in; errors on every row of one pass stop the player on the first failed row and log `casdap: no playable track`. Pad input is SDL3 gamepad events (Guide never mapped), polled every 16 ms while a pad is open and the screen is on, every 1 s while no pad is open, every 50 ms with the screen off only when pocket controls are on, otherwise not at all; d-pad and stick repeat at 300 ms then 80 ms, `CASDAP_PAD_LOG=1` logs each action. `Pad` and `DbusPad` derive from `PadSource` (the `Action` enum, `screenOff`, `pocketControls`, `connected`, `actionName`, `action`, `pressed`, `released`); `main.cpp` hands `Pad` to QML as `Pad`, `DbusPad` under `--overlay`. `DbusPad` reads `org.shadowblip.Input.DBusDevice.InputEvent(s,d)` from InputPlumber on the system bus (`CASDAP_INPUTPLUMBER_BUS` overrides the address): `ui_up/down/left/right`, `ui_accept` A, `ui_back` B, `ui_context` X, `ui_action` Y, `ui_l1` LB, `ui_r1` RB, `ui_l2` LT, `ui_r2` RT, `ui_option` Start, `ui_select` Back, value >= 0.5 press, below release, same 300/80 repeat; `ui_guide`, `ui_quick`, `ui_l3` and unknown names are logged once and dropped; `connected` while a `devices/target/dbus*` path exists; `pocketControls` does nothing. Its `Intercept` writes `InterceptMode` on every `org.shadowblip.Input.CompositeDevice` from `GetManagedObjects` on `/org/shadowblip/InputPlumber`: 3 on `setShown(true)` and on a device added while shown, 0 on `setShown(false)` and in the destructor. |
 | `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`, `busctl`, `amixer`, `armada-rgb`. `bt-test.sh` runs `bt-test.py` under `dbus-run-session` with a fake `org.bluez` (needs `dbus-python` and `python3-gobject`). `keep-test.sh` drives `casdap-keep` through `CASDAP_KEEP_FILE` and `CASDAP_BOOT_ID_FILE`; `power-test.sh` drives `casdap-power` with stubbed `busctl`, `systemctl`, `systemd-run`, `nmcli` and `CASDAP_RUNTIME_DIR`, `CASDAP_SETTINGS_FILE`, `CASDAP_CPU_BEFORE_FILE`; `powerd-test.sh` replays `evtest` lines and profile reads into `casdap-powerd`; `wait-x-test.sh` drives `casdap-wait-x` with a stubbed `xprop` and `CASDAP_X_SOCKET_DIR`; `overlay-unit-test.sh` greps `casdap-overlay.service` and its drop in under `sysext/` and runs `systemd-analyze --user verify` where the image units and the player binary exist (`skip:` otherwise). Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures; `tst_mpris`, `tst_power`, `tst_systembluez`, `tst_dbuspad` and `tst_overlay` run under `dbus-run-session`, `tst_dbuspad` and `tst_overlay` against `fake_inputplumber.py`, `tst_overlay` and `tst_power` against `fake_login1.py` (a fake `org.freedesktop.login1` with `Inhibit` and `PrepareForSleep` on the private bus, `CASDAP_LOGIN1_BUS`), `tst_overlay` also against a unix datagram `NOTIFY_SOCKET`; each `player/tests/qml/tst_*.qml` is its own ctest entry `qml-<name>` running `tst_qml -input <file>`). |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
@@ -69,6 +69,8 @@ PageDown for LT and RT, Space Start, Tab Back/View; key autorepeat counts only f
 `Page` is the screen base: one `focusIndex`, A emits `activated(index)`, B pops, up/down and LT/RT go
 to its `FocusList` when set. `FocusList` keeps the focused row inside `[CONTENT_TOP, H - ROW_HEIGHT]`
 with a 100 ms easeIn `contentY` tween per step; LT/RT move one page of whole rows in 500 ms easeIn.
+It reuses delegates (`reuseItems`, `cacheBuffer` one list height); every row delegate stops its entrance and
+lands at `enter` 1 in `ListView.onPooled`.
 `FocusBar` is the 2 u white bar at `HUB_EDGE - 8` spanning the row, following in 100 ms sine.
 `PressScale` scales its item to 0.96 while A is held, 100 ms linear each way.
 
@@ -78,7 +80,8 @@ from `Ui.ringArcStart`, and runs the F4 swap (scale 0.7 to 1 in 400 ms, opacity 
 glyph change after the first one. `Tile` is the TILE_S art square with, while `captioned`, a 24 u caption
 band under it: title and artist in the 9 u grid caption role, each as wide as the tile and clipped at its
 right edge (no ellipsis), baselines at art bottom + 11 and + 22; the title goes to alpha 1 while focused,
-the artist stays at 0.6. `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
+the artist stays at 0.6. `ListRow` builds its `Ring` in a `Loader` only while `ring` is set (`ringItem` is null
+otherwise). `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
 `Ring` and `FocusBar` take `animated` (default true); cleared, every Behavior is off and a running
 swap jumps to its end. `PageSurface` is `Ui.bg` under a vertical gradient from accent at alpha
 `Ui.backdropStops[0][1]` (0.15) to accent at 0, the first child of every page except `Home` (`MusicHub`,
@@ -95,7 +98,9 @@ tall with the x-height bottom at 66 u in both orientations.
 follow the phone while its transport is active, else the local track. A new `Player.current` id
 shows the toast with artist and title unless the top page is now playing; the phone transport going
 active or its title changing shows `from <phone>` and the title unless the top page is Bluetooth or now
-playing. Pages carry `objectName` (`home`, `bluetooth`) for that check. The layer never takes focus;
+playing. `Player.added(count)` from an `add to queue` or `play next` shows the toast with `ADDED N SONGS`
+(`ADDED 1 SONG`) and the source name (album title, artist name, genre, playlist or song title) on every page; zero
+rows show nothing. Pages carry `objectName` (`home`, `bluetooth`) for that check. The layer never takes focus;
 pad input goes to the page below. With the screen off nothing is drawn and the level is kept.
 
 Overlay mode (`casdap-player --overlay`, the game mode instance): `Main.qml` reads `OverlayBridge`
@@ -113,9 +118,10 @@ The page stack is kept across hide and show: `PageStack.serialize()` lists `name
 on every depth change, and `restoreStack(list)` at start replays the saved stack without transitions
 (`pushNamed` opens `music`, `bluetooth`, `playlists`, `history`, `settings`, `eq`, `artist`, `album`,
 `nowplaying`, `queue`; an `artist` or `album` id the library no longer knows, a `nowplaying` with no
-track and no phone transport, or an unknown name truncates the stack there). B released on the home
-menu in overlay mode (Quickplay and the pin sheet closed) emits `hideRequested` and Main calls
-`OverlayBridge.hide()`. `Home.overlay`, `Bluetooth.overlay` and `SettingsScreen.overlay` carry the mode:
+track and no phone transport, or an unknown name truncates the stack there). A B release on the home
+menu in overlay mode emits `hideRequested` and Main calls `OverlayBridge.hide()` only when the matching B press
+landed on the home menu with Quickplay and the pin sheet closed; a B that pops to home, pans Quickplay back or
+closes the sheet does not hide. `Home.overlay`, `Bluetooth.overlay` and `SettingsScreen.overlay` carry the mode:
 the settings GAME MODE row reads CLOSE PLAYER with a sheet `close player` whose accept calls
 `OverlayBridge.closePlayer()`, PAIR A PHONE shows `PAIR IN DAP MODE` and A does nothing, the Bluetooth
 PAIRING pivot shows `pair in dap mode` (11 u Light upper case at baseline CONTENT_TOP + 16) in place of
@@ -133,16 +139,16 @@ its top left, origin (0, 130), alpha 0.4 (QP_PEEK), so its headers and tiles rea
 subtitle: `music` its pivots, `bluetooth` the phone name while connected, `PAIRING <seconds>` while
 the pairing window is open, else `NOT CONNECTED`, `playlists` `N PLAYLISTS` when `playlistCount` is
 set (default -1) else `NOW PLAYING SAVED`, `history` `RECENT NEW`, `settings` `OUTPUT LIBRARY DISPLAY
-POWER`. Y plays shuffle all; focus is the 2 u bar left of the item with the other items at 0.6. Left or Back/View pans Quickplay
+POWER`. Y plays the whole library shuffled through `Player.playSource("all", 0, "shuffle", -1)` (an empty
+library logs `casdap: shuffle all, empty library`); focus is the 2 u bar left of the item with the other items at 0.6. Left or Back/View pans Quickplay
 forward (T6: the panel scales 0.30 to 1 and moves y 130 to 0 while the menu shrinks to a column on the
 right at 0.6 whole, bar and focused label included); right or B pans back. In landscape both sit side
 by side and the panel without focus is at 0.6 whole. The `casdap` watermark (14 u Light, alpha 0.08) sits in
-the menu column at HOME_TEXT_X on baseline H - EDGE and hides while Quickplay is in front. Focus on the first row of a section scrolls the panel to that section's header (to the top when Pins is empty and History holds focus), so the headers stay reachable from the pad. Quickplay tiles carry
+the menu column at HOME_TEXT_X on baseline H - EDGE and hides while Quickplay is in front. Focus on the first row of a section scrolls the panel to that section's header (to the top when Pins is empty and History holds focus), so the headers stay reachable from the pad. Tile and header tops come from the section counts (section top + QP_CONTENT_DROP + row * pitch), and `rowsInserted`, `rowsMoved`, `rowsRemoved` and `modelReset` of the Pins, History and New models clamp the focus and scroll it back into view. Quickplay tiles carry
 `section` and `kind`: `Pins` lists `Pins` (the phone tile first while a phone is connected, kind `phone`),
-`History` the recent songs (kind `song`), `New` the newest albums (kind `album`). X on a tile opens the
+`History` the recent songs (kind `song`, `QuickplayRecent`, 8 rows), `New` the newest albums (kind `album`, `QuickplayNew`, 8 rows). X on a tile opens the
 sheet `pin to quickplay` (`unpin` on a Pins tile), A on it runs `Library.pin` or `unpin` with the tile's kind
-and id; A on a tile plays it (`album` its tracks from `albumTracks`, `artist` its `artistTracks`, `song`
-the song, anything else or no library logs `play <kind> <id>`). The hub, artist and album sheets read
+and id; A on a tile plays it through `Player.playSource(kind, id, "play", -1)` (a source with no rows or no player logs `play <kind> <id>`). The hub, artist and album sheets read
 `unpin from quickplay` in place of `pin to quickplay` while `Library.isPinned(kind, id)` is true, and Main
 runs `Library.pin` or `unpin` for both verbs. A on `music`, `bluetooth`, `playlists`, `history` and
 `settings` pushes the page of that name; Main binds `playlistCount` to `Library.playlistCount`. The entrance (menu items, focus bar, Quickplay peek) plays once when the page is created
@@ -152,29 +158,36 @@ item outward from the focused one, the focus bar with the focused item and the Q
 250; a pop back to home replays the T1 entrance with 0 stagger (T4) in place of a turn.
 
 `MusicHub` is the `music` page (`objectName` `music`): header `music`, pivots `artists`, `albums`,
-`songs`, `genres`, `playlists`, content from CONTENT_TOP. Each pivot is a `FocusList` pane built from the
-`Artists`, `Albums`, `Songs`, `Genres` context models (any model with `count` or `rowCount()` and `get(row)`
-returning `id`, `title` or `name`, `subtitle`, `artPath`, `section`); the `section` letter (`#`, a..z)
-groups the rows. Artists, songs and genres get a divider row per letter (ROW_HEIGHT, the 20 u Regular letter at
-HUB_EDGE on the LETTER_TILE baseline inset), skipped by focus; albums are a grid of `Ui.gridCols` cells
-(3 portrait, 6 at W 483) with a `LetterTile` cell before each letter group and a `Tile` per album; the cell
-is TILE_S + 24 tall, rows at TILE_S + 24 + GUTTER pitch. Artist rows carry the count line (`1 ALBUM, 3 SONGS`) in the upper case
+`songs`, `genres`, `playlists`, content from CONTENT_TOP. Each alphabetic pivot is a `FocusList` pane bound to a C++ hub
+model over the lazy `Artists`, `Albums`, `Songs`, `Genres` context models: `ArtistsHub`, `SongsHub`, `GenresHub`
+(`SectionedModel`, kind `artist`, `song`, `genre`) and `AlbumsGrid` (`AlbumGridModel`, `columns` bound to
+`Ui.gridCols`). A source model loads nothing until `ensureLoaded()`; a hub model holds 0 rows until `active`, which
+the hub sets the first time a pivot is shown (the start pivot at creation, a switched to pivot before the T5 out
+phase), and the pane binds its model from then on; a source reset while a pane is unbound changes nothing on screen.
+The `section` letter (`#`, a..z) groups the rows. Artists, songs and genres get a divider row per letter (ROW_HEIGHT, the 20 u Regular letter at
+HUB_EDGE on the LETTER_TILE baseline inset), skipped by focus (`isFocusable`, `nearestFocusable`); albums are rows of
+`Ui.gridCols` cells (3 portrait, 6 at W 483, `cells(row)`) with a `LetterTile` cell before each letter group and a `Tile` per album, one
+`Loader` per cell choosing the two; the cell
+is TILE_S + 24 tall, rows at TILE_S + 24 + GUTTER pitch; a column change keeps focus on the same album (`cellOfAlbum`). Artist rows carry the count line (`1 ALBUM, 3 SONGS`) in the upper case
 count role. Songs rows carry the 1 based position as the number; genres and
 playlists are Bold upper case; `playlists` lists `NOW PLAYING` first with `N SONGS` from
-`Player.queue.count` (no saved playlist model exists yet, `playlistsModel` is null). Up/down and LT/RT move
+`Player.queue.count`, then every row of the `Playlists` context model with its `N SONGS`. Up/down and LT/RT move
 through the pane, left/right move within a grid row (no wrap), LB/RB switch pivots with T5 (outgoing pane
 300 strip, incoming rows `min(i, 10) * 22` stagger over 380 strip, header parallax from the strip), no wrap at
-either end. A on a song calls `Player.playTracks(ids, position)` with every song id in list order (without a
-player it emits `play`); A on an album, artist or genre emits `open(kind, id)` (Main pushes `AlbumDetail` for
-`album` and `ArtistDetail` for `artist`, logs `navigate genre <id>`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
-`jumpRequested` and opens the `JumpGrid` over the hub (T14: the grid is full screen on `Ui.bg` over the list, swiveling in about
+either end. A on a song calls `Player.playSource("all", 0, "play", id)` (the whole library in the `Songs` order from
+that song; without a player it emits `play`); A on a genre or playlist calls `Player.playSource(kind, id, "play", -1)`
+(without a player both emit `play(kind, id)`); A on an
+album or artist emits `open(kind, id)` (Main pushes `AlbumDetail` for `album` and `ArtistDetail` for `artist`); A on `NOW PLAYING` emits `nowPlaying`; A on a letter cell, or Back/View on an alphabetic pivot, emits
+`jumpRequested` and opens the `JumpGrid` over the hub with the model's `letters()` (T14: the grid is full screen on `Ui.bg` over the list, swiveling in about
 a horizontal center hinge from -30 degrees over 350 expOut6, out to 30 over 250 expIn1). `jumpTo(letter)` from
-the grid snaps the pane so the letter's divider (or letter cell) sits at the top, focuses the first row under it
-(the cell itself on albums) and shows the 120 u `JumpLetter` (T15). LT/RT show the focused row's letter in the
-same `JumpLetter`. X opens the sheet `play`, `add to queue`, `pin to quickplay`; Y is `add to queue`; `play` on a song
-plays, every other verb emits `sheetAction(action, kind, id)` which Main logs. B pops. After
-`Library.scanning` went true then false, the next model reset runs F12 on the shown pane (rows `x` -5 to 0,
-`o` 0 to 1, 220 decel, `min(i, 10) * 50` stagger); a reset during the scan runs it when the scan ends.
+the grid snaps the pane so the letter's divider (`rowOfLetter`, or the letter cell from `cellOfLetter`) sits at the top, focuses the first row under it
+(`firstRowOfLetter`, the cell itself on albums) and shows the 120 u `JumpLetter` (T15). LT/RT show the focused row's letter in the
+same `JumpLetter`. X opens the sheet `play`, `play next`, `add to queue`, `shuffle`, `pin to quickplay` (no
+`shuffle` on a song; `play` and `add to queue` only on a genre); Y is `add to queue`; `play` on a song, genre or
+playlist plays, every other verb emits `sheetAction(action, kind, id)` and runs through Main's queue verbs. B pops. After
+`Library.scanning` went true then false, the next change of a bound hub model runs F12 on the shown pane (rows `x` -5 to 0,
+`o` 0 to 1, 220 decel, `min(i, 10) * 50` stagger); a change during the scan runs it when the scan ends. A row
+delegate reused while T5, T2a or F12 runs takes the running entrance.
 `screenOff` or `animated` false lands the pivot, settles the rows and dismisses the letter.
 
 `JumpGrid` (`screens/JumpGrid.qml`) is the letter grid hosted by the hub: `exit` top left in the 7 u overlay
@@ -189,20 +202,21 @@ and closes, B, Back/View and Start close with the hub focus unchanged. `screenOf
 at HUB_EDGE on the pivot row baseline, the hub PLAYLISTS rows in a `FocusList` from CONTENT_TOP: `NOW PLAYING`
 first with `N SONGS` from `Player.queue.count`, then every row of the `Playlists` context model (roles `id`,
 `title`, `subtitle`), all Bold upper case with the play ring. A on `NOW PLAYING` emits `nowPlaying`, A on a
-playlist calls `Player.playTracks(Library.playlistTracks(id), 0)` (without a player or library it emits
-`play("playlist", id)`); X opens the sheet `play`, `add to queue`, `pin to quickplay` (or `unpin from
+playlist calls `Player.playSource("playlist", id, "play", -1)` (without a player it emits
+`play("playlist", id)`); X opens the sheet `play`, `play next`, `add to queue`, `shuffle`, `pin to quickplay` (or `unpin from
 quickplay`), Y is `add to queue`, both emit `sheetAction`. A playlist model change rebuilds the rows with F12
 and swaps the count text with F7 (opacity 1 to 0.2 to 1, 200 + 200). B pops.
 
 `HistoryScreen` is the `history` page: header `history`, pivots `recent`, `new`, each a `FocusList` of hub SONGS
 rows without the number (title 14 u and subtitle 11 u at HUB_EDGE, ROW_HEIGHT pitch, no dividers, no art) from
-CONTENT_TOP, from the `HistoryRecent` (kind `song`, title and artist) and `HistoryNew` (kind `album`, title and
-album artist) models. Up/down and LT/RT
+CONTENT_TOP, delegates reading the `HistoryRecent` (kind `song`, title and artist, 100 rows) and `HistoryNew` (kind `album`, title and
+album artist, 100 rows) models directly. Up/down and LT/RT
 move through the rows, LB/RB switch pivots with T5 (outgoing pane 300 strip,
 incoming rows `x` +-34 u to 0 with `min(i, 10) * 22` stagger over 380 strip, header parallax from the strip). A
-model change on the shown pivot rebuilds its rows with F12. A plays the song (`playTracks([id], 0)`) or the album
-(`Library.albumTracks(id)`), without a player it emits `play(kind, id)`; X opens the sheet `play`, `add to
-queue`, pin or unpin, Y is `add to queue`, Back/View does nothing. B pops. `screenOff` or `animated` false lands the pivot.
+`rowsInserted`, `rowsRemoved`, `rowsMoved` or `modelReset` on the shown pivot runs F12 from the first changed row
+(the lower end of a move, the first visible row on a reset) and keeps the focus index. A plays the song or the album
+through `Player.playSource(kind, id, "play", -1)`, without a player it emits `play(kind, id)`; X opens the sheet `play`, `play next`,
+`add to queue`, `shuffle` (albums only), pin or unpin, Y is `add to queue`, Back/View does nothing. B pops. `screenOff` or `animated` false lands the pivot.
 
 `SettingsScreen` is the `settings` page: header `settings`, a scrolling column from CONTENT_TOP of four group
 labels (the 8 u Regular upper case section label role at HUB_EDGE, ROW_HEIGHT tall, baseline 8 u above the
@@ -217,15 +231,17 @@ ignore left, right and A while `OutputControl.activeOutput` is `usb`), `SPEAKER 
 (84 to 108 on `Settings.spkGain`, shown as dB from 84: `0 DB`, `+6 DB`, `+12 DB`, `+15 DB`, `+18 DB`, `+21 DB`,
 `+24 DB`; the hardware takes the value when playback restarts), `VOLUME STEP` (`2%`, `5%`, `10%` on
 `Settings.volumeStep`), `BLUETOOTH CODEC` (`AUTO`, `APTX`, `AAC`,
-`LDAC`, `SBC` on `Settings.btCodec`), `SAMPLE RATE FOLLOW` (read only, `ON <AudioInfo.graphRate>`, `ON`
+`LDAC`, `SBC` on `Settings.btCodec`; `<CODEC> (PENDING)` while `CodecFragment.pending`), `SAMPLE RATE FOLLOW` (read only, `ON <AudioInfo.graphRate>`, `ON`
 without a rate), `REPLAYGAIN` (read only `OFF`), `EQ` (the `Eq.activeOutput` profile: `OFF`, the file name
 upper case, `CUSTOM`, `<NAME> (MISSING)`; left/right inert, A emits `openEq` and Main pushes `EqScreen`, in
 overlay mode as well), `PAIR A PHONE` (A emits `pairPhone`, Main pushes
 `Bluetooth` on its PAIRING pivot; in overlay mode the value reads `PAIR IN DAP MODE` and A does nothing).
 LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in `Settings.candidateRoots()` (`~/Music`,
-`/run/media` and every mount under `/run/media/<user>/`, its `Music` subfolder when present, `CASDAP_MEDIA_ROOT`
+`/run/media`, each direct child of `/run/media` that is a mount point or holds no mounted subfolder, and every
+mount under the other children, each with its `Music` subfolder when present, `CASDAP_MEDIA_ROOT`
 overrides the base) plus `Settings.roots`, path as written in 11 u Light with `ON` or `OFF`, A toggles it in
-`Settings.roots`; the last root stays on). DISPLAY: `ACCENT` (the five `Ui.accentOptions` as 12 u swatches at 4 u gap, the current
+`Settings.roots`; the last root stays on), `RESCAN LIBRARY` (`N SONGS` from `Library.songCount`, `SCANNING` while
+`Library.scanning`; left/right inert, A calls `Library.rescanRoots()` and does nothing while scanning). DISPLAY: `ACCENT` (the five `Ui.accentOptions` as 12 u swatches at 4 u gap, the current
 one with the 2 u border; left/right and A move it and write `Ui.accent` and `Settings.accent`),
 `ORIENTATION` (read only, the current orientation), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps; `Ui.userScale` and
 `Settings.scale` follow live, focus and the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
@@ -234,7 +250,8 @@ left/right and A while `RgbControl.supported` is false; absent in overlay mode),
 on `Settings.overlayToasts`). POWER: `SCREEN OFF AFTER`
 (`OFF`, 1, 2, 5, 10, 30 MIN on `Settings.screenOffSeconds`),
 `SUSPEND AFTER` (`OFF`, 5, 10, 30, 60 MIN on `Settings.suspendMinutes`), `POCKET CONTROLS` (`ON`, `OFF`),
-`WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), `GAME MODE` (A opens the sheet `game mode`
+`WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), `KEEP PHONE IN GAME MODE` (`ON`, `OFF` on
+`Settings.keepPhoneInGameMode`; absent in overlay mode), `GAME MODE` (A opens the sheet `game mode`
 with `switch to game mode`, T12; accepting calls `PowerBridge.closeAndSwitch()`, or `runVerb("game-mode")` on
 a bridge without `closeAndSwitch`; in overlay mode the row reads `CLOSE PLAYER`, the sheet `close player` and
 accepting calls `OverlayBridge.closePlayer()`). `ABOUT` is the last row with the version (`Env.version`) as its value; A opens
@@ -266,20 +283,22 @@ rows.
 header `artist`, pivots `albums`, `songs`, the name (11 u Bold upper case) at HUB_EDGE on a baseline 15 u
 under the pivot baseline (110 portrait, 94 landscape), the ring row play, add, shuffle (32 u, top y 150, 56 u pitch from HUB_EDGE), `IN COLLECTION` on
 baseline 200, content from 212 on a `Backdrop` (L1 pan) of the artist art. The rows come from `Library`:
-`artistInfo(id)` (`name`, `artPath`: the first of the artist's albums with art), `artistAlbums(id)` resolved
-through `albumInfo(id)` (`title`, `artist`, `year`, `artPath`), `artistTracks(id)` through `trackRows(ids)`
-(`id`, `title`, `artist`, `album`, `albumId`, `durationMs`); a null library leaves the lists empty; a new `artistId` reloads them with F12 on the shown pivot. `albums`
+`artistInfo(id)` (`name`, `artPath`: the first of the artist's albums with art), `artistAlbumRows(id)` (`id`,
+`title`, `artist`, `year`, `artPath`) and `artistTrackRows(id)`
+(`id`, `title`, `artist`, `album`, `albumId`, `durationMs`), one query each; a null library leaves the lists empty; a new `artistId` reloads them with F12 on the shown pivot. `albums`
 is a `FocusList` of DETAIL_ROW cells (TILE_L art at HUB_EDGE with a 32 u play ring inset 8 from its top
 right, 13 u Bold upper case title on baseline art top + 28 wrapping to two lines at pitch 15 and clipped at
 W, the year under the last line, both at HUB_EDGE + TILE_L + 8), `songs` the SONGS style
 rows. Focus starts on the play ring: left/right move along the rings, down enters the list, up from its first
 row returns to the rings; up/down and LT/RT move through the list, LB/RB switch pivots with T5 (no wrap).
-A on play calls `Player.playTracks(ids, 0)` with every song id, on shuffle the same ids shuffled, on add
-logs `add artist <id>` (no queue method exists yet); every ring A runs the F4 swap. A on an album emits
-`openAlbum(id)` (Main pushes `AlbumDetail`), A on a song plays from that row. Y plays shuffled. X opens the
-sheet `play`, `add to queue`, `pin to quickplay` on the focused row, or on the artist while the rings hold
-focus; `play` plays (the artist, the album's tracks from `albumTracks(id)`, or from the song), every other
-verb emits `sheetAction(action, kind, id)` which Main logs. B pops. Landscape keeps the name and rings in
+A on play calls `Player.playSource("artist", id, "play", -1)`, on shuffle the same with `shuffle`, on add
+emits `sheetAction("add to queue", "artist", id)`, which appends every artist song; every ring A runs the F4 swap. A on an album emits
+`openAlbum(id)` (Main pushes `AlbumDetail`), A on a song plays the artist from that song (`startId`). Y on an album or song row adds that
+row to the queue, Y with the rings focused plays shuffled. Back/View emits `openQueue` (Main pushes `QueueScreen`
+unless the queue is on top). X opens the
+sheet `play`, `play next`, `add to queue`, `shuffle` (not on a song), `pin to quickplay` on the focused row, or on the artist while the rings hold
+focus; `play` plays (the artist, the album through `playSource("album", id, "play", -1)`, or from the song), every other
+verb emits `sheetAction(action, kind, id)` and runs through Main's queue verbs. B pops. Landscape keeps the name and rings in
 the column to 200 and runs the label and the list from x 216 (`IN COLLECTION` with its cap top at
 CONTENT_TOP, rows 12 u under its baseline). `screenOff` or `animated` false lands the pivot, settles the
 rows and the sheet and pauses the backdrop.
@@ -291,9 +310,9 @@ inset 4, decorative) top left, `StatusStrip` top right, the album artist (20 u B
 (art bottom + 12; `albumInfo(id)` and `albumTracks(id)`, a new `albumId` reloads them with F12): 1 based number, title, the
 duration `m:ss` right aligned at W - HUB_EDGE (absent when unknown), the accent dot left of the number on the
 row whose id is `Player.current.id`. The `Backdrop` is the album art. Focus starts on row 0; up/down and
-LT/RT move, A calls `Player.playTracks(ids, row)` with the album in disc and track order, Y emits
-`sheetAction("add to queue", "album", id)`, X opens the sheet `play`, `add to queue`, `pin to quickplay`
-(`play` from the row, the rest emit `sheetAction(action, "song", id)`), B pops. Landscape keeps the back
+LT/RT move, A calls `Player.playSource("album", id, "play", trackId)` (the album in disc and track order from that row), Y emits
+`sheetAction("add to queue", "album", id)`, X opens the sheet `play`, `play next`, `add to queue`, `pin to quickplay`
+(`play` from the row, the rest emit `sheetAction(action, "song", id)`), Back/View emits `openQueue`, B pops. Landscape keeps the back
 ring and the art (y CONTENT_TOP) in the column to 200, artist on baseline 60 and title on 84 from x 216, and
 runs the rows from x 216, y CONTENT_TOP.
 
@@ -305,7 +324,8 @@ from `StatusModel`, accent under 10 percent, Bluetooth glyph while a phone is co
 glyph), artist baseline 117 and album 141 at EDGE, art square at y 155 with side `min(168, W - 2 EDGE,
 H - 311)`, progress line at y H - 156 from EDGE to the art right edge (fill accent from `Player.position`,
 read every 250 ms; elapsed at EDGE and remaining right aligned at the art right edge under it, refreshed at
-1 Hz), title baseline H - 118, the next three queue rows at EDGE + 40
+1 Hz), title baseline H - 118, the next three rows of the play order (`Queue.upcoming(3)`, refreshed on
+`modelReset`, `currentSlotChanged`, `countChanged`, `rowsMoved`, `orderChanged` and `repeatChanged`) at EDGE + 40
 and 18 u pitch, three rings (shuffle, repeat, rate) centered at 0.13, 0.5 and 0.87 of W on y H - 40.
 Landscape: back ring and art (y 72, side `min(168, H - 106)`) with the progress line 8 u under it and as
 wide as the art in the
@@ -313,7 +333,8 @@ left column, artist 60, album 84, title 116, next rows from 140 at x 216, rings 
 `W - 216 - EDGE` from x 216. Focus starts on the ring row: left and right move it, A toggles the focused
 ring with the F4 swap (`Player.toggleShuffle`, `cycleRepeat`, `rate`), up moves to the title row (2 u bar
 at EDGE - 8) where A emits `openQueue` (Main pushes `QueueScreen`), down returns. LB and RB skip, X plays
-or pauses, Y and Back/View emit `openQueue`, LT and RT seek 10 s, B and Start pop with the fade kind (T8).
+or pauses, Y and Back/View emit `openQueue`, LT and RT released under 400 ms seek -10 or +10 s, held 400 ms they
+seek 1000 ms every 250 ms until release with no 10 s step; RT clamps at the duration - 1000 ms. B and Start pop with the fade kind (T8).
 A track change runs T9 (title, next rows and times out 500 easeOut with the art, in 400 easeIn with the
 art scaling from 0.8 about (0.2, 0.5)); a second `currentChanged` for the same track or a new track during
 the out phase replaces the pending track without restarting the animation; a new art source crossfades the
@@ -331,18 +352,19 @@ lands every animation and stops the timers.
 
 `QueueScreen` is the `queue` page, pushed with the default turnstile kind (T11) by `openQueue` from now
 playing (Main skips the push while the top page is already the queue): header `queue`, the count `N OF M`
-(`Player.queue.index + 1` and `count`, `0 OF 0` when empty) in the 11 u upper case count role at HUB_EDGE on
-the pivot row baseline (95 portrait, 79 landscape), SONGS style rows (1 based number, title, artist) in a
-`FocusList` from CONTENT_TOP, the current row
-`playing` (accent title). Both orientations run the same stack. Focus starts on the current row; up/down and
-LT/RT move through the list, A calls `Player.playAt(row)`, Y removes the focused row, X opens the sheet
-(T12) with `remove`, `play next`, `move up`, `move down`; `play next` is absent on the current row and the
-one after it, `move up` on the first row, `move down` on the last. `remove` calls `Queue.remove(row)`
+(`Player.queue.currentSlot + 1` and `count`, `0 OF 0` when empty) in the 11 u upper case count role at HUB_EDGE on
+the pivot row baseline (95 portrait, 79 landscape), SONGS style rows (1 based slot number, title, artist) bound to
+`Queue.playOrder` (one row per slot) in a
+`FocusList` from CONTENT_TOP, the slot whose `isCurrent` role is set
+`playing` (accent title). Both orientations run the same stack. Focus starts on the current slot; up/down and
+LT/RT move through the list, A calls `Player.playAt(row)` with the slot's queue row, Y removes the focused row, X opens the sheet
+(T12) with `remove`, `play next`, `move up`, `move down`; `play next` is absent on the current slot and the
+one after it, `move up` on the first slot, `move down` on the last. `remove` calls `Queue.remove(row)`
 (removing the current row is handled by the queue, the next track starts), `move up` and `move down` call
-`Queue.move(row, row +- 1)`, `play next` moves the row to right after the current one; a moved row keeps
-focus at its new position, a removed row leaves focus at the same index clamped to the end. Every queue
-change (`rowsInserted`, `rowsRemoved`, `rowsMoved`, `modelReset`) rebuilds the rows and runs F12 from the
-edited index on the visible rows at and below it (`x` -5 to 0, `o` 0 to 1, 220 decel, stagger
+`Queue.moveSlot(slot, slot +- 1)`, `play next` calls `Queue.playNextRow(row)`; a moved row keeps
+focus at its new slot, a removed row leaves focus at the same index clamped to the end. Every play order
+change (`rowsInserted`, `rowsRemoved`, `rowsMoved`) runs F12 from the first changed slot (the lower end of a move), a
+`modelReset` from the first visible slot, on the visible rows at and below it (`x` -5 to 0, `o` 0 to 1, 220 decel, stagger
 `min(i, 10) * 50` counted from the first affected visible row); a changed count text swaps with F7. B pops with T4; Start pops when the page below
 is now playing, else falls through to the router (which opens now playing). `screenOff` or `animated` false
 settles the rows, the scroll and the sheet.
@@ -417,10 +439,18 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just test-player` | ctest of `build/player` inside the builder (after `just dist`); prints `skip: no builder image` where the image is absent. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
-| `just test` | `tests/session-control-test.sh`, `tests/priv-test.sh`, `tests/hotkeyd-test.sh`, `tests/pad-test.sh`, `tests/intercept-test.sh`, `tests/keep-test.sh`, `tests/power-test.sh`, `tests/powerd-test.sh`, `tests/wait-x-test.sh`, `tests/overlay-unit-test.sh`, `tests/bt-test.sh`, then `just test-player`. Needs the stock `session-control` at `CASDAP_BASE_ROOT/usr/libexec/armada/` (defaults to `/`, else `../armada/system_files`). |
+| `just test` | `tests/session-control-test.sh`, `tests/priv-test.sh`, `tests/hotkeyd-test.sh`, `tests/pad-test.sh`, `tests/intercept-test.sh`, `tests/keep-test.sh`, `tests/codec-test.sh`, `tests/power-test.sh`, `tests/powerd-test.sh`, `tests/wait-x-test.sh`, `tests/overlay-unit-test.sh`, `tests/bt-test.sh`, then `just test-player`. Needs the stock `session-control` at `CASDAP_BASE_ROOT/usr/libexec/armada/` (defaults to `/`, else `../armada/system_files`). |
 
 `CASDAP_DEVICE` overrides `armada@pm2`. Root steps on the device run through `ssh -t`
 and `sudo`. Run the dev loop from game mode or ssh, not from inside the casdap session.
+
+## CI
+
+`.github/workflows/build.yml` runs on `ubuntu-24.04-arm` for pushes to main and pull requests: the builder
+image, `build/build.sh`, ctest and the `just test` scripts. The builder is pulled from
+`ghcr.io/seilent/casdap-builder:<key>` (key from `Containerfile`, `toolchain.sh` and `base.env`), else built,
+and pushed only from main. `build/cache` is kept in `actions/cache`. `dist/` is uploaded for 7 days as
+`casdap-dist-<sha>` (`dist.tar`, modes kept): `gh run download -n casdap-dist-<sha> && tar -xf dist.tar && just dev`.
 
 ## Session
 
@@ -680,10 +710,14 @@ It writes `~/.config/wireplumber/wireplumber.conf.d/50-casdap-codec.conf` (`CASD
 overrides the directory) with `monitor.bluez.properties = { bluez5.codecs = [ ... ] }`: `sbc aptx aptx_hd`
 for `aptx`, `sbc aac` for `aac`, `sbc ldac` for `ldac`, `sbc` for `sbc`; `auto` removes the file. The
 write is a temp file then rename. A file change runs `systemctl --user restart wireplumber`
-(`CASDAP_SYSTEMCTL_BIN`) through a tracked `QProcess`, unless `BluezModel.transportActive`: then the
-file waits for the next wireplumber start, `pending` reads true and the deferral is logged. An
+(`CASDAP_SYSTEMCTL_BIN`) through a tracked `QProcess`, unless `BluezModel.transportActive`: then `pending`
+reads true, the deferral is logged and the restart runs when `transportActive` goes false. An
 unchanged file runs nothing. `restarting` is true while the restart runs, `restartFinished(ok)` ends it;
 a failed restart leaves `pending` true. The phone picks among the offered codecs when it connects.
+`gamescope-session-plus@casdap.service.d/10-casdap-bt.conf` runs `casdap-codec clear` from `ExecStopPost`:
+it removes the fragment and, when it removed one and `keepPhoneInGameMode` in `settings.ini`
+(`CASDAP_SETTINGS_FILE`) is not `true`, runs `systemctl --user restart wireplumber`; with no fragment it runs
+nothing. `CASDAP_WP_CONF_DIR` and `CASDAP_SYSTEMCTL_BIN` override the directory and the binary.
 
 ## Audio
 
@@ -708,8 +742,11 @@ restarts), every write `amixer -D hw:0 cset`. The session stop puts `hp-gain-nor
 
 `AudioInfo.graphRate` is the running graph rate: `pw-dump` (`CASDAP_PW_DUMP_BIN`, default `pw-dump` on PATH)
 gives the default sink node's `clock.rate`, else its `Format` rate, else the `settings` metadata `clock.rate`;
-without the binary it is the `hw_params` rate. `pcmFormat` is read every 2 s while `active`; `graphRate` is
-read by `refreshGraphRate()`, which the settings page calls when it opens, and falls back to the latest
+without the binary it is the `hw_params` rate. `hw_params` is the first open `sub0/hw_params` under
+`/proc/asound/card*/pcm*p/` (`CASDAP_ASOUND_DIR` replaces `/proc/asound`) whose `status` reads `state: RUNNING`,
+else the first open one, else none (speaker and headphones are PCMs of card 0, a USB DAC its own card).
+`pcmFormat` is read every 2 s while `active`, and each read updates `graphRate` while no `pw-dump` rate is held;
+`refreshGraphRate()`, which the settings page calls when it opens, runs `pw-dump` and falls back to the latest
 `hw_params` rate when `pw-dump` is absent, fails or is killed after its timeout.
 
 `OutputControl` (context property, DAP mode only, null under `--overlay`) applies `Settings.output`
@@ -722,7 +759,7 @@ apply. The sink list is `pactl list sinks short` (`CASDAP_PACTL_BIN`), name colu
 name starting with `alsa_output.usb-` (empty when none), `usbPresent` follows it, the built in sinks are
 `alsa_output.platform-sound.HiFi__Speaker__sink` and `HiFi__Headphones__sink`. `jackPresent` reads the
 `Headphone Jack` block of `amixer -c0 contents` (`values=on`; the CARD control has no cget name). Both are
-polled every 2 s while `active` and read again inside every apply; a jack edge or the USB sink appearing or
+polled every 2 s for the whole DAP session (the screen off state included) and read again inside every apply; a jack edge or the USB sink appearing or
 disappearing reapplies the current output (the poll skips while an apply runs; an edge after the apply's own read
 is caught by the next poll). The USB DAC seen on the device
 (Apple USB-C dongle) takes 48 kHz only, so 44.1 sources are resampled by the graph while it is the output.

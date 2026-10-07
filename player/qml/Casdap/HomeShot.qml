@@ -8,8 +8,8 @@ Item {
     property bool overlay: false
 
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
-    readonly property var contextRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
-    readonly property var contextNew: typeof HistoryNew === "undefined" ? null : HistoryNew
+    readonly property var contextRecent: typeof QuickplayRecent === "undefined" ? null : QuickplayRecent
+    readonly property var contextNew: typeof QuickplayNew === "undefined" ? null : QuickplayNew
     readonly property var contextPins: typeof Pins === "undefined" ? null : Pins
 
     Rectangle {

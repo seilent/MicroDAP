@@ -2,6 +2,7 @@
 
 #include "Eq.h"
 #include "FakeBluezModel.h"
+#include "HubModels.h"
 #include "Library.h"
 #include "Models.h"
 
@@ -156,6 +157,7 @@ bool scanLibrary(Library &library, const QString &dir)
 void seedHistory(Library &library)
 {
     SongsModel songs(&library);
+    songs.ensureLoaded();
     const int rows = std::min(historyRows, songs.rowCount());
     for (int row = 0; row < rows; ++row)
         library.addHistory(songs.get(row).value(QStringLiteral("id")).toLongLong());
@@ -210,11 +212,20 @@ int screenshot(const ScreenshotOptions &options)
     std::unique_ptr<Library> library;
     std::unique_ptr<HistoryModel> recent;
     std::unique_ptr<HistoryModel> fresh;
+    std::unique_ptr<HistoryModel> quickRecent;
+    std::unique_ptr<HistoryModel> quickNew;
     std::unique_ptr<ArtistsModel> artists;
     std::unique_ptr<AlbumsModel> albums;
     std::unique_ptr<SongsModel> songs;
     std::unique_ptr<GenresModel> genres;
     std::unique_ptr<PinsModel> pins;
+    SectionedModel artistsHub;
+    artistsHub.setKind(QStringLiteral("artist"));
+    SectionedModel songsHub;
+    songsHub.setKind(QStringLiteral("song"));
+    SectionedModel genresHub;
+    genresHub.setKind(QStringLiteral("genre"));
+    AlbumGridModel albumsGrid;
     if (!options.library.isEmpty()) {
         tempDir = std::make_unique<QTemporaryDir>();
         if (!tempDir->isValid()) {
@@ -232,14 +243,19 @@ int screenshot(const ScreenshotOptions &options)
             return 1;
         }
         seedHistory(*library);
-        recent = std::make_unique<HistoryModel>(library.get());
-        fresh = std::make_unique<HistoryModel>(library.get());
-        fresh->setMode(HistoryModel::New);
+        recent = std::make_unique<HistoryModel>(library.get(), HistoryModel::Recent, 100);
+        fresh = std::make_unique<HistoryModel>(library.get(), HistoryModel::New, 100);
+        quickRecent = std::make_unique<HistoryModel>(library.get(), HistoryModel::Recent, 8);
+        quickNew = std::make_unique<HistoryModel>(library.get(), HistoryModel::New, 8);
         artists = std::make_unique<ArtistsModel>(library.get());
         albums = std::make_unique<AlbumsModel>(library.get());
         songs = std::make_unique<SongsModel>(library.get());
         genres = std::make_unique<GenresModel>(library.get());
         pins = std::make_unique<PinsModel>(library.get());
+        artistsHub.setSource(artists.get());
+        songsHub.setSource(songs.get());
+        genresHub.setSource(genres.get());
+        albumsGrid.setSource(albums.get());
     }
 
     EqControl eq(nullptr);
@@ -263,6 +279,14 @@ int screenshot(const ScreenshotOptions &options)
                                              static_cast<QObject *>(genres.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("Pins"),
                                              static_cast<QObject *>(pins.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("QuickplayRecent"),
+                                             static_cast<QObject *>(quickRecent.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("QuickplayNew"),
+                                             static_cast<QObject *>(quickNew.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("ArtistsHub"), &artistsHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("SongsHub"), &songsHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("GenresHub"), &genresHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("AlbumsGrid"), &albumsGrid);
     engine.setInitialProperties({
         {QStringLiteral("screenshot"), true},
         {QStringLiteral("shotScreen"), options.screen},

@@ -98,6 +98,38 @@ TestCase {
         Page {}
     }
 
+    Component {
+        id: shotComponent
+
+        Item {
+            property alias home: shotHome
+
+            Home {
+                id: shotHome
+
+                anchors.fill: parent
+                animated: false
+                historyModel: history
+                newModel: fresh
+                pinsModel: pins
+
+                Component.onCompleted: {
+                    shotHome.showQuickplay()
+                    shotHome.completeAll()
+                }
+            }
+        }
+    }
+
+    function checkSectionTops(qp) {
+        const items = [qp.pinsSection, qp.historySection, qp.newSection]
+        for (let s = 0; s < 3; s++) {
+            const item = items[s]
+            tryVerify(function() { return Math.abs(qp.sections.y + item.y - qp.sectionTop(s)) < 0.5 }, 2000)
+            fuzzyCompare(qp.sections.y + item.y, qp.sectionTop(s), 0.5)
+        }
+    }
+
     function fill(model, prefix, n) {
         model.clear()
         for (let i = 0; i < n; i++)
@@ -124,8 +156,10 @@ TestCase {
     }
 
     function open(properties) {
-        const page = pages.push(homeComponent, properties === undefined ? { animated: false } : properties)
-        page.quickplay.layout()
+        const props = properties === undefined ? { animated: false } : properties
+        const page = pages.push(homeComponent, props)
+        if (props.animated === false)
+            tc.waitForRendering(page)
         return page
     }
 
@@ -450,6 +484,58 @@ TestCase {
         compare(qp.focusIndex, 0)
         compare(qp.flick.contentY, 0)
         fuzzyCompare(qp.pinsHeader.mapToItem(qp.flick, 0, qp.pinsHeader.baselineOffset).y, Ui.px(Ui.qpFirstBaseline), 0.5)
+    }
+
+    function test_quickplay_shown_before_layout() {
+        fill(pins, "Pin", 2)
+        const wrap = createTemporaryObject(shotComponent, tc)
+        verify(wrap !== null)
+        wrap.width = 640
+        wrap.height = 960
+        const qp = wrap.home.quickplay
+        tc.waitForRendering(wrap)
+        compare(qp.active, true)
+        compare(qp.focusIndex, 0)
+        compare(qp.tileAt(0).entry.section, "pins")
+        tryCompare(qp.flick, "contentY", 0)
+        fuzzyCompare(qp.pinsHeader.mapToItem(qp.flick, 0, qp.pinsHeader.baselineOffset).y, Ui.px(Ui.qpFirstBaseline), 0.5)
+        checkSectionTops(qp)
+        qp.focusIndex = 2
+        compare(qp.tileAt(2).entry.section, "history")
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        const historyTop = qp.historyHeader.mapToItem(qp.flick.contentItem, 0, 0).y
+        verify(historyTop >= qp.flick.contentY - 0.5)
+    }
+
+    function test_quickplay_section_tops() {
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        compare(qp.pinsCount, 0)
+        checkSectionTops(qp)
+        fill(pins, "Pin", 2)
+        compare(qp.pinsCount, 2)
+        checkSectionTops(qp)
+        compare(qp.focusIndex, 0)
+        tryCompare(qp.flick, "contentY", 0)
+        verify(router.dispatch("down", false))
+        compare(qp.tileAt(qp.focusIndex).entry.section, "history")
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        verify(qp.historyHeader.mapToItem(qp.flick.contentItem, 0, 0).y >= qp.flick.contentY - 0.5)
+        history.clear()
+        checkSectionTops(qp)
+        pins.clear()
+        checkSectionTops(qp)
+    }
+
+    function test_quickplay_section_tops_phone() {
+        fill(pins, "Pin", 2)
+        const page = open({ animated: false, bluez: phone })
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        compare(qp.pinsCount, 3)
+        checkSectionTops(qp)
+        tryCompare(qp.flick, "contentY", 0)
     }
 
     function test_a_navigates() {
@@ -798,5 +884,43 @@ TestCase {
         compare(page.menuItem(0).enter, 1)
         compare(page.menuItem(0).opacity, 1)
         compare(page.peekEnter, 1)
+    }
+
+    function test_tile_tops_match_layout() {
+        fill(pins, "Pin", 3)
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = open()
+        const qp = page.quickplay
+        compare(qp.count, 19)
+        for (let i = 0; i < qp.count; i++) {
+            const item = qp.tileAt(i)
+            verify(item !== null)
+            fuzzyCompare(qp.tileTop(i), item.mapToItem(qp.flick.contentItem, 0, 0).y, 0.5)
+        }
+        fuzzyCompare(qp.headerTop(1), qp.historyHeader.mapToItem(qp.flick.contentItem, 0, 0).y, 0.5)
+        fuzzyCompare(qp.headerTop(2), qp.newHeader.mapToItem(qp.flick.contentItem, 0, 0).y, 0.5)
+    }
+
+    function test_rows_changed_keeps_focus_visible() {
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        for (let i = 0; i < 8; i++)
+            router.dispatch("down", false)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        verify(qp.flick.contentY > 0)
+        history.move(7, 0, 1)
+        fresh.remove(7)
+        fresh.remove(6)
+        fresh.remove(5)
+        tryVerify(function() { return !qp.scrolling }, 2000)
+        wait(20)
+        verify(qp.focusIndex < qp.count)
+        const top = qp.tileTop(qp.focusIndex) - qp.flick.contentY
+        verify(top >= -0.5)
+        verify(top + qp.tilePx <= qp.height + 0.5)
     }
 }

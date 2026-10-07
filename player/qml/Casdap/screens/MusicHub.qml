@@ -17,12 +17,8 @@ Page {
     property int shownPivot: 0
     property int gridCol: 0
 
-    property var artistRows: []
-    property var albumCells: []
-    property var songRows: []
-    property var songIds: []
-    property var genreRows: []
     property var playlistRows: []
+    property var focusedRow: null
     property var sheetRow: null
 
     readonly property bool live: hub.animated && !hub.screenOff
@@ -36,12 +32,9 @@ Page {
     readonly property real cellPitch: Ui.tileS + Ui.gutter
     readonly property real gridRowPitch: Ui.tileCellH + Ui.gutter
     readonly property int cols: Ui.gridCols
-    readonly property var albumRows: hub.chunk(hub.albumCells, hub.cols)
     readonly property var panes: [artistsPane, albumsPane, songsPane, genresPane, playlistsPane]
     readonly property FocusList activeList: hub.panes[hub.pivotIndex]
-    readonly property var currentRows: hub.rowsFor(hub.pivotIndex)
     readonly property int rowIndex: hub.activeList.focusIndex
-    readonly property var focusedRow: hub.currentRows[hub.rowIndex] === undefined ? null : hub.currentRows[hub.rowIndex]
     readonly property var focusedCell: hub.grid && hub.focusedRow !== null && hub.focusedRow[hub.gridCol] !== undefined
         ? hub.focusedRow[hub.gridCol] : null
     readonly property bool switching: pivotAnim.running
@@ -77,6 +70,10 @@ Page {
         return 0
     }
 
+    function str(value: var): string {
+        return value === undefined || value === null ? "" : String(value)
+    }
+
     function letterOf(title: string): string {
         const key = title.trim().toLowerCase()
         if (key.length === 0)
@@ -85,60 +82,25 @@ Page {
         return c >= "a" && c <= "z" ? c : "#"
     }
 
-    function entryOf(model: var, row: int, kind: string): var {
-        const e = model.get(row)
-        const title = e.title !== undefined && e.title !== null ? String(e.title)
-            : e.name !== undefined && e.name !== null ? String(e.name) : ""
-        const section = e.section !== undefined && e.section !== null && String(e.section) !== ""
-            ? String(e.section).toLowerCase() : hub.letterOf(title)
+    function entryOf(e: var, kind: string): var {
+        if (e === undefined || e === null)
+            return null
+        const title = e.title !== undefined && e.title !== null ? String(e.title) : hub.str(e.name)
+        const letter = e.letter !== undefined && e.letter !== null && String(e.letter) !== "" ? String(e.letter)
+            : e.section !== undefined && e.section !== null && String(e.section) !== "" ? String(e.section).toLowerCase()
+            : hub.letterOf(title)
+        const row = e.sourceRow !== undefined && e.sourceRow !== null ? Number(e.sourceRow)
+            : e.row !== undefined && e.row !== null ? Number(e.row) : -1
         return {
-            kind: kind,
-            id: e.id === undefined ? -1 : Number(e.id),
+            kind: e.kind !== undefined && e.kind !== null && String(e.kind) !== "" ? String(e.kind) : kind,
+            id: e.id === undefined || e.id === null ? -1 : Number(e.id),
             title: title,
-            subtitle: e.subtitle === undefined || e.subtitle === null ? "" : String(e.subtitle),
-            artPath: e.artPath === undefined || e.artPath === null ? "" : String(e.artPath),
-            letter: section,
+            subtitle: hub.str(e.subtitle),
+            artPath: hub.str(e.artPath),
+            letter: letter,
             row: row,
-            number: String(row + 1)
+            number: e.number !== undefined && e.number !== null && String(e.number) !== "" ? String(e.number) : String(row + 1)
         }
-    }
-
-    function buildList(model: var, kind: string): var {
-        const rows = []
-        let last = ""
-        const n = hub.modelCount(model)
-        for (let i = 0; i < n; i++) {
-            const e = hub.entryOf(model, i, kind)
-            if (e.letter !== last) {
-                rows.push({ kind: "divider", letter: e.letter, id: -1, title: e.letter, subtitle: "", artPath: "" })
-                last = e.letter
-            }
-            rows.push(e)
-        }
-        return rows
-    }
-
-    function buildCells(model: var): var {
-        const cells = []
-        let last = ""
-        const n = hub.modelCount(model)
-        for (let i = 0; i < n; i++) {
-            const e = hub.entryOf(model, i, "album")
-            if (e.letter !== last) {
-                cells.push({ kind: "letter", letter: e.letter, id: -1, title: e.letter, subtitle: "", artPath: "" })
-                last = e.letter
-            }
-            cells.push(e)
-        }
-        return cells
-    }
-
-    function chunk(cells: var, cols: int): var {
-        const rows = []
-        const n = Math.max(1, cols)
-        for (let i = 0; i < cells.length; i += n)
-            rows.push(cells.slice(i, i + n))
-        return rows
     }
 
     function countLabel(n: int): string {
@@ -146,25 +108,38 @@ Page {
     }
 
     function buildPlaylists(): var {
-        const rows = [{ kind: "nowplaying", id: -1, title: "now playing", subtitle: hub.countLabel(hub.queueCount), artPath: "", letter: "" }]
+        const rows = [{ kind: "nowplaying", id: -1, title: "now playing", subtitle: hub.countLabel(hub.queueCount), artPath: "", letter: "", row: -1, number: "" }]
         const n = hub.modelCount(hub.playlistsModel)
-        for (let i = 0; i < n; i++)
-            rows.push(hub.entryOf(hub.playlistsModel, i, "playlist"))
+        for (let i = 0; i < n; i++) {
+            const e = hub.entryOf(hub.playlistsModel.get(i), "playlist")
+            if (e !== null)
+                rows.push(e)
+        }
         return rows
     }
 
-    function rowsFor(pivot: int): var {
+    function syncPlaylists(): void {
+        const rows = hub.buildPlaylists()
+        hub.playlistRows = rows
+        playlistsList.clear()
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i]
+            playlistsList.append({ kind: r.kind, letter: "", id: r.id, title: r.title, subtitle: r.subtitle, artPath: r.artPath, number: "", sourceRow: i })
+        }
+    }
+
+    function sourceAt(pivot: int): var {
         switch (pivot) {
         case 0:
-            return hub.artistRows
+            return hub.artistsModel
         case 1:
-            return hub.albumRows
+            return hub.albumsModel
         case 2:
-            return hub.songRows
+            return hub.songsModel
         case 3:
-            return hub.genreRows
+            return hub.genresModel
         default:
-            return hub.playlistRows
+            return playlistsList
         }
     }
 
@@ -172,87 +147,150 @@ Page {
         return hub.panes[pivot]
     }
 
-    function rebuild(pivot: int) {
-        switch (pivot) {
-        case 0:
-            hub.artistRows = hub.buildList(hub.artistsModel, "artist")
-            break
-        case 1:
-            hub.albumCells = hub.buildCells(hub.albumsModel)
-            break
-        case 2: {
-            const rows = hub.buildList(hub.songsModel, "song")
-            const ids = []
-            for (const r of rows) {
-                if (r.kind === "song")
-                    ids.push(r.id)
-            }
-            hub.songRows = rows
-            hub.songIds = ids
-            break
+    function countAt(pivot: int): int {
+        if (pivot === 4)
+            return hub.playlistRows.length
+        if (!hub.contentAt(pivot).bound)
+            return 0
+        return hub.modelCount(hub.sourceAt(pivot))
+    }
+
+    function cellsOf(value: var, index: int): var {
+        if (value !== null && value !== undefined && typeof value === "object" && typeof value.length === "number")
+            return value
+        const m = hub.albumsModel
+        if (m === null || m === undefined || typeof m.cells !== "function")
+            return []
+        return m.cells(index)
+    }
+
+    function gridCells(index: int): var {
+        const out = []
+        const list = hub.cellsOf(null, index)
+        for (let i = 0; i < list.length; i++) {
+            const e = hub.entryOf(list[i], "album")
+            if (e !== null)
+                out.push(e)
         }
-        case 3:
-            hub.genreRows = hub.buildList(hub.genresModel, "genre")
-            break
-        default:
-            hub.playlistRows = hub.buildPlaylists()
-            break
-        }
-        hub.fixFocus(pivot)
-        hub.afterRebuild()
+        return out
     }
 
-    function rebuildAll() {
-        for (let p = 0; p < hub.pivots.length; p++)
-            hub.rebuild(p)
+    function rowEntry(pivot: int, index: int): var {
+        if (index < 0 || index >= hub.countAt(pivot))
+            return null
+        if (pivot === 4)
+            return hub.playlistRows[index]
+        if (pivot === 1)
+            return hub.gridCells(index)
+        const m = hub.sourceAt(pivot)
+        if (m === null || m === undefined || typeof m.get !== "function")
+            return null
+        return hub.entryOf(m.get(index), "")
     }
 
-    function isFocusable(rows: var, index: int): bool {
-        const r = rows[index]
-        return r !== undefined && r !== null && r.kind !== "divider"
+    function entryAt(pivot: int, index: int): var {
+        return hub.rowEntry(pivot, index)
     }
 
-    function nearestFocusable(rows: var, from: int, dir: int): int {
+    function focusableAt(pivot: int, index: int): bool {
+        if (index < 0 || index >= hub.countAt(pivot))
+            return false
+        if (pivot === 1 || pivot === 4)
+            return true
+        const m = hub.sourceAt(pivot)
+        if (m === null || m === undefined)
+            return false
+        if (typeof m.isFocusable === "function")
+            return m.isFocusable(index) === true
+        return true
+    }
+
+    function nearestFocusable(pivot: int, from: int, dir: int): int {
+        const m = hub.sourceAt(pivot)
+        if (pivot !== 1 && pivot !== 4 && hub.contentAt(pivot).bound && m !== null && m !== undefined
+                && typeof m.nearestFocusable === "function")
+            return m.nearestFocusable(from, dir)
+        const n = hub.countAt(pivot)
         const step = dir >= 0 ? 1 : -1
-        for (let i = from; i >= 0 && i < rows.length; i += step) {
-            if (hub.isFocusable(rows, i))
+        for (let i = from; i >= 0 && i < n; i += step) {
+            if (hub.focusableAt(pivot, i))
                 return i
         }
-        for (let i = from - step; i >= 0 && i < rows.length; i -= step) {
-            if (hub.isFocusable(rows, i))
+        for (let i = from - step; i >= 0 && i < n; i -= step) {
+            if (hub.focusableAt(pivot, i))
                 return i
         }
         return -1
     }
 
-    function fixFocus(pivot: int) {
+    function bindPane(pivot: int): void {
         const pane = hub.contentAt(pivot)
-        pane.forceLayout()
-        const rows = hub.rowsFor(pivot)
-        if (rows.length === 0) {
+        if (pane.bound)
+            return
+        const m = hub.sourceAt(pivot)
+        if (m !== null && m !== undefined && m.active !== undefined)
+            m.active = true
+        pane.bound = true
+        hub.fixFocus(pivot)
+    }
+
+    function rebind(pivot: int): void {
+        const pane = hub.contentAt(pivot)
+        if (!pane.bound)
+            return
+        const m = hub.sourceAt(pivot)
+        if (m !== null && m !== undefined && m.active !== undefined)
+            m.active = true
+        hub.fixFocus(pivot)
+    }
+
+    function fixFocus(pivot: int): void {
+        d.fixing = true
+        hub.placeFocus(pivot)
+        d.fixing = false
+    }
+
+    function placeFocus(pivot: int): void {
+        const pane = hub.contentAt(pivot)
+        if (pane.bound)
+            pane.forceLayout()
+        const n = hub.countAt(pivot)
+        if (n === 0) {
             pane.focusIndex = 0
+            hub.syncFocus()
             return
         }
-        const target = hub.nearestFocusable(rows, Math.min(pane.focusIndex, rows.length - 1), 1)
+        const grid = hub.albumsModel
+        if (pivot === 1 && d.focusAlbum >= 0 && grid !== null && grid !== undefined && typeof grid.cellOfAlbum === "function") {
+            const pos = grid.cellOfAlbum(d.focusAlbum)
+            if (pos !== undefined && pos !== null && Number(pos.row) >= 0) {
+                pane.snapTo(Number(pos.row))
+                if (hub.pivotIndex === 1)
+                    hub.gridCol = Number(pos.col)
+                hub.syncFocus()
+                return
+            }
+        }
+        const target = hub.nearestFocusable(pivot, Math.min(pane.focusIndex, n - 1), 1)
         pane.snapTo(target < 0 ? 0 : target)
         hub.syncFocus()
     }
 
-    function clampCol() {
+    function clampCol(): void {
         if (!hub.grid || hub.focusedRow === null)
             return
         hub.gridCol = Math.max(0, Math.min(hub.focusedRow.length - 1, hub.gridCol))
     }
 
-    function syncFocus() {
+    function syncFocus(): void {
         hub.focusIndex = hub.activeList.focusIndex
+        hub.focusedRow = hub.rowEntry(hub.pivotIndex, hub.activeList.focusIndex)
         hub.clampCol()
     }
 
     function moveRow(delta: int): bool {
-        const rows = hub.currentRows
         const list = hub.activeList
-        const target = hub.nearestFocusable(rows, list.focusIndex + delta, delta)
+        const target = hub.nearestFocusable(hub.pivotIndex, list.focusIndex + delta, delta)
         if (target < 0 || target === list.focusIndex)
             return false
         if ((delta > 0 && target < list.focusIndex) || (delta < 0 && target > list.focusIndex))
@@ -266,8 +304,7 @@ Page {
         const list = hub.activeList
         if (!list.pageFocus(dir))
             return false
-        const rows = hub.currentRows
-        const fixed = hub.nearestFocusable(rows, list.focusIndex, dir)
+        const fixed = hub.nearestFocusable(hub.pivotIndex, list.focusIndex, dir)
         if (fixed >= 0 && fixed !== list.focusIndex) {
             list.focusIndex = fixed
             list.ensureVisible(Motion.page)
@@ -293,7 +330,7 @@ Page {
         return hub.focusedRow === null || hub.focusedRow.letter === undefined ? "" : hub.focusedRow.letter
     }
 
-    function showJump() {
+    function showJump(): void {
         if (!hub.alphabetic)
             return
         const letter = hub.focusLetter()
@@ -307,17 +344,12 @@ Page {
 
     function availableLetters(): var {
         const out = []
-        if (hub.grid) {
-            for (const cell of hub.albumCells) {
-                if (cell.kind === "letter")
-                    out.push(cell.letter)
-            }
+        const m = hub.sourceAt(hub.pivotIndex)
+        if (!hub.alphabetic || m === null || m === undefined || typeof m.letters !== "function")
             return out
-        }
-        for (const r of hub.currentRows) {
-            if (r.kind === "divider")
-                out.push(r.letter)
-        }
+        const list = m.letters()
+        for (let i = 0; i < list.length; i++)
+            out.push(String(list[i]))
         return out
     }
 
@@ -329,52 +361,59 @@ Page {
         return true
     }
 
-    function jumpTo(letter: string) {
-        const rows = hub.currentRows
+    function jumpTo(letter: string): void {
         const list = hub.activeList
-        let rowIndex = -1
+        const m = hub.sourceAt(hub.pivotIndex)
+        if (m === null || m === undefined)
+            return
+        let top = -1
+        let target = -1
         let col = 0
         if (hub.grid) {
-            for (let i = 0; i < rows.length && rowIndex < 0; i++) {
-                for (let c = 0; c < rows[i].length; c++) {
-                    if (rows[i][c].kind === "letter" && rows[i][c].letter === letter) {
-                        rowIndex = i
-                        col = c
-                        break
-                    }
-                }
-            }
+            if (typeof m.cellOfLetter !== "function")
+                return
+            const pos = m.cellOfLetter(letter)
+            top = pos === undefined || pos === null ? -1 : Number(pos.row)
+            col = pos === undefined || pos === null ? 0 : Number(pos.col)
+            target = top
         } else {
-            for (let i = 0; i < rows.length; i++) {
-                if (rows[i].kind === "divider" && rows[i].letter === letter) {
-                    rowIndex = i
-                    break
-                }
-            }
+            if (typeof m.rowOfLetter !== "function" || typeof m.firstRowOfLetter !== "function")
+                return
+            top = m.rowOfLetter(letter)
+            target = m.firstRowOfLetter(letter)
         }
-        if (rowIndex < 0)
+        if (top < 0 || target < 0)
             return
         list.completeScroll()
-        const target = hub.grid ? rowIndex : hub.nearestFocusable(rows, rowIndex + 1, 1)
-        if (target < 0)
-            return
         list.focusIndex = target
-        list.contentY = Math.max(0, Math.min(list.maxContentY, rowIndex * list.rowPitch))
+        list.contentY = Math.max(0, Math.min(list.maxContentY, top * list.rowPitch))
         if (hub.grid)
             hub.gridCol = col
         hub.syncFocus()
         jump.show(letter)
     }
 
-    function playSong(row: var) {
-        if (hub.player !== null && typeof hub.player.playTracks === "function") {
-            hub.player.playTracks(hub.songIds, hub.songIds.indexOf(row.id))
+    function canPlaySource(): bool {
+        return hub.player !== null && typeof hub.player.playSource === "function"
+    }
+
+    function playSong(row: var): void {
+        if (hub.canPlaySource()) {
+            hub.player.playSource("all", 0, "play", row.id)
             return
         }
         hub.play("song", row.id)
     }
 
-    function activate() {
+    function playCollection(kind: string, id: int): void {
+        if (hub.canPlaySource()) {
+            hub.player.playSource(kind, id, "play", -1)
+            return
+        }
+        hub.play(kind, id)
+    }
+
+    function activate(): void {
         const t = hub.focusedEntry()
         if (t === null || t === undefined)
             return
@@ -384,6 +423,10 @@ Page {
             break
         case "song":
             hub.playSong(t)
+            break
+        case "genre":
+        case "playlist":
+            hub.playCollection(t.kind, t.id)
             break
         case "nowplaying":
             hub.nowPlaying()
@@ -414,16 +457,22 @@ Page {
     }
 
     function sheetItemsFor(kind: string, id: int): var {
-        return ["play", "add to queue", hub.pinLabel(kind, id)]
+        if (kind === "genre")
+            return ["play", "add to queue"]
+        if (kind === "song")
+            return ["play", "play next", "add to queue", hub.pinLabel(kind, id)]
+        return ["play", "play next", "add to queue", "shuffle", hub.pinLabel(kind, id)]
     }
 
-    function runSheet(index: int) {
+    function runSheet(index: int): void {
         const t = hub.sheetRow
         if (t === null)
             return
         const action = sheet.items[index]
         if (action === "play" && t.kind === "song")
             hub.playSong(t)
+        else if (action === "play" && (t.kind === "genre" || t.kind === "playlist"))
+            hub.playCollection(t.kind, t.id)
         else
             hub.sheetAction(action, t.kind, t.id)
     }
@@ -436,12 +485,12 @@ Page {
         return true
     }
 
-    function landPivot() {
+    function landPivot(): void {
         pivotAnim.stop()
         for (const pane of hub.panes) {
             pane.x = 0
             pane.opacity = 1
-            pane.settle()
+            pane.land()
         }
         hub.shownPivot = hub.pivotIndex
     }
@@ -453,6 +502,7 @@ Page {
         if (pivotAnim.running)
             hub.landPivot()
         const dir = target > hub.pivotIndex ? 1 : -1
+        hub.bindPane(target)
         d.internal = true
         hub.pivotIndex = target
         d.internal = false
@@ -468,17 +518,17 @@ Page {
         return true
     }
 
-    function runRefresh() {
+    function runRefresh(): void {
         if (!hub.live)
             return
         hub.contentAt(hub.shownPivot).refresh()
     }
 
-    function scheduleRefresh() {
+    function scheduleRefresh(): void {
         Qt.callLater(hub.runRefresh)
     }
 
-    function scanTick() {
+    function scanTick(): void {
         if (hub.scanning) {
             d.scanSeen = true
             d.resetDuringScan = false
@@ -496,7 +546,7 @@ Page {
         }
     }
 
-    function afterRebuild() {
+    function afterRebuild(): void {
         if (!d.ready)
             return
         if (d.scanSeen && hub.scanning) {
@@ -510,7 +560,14 @@ Page {
         }
     }
 
-    function completeAll() {
+    function rowsUpdated(pivot: int): void {
+        if (!d.ready)
+            return
+        hub.fixFocus(pivot)
+        hub.afterRebuild()
+    }
+
+    function completeAll(): void {
         hub.landPivot()
         for (const pane of hub.panes)
             pane.completeScroll()
@@ -578,9 +635,18 @@ Page {
     }
 
     onPivotIndexChanged: {
-        if (!d.internal)
+        if (!d.ready)
+            return
+        if (!d.internal) {
             hub.landPivot()
+            hub.bindPane(hub.pivotIndex)
+        }
         hub.syncFocus()
+    }
+
+    onFocusedCellChanged: {
+        if (!d.fixing && hub.focusedCell !== null && hub.focusedCell.kind === "album")
+            d.focusAlbum = hub.focusedCell.id
     }
 
     onEntered: (first, kind) => {
@@ -595,27 +661,35 @@ Page {
 
     onArtistsModelChanged: {
         if (d.ready)
-            hub.rebuild(0)
+            hub.rebind(0)
     }
     onAlbumsModelChanged: {
         if (d.ready)
-            hub.rebuild(1)
+            hub.rebind(1)
     }
     onSongsModelChanged: {
         if (d.ready)
-            hub.rebuild(2)
+            hub.rebind(2)
     }
     onGenresModelChanged: {
         if (d.ready)
-            hub.rebuild(3)
+            hub.rebind(3)
     }
     onPlaylistsModelChanged: {
-        if (d.ready)
-            hub.rebuild(4)
+        if (!d.ready)
+            return
+        hub.syncPlaylists()
+        hub.rowsUpdated(4)
     }
     onQueueCountChanged: {
-        if (d.ready)
-            hub.playlistRows = hub.buildPlaylists()
+        if (!d.ready || hub.playlistRows.length === 0)
+            return
+        const rows = hub.playlistRows.slice()
+        rows[0] = Object.assign({}, rows[0], { subtitle: hub.countLabel(hub.queueCount) })
+        hub.playlistRows = rows
+        playlistsList.setProperty(0, "subtitle", rows[0].subtitle)
+        if (hub.pivotIndex === 4)
+            hub.syncFocus()
     }
     onColsChanged: {
         if (d.ready)
@@ -623,7 +697,9 @@ Page {
     }
 
     Component.onCompleted: {
-        hub.rebuildAll()
+        hub.syncPlaylists()
+        hub.fixFocus(4)
+        hub.bindPane(hub.pivotIndex)
         hub.shownPivot = hub.pivotIndex
         hub.syncFocus()
         d.ready = true
@@ -637,6 +713,19 @@ Page {
         property bool scanSeen: false
         property bool resetDuringScan: false
         property bool refreshArmed: false
+        property bool fixing: false
+        property int focusAlbum: -1
+    }
+
+    ListModel {
+        id: playlistsList
+    }
+
+    Binding {
+        target: hub.albumsModel
+        property: "columns"
+        value: hub.cols
+        when: hub.albumsModel !== null && hub.albumsModel !== undefined && hub.albumsModel.columns !== undefined
     }
 
     Connections {
@@ -659,52 +748,81 @@ Page {
             ignoreUnknownSignals: true
 
             function onModelReset() {
-                hub.rebuild(watch.pivot)
+                hub.rowsUpdated(watch.pivot)
             }
 
             function onRowsInserted() {
-                hub.rebuild(watch.pivot)
+                hub.rowsUpdated(watch.pivot)
             }
 
             function onRowsRemoved() {
-                hub.rebuild(watch.pivot)
+                hub.rowsUpdated(watch.pivot)
+            }
+
+            function onRowsMoved() {
+                hub.rowsUpdated(watch.pivot)
             }
 
             function onDataChanged() {
-                hub.rebuild(watch.pivot)
+                if (d.ready && watch.pivot === hub.pivotIndex)
+                    hub.syncFocus()
             }
         }
     }
 
     ModelWatch {
-        model: hub.artistsModel
+        model: artistsPane.bound ? hub.artistsModel : null
         pivot: 0
     }
 
     ModelWatch {
-        model: hub.albumsModel
+        model: albumsPane.bound ? hub.albumsModel : null
         pivot: 1
     }
 
     ModelWatch {
-        model: hub.songsModel
+        model: songsPane.bound ? hub.songsModel : null
         pivot: 2
     }
 
     ModelWatch {
-        model: hub.genresModel
+        model: genresPane.bound ? hub.genresModel : null
         pivot: 3
     }
 
-    ModelWatch {
-        model: hub.playlistsModel
-        pivot: 4
+    Connections {
+        target: hub.playlistsModel
+        ignoreUnknownSignals: true
+
+        function onModelReset() {
+            hub.syncPlaylists()
+            hub.rowsUpdated(4)
+        }
+
+        function onRowsInserted() {
+            hub.syncPlaylists()
+            hub.rowsUpdated(4)
+        }
+
+        function onRowsRemoved() {
+            hub.syncPlaylists()
+            hub.rowsUpdated(4)
+        }
+
+        function onDataChanged() {
+            hub.syncPlaylists()
+            hub.rowsUpdated(4)
+        }
     }
 
     component Pane: FocusList {
         id: pane
 
         property int pivot: 0
+        property bool bound: false
+        property var source: null
+        property var entranceArgs: null
+        readonly property bool entering: entranceClock.running
 
         signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve)
         signal settle()
@@ -713,14 +831,25 @@ Page {
             return Math.max(0, Math.floor(pane.contentY / pane.rowPitch))
         }
 
-        function feather(dir: int) {
+        function startEntrance(shift: real, stagger: int, cap: int, duration: int, stripCurve: bool): void {
             pane.forceLayout()
-            pane.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+            pane.entranceArgs = { shift: shift, stagger: stagger, cap: cap, duration: duration, stripCurve: stripCurve }
+            entranceClock.interval = Math.max(1, duration + cap * stagger)
+            entranceClock.restart()
+            pane.entrance(shift, stagger, cap, duration, stripCurve)
         }
 
-        function refresh() {
-            pane.forceLayout()
-            pane.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
+        function feather(dir: int): void {
+            pane.startEntrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+        }
+
+        function refresh(): void {
+            pane.startEntrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
+        }
+
+        function land(): void {
+            entranceClock.stop()
+            pane.settle()
         }
 
         x: 0
@@ -728,45 +857,65 @@ Page {
         width: hub.width
         height: hub.height - pane.y
         visible: hub.shownPivot === pane.pivot
+        model: pane.bound ? pane.source : null
+        onFocusIndexChanged: {
+            if (d.ready && hub.activeList === pane)
+                hub.syncFocus()
+        }
+
+        Timer {
+            id: entranceClock
+
+            repeat: false
+        }
     }
 
-    component HubRow: Item {
-        id: row
+    component Entering: Item {
+        id: entering
 
         required property int index
-        required property var modelData
-        readonly property var pane: row.ListView.view
-        readonly property bool divider: row.modelData.kind === "divider"
-        readonly property bool isFocused: !row.divider && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
-        readonly property Item rowItem: listRow
-        readonly property Item dividerItem: dividerText
+        readonly property var pane: entering.ListView.view
         property real enter: hub.arriving ? 0 : 1
         property real shift: hub.arriving ? Motion.pivotShift : 0
         property int stagger: 0
         property int enterDuration: 0
         property var enterCurve: Motion.strip
 
-        width: row.pane.width
-        height: row.pane.rowPitch
-        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
-        opacity: row.enter
+        function runEntrance(args: var): void {
+            enterAnim.stop()
+            entering.shift = args.shift
+            entering.stagger = Math.min(args.cap, Math.max(0, entering.index - entering.pane.firstVisible())) * args.stagger
+            entering.enterDuration = args.duration
+            entering.enterCurve = args.stripCurve ? Motion.strip : Motion.decel
+            entering.enter = 0
+            enterAnim.start()
+        }
+
+        function landEntrance(): void {
+            enterAnim.stop()
+            entering.enter = 1
+        }
+
+        width: entering.pane === null ? 0 : entering.pane.width
+        height: entering.pane === null ? 0 : entering.pane.rowPitch
+        transform: Translate { x: Ui.px(entering.shift) * (1 - entering.enter) }
+        opacity: entering.enter
+
+        ListView.onPooled: entering.landEntrance()
+        ListView.onReused: {
+            if (entering.pane !== null && entering.pane.entering && entering.pane.entranceArgs !== null)
+                entering.runEntrance(entering.pane.entranceArgs)
+        }
 
         Connections {
-            target: row.pane
+            target: entering.pane
 
             function onEntrance(shift, stagger, cap, duration, stripCurve) {
-                enterAnim.stop()
-                row.shift = shift
-                row.stagger = Math.min(cap, Math.max(0, row.index - row.pane.firstVisible())) * stagger
-                row.enterDuration = duration
-                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
-                row.enter = 0
-                enterAnim.start()
+                entering.runEntrance({ shift: shift, stagger: stagger, cap: cap, duration: duration, stripCurve: stripCurve })
             }
 
             function onSettle() {
-                enterAnim.stop()
-                row.enter = 1
+                entering.landEntrance()
             }
         }
 
@@ -774,32 +923,46 @@ Page {
             id: enterAnim
 
             PauseAnimation {
-                duration: row.stagger
+                duration: entering.stagger
             }
 
             NumberAnimation {
-                target: row
+                target: entering
                 property: "enter"
                 from: 0
                 to: 1
-                duration: row.enterDuration
+                duration: entering.enterDuration
                 easing.type: Motion.bezier
-                easing.bezierCurve: row.enterCurve
+                easing.bezierCurve: entering.enterCurve
             }
         }
+    }
+
+    component HubRow: Entering {
+        id: row
+
+        required property string kind
+        required property string letter
+        required property string title
+        required property string subtitle
+        required property string number
+        readonly property bool divider: row.kind === "divider"
+        readonly property bool isFocused: !row.divider && row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
+        readonly property Item rowItem: listRow
+        readonly property Item dividerItem: dividerText
 
         ListRow {
             id: listRow
 
             visible: !row.divider
             width: row.width
-            number: row.modelData.kind === "song" ? row.modelData.number : ""
-            bold: row.modelData.kind === "genre" || row.modelData.kind === "playlist" || row.modelData.kind === "nowplaying"
-            countLine: row.modelData.kind === "artist"
-            ring: row.modelData.kind === "playlist" || row.modelData.kind === "nowplaying"
+            number: row.kind === "song" ? row.number : ""
+            bold: row.kind === "genre" || row.kind === "playlist" || row.kind === "nowplaying"
+            countLine: row.kind === "artist"
+            ring: row.kind === "playlist" || row.kind === "nowplaying"
             ringGlyph: "play"
-            primary: row.modelData.title
-            secondary: row.modelData.subtitle
+            primary: row.divider ? "" : row.title
+            secondary: row.divider ? "" : row.subtitle
             focused: row.isFocused
             pressed: row.isFocused && hub.pressed
             animated: hub.live
@@ -812,76 +975,28 @@ Page {
             x: Ui.px(Ui.hubEdge)
             anchors.baseline: parent.bottom
             anchors.baselineOffset: -Ui.px(Ui.letterInsetBaseline)
-            text: row.divider ? row.modelData.letter : ""
+            text: row.divider ? row.letter : ""
             color: Ui.white(Ui.letterGlyph.alpha)
             font: Ui.font(Ui.letterGlyph)
         }
     }
 
-    component GridRow: Item {
+    component GridRow: Entering {
         id: row
 
-        required property int index
-        required property var modelData
-        readonly property var pane: row.ListView.view
-        readonly property bool isFocusedRow: hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
-        readonly property int cellCount: cells.count
-        property real enter: hub.arriving ? 0 : 1
-        property real shift: hub.arriving ? Motion.pivotShift : 0
-        property int stagger: 0
-        property int enterDuration: 0
-        property var enterCurve: Motion.strip
+        required property var cells
+        readonly property var cellList: hub.cellsOf(row.cells, row.index)
+        readonly property bool isFocusedRow: row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
+        readonly property int cellCount: cellRepeater.count
 
         function cellAt(col: int): Item {
-            return cells.itemAt(col)
-        }
-
-        width: row.pane.width
-        height: row.pane.rowPitch
-        transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
-        opacity: row.enter
-
-        Connections {
-            target: row.pane
-
-            function onEntrance(shift, stagger, cap, duration, stripCurve) {
-                enterAnim.stop()
-                row.shift = shift
-                row.stagger = Math.min(cap, Math.max(0, row.index - row.pane.firstVisible())) * stagger
-                row.enterDuration = duration
-                row.enterCurve = stripCurve ? Motion.strip : Motion.decel
-                row.enter = 0
-                enterAnim.start()
-            }
-
-            function onSettle() {
-                enterAnim.stop()
-                row.enter = 1
-            }
-        }
-
-        SequentialAnimation {
-            id: enterAnim
-
-            PauseAnimation {
-                duration: row.stagger
-            }
-
-            NumberAnimation {
-                target: row
-                property: "enter"
-                from: 0
-                to: 1
-                duration: row.enterDuration
-                easing.type: Motion.bezier
-                easing.bezierCurve: row.enterCurve
-            }
+            return cellRepeater.itemAt(col)
         }
 
         Repeater {
-            id: cells
+            id: cellRepeater
 
-            model: row.modelData
+            model: row.cellList
 
             delegate: Item {
                 id: cell
@@ -890,34 +1005,42 @@ Page {
                 required property var modelData
                 readonly property bool letter: cell.modelData.kind === "letter"
                 readonly property bool isFocused: row.isFocusedRow && hub.gridCol === cell.index
-                readonly property Item tileItem: tile
-                readonly property Item letterItem: letterTile
+                readonly property Item tileItem: cell.letter ? null : cellLoader.item
+                readonly property Item letterItem: cell.letter ? cellLoader.item : null
 
                 x: Ui.px(Ui.hubEdge + cell.index * hub.cellPitch)
                 y: 0
                 width: Ui.px(Ui.tileS)
                 height: Ui.px(cell.letter ? Ui.tileS : Ui.tileCellH)
 
-                Tile {
-                    id: tile
+                Loader {
+                    id: cellLoader
 
-                    visible: !cell.letter
-                    source: cell.modelData.artPath !== "" ? "file://" + cell.modelData.artPath : ""
-                    title: cell.modelData.title
-                    subtitle: cell.modelData.subtitle
-                    focused: cell.isFocused
-                    pressed: cell.isFocused && hub.pressed
-                    animated: hub.live
+                    sourceComponent: cell.letter ? letterComponent : tileComponent
                 }
 
-                LetterTile {
-                    id: letterTile
+                Component {
+                    id: tileComponent
 
-                    visible: cell.letter
-                    letter: cell.letter ? cell.modelData.letter : ""
-                    focused: cell.isFocused
-                    pressed: cell.isFocused && hub.pressed
-                    animated: hub.live
+                    Tile {
+                        source: cell.modelData.artPath !== undefined && cell.modelData.artPath !== "" ? "file://" + cell.modelData.artPath : ""
+                        title: cell.modelData.title
+                        subtitle: cell.modelData.subtitle
+                        focused: cell.isFocused
+                        pressed: cell.isFocused && hub.pressed
+                        animated: hub.live
+                    }
+                }
+
+                Component {
+                    id: letterComponent
+
+                    LetterTile {
+                        letter: cell.modelData.letter
+                        focused: cell.isFocused
+                        pressed: cell.isFocused && hub.pressed
+                        animated: hub.live
+                    }
                 }
             }
         }
@@ -937,7 +1060,7 @@ Page {
             id: artistsPane
 
             pivot: 0
-            model: hub.artistRows
+            source: hub.artistsModel
             delegate: HubRow {}
         }
 
@@ -946,7 +1069,7 @@ Page {
 
             pivot: 1
             rowPitch: Ui.px(hub.gridRowPitch)
-            model: hub.albumRows
+            source: hub.albumsModel
             delegate: GridRow {}
         }
 
@@ -954,7 +1077,7 @@ Page {
             id: songsPane
 
             pivot: 2
-            model: hub.songRows
+            source: hub.songsModel
             delegate: HubRow {}
         }
 
@@ -962,7 +1085,7 @@ Page {
             id: genresPane
 
             pivot: 3
-            model: hub.genreRows
+            source: hub.genresModel
             delegate: HubRow {}
         }
 
@@ -970,7 +1093,8 @@ Page {
             id: playlistsPane
 
             pivot: 4
-            model: hub.playlistRows
+            bound: true
+            source: playlistsList
             delegate: HubRow {}
         }
 

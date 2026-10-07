@@ -54,6 +54,14 @@ TestCase {
             return id === 12 ? fakeLibrary.trackRows([1, 2]) : []
         }
 
+        function artistAlbumRows(id) {
+            return id === 7 ? [fakeLibrary.albumInfo(12)] : []
+        }
+
+        function artistTrackRows(id) {
+            return fakeLibrary.trackRows([1, 2])
+        }
+
         function isPinned(kind, id) {
             return false
         }
@@ -317,6 +325,37 @@ TestCase {
         home.completeAll()
         overlayMain.navigate("music")
         overlayMain.pageStack.completeAll()
+        overlayMain.router.release("b")
+        compare(hides, 1)
+        overlayMain.hideOverlayRequested.disconnect(onHide)
+    }
+
+    function test_b_pop_to_home_does_not_hide() {
+        overlayMain.overlayMapped = true
+        overlayMain.overlayFade = 1
+        let hides = 0
+        const onHide = function() { hides++ }
+        overlayMain.hideOverlayRequested.connect(onHide)
+        overlayMain.navigate("music")
+        overlayMain.pageStack.completeAll()
+        compare(overlayMain.pageStack.depth, 2)
+        overlayMain.router.press("b")
+        verify(overlayMain.router.dispatch("b", false))
+        overlayMain.pageStack.completeAll()
+        compare(overlayMain.pageStack.depth, 1)
+        overlayMain.router.release("b")
+        compare(hides, 0)
+        const home = overlayMain.pageStack.currentItem
+        home.showQuickplay()
+        home.completeAll()
+        overlayMain.router.press("b")
+        verify(overlayMain.router.dispatch("b", false))
+        home.completeAll()
+        compare(home.quickplayShown, false)
+        overlayMain.router.release("b")
+        compare(hides, 0)
+        overlayMain.router.press("b")
+        overlayMain.router.dispatch("b", false)
         overlayMain.router.release("b")
         compare(hides, 1)
         overlayMain.hideOverlayRequested.disconnect(onHide)

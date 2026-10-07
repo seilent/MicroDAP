@@ -25,6 +25,8 @@ add_library(casdapcore STATIC
     src/core/Eq.h
     src/core/FakeBluezModel.cpp
     src/core/FakeBluezModel.h
+    src/core/HubModels.cpp
+    src/core/HubModels.h
     src/core/Intercept.cpp
     src/core/Intercept.h
     src/core/Keep.cpp
@@ -33,6 +35,8 @@ add_library(casdapcore STATIC
     src/core/Keep.h
     src/core/Library.cpp
     src/core/Library.h
+    src/core/LibraryWatcher.cpp
+    src/core/LibraryWatcher.h
     src/core/Models.cpp
     src/core/Models.h
     src/core/Mpris.cpp

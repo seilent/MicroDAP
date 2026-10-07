@@ -26,6 +26,9 @@ Item {
     readonly property real rowPitch: qp.tilePx + qp.gutterPx
     readonly property real gridW: 2 * qp.tilePx + qp.gutterPx
     property alias flick: flick
+    property alias sections: sections
+    property alias pinsSection: pinsSection
+    property alias historySection: historySection
     property alias newSection: newSection
     property alias newHeader: newHeader
     property alias phoneItem: phone
@@ -78,6 +81,7 @@ Item {
     component SectionHeader: Text {
         color: Ui.white(Ui.quickplayHeader.alpha)
         font: Ui.font(Ui.quickplayHeader)
+        onBaselineOffsetChanged: qp.scheduleSettle()
     }
 
     function sectionOf(index: int): var {
@@ -241,31 +245,50 @@ Item {
         return moved
     }
 
-    function layout() {
-        sections.forceLayout()
-        pinsGrid.forceLayout()
-        historyGrid.forceLayout()
-        newGrid.forceLayout()
+    function gridHeight(n: int): real {
+        const rows = Math.ceil(n / 2)
+        return rows <= 0 ? 0 : rows * qp.tilePx + (rows - 1) * qp.gutterPx
     }
 
-    function ensureVisible(duration: int) {
-        const item = qp.tileAt(qp.focusIndex)
-        if (item === null)
+    function sectionHeight(section: int): real {
+        if (section === 0 && qp.pinsCount === 0)
+            return Ui.px(Ui.qpHintDrop + Ui.qpHintPitch * (emptyText.lineCount - 1))
+        return Ui.px(Ui.qpContentDrop) + qp.gridHeight(qp.sectionCounts[section])
+    }
+
+    function sectionTop(section: int): real {
+        let top = Ui.px(Ui.qpFirstBaseline)
+        for (let s = 0; s < section; s++)
+            top += qp.sectionHeight(s) + Ui.px(Ui.qpSectionGap)
+        return top
+    }
+
+    function headerTop(section: int): real {
+        const header = section === 2 ? newHeader : section === 1 ? historyHeader : pinsHeader
+        return qp.sectionTop(section) - header.baselineOffset
+    }
+
+    function tileTop(index: int): real {
+        const p = qp.sectionOf(index)
+        if (p.section < 0)
+            return 0
+        return qp.sectionTop(p.section) + Ui.px(Ui.qpContentDrop) + Math.floor(p.local / 2) * qp.rowPitch
+    }
+
+    function ensureVisible(duration: int): void {
+        if (qp.count <= 0 || qp.focusIndex < 0 || qp.focusIndex >= qp.count)
             return
-        qp.layout()
-        let top = item.mapToItem(content, 0, 0).y
-        const bottom = top + item.height
         const p = qp.sectionOf(qp.focusIndex)
-        if (p.local < 2) {
-            const header = p.section === 2 ? newHeader : p.section === 1 ? historyHeader : pinsHeader
-            top = p.section === 0 || (qp.pinsCount === 0 && p.section === 1) ? 0 : header.mapToItem(content, 0, 0).y
-        }
-        const maxY = Math.max(0, flick.contentHeight - flick.height)
+        let top = qp.tileTop(qp.focusIndex)
+        const bottom = top + qp.tilePx
+        if (p.local < 2)
+            top = p.section === 0 || (qp.pinsCount === 0 && p.section === 1) ? 0 : qp.headerTop(p.section)
+        const maxY = Math.max(0, content.height - flick.height)
         let y = scrollAnim.running ? scrollAnim.to : flick.contentY
+        if (bottom > y + flick.height)
+            y = bottom - flick.height
         if (top < y)
             y = top
-        else if (bottom > y + flick.height)
-            y = bottom - flick.height
         y = Math.max(0, Math.min(maxY, y))
         scrollAnim.stop()
         if (y === flick.contentY)
@@ -278,6 +301,16 @@ Item {
         scrollAnim.from = flick.contentY
         scrollAnim.to = y
         scrollAnim.start()
+    }
+
+    function settleScroll(): void {
+        if (qp.focusIndex >= qp.count)
+            qp.focusIndex = Math.max(0, qp.count - 1)
+        qp.ensureVisible(0)
+    }
+
+    function scheduleSettle(): void {
+        Qt.callLater(qp.settleScroll)
     }
 
     function completeAll() {
@@ -297,6 +330,38 @@ Item {
             qp.focusIndex = Math.max(0, qp.count - 1)
     }
 
+    component RowWatch: Connections {
+        ignoreUnknownSignals: true
+
+        function onRowsInserted() {
+            qp.scheduleSettle()
+        }
+
+        function onRowsMoved() {
+            qp.scheduleSettle()
+        }
+
+        function onRowsRemoved() {
+            qp.scheduleSettle()
+        }
+
+        function onModelReset() {
+            qp.scheduleSettle()
+        }
+    }
+
+    RowWatch {
+        target: qp.pinsModel
+    }
+
+    RowWatch {
+        target: qp.historyModel
+    }
+
+    RowWatch {
+        target: qp.newModel
+    }
+
     Flickable {
         id: flick
 
@@ -304,14 +369,15 @@ Item {
         contentWidth: width
         contentHeight: content.height
         interactive: false
-        onContentHeightChanged: Qt.callLater(function() { qp.ensureVisible(0) })
+        onContentHeightChanged: qp.scheduleSettle()
+        onHeightChanged: qp.scheduleSettle()
         boundsBehavior: Flickable.StopAtBounds
 
         Item {
             id: content
 
             width: flick.width
-            height: sections.y + sections.height + Ui.px(Ui.hubEdge)
+            height: qp.sectionTop(2) + qp.sectionHeight(2) + Ui.px(Ui.hubEdge)
 
             Column {
                 id: sections
@@ -324,9 +390,7 @@ Item {
                     id: pinsSection
 
                     width: qp.gridW
-                    height: qp.pinsCount === 0
-                        ? Ui.px(Ui.qpHintDrop + Ui.qpHintPitch * (emptyText.lineCount - 1))
-                        : Ui.px(Ui.qpContentDrop) + pinsGrid.height
+                    height: qp.sectionHeight(0)
 
                     SectionHeader {
                         id: pinsHeader
@@ -429,7 +493,7 @@ Item {
                     id: historySection
 
                     width: qp.gridW
-                    height: Ui.px(Ui.qpContentDrop) + historyGrid.height
+                    height: qp.sectionHeight(1)
 
                     SectionHeader {
                         id: historyHeader
@@ -464,7 +528,7 @@ Item {
                     id: newSection
 
                     width: qp.gridW
-                    height: Ui.px(Ui.qpContentDrop) + newGrid.height
+                    height: qp.sectionHeight(2)
 
                     SectionHeader {
                         id: newHeader

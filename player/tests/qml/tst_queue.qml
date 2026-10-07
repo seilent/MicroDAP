@@ -11,6 +11,139 @@ TestCase {
     width: 640
     height: 960
 
+    component FakeQueue: QtObject {
+        id: q
+
+        property var rows: []
+        property var order: []
+        property int index: -1
+        property bool shuffle: false
+        property int repeat: 0
+        property var calls: []
+        readonly property int count: q.rows.length
+        readonly property int currentSlot: q.slotOf(q.index)
+        property ListModel playOrder: ListModel {}
+
+        onIndexChanged: q.renumber()
+
+        function note(name) {
+            q.calls = q.calls.concat([name])
+        }
+
+        function rowAt(slot) {
+            return q.order.length > 0 ? q.order[slot] : slot
+        }
+
+        function slotOf(row) {
+            if (row < 0)
+                return -1
+            return q.order.length > 0 ? q.order.indexOf(row) : row
+        }
+
+        function get(row) {
+            return q.rows[row]
+        }
+
+        function entryFor(slot) {
+            const r = q.rowAt(slot)
+            const e = q.rows[r]
+            return { row: r, slot: slot, number: slot + 1, id: e.id, title: e.title, artist: e.artist, album: e.album, durationMs: e.durationMs, isCurrent: r === q.index }
+        }
+
+        function renumber() {
+            for (let s = 0; s < q.playOrder.count; s++) {
+                const r = q.rowAt(s)
+                q.playOrder.setProperty(s, "slot", s)
+                q.playOrder.setProperty(s, "number", s + 1)
+                q.playOrder.setProperty(s, "row", r)
+                q.playOrder.setProperty(s, "isCurrent", r === q.index)
+            }
+        }
+
+        function fill(n, current, order) {
+            const rows = []
+            for (let i = 0; i < n; i++)
+                rows.push({ id: i + 1, title: "Song " + (i + 1), artist: "Artist " + (i + 1), album: "Album", artPath: "", durationMs: 240000 })
+            q.playOrder.clear()
+            q.rows = rows
+            q.order = order === undefined ? [] : order
+            q.index = n > 0 ? current : -1
+            for (let s = 0; s < n; s++)
+                q.playOrder.append(q.entryFor(s))
+            q.calls = []
+        }
+
+        function insertAt(row, entry) {
+            const rows = q.rows.slice()
+            rows.splice(row, 0, entry)
+            q.rows = rows
+            if (row <= q.index)
+                q.index++
+            q.playOrder.insert(row, q.entryFor(row))
+            q.renumber()
+        }
+
+        function remove(row) {
+            q.note("remove " + row)
+            if (row < 0 || row >= q.rows.length)
+                return
+            const slot = q.slotOf(row)
+            const rows = q.rows.slice()
+            rows.splice(row, 1)
+            q.rows = rows
+            if (q.order.length > 0)
+                q.order = q.order.filter((r) => r !== row).map((r) => r > row ? r - 1 : r)
+            let next = q.index
+            if (row < next)
+                next--
+            else if (row === next && next >= rows.length)
+                next = rows.length - 1
+            q.playOrder.remove(slot)
+            q.index = next
+            q.renumber()
+        }
+
+        function shiftSlot(from, to) {
+            const n = q.rows.length
+            if (from < 0 || from >= n || to < 0 || to >= n || from === to)
+                return
+            if (q.order.length > 0) {
+                const order = q.order.slice()
+                const row = order.splice(from, 1)[0]
+                order.splice(to, 0, row)
+                q.order = order
+            } else {
+                const rows = q.rows.slice()
+                const entry = rows.splice(from, 1)[0]
+                rows.splice(to, 0, entry)
+                q.rows = rows
+                const cur = q.index
+                let next = cur
+                if (cur === from)
+                    next = to
+                else if (from < to && cur > from && cur <= to)
+                    next = cur - 1
+                else if (to < from && cur >= to && cur < from)
+                    next = cur + 1
+                q.index = next
+            }
+            q.playOrder.move(from, to, 1)
+            q.renumber()
+        }
+
+        function moveSlot(from, to) {
+            q.note("moveSlot " + from + " " + to)
+            q.shiftSlot(from, to)
+        }
+
+        function playNextRow(row) {
+            q.note("playNextRow " + row)
+            const slot = q.slotOf(row)
+            const cur = q.currentSlot
+            q.shiftSlot(slot, slot < cur ? cur : cur + 1)
+        }
+    }
+
     PageStack {
         id: pages
 
@@ -27,74 +160,8 @@ TestCase {
         onNowPlaying: counters.nowPlaying++
     }
 
-    QtObject {
+    FakeQueue {
         id: fakeQueue
-
-        property var rows: []
-        property int count: 0
-        property int index: -1
-        property bool shuffle: false
-        property int repeat: 0
-        property var calls: []
-
-        signal modelReset()
-        signal rowsInserted(var parent, int first, int last)
-        signal rowsRemoved(var parent, int first, int last)
-        signal rowsMoved(var parent, int start, int end, var destination, int row)
-
-        function note(name) {
-            fakeQueue.calls = fakeQueue.calls.concat([name])
-        }
-
-        function get(row) {
-            return fakeQueue.rows[row]
-        }
-
-        function fill(n, current) {
-            const rows = []
-            for (let i = 0; i < n; i++)
-                rows.push({ id: i + 1, title: "Song " + (i + 1), artist: "Artist " + (i + 1), album: "Album", artPath: "", durationMs: 240000 })
-            fakeQueue.rows = rows
-            fakeQueue.count = n
-            fakeQueue.index = n > 0 ? current : -1
-            fakeQueue.modelReset()
-        }
-
-        function remove(row) {
-            fakeQueue.note("remove " + row)
-            if (row < 0 || row >= fakeQueue.rows.length)
-                return
-            const rows = fakeQueue.rows.slice()
-            rows.splice(row, 1)
-            fakeQueue.rows = rows
-            fakeQueue.count = rows.length
-            fakeQueue.rowsRemoved(null, row, row)
-            if (row < fakeQueue.index)
-                fakeQueue.index--
-            else if (row === fakeQueue.index && fakeQueue.index >= rows.length)
-                fakeQueue.index = rows.length - 1
-        }
-
-        function move(from, to) {
-            fakeQueue.note("move " + from + " " + to)
-            const n = fakeQueue.rows.length
-            if (from < 0 || from >= n || to < 0 || to >= n || from === to)
-                return
-            const rows = fakeQueue.rows.slice()
-            const entry = rows.splice(from, 1)[0]
-            rows.splice(to, 0, entry)
-            fakeQueue.rows = rows
-            const cur = fakeQueue.index
-            let next = cur
-            if (cur === from)
-                next = to
-            else if (from < to && cur > from && cur <= to)
-                next = cur - 1
-            else if (to < from && cur >= to && cur < from)
-                next = cur + 1
-            fakeQueue.index = next
-            fakeQueue.rowsMoved(null, from, from, null, to > from ? to + 1 : to)
-        }
     }
 
     QtObject {
@@ -115,6 +182,25 @@ TestCase {
         id: counters
 
         property int nowPlaying: 0
+    }
+
+    FakeQueue {
+        id: orderedQueue
+
+        shuffle: true
+    }
+
+    QtObject {
+        id: orderedPlayer
+
+        property int status: 1
+        property var current: ({})
+        property QtObject queue: orderedQueue
+        property var calls: []
+
+        function playAt(index) {
+            orderedPlayer.calls = orderedPlayer.calls.concat(["playAt " + index])
+        }
     }
 
     Component {
@@ -155,7 +241,6 @@ TestCase {
         pages.clear()
         pages.animate = false
         fakeQueue.fill(20, 2)
-        fakeQueue.calls = []
         fakePlayer.calls = []
         counters.nowPlaying = 0
     }
@@ -193,6 +278,8 @@ TestCase {
         compare(page.list.y, Ui.px(128))
         compare(page.list.rowPitch, Ui.px(40))
         compare(page.list.count, 20)
+        verify(page.list.model === fakeQueue.playOrder)
+        compare(page.list.reuseItems, true)
         compare(page.rowIndex, 2)
         compare(page.focusBar.x, Ui.px(20 - 8))
         compare(page.focusBar.visible, true)
@@ -367,7 +454,7 @@ TestCase {
         compare(page.sheet.items[page.sheet.focusIndex], "move up")
         router.dispatch("a", false)
         compare(page.sheet.shown, false)
-        compare(fakeQueue.calls[0], "move 2 1")
+        compare(fakeQueue.calls[0], "moveSlot 2 1")
         compare(fakeQueue.index, 1)
         compare(page.rowIndex, 1)
         compare(page.countText, "2 of 20")
@@ -388,7 +475,7 @@ TestCase {
         router.dispatch("down", false)
         compare(page.sheet.items[page.sheet.focusIndex], "move down")
         router.dispatch("a", false)
-        compare(fakeQueue.calls[0], "move 2 3")
+        compare(fakeQueue.calls[0], "moveSlot 2 3")
         compare(fakeQueue.index, 3)
         compare(page.rowIndex, 3)
         compare(page.countText, "4 of 20")
@@ -408,7 +495,7 @@ TestCase {
         router.dispatch("down", false)
         compare(page.sheet.items[page.sheet.focusIndex], "play next")
         router.dispatch("a", false)
-        compare(fakeQueue.calls[0], "move 6 3")
+        compare(fakeQueue.calls[0], "playNextRow 6")
         compare(fakeQueue.index, 2)
         compare(page.rowIndex, 3)
         compare(tc.rowAt(3).rowItem.primary, "Song 7")
@@ -422,7 +509,7 @@ TestCase {
         router.dispatch("down", false)
         compare(page.sheet.items[page.sheet.focusIndex], "play next")
         router.dispatch("a", false)
-        compare(fakeQueue.calls[0], "move 0 2")
+        compare(fakeQueue.calls[0], "playNextRow 0")
         compare(fakeQueue.index, 1)
         compare(page.rowIndex, 2)
         compare(tc.rowAt(1).rowItem.primary, "Song 3")
@@ -441,16 +528,51 @@ TestCase {
 
     function test_external_insert_runs_f12() {
         const page = open({ animated: true })
-        const rows = fakeQueue.rows.slice()
-        rows.splice(1, 0, { id: 99, title: "Inserted", artist: "Artist", album: "", artPath: "", durationMs: 1000 })
-        fakeQueue.rows = rows
-        fakeQueue.count = rows.length
-        fakeQueue.rowsInserted(null, 1, 1)
+        fakeQueue.insertAt(1, { id: 99, title: "Inserted", artist: "Artist", album: "", artPath: "", durationMs: 1000 })
         compare(page.count, 21)
         tryVerify(tc.entering(1), 1000)
         compare(tc.rowAt(0).enter, 1)
         compare(tc.rowAt(1).rowItem.primary, "Inserted")
+        compare(tc.rowAt(3).rowItem.playing, true)
+        compare(page.countText, "4 of 21")
         tryCompare(tc.rowAt(1), "enter", 1, 2000)
+    }
+
+    function test_play_order_rows_and_verbs() {
+        orderedQueue.fill(5, 0, [2, 0, 4, 1, 3])
+        const page = open({ player: orderedPlayer })
+        compare(page.count, 5)
+        compare(page.countText, "2 of 5")
+        compare(page.rowIndex, 1)
+        compare(tc.rowAt(0).rowItem.primary, "Song 3")
+        compare(tc.rowAt(0).rowItem.number, "1")
+        compare(tc.rowAt(1).rowItem.primary, "Song 1")
+        compare(tc.rowAt(1).rowItem.playing, true)
+        compare(tc.rowAt(2).rowItem.primary, "Song 5")
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(orderedPlayer.calls[0], "playAt 4")
+        page.list.snapTo(3)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "play next", "move up", "move down"]))
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(orderedQueue.calls[0], "playNextRow 1")
+        compare(page.rowIndex, 2)
+        compare(tc.rowAt(2).rowItem.primary, "Song 2")
+        compare(tc.rowAt(3).rowItem.primary, "Song 5")
+        page.list.snapTo(0)
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        compare(page.sheet.items[page.sheet.focusIndex], "move down")
+        router.dispatch("a", false)
+        compare(orderedQueue.calls[1], "moveSlot 0 1")
+        compare(page.rowIndex, 1)
+        compare(page.countText, "1 of 5")
+        compare(tc.rowAt(0).rowItem.playing, true)
+        router.dispatch("y", false)
+        compare(orderedQueue.calls[2], "remove 2")
     }
 
     function test_no_f12_when_not_animated() {

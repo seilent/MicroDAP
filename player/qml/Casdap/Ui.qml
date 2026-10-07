@@ -255,6 +255,10 @@ QtObject {
     readonly property var npRingX: [0.13, 0.5, 0.87]
     readonly property real npBtGlyph: 64
     readonly property int seekStepMs: 10000
+    readonly property int seekHoldMs: 400
+    readonly property int seekTickMs: 250
+    readonly property int seekTickStepMs: 1000
+    readonly property int seekEndMarginMs: 1000
 
     function npRingCenter(index: int): real {
         const span = ui.landscape ? ui.canvasW - ui.npColumnRight - ui.edge : ui.canvasW

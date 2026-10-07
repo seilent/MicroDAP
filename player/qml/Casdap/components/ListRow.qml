@@ -30,7 +30,7 @@ PressScale {
     readonly property Item secondaryItem: secondaryText
     readonly property Item trailingItem: trailingText
     readonly property Item dotItem: dot
-    readonly property Item ringItem: rowRing
+    readonly property Item ringItem: ringLoader.item
 
     width: Ui.windowW
     height: Ui.px(Ui.rowHeight)
@@ -48,16 +48,19 @@ PressScale {
         color: Ui.accent
     }
 
-    Ring {
-        id: rowRing
+    Loader {
+        id: ringLoader
 
-        visible: root.ring
+        active: root.ring
         x: Ui.px(Ui.hubEdge)
         anchors.verticalCenter: parent.verticalCenter
-        size: Ui.rowRing
-        glyph: root.ringGlyph
-        focused: root.focused
-        animated: root.animated
+
+        sourceComponent: Ring {
+            size: Ui.rowRing
+            glyph: root.ringGlyph
+            focused: root.focused
+            animated: root.animated
+        }
     }
 
     Text {

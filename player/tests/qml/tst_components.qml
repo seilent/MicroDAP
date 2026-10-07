@@ -405,8 +405,13 @@ TestCase {
         compare(row.dotItem.x, 28)
         compare(row.dotItem.width, 8)
         fuzzyCompare(row.dotItem.y, row.primaryBaseline - Ui.px(Ui.playingDot), 0.5)
+        compare(row.ringItem, null)
+        row.ring = true
+        verify(row.ringItem !== null)
         compare(row.ringItem.width, Ui.px(Ui.rowRing))
         compare(row.ringItem.width, 40)
+        row.ring = false
+        compare(row.ringItem, null)
     }
 
     function test_glyph_box() {

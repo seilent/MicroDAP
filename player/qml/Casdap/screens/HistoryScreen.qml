@@ -12,18 +12,16 @@ Page {
     property bool screenOff: false
     property int pivotIndex: 0
     property int shownPivot: 0
-    property var recentRows: []
-    property var newRows: []
+    property var focusedEntry: null
     property var sheetEntry: null
 
     readonly property bool live: page.animated && !page.screenOff
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property var pivots: ["recent", "new"]
+    readonly property var kinds: ["song", "album"]
     readonly property var panes: [recentPane, newPane]
     readonly property FocusList activeList: page.panes[page.pivotIndex]
-    readonly property var currentRows: page.pivotIndex === 0 ? page.recentRows : page.newRows
     readonly property int rowIndex: page.activeList.focusIndex
-    readonly property var focusedEntry: page.currentRows[page.rowIndex] === undefined ? null : page.currentRows[page.rowIndex]
     readonly property bool switching: pivotAnim.running
     property alias header: header
     property alias strip: strip
@@ -47,68 +45,78 @@ Page {
         return 0
     }
 
-    function entries(model: var, defaultKind: string): var {
-        const out = []
-        const n = page.modelCount(model)
-        for (let i = 0; i < n; i++) {
-            const e = model.get(i)
-            const kind = e.kind === undefined || e.kind === null || String(e.kind) === "" ? defaultKind : String(e.kind)
-            out.push({
-                kind: kind,
-                id: e.id === undefined ? -1 : Number(e.id),
-                title: e.title === undefined || e.title === null ? "" : String(e.title),
-                subtitle: e.subtitle === undefined || e.subtitle === null ? "" : String(e.subtitle)
-            })
-        }
-        return out
+    function modelAt(pivot: int): var {
+        return pivot === 0 ? page.historyModel : page.newModel
     }
 
-    function rebuild(pivot: int): void {
-        if (pivot === 0)
-            page.recentRows = page.entries(page.historyModel, "song")
-        else
-            page.newRows = page.entries(page.newModel, "album")
+    function entryAt(pivot: int, index: int): var {
+        const model = page.modelAt(pivot)
+        if (index < 0 || index >= page.modelCount(model) || typeof model.get !== "function")
+            return null
+        const e = model.get(index)
+        if (e === undefined || e === null)
+            return null
+        const kind = e.kind === undefined || e.kind === null || String(e.kind) === "" ? page.kinds[pivot] : String(e.kind)
+        return {
+            kind: kind,
+            id: e.id === undefined || e.id === null ? -1 : Number(e.id),
+            title: e.title === undefined || e.title === null ? "" : String(e.title),
+            subtitle: e.subtitle === undefined || e.subtitle === null ? "" : String(e.subtitle)
+        }
+    }
+
+    function syncFocus(): void {
+        page.focusIndex = page.activeList.focusIndex
+        page.focusedEntry = page.entryAt(page.pivotIndex, page.activeList.focusIndex)
+    }
+
+    function fixFocus(pivot: int): void {
         const pane = page.panes[pivot]
         pane.forceLayout()
-        if (pane.count > 0)
-            pane.snapTo(Math.min(pane.focusIndex, pane.count - 1))
-        page.focusIndex = page.activeList.focusIndex
+        const n = page.modelCount(page.modelAt(pivot))
+        if (n > 0)
+            pane.snapTo(Math.min(pane.focusIndex, n - 1))
+        else
+            pane.focusIndex = 0
+        page.syncFocus()
+    }
+
+    function rowsUpdated(pivot: int, from: int): void {
+        page.fixFocus(pivot)
         if (d.ready && pivot === page.shownPivot && page.live && !page.arriving && !page.switching)
-            Qt.callLater(page.runRefresh)
+            page.refreshFrom(from)
+    }
+
+    function refreshFrom(index: int): void {
+        d.pendingFrom = d.pendingFrom < 0 ? index : Math.min(d.pendingFrom, index)
+        Qt.callLater(page.runRefresh)
     }
 
     function runRefresh(): void {
-        if (!page.live)
+        const from = d.pendingFrom
+        d.pendingFrom = -1
+        if (from < 0 || !page.live)
             return
-        page.panes[page.shownPivot].refresh()
+        const pane = page.panes[page.shownPivot]
+        pane.refresh(from)
     }
 
     function moveRow(delta: int): bool {
         const before = page.activeList.focusIndex
         page.activeList.moveFocus(delta)
-        page.focusIndex = page.activeList.focusIndex
+        page.syncFocus()
         return page.activeList.focusIndex !== before
     }
 
     function pageRow(dir: int): bool {
         const moved = page.activeList.pageFocus(dir)
-        page.focusIndex = page.activeList.focusIndex
+        page.syncFocus()
         return moved
     }
 
-    function albumIds(id: int): var {
-        if (page.library === null || typeof page.library.albumTracks !== "function")
-            return []
-        const ids = []
-        for (const t of page.library.albumTracks(id))
-            ids.push(Number(t.id))
-        return ids
-    }
-
     function playEntry(e: var): void {
-        const ids = e.kind === "song" ? [e.id] : e.kind === "album" ? page.albumIds(e.id) : []
-        if (page.player !== null && typeof page.player.playTracks === "function" && ids.length > 0) {
-            page.player.playTracks(ids, 0)
+        if (page.player !== null && typeof page.player.playSource === "function" && (e.kind === "song" || e.kind === "album")) {
+            page.player.playSource(e.kind, e.id, "play", -1)
             return
         }
         page.play(e.kind, e.id)
@@ -126,7 +134,9 @@ Page {
             return false
         page.sheetEntry = e
         sheet.title = e.title
-        sheet.items = ["play", "add to queue", page.pinLabel(e.kind, e.id)]
+        sheet.items = e.kind === "song"
+            ? ["play", "play next", "add to queue", page.pinLabel(e.kind, e.id)]
+            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(e.kind, e.id)]
         sheet.open()
         return true
     }
@@ -162,7 +172,7 @@ Page {
         d.internal = true
         page.pivotIndex = target
         d.internal = false
-        page.focusIndex = page.activeList.focusIndex
+        page.syncFocus()
         if (!page.live) {
             page.shownPivot = target
             return true
@@ -232,9 +242,11 @@ Page {
     }
 
     onPivotIndexChanged: {
+        if (!d.ready)
+            return
         if (!d.internal)
             page.landPivot()
-        page.focusIndex = page.activeList.focusIndex
+        page.syncFocus()
     }
 
     onEntered: (first, kind) => {
@@ -242,8 +254,14 @@ Page {
             page.panes[page.shownPivot].feather(1)
     }
 
-    onHistoryModelChanged: page.rebuild(0)
-    onNewModelChanged: page.rebuild(1)
+    onHistoryModelChanged: {
+        if (d.ready)
+            page.fixFocus(0)
+    }
+    onNewModelChanged: {
+        if (d.ready)
+            page.fixFocus(1)
+    }
 
     onLiveChanged: {
         if (!page.live)
@@ -251,9 +269,10 @@ Page {
     }
 
     Component.onCompleted: {
-        page.rebuild(0)
-        page.rebuild(1)
+        page.fixFocus(0)
+        page.fixFocus(1)
         page.shownPivot = page.pivotIndex
+        page.syncFocus()
         d.ready = true
     }
 
@@ -262,53 +281,72 @@ Page {
 
         property bool internal: false
         property bool ready: false
+        property int pendingFrom: -1
     }
 
-    component ModelWatch: QtObject {
-        id: watch
+    function rowsDataChanged(pivot: int): void {
+        if (d.ready && pivot === page.pivotIndex)
+            page.syncFocus()
+    }
 
-        property var model: null
-        property int pivot: 0
+    Connections {
+        target: page.historyModel
+        ignoreUnknownSignals: true
 
-        readonly property Connections link: Connections {
-            target: watch.model
-            ignoreUnknownSignals: true
+        function onModelReset() {
+            page.rowsUpdated(0, 0)
+        }
 
-            function onModelReset() {
-                page.rebuild(watch.pivot)
-            }
+        function onRowsInserted(parent, first, last) {
+            page.rowsUpdated(0, first)
+        }
 
-            function onRowsInserted() {
-                page.rebuild(watch.pivot)
-            }
+        function onRowsRemoved(parent, first, last) {
+            page.rowsUpdated(0, first)
+        }
 
-            function onRowsRemoved() {
-                page.rebuild(watch.pivot)
-            }
+        function onRowsMoved(parent, start, end, destination, row) {
+            page.rowsUpdated(0, Math.min(start, row))
+        }
 
-            function onDataChanged() {
-                page.rebuild(watch.pivot)
-            }
+        function onDataChanged() {
+            page.rowsDataChanged(0)
         }
     }
 
-    ModelWatch {
-        model: page.historyModel
-        pivot: 0
-    }
+    Connections {
+        target: page.newModel
+        ignoreUnknownSignals: true
 
-    ModelWatch {
-        model: page.newModel
-        pivot: 1
+        function onModelReset() {
+            page.rowsUpdated(1, 0)
+        }
+
+        function onRowsInserted(parent, first, last) {
+            page.rowsUpdated(1, first)
+        }
+
+        function onRowsRemoved(parent, first, last) {
+            page.rowsUpdated(1, first)
+        }
+
+        function onRowsMoved(parent, start, end, destination, row) {
+            page.rowsUpdated(1, Math.min(start, row))
+        }
+
+        function onDataChanged() {
+            page.rowsDataChanged(1)
+        }
     }
 
     component HistoryRow: Item {
         id: row
 
         required property int index
-        required property var modelData
+        required property string title
+        required property string subtitle
         readonly property var pane: row.ListView.view
-        readonly property bool isFocused: page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
+        readonly property bool isFocused: row.pane !== null && page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
         property real enter: page.arriving ? 0 : 1
         property real shift: page.arriving ? Motion.pivotShift : 0
@@ -316,18 +354,25 @@ Page {
         property int enterDuration: 0
         property var enterCurve: Motion.strip
 
-        width: row.pane.width
-        height: row.pane.rowPitch
+        width: row.pane === null ? 0 : row.pane.width
+        height: row.pane === null ? 0 : row.pane.rowPitch
         transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
+
+        ListView.onPooled: {
+            enterAnim.stop()
+            row.enter = 1
+        }
 
         Connections {
             target: row.pane
 
-            function onEntrance(shift, stagger, cap, duration, stripCurve) {
+            function onEntrance(from, shift, stagger, cap, duration, stripCurve) {
+                if (row.index < from || row.pane === null)
+                    return
                 enterAnim.stop()
                 row.shift = shift
-                row.stagger = Math.min(cap, Math.max(0, row.index - row.pane.firstVisible())) * stagger
+                row.stagger = Math.min(cap, Math.max(0, row.index - Math.max(from, row.pane.firstVisible()))) * stagger
                 row.enterDuration = duration
                 row.enterCurve = stripCurve ? Motion.strip : Motion.decel
                 row.enter = 0
@@ -362,8 +407,8 @@ Page {
             id: listRow
 
             width: row.width
-            primary: row.modelData.title
-            secondary: row.modelData.subtitle
+            primary: row.title
+            secondary: row.subtitle
             focused: row.isFocused
             pressed: row.isFocused && page.pressed
             animated: page.live
@@ -375,7 +420,7 @@ Page {
 
         property int pivot: 0
 
-        signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve)
+        signal entrance(int from, real shift, int stagger, int cap, int duration, bool stripCurve)
         signal settle()
 
         function firstVisible(): int {
@@ -384,12 +429,12 @@ Page {
 
         function feather(dir: int): void {
             pane.forceLayout()
-            pane.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
+            pane.entrance(0, dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true)
         }
 
-        function refresh(): void {
+        function refresh(from: int): void {
             pane.forceLayout()
-            pane.entrance(Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
+            pane.entrance(from, Motion.listChangeShift, Motion.listChangeStagger, Motion.listChangeCap, Motion.listChange, false)
         }
 
         x: 0
@@ -397,6 +442,10 @@ Page {
         width: page.width
         height: page.height - pane.y
         visible: page.shownPivot === pane.pivot
+        onFocusIndexChanged: {
+            if (d.ready && page.activeList === pane)
+                page.syncFocus()
+        }
     }
 
     PageSurface {
@@ -407,7 +456,7 @@ Page {
         id: recentPane
 
         pivot: 0
-        model: page.recentRows
+        model: page.historyModel
         delegate: HistoryRow {}
     }
 
@@ -415,7 +464,7 @@ Page {
         id: newPane
 
         pivot: 1
-        model: page.newRows
+        model: page.newModel
         delegate: HistoryRow {}
     }
 

@@ -56,6 +56,7 @@ Page {
     property alias sheet: sheet
     property alias backdrop: backdrop
 
+    signal openQueue()
     signal sheetAction(string action, string kind, int id)
 
     list: trackList
@@ -113,8 +114,9 @@ Page {
     }
 
     function play(start: int): void {
-        if (page.player !== null && typeof page.player.playTracks === "function") {
-            page.player.playTracks(page.trackIds, start)
+        const startId = start >= 0 && start < page.trackIds.length ? page.trackIds[start] : -1
+        if (page.player !== null && typeof page.player.playSource === "function") {
+            page.player.playSource("album", page.albumId, "play", startId)
             return
         }
         console.info("casdap: play album " + page.albumId + " " + start)
@@ -144,7 +146,7 @@ Page {
     }
 
     function sheetItemsFor(kind: string, id: int): var {
-        return ["play", "add to queue", page.pinLabel(kind, id)]
+        return ["play", "play next", "add to queue", page.pinLabel(kind, id)]
     }
 
     function openSheet(): bool {
@@ -205,6 +207,10 @@ Page {
             if (!repeat)
                 page.sheetAction("add to queue", "album", page.albumId)
             return true
+        case "back":
+            if (!repeat)
+                page.openQueue()
+            return true
         case "b":
             if (repeat)
                 return false
@@ -263,6 +269,11 @@ Page {
         height: trackList.rowPitch
         transform: Translate { x: Ui.px(row.shift) * (1 - row.enter) }
         opacity: row.enter
+
+        ListView.onPooled: {
+            enterAnim.stop()
+            row.enter = 1
+        }
 
         Connections {
             target: trackList

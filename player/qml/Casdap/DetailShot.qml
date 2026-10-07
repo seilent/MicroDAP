@@ -53,6 +53,14 @@ Item {
             return sampleLibrary.tracks.map((t) => t[0])
         }
 
+        function artistAlbumRows(id: int): var {
+            return [sampleLibrary.albums[1], sampleLibrary.albums[2]]
+        }
+
+        function artistTrackRows(id: int): var {
+            return sampleLibrary.tracks.map((t) => sampleLibrary.rowOf(t))
+        }
+
         function trackRows(ids: var): var {
             return sampleLibrary.tracks.filter((t) => ids.indexOf(t[0]) >= 0).map((t) => sampleLibrary.rowOf(t))
         }

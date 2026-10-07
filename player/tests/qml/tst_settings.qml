@@ -46,6 +46,25 @@ TestCase {
         property int screenOffSeconds: 300
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
+        property bool keepPhoneInGameMode: false
+    }
+
+    QtObject {
+        id: fakeLibrary
+
+        property bool scanning: false
+        property int songCount: 9
+        property int rescans: 0
+
+        function rescanRoots() {
+            fakeLibrary.rescans++
+        }
+    }
+
+    QtObject {
+        id: fakeCodec
+
+        property bool pending: false
     }
 
     QtObject {
@@ -161,12 +180,12 @@ TestCase {
 
     readonly property var expectedKeys: [
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
-        "label-library", "folders",
+        "label-library", "folders", "rescan",
         "label-display", "accent", "orientation", "scale", "saver", "rgb", "toasts",
-        "label-power", "screenOff", "suspend", "pocket", "wifi", "gameMode",
+        "label-power", "screenOff", "suspend", "pocket", "wifi", "keepPhone", "gameMode",
         "about"
     ]
-    readonly property var overlayKeys: tc.expectedKeys.filter((k) => k !== "rgb")
+    readonly property var overlayKeys: tc.expectedKeys.filter((k) => k !== "rgb" && k !== "keepPhone")
 
     function setWindow(w, h) {
         Ui.userScale = 1.0
@@ -199,6 +218,11 @@ TestCase {
         fakeSettings.screenOffSeconds = 300
         fakeSettings.suspendMinutes = 10
         fakeSettings.wifiOffScreenOff = false
+        fakeSettings.keepPhoneInGameMode = false
+        fakeLibrary.scanning = false
+        fakeLibrary.songCount = 9
+        fakeLibrary.rescans = 0
+        fakeCodec.pending = false
         fakeAudio.pcmFormat = "44100 S24_LE"
         fakeAudio.graphRate = 44100
         fakeOutput.jackPresent = true
@@ -319,7 +343,11 @@ TestCase {
         verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "folders"))
         verify(router.dispatch("down", false))
+        compare(page.focusIndex, tc.keyIndex(page, "rescan"))
+        verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "accent"))
+        verify(router.dispatch("up", false))
+        compare(page.focusIndex, tc.keyIndex(page, "rescan"))
         verify(router.dispatch("up", false))
         compare(page.focusIndex, tc.keyIndex(page, "folders"))
         for (let i = 0; i < 25; i++)
@@ -738,7 +766,8 @@ TestCase {
         compare(page.rows[folders + 1].value, "on")
         compare(page.rows[folders + 2].title, "/run/media/armada/SD")
         compare(page.rows[folders + 2].value, "off")
-        compare(page.rows[folders + 3].kind, "label")
+        compare(page.rows[folders + 3].key, "rescan")
+        compare(page.rows[folders + 4].kind, "label")
         compare(page.focusIndex, folders)
         const sub = tc.rowItem(page, folders + 1)
         compare(sub.height, Ui.px(43))
@@ -765,7 +794,8 @@ TestCase {
         router.dispatch("up", false)
         router.dispatch("a", false)
         compare(page.foldersOpen, false)
-        compare(page.rows[folders + 1].kind, "label")
+        compare(page.rows[folders + 1].key, "rescan")
+        compare(page.rows[folders + 2].kind, "label")
     }
 
     function test_accent_swatches() {
@@ -1075,5 +1105,57 @@ TestCase {
         tryVerify(function() { return info.enter < 1 }, 1000)
         compare(info.enterDuration, 220)
         tryCompare(info, "enter", 1, 2000)
+    }
+
+    function test_rescan_row() {
+        const page = open({ library: fakeLibrary })
+        compare(tc.rowOf(page, "rescan").title, "rescan library")
+        compare(tc.rowOf(page, "rescan").value, "9 songs")
+        tc.focusKey(page, "rescan")
+        compare(router.dispatch("right", false), false)
+        compare(fakeLibrary.rescans, 0)
+        verify(router.dispatch("a", false))
+        compare(fakeLibrary.rescans, 1)
+        fakeLibrary.scanning = true
+        compare(tc.rowOf(page, "rescan").value, "scanning")
+        compare(tc.itemOf(page, "rescan").shownValue, "scanning")
+        verify(router.dispatch("a", false))
+        compare(fakeLibrary.rescans, 1)
+        fakeLibrary.songCount = 1
+        fakeLibrary.scanning = false
+        compare(tc.rowOf(page, "rescan").value, "1 song")
+    }
+
+    function test_rescan_without_library() {
+        const page = open()
+        compare(tc.rowOf(page, "rescan").value, "0 songs")
+        tc.focusKey(page, "rescan")
+        verify(router.dispatch("a", false))
+    }
+
+    function test_codec_pending() {
+        fakeSettings.btCodec = "aptx"
+        const page = open({ settings: fakeSettings, codecFragment: fakeCodec })
+        compare(tc.rowOf(page, "codec").value, "aptx")
+        fakeCodec.pending = true
+        compare(tc.rowOf(page, "codec").value, "aptx (pending)")
+        fakeCodec.pending = false
+        compare(tc.rowOf(page, "codec").value, "aptx")
+    }
+
+    function test_keep_phone_row() {
+        const page = open({ settings: fakeSettings })
+        compare(tc.rowOf(page, "keepPhone").title, "keep phone in game mode")
+        compare(tc.rowOf(page, "keepPhone").value, "off")
+        compare(tc.keyIndex(page, "keepPhone"), tc.keyIndex(page, "wifi") + 1)
+        compare(tc.keyIndex(page, "gameMode"), tc.keyIndex(page, "keepPhone") + 1)
+        tc.focusKey(page, "keepPhone")
+        router.dispatch("right", false)
+        compare(fakeSettings.keepPhoneInGameMode, true)
+        compare(tc.rowOf(page, "keepPhone").value, "on")
+        router.dispatch("a", false)
+        compare(fakeSettings.keepPhoneInGameMode, false)
+        const overlayPage = open({ settings: fakeSettings, overlay: true })
+        compare(overlayPage.indexOfKey("keepPhone"), -1)
     }
 }

@@ -3,9 +3,11 @@
 #include "DbusPad.h"
 #include "Eq.h"
 #include "Gamescope.h"
+#include "HubModels.h"
 #include "Intercept.h"
 #include "Keep.h"
 #include "Library.h"
+#include "LibraryWatcher.h"
 #include "Models.h"
 #include "Mpris.h"
 #include "OutputControl.h"
@@ -148,13 +150,25 @@ int main(int argc, char *argv[])
 
     casdap::Settings settings;
     casdap::Library library;
-    casdap::HistoryModel historyRecent(&library);
-    casdap::HistoryModel historyNew(&library);
-    historyNew.setMode(casdap::HistoryModel::New);
+    casdap::HistoryModel quickplayRecent(&library, casdap::HistoryModel::Recent, 8);
+    casdap::HistoryModel quickplayNew(&library, casdap::HistoryModel::New, 8);
+    casdap::HistoryModel historyRecent(&library, casdap::HistoryModel::Recent, 100);
+    casdap::HistoryModel historyNew(&library, casdap::HistoryModel::New, 100);
     casdap::ArtistsModel artists(&library);
     casdap::AlbumsModel albums(&library);
     casdap::SongsModel songs(&library);
     casdap::GenresModel genres(&library);
+    casdap::SectionedModel artistsHub;
+    artistsHub.setKind(QStringLiteral("artist"));
+    artistsHub.setSource(&artists);
+    casdap::SectionedModel songsHub;
+    songsHub.setKind(QStringLiteral("song"));
+    songsHub.setSource(&songs);
+    casdap::SectionedModel genresHub;
+    genresHub.setKind(QStringLiteral("genre"));
+    genresHub.setSource(&genres);
+    casdap::AlbumGridModel albumsGrid;
+    albumsGrid.setSource(&albums);
     casdap::PinsModel pins(&library);
     casdap::PlaylistsModel playlists(&library);
     casdap::AudioInfo audioInfo;
@@ -192,6 +206,11 @@ int main(int argc, char *argv[])
         power.runScreenOn();
         power.setState(&state);
         power.enableSleepWatch();
+    }
+    std::unique_ptr<casdap::LibraryWatcher> libraryWatcher;
+    if (!overlayMode) {
+        library.setSettings(&settings);
+        libraryWatcher = std::make_unique<casdap::LibraryWatcher>(&library);
     }
     casdap::StatusModel status;
 
@@ -238,14 +257,11 @@ int main(int argc, char *argv[])
         pad = std::make_unique<casdap::Pad>();
     }
 
-    auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get(),
-                        control = outputControl.get()] {
+    auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get()] {
         const bool active = !power.screenOff() && (!bridge || bridge->mapped());
         status.setActive(active);
         audioInfo.setActive(active);
         model->setActive(active);
-        if (control)
-            control->setActive(active);
     };
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status, applyActive);
     if (overlay) {
@@ -264,6 +280,12 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"), &historyRecent);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryNew"), &historyNew);
+    engine.rootContext()->setContextProperty(QStringLiteral("QuickplayRecent"), &quickplayRecent);
+    engine.rootContext()->setContextProperty(QStringLiteral("QuickplayNew"), &quickplayNew);
+    engine.rootContext()->setContextProperty(QStringLiteral("ArtistsHub"), &artistsHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("SongsHub"), &songsHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("GenresHub"), &genresHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("AlbumsGrid"), &albumsGrid);
     engine.rootContext()->setContextProperty(QStringLiteral("Playlists"), &playlists);
     engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);
     engine.rootContext()->setContextProperty(QStringLiteral("OutputControl"),
@@ -308,6 +330,9 @@ int main(int argc, char *argv[])
     auto *window = engine.rootObjects().isEmpty()
                        ? nullptr
                        : qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+    if (!overlayMode && window)
+        QObject::connect(window, &QQuickWindow::frameSwapped, &library,
+                         [&library] { library.rescanRoots(); }, Qt::SingleShotConnection);
     if (!grabOut.isEmpty() && window) {
         const int delay = qEnvironmentVariableIntValue("CASDAP_GRAB_AFTER_MS");
         QTimer::singleShot(delay > 0 ? delay : 3000, window, [window, grabOut] {

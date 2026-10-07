@@ -18,6 +18,7 @@ Page {
     property real barExit: 0
     property bool exited: false
     property int playlistCount: -1
+    property bool hideArmed: false
 
     readonly property string pageMotion: "home"
     readonly property int exitSpan: Math.max(home.focusIndex, home.menu.length - 1 - home.focusIndex)
@@ -77,10 +78,21 @@ Page {
 
     focusCount: home.menu.length
 
+    function press(name: string) {
+        if (name === "a")
+            home.pressed = true
+        if (name === "b")
+            home.hideArmed = home.overlay && !home.quickplayShown && !sheet.shown
+    }
+
     function release(name: string) {
         if (name === "a")
             home.pressed = false
-        if (name === "b" && home.overlay && !home.quickplayShown && !sheet.shown)
+        if (name !== "b")
+            return
+        const armed = home.hideArmed
+        home.hideArmed = false
+        if (armed && home.overlay && !home.quickplayShown && !sheet.shown)
             home.hideRequested()
     }
 

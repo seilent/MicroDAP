@@ -47,8 +47,9 @@ TestCase {
             property int count: 12
         }
 
-        function playTracks(ids, start) {
-            fakePlayer.calls = fakePlayer.calls.concat([{ ids: ids, start: start }])
+        function playSource(kind, id, mode, startId) {
+            fakePlayer.calls = fakePlayer.calls.concat([{ kind: kind, id: id, mode: mode, startId: startId }])
+            return 1
         }
     }
 
@@ -60,14 +61,6 @@ TestCase {
 
         function isPinned(kind, id) {
             return fakeLibrary.pinned.indexOf(kind + ":" + id) >= 0
-        }
-
-        function playlistTracks(id) {
-            return id === 1 ? [11, 12, 13] : [21, 22]
-        }
-
-        function albumTracks(id) {
-            return [{ id: id * 10 + 1 }, { id: id * 10 + 2 }]
         }
     }
 
@@ -206,11 +199,12 @@ TestCase {
         compare(page.focusIndex, 1)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
-        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([11, 12, 13]))
-        compare(fakePlayer.calls[0].start, 0)
+        compare(fakePlayer.calls[0].kind, "playlist")
+        compare(fakePlayer.calls[0].id, 1)
+        compare(fakePlayer.calls[0].mode, "play")
         router.dispatch("down", false)
         router.dispatch("a", false)
-        compare(JSON.stringify(fakePlayer.calls[1].ids), JSON.stringify([21, 22]))
+        compare(fakePlayer.calls[1].id, 2)
         compare(router.dispatch("down", false), false)
     }
 
@@ -232,7 +226,9 @@ TestCase {
         router.dispatch("x", false)
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "Morning")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay"]))
+        router.dispatch("down", false)
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
@@ -242,7 +238,7 @@ TestCase {
         compare(counters.sheetActions[0].id, 1)
         router.dispatch("down", false)
         router.dispatch("x", false)
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "unpin from quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "unpin from quickplay"]))
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
         router.dispatch("y", false)
@@ -268,12 +264,14 @@ TestCase {
         compare(page.header.text, "history")
         compare(JSON.stringify(page.pivots), JSON.stringify(["recent", "new"]))
         compare(page.pivotIndex, 0)
-        compare(page.recentRows.length, 7)
-        compare(page.newRows.length, 3)
-        compare(page.recentRows[0].kind, "song")
-        compare(page.recentRows[0].title, "Song 0")
-        compare(page.recentRows[0].subtitle, "Artist 0")
-        compare(page.newRows[0].kind, "album")
+        compare(page.recentPane.count, 7)
+        compare(page.newPane.count, 3)
+        compare(page.recentPane.model, recent)
+        compare(page.newPane.model, fresh)
+        compare(page.entryAt(0, 0).kind, "song")
+        compare(page.entryAt(0, 0).title, "Song 0")
+        compare(page.entryAt(0, 0).subtitle, "Artist 0")
+        compare(page.entryAt(1, 0).kind, "album")
         compare(page.recentPane.y, Ui.px(128))
         compare(page.recentPane.rowPitch, Ui.px(40))
         const row = tc.rowAt(page.recentPane, 0)
@@ -308,13 +306,15 @@ TestCase {
         compare(page.rowIndex, 6)
         verify(router.dispatch("a", false))
         compare(fakePlayer.calls.length, 1)
-        compare(JSON.stringify(fakePlayer.calls[0].ids), JSON.stringify([106]))
+        compare(fakePlayer.calls[0].kind, "song")
+        compare(fakePlayer.calls[0].id, 106)
         verify(router.dispatch("rb", false))
         compare(page.pivotIndex, 1)
         compare(page.shownPivot, 1)
         compare(page.rowIndex, 0)
         router.dispatch("a", false)
-        compare(JSON.stringify(fakePlayer.calls[1].ids), JSON.stringify([2001, 2002]))
+        compare(fakePlayer.calls[1].kind, "album")
+        compare(fakePlayer.calls[1].id, 200)
         compare(router.dispatch("rb", false), true)
         compare(page.pivotIndex, 1)
         router.dispatch("lb", false)
@@ -339,7 +339,8 @@ TestCase {
         verify(router.dispatch("x", false))
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "Song 0")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "unpin from quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "unpin from quickplay"]))
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
         compare(counters.sheetActions[0].action, "add to queue")
@@ -348,12 +349,12 @@ TestCase {
         router.dispatch("y", false)
         compare(counters.sheetActions[1].action, "add to queue")
         recent.clear()
-        compare(page.recentRows.length, 0)
+        compare(page.recentPane.count, 0)
         compare(page.focusedEntry, null)
         compare(router.dispatch("a", false), true)
         compare(fakePlayer.calls.length, 0)
         recent.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "song" })
-        compare(page.recentRows.length, 1)
+        compare(page.recentPane.count, 1)
         compare(page.focusedEntry.id, 300)
     }
 
@@ -494,14 +495,24 @@ TestCase {
         const page = open(historyComponent, { animated: true, player: fakePlayer })
         recent.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "song" })
         tryVerify(function() {
+            const r = page.recentPane.itemAtIndex(7)
+            return r !== null && r.enter < 1
+        }, 1000)
+        const added = tc.rowAt(page.recentPane, 7)
+        compare(added.enterDuration, 220)
+        compare(added.shift, Motion.listChangeShift)
+        compare(added.stagger, 0)
+        compare(tc.rowAt(page.recentPane, 0).enter, 1)
+        tryCompare(added, "enter", 1, 2000)
+        recent.move(6, 0, 1)
+        tryVerify(function() {
             const r = page.recentPane.itemAtIndex(0)
             return r !== null && r.enter < 1
         }, 1000)
-        const first = tc.rowAt(page.recentPane, 0)
-        compare(first.enterDuration, 220)
-        compare(first.shift, Motion.listChangeShift)
+        compare(tc.rowAt(page.recentPane, 0).rowItem.primary, "Song 6")
         compare(tc.rowAt(page.recentPane, 1).stagger, 50)
-        tryCompare(first, "enter", 1, 2000)
+        tryCompare(tc.rowAt(page.recentPane, 0), "enter", 1, 2000)
+        tryCompare(tc.rowAt(page.recentPane, 1), "enter", 1, 2000)
         fresh.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "album" })
         wait(20)
         compare(tc.rowAt(page.recentPane, 0).enter, 1)

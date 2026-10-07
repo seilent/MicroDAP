@@ -42,6 +42,16 @@ Item {
         toast.show(map.artist !== undefined ? map.artist : "", map.title !== undefined ? map.title : "")
     }
 
+    function addedLabel(count: int): string {
+        return "added " + count + (count === 1 ? " song" : " songs")
+    }
+
+    function showAdded(count: int, source: string): void {
+        if (count <= 0)
+            return
+        toast.show(layer.addedLabel(count), source)
+    }
+
     function showPhoneToast() {
         if (layer.onNowPlaying || layer.onBluetooth || layer.bluez.transportActive !== true)
             return

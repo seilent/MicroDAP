@@ -27,19 +27,19 @@ TestCase {
         pad: null
     }
 
-    ListModel {
+    FakeSectioned {
         id: artists
     }
 
-    ListModel {
+    FakeAlbumGrid {
         id: albums
     }
 
-    ListModel {
+    FakeSectioned {
         id: songs
     }
 
-    ListModel {
+    FakeSectioned {
         id: genres
     }
 
@@ -67,15 +67,16 @@ TestCase {
         Page {}
     }
 
-    function fill(model, prefix, letters, per) {
-        model.clear()
+    function entries(prefix, letters, per) {
+        const out = []
         let id = 1
         for (const letter of letters) {
             for (let i = 0; i < per; i++) {
-                model.append({ id: id, title: letter + " " + prefix + " " + id, subtitle: "Artist", artPath: "", section: letter.toUpperCase() })
+                out.push({ id: id, title: letter + " " + prefix + " " + id, subtitle: "Artist", artPath: "", section: letter.toUpperCase() })
                 id++
             }
         }
+        return out
     }
 
     function setWindow(w, h) {
@@ -92,10 +93,13 @@ TestCase {
         tc.setWindow(640, 960)
         pages.clear()
         pages.animate = false
-        tc.fill(artists, "artist", ["a", "c", "h", "m"], 6)
-        tc.fill(albums, "album", ["#", "b", "k"], 4)
-        tc.fill(songs, "song", ["a", "b", "c", "d", "e", "f", "g", "h"], 5)
-        tc.fill(genres, "genre", ["r"], 1)
+        for (const m of [artists, songs, genres, albums])
+            m.active = false
+        albums.columns = 3
+        artists.load(tc.entries("artist", ["a", "c", "h", "m"], 6), "artist")
+        albums.load(tc.entries("album", ["#", "b", "k"], 4))
+        songs.load(tc.entries("song", ["a", "b", "c", "d", "e", "f", "g", "h"], 5), "song")
+        genres.load(tc.entries("genre", ["r"], 1), "genre")
         counters.jumps = 0
     }
 
@@ -205,8 +209,8 @@ TestCase {
         compare(grid.focusLetter, "c")
         verify(router.dispatch("a", false))
         compare(grid.shown, false)
-        compare(page.artistRows[7].kind, "divider")
-        compare(page.artistRows[7].letter, "c")
+        compare(page.entryAt(0, 7).kind, "divider")
+        compare(page.entryAt(0, 7).letter, "c")
         compare(page.rowIndex, 8)
         compare(page.artistsPane.contentY, 7 * page.artistsPane.rowPitch)
         compare(page.jump.shown, true)
@@ -265,7 +269,7 @@ TestCase {
         router.dispatch("right", false)
         compare(grid.focusLetter, "k")
         router.dispatch("a", false)
-        const cell = page.albumRows[page.rowIndex][page.gridCol]
+        const cell = albums.cellAt(page.rowIndex, page.gridCol)
         compare(cell.kind, "letter")
         compare(cell.letter, "k")
     }

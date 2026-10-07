@@ -41,19 +41,19 @@ TestCase {
         }
     }
 
-    ListModel {
+    FakeSectioned {
         id: artists
     }
 
-    ListModel {
+    FakeAlbumGrid {
         id: albums
     }
 
-    ListModel {
+    FakeSectioned {
         id: songs
     }
 
-    ListModel {
+    FakeSectioned {
         id: genres
     }
 
@@ -65,8 +65,9 @@ TestCase {
             property int count: 12
         }
 
-        function playTracks(ids, start) {
-            fakePlayer.calls = fakePlayer.calls.concat([{ ids: ids, start: start }])
+        function playSource(kind, id, mode, startId) {
+            fakePlayer.calls = fakePlayer.calls.concat([{ kind: kind, id: id, mode: mode, startId: startId }])
+            return 1
         }
     }
 
@@ -79,6 +80,10 @@ TestCase {
         function isPinned(kind, id) {
             return fakeLibrary.pinned.indexOf(kind + ":" + id) >= 0
         }
+    }
+
+    ListModel {
+        id: playlists
     }
 
     QtObject {
@@ -113,14 +118,6 @@ TestCase {
         Page {}
     }
 
-    function childIndex(parent, item) {
-        for (let i = 0; i < parent.children.length; i++) {
-            if (parent.children[i] === item)
-                return i
-        }
-        return -1
-    }
-
     function letterAt(i, per) {
         return String.fromCharCode(97 + Math.floor(i / per))
     }
@@ -130,21 +127,22 @@ TestCase {
         return pane.itemAtIndex(index)
     }
 
-    function fill(model, prefix, n, per) {
-        model.clear()
+    function entries(prefix, n, per) {
+        const out = []
         for (let i = 0; i < n; i++) {
             const letter = tc.letterAt(i, per)
-            model.append({ id: i + 1, title: letter + " " + prefix + " " + (i + 1), subtitle: "Artist " + (i + 1), artPath: "", section: letter.toUpperCase() })
+            out.push({ id: i + 1, title: letter + " " + prefix + " " + (i + 1), subtitle: "Artist " + (i + 1), artPath: "", section: letter.toUpperCase() })
         }
+        return out
     }
 
-    function fillAlbums(n) {
-        albums.clear()
-        albums.append({ id: 1000, title: "3 albums", subtitle: "Various", artPath: "", section: "#" })
+    function albumEntries(n) {
+        const out = [{ id: 1000, title: "3 albums", subtitle: "Various", artPath: "", section: "#" }]
         for (let i = 0; i < n; i++) {
             const letter = tc.letterAt(i, 4)
-            albums.append({ id: i + 1, title: letter + " album " + (i + 1), subtitle: "Artist " + (i + 1), artPath: "", section: letter.toUpperCase() })
+            out.push({ id: i + 1, title: letter + " album " + (i + 1), subtitle: "Artist " + (i + 1), artPath: "", section: letter.toUpperCase() })
         }
+        return out
     }
 
     function setWindow(w, h) {
@@ -161,14 +159,18 @@ TestCase {
         tc.setWindow(640, 960)
         pages.clear()
         pages.animate = false
-        tc.fill(artists, "artist", 12, 3)
-        tc.fillAlbums(19)
-        tc.fill(songs, "song", 30, 3)
-        tc.fill(genres, "genre", 4, 1)
+        for (const m of [artists, songs, genres, albums])
+            m.active = false
+        albums.columns = 3
+        artists.load(tc.entries("artist", 12, 3), "artist")
+        albums.load(tc.albumEntries(19))
+        songs.load(tc.entries("song", 30, 3), "song")
+        genres.load(tc.entries("genre", 4, 1), "genre")
         fakePlayer.calls = []
         fakePlayer.queue.count = 12
         fakeLibrary.scanning = false
         fakeLibrary.pinned = []
+        playlists.clear()
         counters.opened = []
         counters.nowPlaying = 0
         counters.jumps = 0
@@ -201,35 +203,58 @@ TestCase {
         compare(page.focusBar.visible, true)
     }
 
+    function test_lazy_panes() {
+        const page = open()
+        compare(artists.active, true)
+        compare(albums.active, false)
+        compare(songs.active, false)
+        compare(genres.active, false)
+        compare(page.artistsPane.count, artists.count)
+        compare(page.albumsPane.count, 0)
+        compare(page.songsPane.count, 0)
+        verify(router.dispatch("rb", false))
+        compare(albums.active, true)
+        compare(page.albumsPane.count, albums.count)
+        compare(songs.active, false)
+        page.pivotIndex = 2
+        compare(songs.active, true)
+        compare(page.songsPane.count, songs.count)
+        compare(genres.active, false)
+    }
+
     function test_grid_cols() {
         const page = open({ pivotIndex: 1 })
         compare(Ui.canvasW, 320)
         compare(Ui.gridCols, 3)
         compare(page.cols, 3)
-        compare(page.albumRows[0].length, 3)
-        compare(page.albumRows.length, Math.ceil(page.albumCells.length / 3))
+        compare(albums.columns, 3)
+        compare(albums.cellCount(0), 3)
+        compare(page.albumsPane.count, Math.ceil(albums.flat.length / 3))
         tc.setWindow(1920, 1080)
         fuzzyCompare(Ui.canvasW, 483, 1)
         compare(Ui.gridCols, 6)
         compare(page.cols, 6)
-        compare(page.albumRows[0].length, 6)
+        compare(albums.columns, 6)
+        compare(albums.cellCount(0), 6)
+        compare(page.albumsPane.count, Math.ceil(albums.flat.length / 6))
         compare(page.albumsPane.y, Ui.px(98))
         compare(page.albumsPane.rowPitch, Ui.px(60 + 24 + 12))
     }
 
     function test_grid_letter_tiles() {
         const page = open({ pivotIndex: 1 })
-        compare(page.albumCells[0].kind, "letter")
-        compare(page.albumCells[0].letter, "#")
-        compare(page.albumCells[1].kind, "album")
-        compare(page.albumCells[2].kind, "letter")
-        compare(page.albumCells[2].letter, "a")
-        const row = page.albumsPane.itemAtIndex(0)
-        verify(row !== null)
+        const first = albums.cells(0)
+        compare(first[0].kind, "letter")
+        compare(first[0].letter, "#")
+        compare(first[1].kind, "album")
+        compare(first[2].kind, "letter")
+        compare(first[2].letter, "a")
+        const row = tc.rowAt(page.albumsPane, 0)
         compare(row.cellCount, 3)
-        compare(row.cellAt(0).letterItem.visible, true)
-        compare(row.cellAt(0).tileItem.visible, false)
-        compare(row.cellAt(1).tileItem.visible, true)
+        verify(row.cellAt(0).letterItem !== null)
+        compare(row.cellAt(0).tileItem, null)
+        verify(row.cellAt(1).tileItem !== null)
+        compare(row.cellAt(1).letterItem, null)
         compare(row.cellAt(0).letterItem.letter, "#")
     }
 
@@ -245,6 +270,7 @@ TestCase {
             compare(cell.width, Ui.px(71))
             compare(cell.height, Ui.px(71 + 24))
             const tile = cell.tileItem
+            verify(tile !== null)
             compare(tile.height, Ui.px(71))
             const caption = tile.captionItem
             compare(caption.visible, true)
@@ -277,7 +303,7 @@ TestCase {
         const cell = row.cellAt(0)
         compare(cell.letter, true)
         compare(cell.height, Ui.px(71))
-        compare(cell.tileItem.visible, false)
+        compare(cell.tileItem, null)
         compare(cell.letterItem.height, Ui.px(71))
     }
 
@@ -354,9 +380,9 @@ TestCase {
 
     function test_dividers_skipped() {
         const page = open()
-        compare(page.artistRows[0].kind, "divider")
-        compare(page.artistRows[0].letter, "a")
-        compare(page.artistRows[1].kind, "artist")
+        compare(page.entryAt(0, 0).kind, "divider")
+        compare(page.entryAt(0, 0).letter, "a")
+        compare(page.entryAt(0, 1).kind, "artist")
         compare(page.rowIndex, 1)
         verify(router.dispatch("up", false) === false)
         compare(page.rowIndex, 1)
@@ -366,7 +392,7 @@ TestCase {
         compare(page.rowIndex, 3)
         verify(router.dispatch("down", false))
         compare(page.rowIndex, 5)
-        compare(page.artistRows[4].kind, "divider")
+        compare(page.entryAt(0, 4).kind, "divider")
         verify(router.dispatch("up", false))
         compare(page.rowIndex, 3)
         const divider = tc.rowAt(page.artistsPane, 0)
@@ -380,8 +406,10 @@ TestCase {
         const entry = tc.rowAt(page.artistsPane, 3)
         compare(entry.rowItem.visible, true)
         compare(entry.rowItem.focused, true)
-        compare(entry.rowItem.primary, page.artistRows[3].title)
+        compare(entry.rowItem.primary, page.entryAt(0, 3).title)
         compare(entry.rowItem.countLine, true)
+        compare(entry.rowItem.ring, false)
+        compare(entry.rowItem.ringItem, null)
         compare(entry.rowItem.secondaryItem.font.capitalization, Font.AllUppercase)
         compare(entry.rowItem.secondaryItem.font.pixelSize, Ui.fontPx(11))
         fuzzyCompare(entry.rowItem.secondaryItem.color.a, 0.6, 1 / 255)
@@ -390,7 +418,7 @@ TestCase {
 
     function test_songs_rows_and_play() {
         const page = open({ pivotIndex: 2, player: fakePlayer })
-        compare(page.songRows[0].kind, "divider")
+        compare(page.entryAt(2, 0).kind, "divider")
         compare(page.rowIndex, 1)
         const first = page.songsPane.itemAtIndex(1)
         compare(first.rowItem.number, "1")
@@ -399,18 +427,18 @@ TestCase {
         compare(first.rowItem.countLine, false)
         compare(first.rowItem.secondaryItem.font.capitalization, Font.MixedCase)
         compare(first.rowItem.textX, Ui.px(20 + 24))
-        compare(page.songIds.length, 30)
         verify(router.dispatch("a", false))
         compare(fakePlayer.calls.length, 1)
-        compare(fakePlayer.calls[0].ids.length, 30)
-        compare(fakePlayer.calls[0].ids[0], 1)
-        compare(fakePlayer.calls[0].start, 0)
+        compare(fakePlayer.calls[0].kind, "all")
+        compare(fakePlayer.calls[0].mode, "play")
+        compare(fakePlayer.calls[0].startId, 1)
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
         compare(page.rowIndex, 5)
         router.dispatch("a", false)
-        compare(fakePlayer.calls[1].start, 3)
+        compare(fakePlayer.calls[1].kind, "all")
+        compare(fakePlayer.calls[1].startId, 4)
         compare(page.songsPane.itemAtIndex(5).rowItem.number, "4")
     }
 
@@ -451,16 +479,60 @@ TestCase {
         compare(counters.opened[1].id, 1)
         page.switchPivot(3)
         compare(page.pivotIndex, 3)
-        compare(page.genresPane.itemAtIndex(1).rowItem.bold, true)
+        compare(tc.rowAt(page.genresPane, 1).rowItem.bold, true)
         router.dispatch("a", false)
-        compare(counters.opened[2].kind, "genre")
+        compare(counters.opened.length, 2)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].kind, "genre")
+        compare(counters.played[0].id, 1)
         compare(router.dispatch("left", false), false)
+    }
+
+    function test_genre_plays_and_sheet() {
+        const page = open({ pivotIndex: 3, player: fakePlayer, library: fakeLibrary })
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].kind, "genre")
+        compare(fakePlayer.calls[0].id, 1)
+        compare(fakePlayer.calls[0].mode, "play")
+        compare(fakePlayer.calls[0].startId, -1)
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue"]))
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 2)
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, "add to queue")
+        compare(counters.sheetActions[0].kind, "genre")
+        router.dispatch("y", false)
+        compare(counters.sheetActions[1].action, "add to queue")
+        compare(counters.sheetActions[1].kind, "genre")
+    }
+
+    function test_playlist_rows_play() {
+        playlists.clear()
+        playlists.append({ id: 5, title: "road", subtitle: "2 songs", artPath: "", section: "playlists" })
+        const page = open({ pivotIndex: 4, player: fakePlayer, library: fakeLibrary, playlistsModel: playlists })
+        compare(page.playlistRows.length, 2)
+        compare(page.playlistRows[1].kind, "playlist")
+        compare(page.playlistRows[1].title, "road")
+        compare(page.playlistRows[1].subtitle, "2 songs")
+        compare(page.playlistsPane.count, 2)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].kind, "playlist")
+        compare(fakePlayer.calls[0].id, 5)
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay"]))
     }
 
     function test_grid_last_row_col_clamp() {
         const page = open({ pivotIndex: 1 })
-        const lastRow = page.albumRows.length - 1
-        const lastLen = page.albumRows[lastRow].length
+        const lastRow = page.albumsPane.count - 1
+        const lastLen = albums.cellCount(lastRow)
         verify(lastLen < 3)
         page.gridCol = 2
         for (let i = 0; i < 20; i++)
@@ -477,13 +549,15 @@ TestCase {
         compare(page.playlistRows[0].kind, "nowplaying")
         compare(page.playlistRows[0].title, "now playing")
         compare(page.playlistRows[0].subtitle, "12 songs")
-        const row = page.playlistsPane.itemAtIndex(0)
+        const row = tc.rowAt(page.playlistsPane, 0)
         compare(row.rowItem.ring, true)
+        verify(row.rowItem.ringItem !== null)
         compare(row.rowItem.bold, true)
         compare(row.rowItem.focused, true)
         compare(row.rowItem.primaryRole.name, "listPlaylist")
         fakePlayer.queue.count = 1
         compare(page.playlistRows[0].subtitle, "1 song")
+        compare(row.rowItem.secondary, "1 song")
         router.dispatch("a", false)
         compare(counters.nowPlaying, 1)
         compare(router.dispatch("x", false), true)
@@ -498,8 +572,8 @@ TestCase {
         verify(router.dispatch("rt", false))
         compare(page.jump.shown, true)
         compare(page.jump.opacity, 1)
-        compare(page.songRows[page.rowIndex].kind, "song")
-        compare(page.jump.letter, page.songRows[page.rowIndex].letter)
+        compare(page.entryAt(2, page.rowIndex).kind, "song")
+        compare(page.jump.letter, page.entryAt(2, page.rowIndex).letter)
         verify(page.rowIndex > 1)
         compare(page.jump.text.font.pixelSize, Ui.fontPx(120))
         page.songsPane.completeScroll()
@@ -516,8 +590,7 @@ TestCase {
         page.gridCol = 1
         verify(router.dispatch("rt", false))
         compare(page.jump.shown, true)
-        const cell = page.albumRows[page.rowIndex][page.gridCol]
-        compare(page.jump.letter, cell.letter)
+        compare(page.jump.letter, albums.cellAt(page.rowIndex, page.gridCol).letter)
     }
 
     function test_back_view_opens_jump_grid() {
@@ -538,10 +611,12 @@ TestCase {
         verify(router.dispatch("x", false))
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "a song 1")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "pin to quickplay"]))
         router.dispatch("down", false)
         compare(page.sheet.focusIndex, 1)
         compare(page.rowIndex, 1)
+        router.dispatch("down", false)
+        compare(page.sheet.focusIndex, 2)
         router.dispatch("a", false)
         compare(page.sheet.shown, false)
         compare(counters.sheetActions.length, 1)
@@ -551,14 +626,20 @@ TestCase {
         router.dispatch("x", false)
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
-        compare(fakePlayer.calls[0].start, 0)
+        compare(fakePlayer.calls[0].kind, "all")
+        compare(fakePlayer.calls[0].startId, 1)
         router.dispatch("x", false)
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
         compare(counters.sheetActions[1].action, "pin to quickplay")
         router.dispatch("y", false)
         compare(counters.sheetActions[2].action, "add to queue")
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions[3].action, "play next")
         router.dispatch("x", false)
         verify(router.dispatch("b", false))
         compare(page.sheet.shown, false)
@@ -576,7 +657,8 @@ TestCase {
         fakeLibrary.pinned = ["song:1"]
         const page = open({ pivotIndex: 2, library: fakeLibrary })
         verify(router.dispatch("x", false))
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "unpin from quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "unpin from quickplay"]))
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
@@ -586,7 +668,8 @@ TestCase {
         compare(counters.sheetActions[0].id, 1)
         router.dispatch("down", false)
         verify(router.dispatch("x", false))
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "add to queue", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "pin to quickplay"]))
+        router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)
@@ -607,7 +690,7 @@ TestCase {
         fakeLibrary.scanning = false
         const pane = page.songsPane
         compare(tc.rowAt(pane, 0).enter, 1)
-        songs.append({ id: 99, title: "z song", subtitle: "Artist", artPath: "", section: "Z" })
+        songs.push({ id: 99, title: "z song", subtitle: "Artist", artPath: "", section: "Z" })
         tryVerify(tc.entering(pane, 0), 1000)
         const visibleRows = Math.min(9, Math.ceil(pane.height / pane.rowPitch))
         const last = visibleRows - 1
@@ -621,7 +704,7 @@ TestCase {
         }
         tryCompare(tc.rowAt(pane, 0), "enter", 1, 2000)
         tryCompare(tc.rowAt(pane, last), "enter", 1, 2000)
-        songs.append({ id: 100, title: "z song 2", subtitle: "Artist", artPath: "", section: "Z" })
+        songs.push({ id: 100, title: "z song 2", subtitle: "Artist", artPath: "", section: "Z" })
         wait(20)
         compare(tc.rowAt(pane, 0).enter, 1)
     }
@@ -629,7 +712,7 @@ TestCase {
     function test_f12_reset_during_scan() {
         const page = open({ animated: true, pivotIndex: 0, library: fakeLibrary })
         fakeLibrary.scanning = true
-        artists.append({ id: 99, title: "z artist", subtitle: "1 album, 1 song", artPath: "", section: "Z" })
+        artists.push({ id: 99, title: "z artist", subtitle: "1 album, 1 song", artPath: "", section: "Z" })
         wait(20)
         compare(tc.rowAt(page.artistsPane, 0).enter, 1)
         fakeLibrary.scanning = false
@@ -639,22 +722,33 @@ TestCase {
     }
 
     function test_f12_refreshes_shown_pane() {
-        const page = open({ animated: true, pivotIndex: 2, library: fakeLibrary })
+        const page = open({ animated: true, pivotIndex: 0, library: fakeLibrary })
+        page.switchPivot(2)
+        tryCompare(page, "switching", false, 3000)
+        tryCompare(tc.rowAt(page.songsPane, 0), "enter", 1, 2000)
         fakeLibrary.scanning = true
         fakeLibrary.scanning = false
-        artists.append({ id: 99, title: "z artist", subtitle: "", artPath: "", section: "Z" })
-        songs.append({ id: 99, title: "z song", subtitle: "Artist", artPath: "", section: "Z" })
+        artists.push({ id: 99, title: "z artist", subtitle: "", artPath: "", section: "Z" })
         tryVerify(tc.entering(page.songsPane, 0), 1000)
         compare(tc.rowAt(page.artistsPane, 0).enter, 1)
-        compare(page.songRows[page.songRows.length - 1].id, 99)
         tryCompare(tc.rowAt(page.songsPane, 0), "enter", 1, 2000)
     }
 
     function test_f12_not_without_scan() {
         const page = open({ animated: true, pivotIndex: 2, library: fakeLibrary })
-        songs.append({ id: 99, title: "z song", subtitle: "Artist", artPath: "", section: "Z" })
+        songs.push({ id: 99, title: "z song", subtitle: "Artist", artPath: "", section: "Z" })
         wait(20)
         compare(tc.rowAt(page.songsPane, 0).enter, 1)
+    }
+
+    function test_unbound_change_ignored() {
+        const page = open({ animated: true, pivotIndex: 2, library: fakeLibrary })
+        fakeLibrary.scanning = true
+        fakeLibrary.scanning = false
+        artists.push({ id: 99, title: "z artist", subtitle: "", artPath: "", section: "Z" })
+        wait(20)
+        compare(tc.rowAt(page.songsPane, 0).enter, 1)
+        compare(page.artistsPane.count, 0)
     }
 
     function test_screen_off_completes() {
@@ -694,11 +788,24 @@ TestCase {
             router.dispatch("down", false)
         const list = page.songsPane
         list.completeScroll()
-        compare(page.rowIndex, page.songRows.length - 1)
+        compare(page.rowIndex, songs.count - 1)
         const top = list.focusIndex * list.rowPitch - list.contentY
         verify(top >= 0)
         verify(top + list.rowPitch <= list.height + 0.01)
         compare(router.dispatch("down", false), false)
+    }
+
+    function test_reused_rows_settle() {
+        const page = open({ pivotIndex: 2 })
+        compare(page.songsPane.reuseItems, true)
+        for (let i = 0; i < 40; i++)
+            router.dispatch("down", false)
+        page.songsPane.completeScroll()
+        page.songsPane.forceLayout()
+        const row = tc.rowAt(page.songsPane, page.rowIndex)
+        compare(row.enter, 1)
+        compare(row.rowItem.focused, true)
+        compare(row.rowItem.primary, page.entryAt(2, page.rowIndex).title)
     }
 
     function test_t2a_first_show() {
