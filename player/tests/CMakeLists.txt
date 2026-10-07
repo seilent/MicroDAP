@@ -93,6 +93,11 @@ target_link_libraries(tst_output PRIVATE casdapcore Qt6::Test)
 add_test(NAME output COMMAND tst_output)
 casdap_test_env(output)
 
+qt_add_executable(tst_artcolor core/tst_artcolor.cpp)
+target_link_libraries(tst_artcolor PRIVATE casdapcore Qt6::Test)
+add_test(NAME artcolor COMMAND tst_artcolor)
+casdap_test_env(artcolor)
+
 qt_add_executable(tst_scale core/tst_scale.cpp)
 target_link_libraries(tst_scale PRIVATE casdapcore Qt6::Test)
 add_test(NAME scale COMMAND tst_scale)

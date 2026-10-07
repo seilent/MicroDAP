@@ -132,9 +132,68 @@ QtObject {
     readonly property color black: "#000000"
     readonly property real dimAlpha: 0.6
     readonly property var backdropStops: [[0.0, 0.15], [0.55, 0.35], [1.0, 0.75]]
-    readonly property var accentOptions: ["#FA2A55", "#F09609", "#1BA1E2", "#339933", "#A200FF"]
-    property color accent: "#FA2A55"
-    readonly property color accentBright: "#FF4D79"
+    readonly property int accentHueDefault: 350
+    readonly property int accentHueStep: 10
+    readonly property int accentHueCount: 36
+    readonly property real accentValue: 0.98
+    readonly property int accentSatMax: 83
+    readonly property int accentSatMin: 40
+    readonly property real accentLumFloor: 0.149
+    readonly property real accentBrightSat: 0.84
+    property color accent: ui.accentForHue(ui.accentHueDefault)
+    property color accentBright: ui.brightForHue(ui.accentHueDefault)
+
+    function hueOnGrid(h: real): int {
+        const n = Math.round(Number(h) / ui.accentHueStep) % ui.accentHueCount
+        return (n + ui.accentHueCount) % ui.accentHueCount * ui.accentHueStep
+    }
+
+    function stepHue(h: int, delta: int): int {
+        return ui.hueOnGrid(ui.hueOnGrid(h) + delta * ui.accentHueStep)
+    }
+
+    function hsvChannels(h: real, s: real, v: real): var {
+        const hh = ((h % 360) + 360) % 360 / 60
+        const i = Math.floor(hh) % 6
+        const f = hh - Math.floor(hh)
+        const p = v * (1 - s)
+        const q = v * (1 - s * f)
+        const t = v * (1 - s * (1 - f))
+        const rgb = i === 0 ? [v, t, p] : i === 1 ? [q, v, p] : i === 2 ? [p, v, t]
+            : i === 3 ? [p, q, v] : i === 4 ? [t, p, v] : [v, p, q]
+        return [Math.round(255 * rgb[0]), Math.round(255 * rgb[1]), Math.round(255 * rgb[2])]
+    }
+
+    function linear(c: int): real {
+        const x = c / 255
+        return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)
+    }
+
+    function luminance(ch: var): real {
+        return 0.2126 * ui.linear(ch[0]) + 0.7152 * ui.linear(ch[1]) + 0.0722 * ui.linear(ch[2])
+    }
+
+    function accentSaturation(h: int): real {
+        for (let k = ui.accentSatMax; k > ui.accentSatMin; k--) {
+            if (ui.luminance(ui.hsvChannels(h, k / 100, ui.accentValue)) >= ui.accentLumFloor)
+                return k / 100
+        }
+        return ui.accentSatMin / 100
+    }
+
+    function channelsColor(ch: var): color {
+        return Qt.rgba(ch[0] / 255, ch[1] / 255, ch[2] / 255, 1)
+    }
+
+    function accentForHue(h: int): color {
+        const hue = ui.hueOnGrid(h)
+        return ui.channelsColor(ui.hsvChannels(hue, ui.accentSaturation(hue), ui.accentValue))
+    }
+
+    function brightForHue(h: int): color {
+        const hue = ui.hueOnGrid(h)
+        return ui.channelsColor(ui.hsvChannels(hue, ui.accentBrightSat * ui.accentSaturation(hue), 1.0))
+    }
     readonly property real focusBorder: 2
     readonly property real focusBarWidth: 2
     readonly property real focusBarOffset: 8
@@ -217,7 +276,6 @@ QtObject {
     readonly property real settingsPitch: 43
     readonly property real settingsLabelBaselineInset: ui.letterInsetBaseline
     readonly property real settingsSwatch: 12
-    readonly property real settingsSwatchGap: 4
     readonly property real settingsValueFocused: 0.85
     readonly property real settingsValueDim: 0.4
     readonly property real eqValueGap: 8

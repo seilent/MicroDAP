@@ -3,6 +3,7 @@
 #include "Scanner.h"
 
 #include <QCoreApplication>
+#include <QColor>
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -24,6 +25,16 @@ QString keyRoots()
 QString keyAccent()
 {
     return QStringLiteral("accent");
+}
+
+QString keyAccentHue()
+{
+    return QStringLiteral("accentHue");
+}
+
+QString keyAccentFromArt()
+{
+    return QStringLiteral("accentFromArt");
 }
 
 QString keyScale()
@@ -163,15 +174,21 @@ QStringList Settings::codecs()
             QStringLiteral("ldac"), QStringLiteral("sbc")};
 }
 
-QStringList Settings::accents()
+int Settings::normalizeHue(int hue)
 {
-    return {
-        QStringLiteral("#FA2A55"),
-        QStringLiteral("#F09609"),
-        QStringLiteral("#1BA1E2"),
-        QStringLiteral("#339933"),
-        QStringLiteral("#A200FF"),
-    };
+    const int stepped = qRound(hue / 10.0) * 10;
+    return ((stepped % 360) + 360) % 360;
+}
+
+int Settings::hueFromColor(const QString &color)
+{
+    const QColor value = QColor::fromString(color);
+    if (!value.isValid())
+        return defaultAccentHue;
+    const float hue = value.hsvHueF();
+    if (hue < 0)
+        return defaultAccentHue;
+    return ((qRound(hue * 36.0f) * 10) % 360 + 360) % 360;
 }
 
 QStringList Settings::hpGains()
@@ -244,8 +261,19 @@ void Settings::load()
     const QStringList roots = m_settings.value(keyRoots()).toStringList();
     m_roots = roots.isEmpty() ? defaultRoots() : roots;
 
-    const QString accent = m_settings.value(keyAccent()).toString().toUpper();
-    m_accent = accents().contains(accent) ? accent : accents().first();
+    const QVariant storedHue = m_settings.value(keyAccentHue());
+    bool hueOk = false;
+    const int hue = storedHue.toInt(&hueOk);
+    if (storedHue.isValid()) {
+        m_accentHue = hueOk ? normalizeHue(hue) : defaultAccentHue;
+    } else if (m_settings.contains(keyAccent())) {
+        m_accentHue = hueFromColor(m_settings.value(keyAccent()).toString());
+        m_dirty.insert(keyAccentHue(), m_accentHue);
+    } else {
+        m_accentHue = defaultAccentHue;
+    }
+    m_dropAccent = m_settings.contains(keyAccent());
+    m_accentFromArt = m_settings.value(keyAccentFromArt(), false).toBool();
 
     m_scale = normalizeScale(m_settings.value(keyScale(), 1.0).toDouble());
     m_pocketControls = m_settings.value(keyPocketControls(), false).toBool();
@@ -308,19 +336,33 @@ void Settings::setRoots(const QStringList &roots)
     emit rootsChanged();
 }
 
-QString Settings::accent() const
+int Settings::accentHue() const
 {
-    return m_accent;
+    return m_accentHue;
 }
 
-void Settings::setAccent(const QString &accent)
+void Settings::setAccentHue(int hue)
 {
-    const QString value = accent.toUpper();
-    if (!accents().contains(value) || m_accent == value)
+    const int value = normalizeHue(hue);
+    if (m_accentHue == value)
         return;
-    m_accent = value;
-    store(keyAccent(), m_accent);
-    emit accentChanged();
+    m_accentHue = value;
+    store(keyAccentHue(), m_accentHue);
+    emit accentHueChanged();
+}
+
+bool Settings::accentFromArt() const
+{
+    return m_accentFromArt;
+}
+
+void Settings::setAccentFromArt(bool on)
+{
+    if (m_accentFromArt == on)
+        return;
+    m_accentFromArt = on;
+    store(keyAccentFromArt(), m_accentFromArt);
+    emit accentFromArtChanged();
 }
 
 double Settings::scale() const
@@ -395,6 +437,10 @@ void Settings::sync()
     for (auto it = m_dirty.cbegin(); it != m_dirty.cend(); ++it)
         m_settings.setValue(it.key(), it.value());
     m_dirty.clear();
+    if (m_dropAccent) {
+        m_settings.remove(keyAccent());
+        m_dropAccent = false;
+    }
     m_settings.sync();
 }
 

@@ -62,7 +62,8 @@ Page {
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
     readonly property string eqOutput: page.hasEq && page.eq.activeOutput !== undefined ? String(page.eq.activeOutput) : ""
     readonly property string eqValue: page.eqText(page.eqOutput, page.eqRevision)
-    readonly property string accent: page.settings !== null && page.settings.accent !== undefined ? String(page.settings.accent) : String(Ui.accent)
+    readonly property int accentHue: page.settings !== null && page.settings.accentHue !== undefined ? Ui.hueOnGrid(Number(page.settings.accentHue)) : Ui.accentHueDefault
+    readonly property bool accentFromArt: page.settings !== null && page.settings.accentFromArt === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
@@ -195,6 +196,7 @@ Page {
         out.push(page.row("rescan", "rescan library", page.rescanValue, true))
         out.push(page.label("display"))
         out.push(page.row("accent", "accent", "", false))
+        out.push(page.row("accentArt", "accent from art", page.accentFromArt ? "on" : "off", false))
         out.push(page.row("orientation", "orientation", Ui.landscape ? "landscape" : "portrait", true))
         out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
@@ -371,11 +373,6 @@ Page {
         flick.contentY = page.visibleY(index, flick.contentY)
     }
 
-    function applyAccent(c: string) {
-        Ui.accent = c
-        page.set("accent", c)
-    }
-
     function step(delta: int, wrap: bool): bool {
         const r = page.focusedRow
         if (r === null)
@@ -411,14 +408,12 @@ Page {
         case "toasts":
             page.set("overlayToasts", !page.overlayToasts)
             return true
-        case "accent": {
-            const list = Ui.accentOptions
-            const i = list.indexOf(page.accent.toUpperCase())
-            const base = i < 0 ? 0 : i
-            const next = wrap ? (base + delta + list.length) % list.length : Math.max(0, Math.min(list.length - 1, base + delta))
-            page.applyAccent(list[next])
+        case "accent":
+            page.set("accentHue", Ui.stepHue(page.accentHue, delta))
             return true
-        }
+        case "accentArt":
+            page.set("accentFromArt", !page.accentFromArt)
+            return true
         case "scale":
             page.applyScale(page.cycle(page.scaleSteps, Math.round(Ui.userScale * 10) / 10, delta, wrap))
             return true
@@ -520,6 +515,7 @@ Page {
         case "orientation":
         case "rate":
         case "replaygain":
+        case "accent":
             return true
         case "rgb":
             if (!page.rgbSupported)
@@ -636,14 +632,14 @@ Page {
         readonly property bool label: item.modelData.kind === "label"
         readonly property bool sub: item.modelData.kind === "sub"
         readonly property bool info: item.modelData.kind === "info"
-        readonly property bool swatches: item.modelData.key === "accent"
+        readonly property bool hasSwatch: item.modelData.key === "accent"
         readonly property var titleRole: item.label ? Ui.sectionLabel : item.sub ? Ui.settingsSub : item.info ? Ui.settingsValue : Ui.settingsItem
         readonly property real titleAlpha: item.label ? Ui.sectionLabel.alpha
             : item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
         readonly property real valueAlpha: item.isFocused ? Ui.settingsValueFocused : Ui.settingsValueDim
         readonly property Item titleItem: titleText
         readonly property Item valueItem: valueText
-        readonly property Item swatchItem: swatchRow
+        readonly property Item swatchItem: swatch
         property string shownValue: item.modelData.value
         readonly property bool valueSwapping: valueAnim.running
         property real enter: page.arriving ? 0 : 1
@@ -738,7 +734,7 @@ Page {
             y: item.label
                 ? item.height - Ui.px(Ui.settingsLabelBaselineInset) - titleText.baselineOffset
                 : (item.height - titleText.height) / 2
-            width: swatchRow.visible ? swatchRow.x - Ui.px(Ui.gutter) - titleText.x
+            width: swatch.visible ? swatch.x - Ui.px(Ui.gutter) - titleText.x
                 : valueText.visible ? valueText.x - Ui.px(Ui.gutter) - titleText.x : item.width - Ui.px(Ui.hubEdge) - titleText.x
             text: item.modelData.title
             color: Ui.white(item.titleAlpha)
@@ -756,7 +752,7 @@ Page {
         Text {
             id: valueText
 
-            visible: item.shownValue !== "" && !item.swatches
+            visible: item.shownValue !== "" && !item.hasSwatch
             x: item.width - Ui.px(Ui.hubEdge) - valueText.width
             anchors.baseline: titleText.baseline
             text: item.shownValue
@@ -771,31 +767,16 @@ Page {
             }
         }
 
-        Row {
-            id: swatchRow
+        Rectangle {
+            id: swatch
 
-            visible: item.swatches
-            x: item.width - Ui.px(Ui.hubEdge) - swatchRow.width
+            visible: item.hasSwatch
+            x: item.width - Ui.px(Ui.hubEdge) - swatch.width
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Ui.px(Ui.settingsSwatchGap)
+            width: Ui.px(Ui.settingsSwatch)
+            height: Ui.px(Ui.settingsSwatch)
+            color: Ui.accentForHue(page.accentHue)
             opacity: item.valueAlpha / Ui.settingsValueFocused
-
-            Repeater {
-                model: item.swatches ? Ui.accentOptions : []
-
-                delegate: Rectangle {
-                    id: swatch
-
-                    required property var modelData
-                    readonly property bool selected: String(swatch.modelData).toUpperCase() === page.accent.toUpperCase()
-
-                    width: Ui.px(Ui.settingsSwatch)
-                    height: Ui.px(Ui.settingsSwatch)
-                    color: swatch.modelData
-                    border.width: swatch.selected ? Ui.px(Ui.focusBorder) : 0
-                    border.color: Ui.textFull
-                }
-            }
         }
     }
 

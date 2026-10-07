@@ -30,6 +30,15 @@ Window {
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
     property var codecFragment: root.screenshot || typeof CodecFragment === "undefined" ? null : CodecFragment
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
+    property var accentControl: root.screenshot || typeof Accent === "undefined" ? null : Accent
+    readonly property int sliderHue: root.settings !== null && root.settings.accentHue !== undefined
+        ? Ui.hueOnGrid(Number(root.settings.accentHue)) : Ui.accentHueDefault
+    readonly property int accentHue: root.accentControl !== null && root.accentControl.hue !== undefined
+        ? Ui.hueOnGrid(Number(root.accentControl.hue)) : root.sliderHue
+    readonly property color accentColor: root.accentControl !== null && root.accentControl.color !== undefined
+        ? root.accentControl.color : Ui.accentForHue(root.accentHue)
+    readonly property color accentBrightColor: root.accentControl !== null && root.accentControl.brightColor !== undefined
+        ? root.accentControl.brightColor : Ui.brightForHue(root.accentHue)
     property var eq: root.screenshot || typeof Eq === "undefined" ? null : Eq
     property var stateStore: root.screenshot || typeof PlayerState === "undefined" ? null : PlayerState
     readonly property int playlistCount: root.library !== null && root.library.playlistCount !== undefined ? root.library.playlistCount : -1
@@ -128,6 +137,7 @@ Window {
     Component.onCompleted: {
         Ui.windowW = root.width
         Ui.windowH = root.height
+        root.bindAccent()
         root.applySettings()
         root.lastToastId = root.trackId(root.current)
         if (!root.screenshot)
@@ -141,8 +151,11 @@ Window {
             return
         if (root.settings.scale !== undefined)
             Ui.userScale = Math.max(Ui.sMin, Math.min(Ui.sMax, Number(root.settings.scale)))
-        if (root.settings.accent !== undefined && String(root.settings.accent) !== "")
-            Ui.accent = root.settings.accent
+    }
+
+    function bindAccent(): void {
+        Ui.accent = Qt.binding(() => root.accentColor)
+        Ui.accentBright = Qt.binding(() => root.accentBrightColor)
     }
 
     function trackId(map: var): var {

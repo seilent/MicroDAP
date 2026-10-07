@@ -15,6 +15,10 @@ find_package(SDL3 REQUIRED CONFIG)
 qt_standard_project_setup(REQUIRES 6.11)
 
 add_library(casdapcore STATIC
+    src/core/AccentControl.cpp
+    src/core/AccentControl.h
+    src/core/ArtColor.cpp
+    src/core/ArtColor.h
     src/core/BluezModel.cpp
     src/core/BluezModel.h
     src/core/CodecFragment.cpp

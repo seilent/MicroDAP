@@ -22,7 +22,8 @@ Item {
         property string rgb: "accent"
         property string btCodec: "auto"
         property var roots: ["/home/armada/Music", "/run/media/armada/SD"]
-        property string accent: String(Ui.accent).toUpperCase()
+        property int accentHue: 350
+        property bool accentFromArt: false
         property real scale: 1.0
         property bool pocketControls: false
         property int saverSeconds: 30

@@ -722,7 +722,8 @@ void PowerTest::settingsPersist()
         QCOMPARE(Settings::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")}));
         QCOMPARE(Settings::codecs(), QStringList({QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"), QStringLiteral("ldac"), QStringLiteral("sbc")}));
         QCOMPARE(settings.roots(), Settings::defaultRoots());
-        QCOMPARE(settings.accent(), QStringLiteral("#FA2A55"));
+        QCOMPARE(settings.accentHue(), 350);
+        QVERIFY(!settings.accentFromArt());
         QCOMPARE(settings.scale(), 1.0);
         QVERIFY(!settings.pocketControls());
         QCOMPARE(settings.saverSeconds(), 30);
@@ -756,10 +757,18 @@ void PowerTest::settingsPersist()
         QCOMPARE(codecSpy.count(), 1);
         QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
 
-        settings.setAccent(QStringLiteral("#1ba1e2"));
-        QCOMPARE(settings.accent(), QStringLiteral("#1BA1E2"));
-        settings.setAccent(QStringLiteral("#123456"));
-        QCOMPARE(settings.accent(), QStringLiteral("#1BA1E2"));
+        QSignalSpy hueSpy(&settings, &Settings::accentHueChanged);
+        settings.setAccentHue(198);
+        QCOMPARE(settings.accentHue(), 200);
+        settings.setAccentHue(200);
+        QCOMPARE(hueSpy.count(), 1);
+        settings.setAccentHue(-10);
+        QCOMPARE(settings.accentHue(), 350);
+        settings.setAccentHue(360);
+        QCOMPARE(settings.accentHue(), 0);
+        settings.setAccentHue(204);
+        QCOMPARE(settings.accentHue(), 200);
+        settings.setAccentFromArt(true);
 
         settings.setPocketControls(true);
         settings.setSaverSeconds(5);
@@ -782,7 +791,8 @@ void PowerTest::settingsPersist()
     QCOMPARE(again.output(), QStringLiteral("headphones"));
     QCOMPARE(again.btCodec(), QStringLiteral("aac"));
     QCOMPARE(again.roots(), QStringList({QStringLiteral("/tmp/a"), QStringLiteral("/tmp/b")}));
-    QCOMPARE(again.accent(), QStringLiteral("#1BA1E2"));
+    QCOMPARE(again.accentHue(), 200);
+    QVERIFY(again.accentFromArt());
     QCOMPARE(again.scale(), 1.1);
     QVERIFY(again.pocketControls());
     QCOMPARE(again.saverSeconds(), 45);

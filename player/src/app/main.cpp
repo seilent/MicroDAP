@@ -1,3 +1,4 @@
+#include "AccentControl.h"
 #include "FakeBluezModel.h"
 #include "CodecFragment.h"
 #include "DbusPad.h"
@@ -214,6 +215,21 @@ int main(int argc, char *argv[])
     }
     casdap::StatusModel status;
 
+    casdap::AccentControl accent;
+    accent.setSliderHue(settings.accentHue());
+    accent.setFromArt(settings.accentFromArt());
+    accent.setPhoneActive(bluez->transportActive());
+    accent.setArtPath(player.current().value(QStringLiteral("artPath")).toString());
+    QObject::connect(&settings, &casdap::Settings::accentHueChanged, &accent,
+                     [&settings, &accent] { accent.setSliderHue(settings.accentHue()); });
+    QObject::connect(&settings, &casdap::Settings::accentFromArtChanged, &accent,
+                     [&settings, &accent] { accent.setFromArt(settings.accentFromArt()); });
+    QObject::connect(&player, &casdap::Player::currentChanged, &accent, [&player, &accent] {
+        accent.setArtPath(player.current().value(QStringLiteral("artPath")).toString());
+    });
+    QObject::connect(bluez.get(), &casdap::BluezModel::transportActiveChanged, &accent,
+                     [&accent, model = bluez.get()] { accent.setPhoneActive(model->transportActive()); });
+    QObject::connect(&library, &casdap::Library::albumsChanged, &accent, &casdap::AccentControl::clearCache);
     std::unique_ptr<casdap::OutputControl> outputControl;
     std::unique_ptr<casdap::CodecFragment> codecFragment;
     std::unique_ptr<casdap::RgbControl> rgbControl;
@@ -238,11 +254,14 @@ int main(int argc, char *argv[])
         QObject::connect(&settings, &casdap::Settings::btCodecChanged, codecFragment.get(),
                          [&settings, fragment = codecFragment.get()] { fragment->apply(settings.btCodec()); });
         rgbControl = std::make_unique<casdap::RgbControl>();
-        rgbControl->start(settings.rgb(), settings.accent());
+        rgbControl->setScreenOff(power.screenOff());
+        rgbControl->start(settings.rgb(), accent.hue());
         QObject::connect(&settings, &casdap::Settings::rgbChanged, rgbControl.get(),
                          [&settings, rgb = rgbControl.get()] { rgb->setMode(settings.rgb()); });
-        QObject::connect(&settings, &casdap::Settings::accentChanged, rgbControl.get(),
-                         [&settings, rgb = rgbControl.get()] { rgb->setAccent(settings.accent()); });
+        QObject::connect(&accent, &casdap::AccentControl::hueChanged, rgbControl.get(),
+                         [&accent, rgb = rgbControl.get()] { rgb->setHue(accent.hue()); });
+        QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, rgbControl.get(),
+                         [&power, rgb = rgbControl.get()] { rgb->setScreenOff(power.screenOff()); });
     }
 
     std::unique_ptr<casdap::PadSource> pad;
@@ -304,6 +323,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
     engine.rootContext()->setContextProperty(QStringLiteral("Pad"), pad.get());
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
+    engine.rootContext()->setContextProperty(QStringLiteral("Accent"), &accent);
     engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);
     engine.rootContext()->setContextProperty(QStringLiteral("PlayerState"), &state);
     engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);

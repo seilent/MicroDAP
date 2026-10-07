@@ -3,7 +3,6 @@
 #include "Settings.h"
 
 #include <QDebug>
-#include <QTimer>
 
 namespace casdap {
 
@@ -17,12 +16,30 @@ QString binary(const char *env, const QString &fallback)
     return value.isEmpty() ? fallback : value;
 }
 
+QString huePrefix()
+{
+    return QStringLiteral("rgb-hue-");
+}
+
+bool isHueWord(const QString &word)
+{
+    return word.startsWith(huePrefix());
+}
+
+int wordHue(const QString &word)
+{
+    return isHueWord(word) ? word.mid(huePrefix().size()).toInt() : -1;
+}
+
 }
 
 RgbControl::RgbControl(QObject *parent)
     : QObject(parent)
     , m_mode(QStringLiteral("armada"))
 {
+    m_hueTimer.setSingleShot(true);
+    m_hueTimer.setInterval(hueDelayMs);
+    connect(&m_hueTimer, &QTimer::timeout, this, &RgbControl::sendHue);
 }
 
 RgbControl::~RgbControl()
@@ -41,21 +58,9 @@ QString RgbControl::systemctlPath()
     return binary("CASDAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
 }
 
-QStringList RgbControl::accentHexes()
+QString RgbControl::hueWord(int hue)
 {
-    return Settings::accents();
-}
-
-QStringList RgbControl::accentNames()
-{
-    return {QStringLiteral("pink"), QStringLiteral("orange"), QStringLiteral("cyan"),
-            QStringLiteral("lime"), QStringLiteral("purple")};
-}
-
-QString RgbControl::accentName(const QString &hex)
-{
-    const int at = accentHexes().indexOf(hex.toUpper());
-    return at < 0 ? QString() : accentNames().at(at);
+    return huePrefix() + QString::number(Settings::normalizeHue(hue));
 }
 
 QString RgbControl::unitFor(const QString &word)
@@ -83,12 +88,27 @@ QString RgbControl::mode() const
     return m_mode;
 }
 
-QString RgbControl::accent() const
+int RgbControl::hue() const
 {
-    return m_accent;
+    return m_hue;
 }
 
-void RgbControl::start(const QString &mode, const QString &accent)
+bool RgbControl::screenOff() const
+{
+    return m_screenOff;
+}
+
+int RgbControl::sentHue() const
+{
+    return m_sentHue;
+}
+
+bool RgbControl::ready() const
+{
+    return m_probed && m_supported;
+}
+
+void RgbControl::start(const QString &mode, int hue)
 {
     const QString m = mode.toLower();
     if (!Settings::rgbModes().contains(m))
@@ -97,10 +117,10 @@ void RgbControl::start(const QString &mode, const QString &accent)
         m_mode = m;
         emit modeChanged();
     }
-    const QString a = accent.toUpper();
-    if (m_accent != a) {
-        m_accent = a;
-        emit accentChanged();
+    const int h = Settings::normalizeHue(hue);
+    if (m_hue != h) {
+        m_hue = h;
+        emit hueChanged();
     }
     probe();
 }
@@ -116,19 +136,34 @@ void RgbControl::setMode(const QString &mode)
         return;
     m_mode = m;
     emit modeChanged();
-    if (m_probed && m_supported)
+    if (ready())
         applyMode();
 }
 
-void RgbControl::setAccent(const QString &accent)
+void RgbControl::setHue(int hue)
 {
-    const QString a = accent.toUpper();
-    if (m_accent == a)
+    const int h = Settings::normalizeHue(hue);
+    if (m_hue == h)
         return;
-    m_accent = a;
-    emit accentChanged();
-    if (m_probed && m_supported && m_mode == QLatin1StringView("accent"))
-        applyMode();
+    m_hue = h;
+    emit hueChanged();
+    if (ready() && m_mode == QLatin1StringView("accent"))
+        m_hueTimer.start();
+}
+
+void RgbControl::setScreenOff(bool off)
+{
+    if (m_screenOff == off)
+        return;
+    m_screenOff = off;
+    emit screenOffChanged();
+    if (off) {
+        m_hueTimer.stop();
+        m_words.removeIf(isHueWord);
+        updateBusy();
+        return;
+    }
+    queueHue();
 }
 
 void RgbControl::probe()
@@ -172,20 +207,34 @@ void RgbControl::probe()
 
 void RgbControl::applyMode()
 {
-    if (m_mode == QLatin1StringView("off")) {
-        startWords({QStringLiteral("rgb-off")});
+    m_hueTimer.stop();
+    if (m_mode == QLatin1StringView("accent")) {
+        queueHue();
         return;
     }
-    if (m_mode == QLatin1StringView("armada")) {
-        startWords({QStringLiteral("rgb-restore")});
+    m_words.removeIf(isHueWord);
+    startWords({m_mode == QLatin1StringView("off") ? QStringLiteral("rgb-off") : QStringLiteral("rgb-restore")});
+}
+
+void RgbControl::sendHue()
+{
+    if (m_mode == QLatin1StringView("accent"))
+        queueHue();
+}
+
+void RgbControl::queueHue()
+{
+    if (!ready() || m_screenOff || m_mode != QLatin1StringView("accent"))
+        return;
+    m_words.removeIf(isHueWord);
+    int tail = m_sentHue;
+    if (!m_words.isEmpty())
+        tail = wordHue(m_words.constLast());
+    if (tail == m_hue) {
+        updateBusy();
         return;
     }
-    const QString name = accentName(m_accent);
-    if (name.isEmpty()) {
-        qWarning() << "casdap rgb: no accent word for" << m_accent;
-        return;
-    }
-    startWords({QStringLiteral("rgb-accent-") + name});
+    startWords({hueWord(m_hue)});
 }
 
 void RgbControl::startWords(const QStringList &words)
@@ -203,6 +252,7 @@ void RgbControl::nextWord()
         return;
     }
     const QString word = m_words.takeFirst();
+    m_sentHue = wordHue(word);
     qInfo() << "casdap rgb: start" << unitFor(word);
     auto *process = new QProcess(this);
     m_word = process;
@@ -210,8 +260,11 @@ void RgbControl::nextWord()
         if (m_word == process)
             m_word = nullptr;
         process->deleteLater();
-        if (!ok)
+        if (!ok) {
             qWarning() << "casdap rgb:" << word << "failed";
+            if (isHueWord(word) && m_sentHue == wordHue(word))
+                m_sentHue = -1;
+        }
         qInfo() << "casdap rgb: applied" << word << ok;
         emit applied(word, ok);
         nextWord();

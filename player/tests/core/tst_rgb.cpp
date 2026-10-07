@@ -1,10 +1,8 @@
 #include "RgbControl.h"
-#include "Settings.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -37,6 +35,11 @@ QString readFile(const QString &path)
     return QString::fromUtf8(file.readAll());
 }
 
+QString unit(const QString &word)
+{
+    return QStringLiteral("casdap-priv@") + word + QStringLiteral(".service");
+}
+
 }
 
 class RgbTest : public QObject
@@ -46,16 +49,20 @@ class RgbTest : public QObject
 private slots:
     void initTestCase();
     void init();
-    void accentTableMatchesUi();
-    void restoreThenAccentAtStart();
+    void words();
+    void restoreThenHueAtStart();
     void offAndArmada();
-    void accentChangeReapplies();
+    void hueDebounced();
+    void unchangedHueSkipped();
+    void waitingHueReplaced();
+    void screenOffHolds();
     void unsupportedRunsNothing();
     void missingBinaryUnsupported();
     void failedWordReported();
 
 private:
     void useSupported(bool supported);
+    void startAccent(RgbControl &control, QSignalSpy &applied, int hue);
     QStringList starts() const;
 
     QTemporaryDir m_dir;
@@ -63,6 +70,7 @@ private:
     QString m_log;
     QString m_rgbExit;
     QString m_systemctlExit;
+    QString m_systemctlDelay;
 };
 
 void RgbTest::initTestCase()
@@ -72,6 +80,7 @@ void RgbTest::initTestCase()
     m_log = m_dir.path() + QStringLiteral("/calls.log");
     m_rgbExit = m_dir.path() + QStringLiteral("/rgb.exit");
     m_systemctlExit = m_dir.path() + QStringLiteral("/systemctl.exit");
+    m_systemctlDelay = m_dir.path() + QStringLiteral("/systemctl.delay");
     const QString logLine = QStringLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"") + m_log
                             + QStringLiteral("\"\n");
     QVERIFY(writeFile(m_bin + QStringLiteral("/armada-rgb"),
@@ -79,8 +88,9 @@ void RgbTest::initTestCase()
                           + QStringLiteral("\")\"\n"),
                       true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"),
-                      QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit \"$(cat \"") + m_systemctlExit
-                          + QStringLiteral("\")\"\n"),
+                      QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("[ -f \"") + m_systemctlDelay
+                          + QStringLiteral("\" ] && sleep \"$(cat \"") + m_systemctlDelay
+                          + QStringLiteral("\")\"\nexit \"$(cat \"") + m_systemctlExit + QStringLiteral("\")\"\n"),
                       true));
     qputenv("CASDAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
     qputenv("CASDAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
@@ -91,6 +101,7 @@ void RgbTest::initTestCase()
 void RgbTest::init()
 {
     QFile::remove(m_log);
+    QFile::remove(m_systemctlDelay);
     useSupported(true);
     QVERIFY(writeFile(m_systemctlExit, QStringLiteral("0\n")));
     qputenv("CASDAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
@@ -99,6 +110,14 @@ void RgbTest::init()
 void RgbTest::useSupported(bool supported)
 {
     QVERIFY(writeFile(m_rgbExit, supported ? QStringLiteral("0\n") : QStringLiteral("1\n")));
+}
+
+void RgbTest::startAccent(RgbControl &control, QSignalSpy &applied, int hue)
+{
+    control.start(QStringLiteral("accent"), hue);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QFile::remove(m_log);
 }
 
 QStringList RgbTest::starts() const
@@ -111,32 +130,17 @@ QStringList RgbTest::starts() const
     return out;
 }
 
-void RgbTest::accentTableMatchesUi()
+void RgbTest::words()
 {
-    QFile ui(QStringLiteral(CASDAP_UI_QML));
-    QVERIFY2(ui.open(QIODevice::ReadOnly), qPrintable(ui.fileName()));
-    const QString text = QString::fromUtf8(ui.readAll());
-    const QRegularExpression re(QStringLiteral("accentOptions:\\s*\\[([^\\]]*)\\]"));
-    const QRegularExpressionMatch match = re.match(text);
-    QVERIFY(match.hasMatch());
-    QStringList hexes;
-    const QRegularExpression item(QStringLiteral("\"(#[0-9A-Fa-f]{6})\""));
-    auto it = item.globalMatch(match.captured(1));
-    while (it.hasNext())
-        hexes.append(it.next().captured(1).toUpper());
-    QCOMPARE(hexes, RgbControl::accentHexes());
-    QCOMPARE(hexes, Settings::accents());
-    QCOMPARE(RgbControl::accentNames().size(), hexes.size());
-    QCOMPARE(RgbControl::accentName(QStringLiteral("#FA2A55")), QStringLiteral("pink"));
-    QCOMPARE(RgbControl::accentName(QStringLiteral("#f09609")), QStringLiteral("orange"));
-    QCOMPARE(RgbControl::accentName(QStringLiteral("#1BA1E2")), QStringLiteral("cyan"));
-    QCOMPARE(RgbControl::accentName(QStringLiteral("#339933")), QStringLiteral("lime"));
-    QCOMPARE(RgbControl::accentName(QStringLiteral("#A200FF")), QStringLiteral("purple"));
-    QCOMPARE(RgbControl::accentName(QStringLiteral("#123456")), QString());
+    QCOMPARE(RgbControl::hueWord(0), QStringLiteral("rgb-hue-0"));
+    QCOMPARE(RgbControl::hueWord(350), QStringLiteral("rgb-hue-350"));
+    QCOMPARE(RgbControl::hueWord(198), QStringLiteral("rgb-hue-200"));
+    QCOMPARE(RgbControl::hueWord(360), QStringLiteral("rgb-hue-0"));
+    QCOMPARE(RgbControl::hueWord(-10), QStringLiteral("rgb-hue-350"));
     QCOMPARE(RgbControl::unitFor(QStringLiteral("rgb-off")), QStringLiteral("casdap-priv@rgb-off.service"));
 }
 
-void RgbTest::restoreThenAccentAtStart()
+void RgbTest::restoreThenHueAtStart()
 {
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
@@ -144,50 +148,57 @@ void RgbTest::restoreThenAccentAtStart()
     QVERIFY(!control.supported());
     QVERIFY(!control.probed());
     QCOMPARE(control.mode(), QStringLiteral("armada"));
-    control.start(QStringLiteral("accent"), QStringLiteral("#FA2A55"));
+    control.start(QStringLiteral("accent"), 350);
     QVERIFY(control.busy());
     QCOMPARE(control.mode(), QStringLiteral("accent"));
-    QCOMPARE(control.accent(), QStringLiteral("#FA2A55"));
+    QCOMPARE(control.hue(), 350);
     QTRY_VERIFY_WITH_TIMEOUT(control.probed(), waitMs);
     QVERIFY(control.supported());
     QCOMPARE(supportedSpy.count(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
     QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("rgb-restore"));
     QVERIFY(applied.at(0).at(1).toBool());
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-accent-pink"));
+    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-hue-350"));
     QVERIFY(applied.at(1).at(1).toBool());
     QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QCOMPARE(control.sentHue(), 350);
     const QString log = readFile(m_log);
     QVERIFY2(log.startsWith(QStringLiteral("armada-rgb supported\n")), qPrintable(log));
-    QCOMPARE(starts(), QStringList({QStringLiteral("casdap-priv@rgb-restore.service"),
-                                    QStringLiteral("casdap-priv@rgb-accent-pink.service")}));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore")), unit(QStringLiteral("rgb-hue-350"))}));
 }
 
 void RgbTest::offAndArmada()
 {
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
-    control.start(QStringLiteral("off"), QStringLiteral("#1BA1E2"));
+    control.start(QStringLiteral("off"), 200);
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(starts(), QStringList({QStringLiteral("casdap-priv@rgb-restore.service"),
-                                    QStringLiteral("casdap-priv@rgb-off.service")}));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore")), unit(QStringLiteral("rgb-off"))}));
 
     QFile::remove(m_log);
     control.setMode(QStringLiteral("armada"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
     QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-restore"));
-    QCOMPARE(starts(), QStringList({QStringLiteral("casdap-priv@rgb-restore.service")}));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore"))}));
 
     QFile::remove(m_log);
-    control.setAccent(QStringLiteral("#A200FF"));
+    control.setHue(280);
     control.setMode(QStringLiteral("armada"));
-    QTest::qWait(300);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
     QCOMPARE(applied.count(), 3);
     QVERIFY(!QFile::exists(m_log));
 
     control.setMode(QStringLiteral("accent"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-accent-purple"));
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-hue-280"));
+
+    QFile::remove(m_log);
+    control.setMode(QStringLiteral("off"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
+    QCOMPARE(control.sentHue(), -1);
+    control.setMode(QStringLiteral("accent"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-off")), unit(QStringLiteral("rgb-hue-280"))}));
 
     QFile::remove(m_log);
     QTest::ignoreMessage(QtWarningMsg, "casdap rgb: unknown mode \"disco\"");
@@ -197,29 +208,86 @@ void RgbTest::offAndArmada()
     QVERIFY(!QFile::exists(m_log));
 }
 
-void RgbTest::accentChangeReapplies()
+void RgbTest::hueDebounced()
 {
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
-    control.start(QStringLiteral("accent"), QStringLiteral("#FA2A55"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    startAccent(control, applied, 350);
 
-    QFile::remove(m_log);
-    control.setAccent(QStringLiteral("#1ba1e2"));
-    QCOMPARE(control.accent(), QStringLiteral("#1BA1E2"));
+    for (int hue = 0; hue <= 90; hue += 10)
+        control.setHue(hue);
+    QCOMPARE(control.hue(), 90);
+    QTest::qWait(RgbControl::hueDelayMs / 2);
+    QCOMPARE(applied.count(), 2);
+    QVERIFY(!QFile::exists(m_log));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-accent-cyan"));
-    QCOMPARE(starts(), QStringList({QStringLiteral("casdap-priv@rgb-accent-cyan.service")}));
-
-    QFile::remove(m_log);
-    control.setAccent(QStringLiteral("#1BA1E2"));
-    QTest::qWait(300);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-hue-90"));
+    QTest::qWait(RgbControl::hueDelayMs + 200);
     QCOMPARE(applied.count(), 3);
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-hue-90"))}));
+}
+
+void RgbTest::unchangedHueSkipped()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    startAccent(control, applied, 200);
+
+    control.setHue(200);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
+    QCOMPARE(applied.count(), 2);
+
+    control.setHue(210);
+    control.setHue(200);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 2);
+    QVERIFY(!QFile::exists(m_log));
+}
+
+void RgbTest::waitingHueReplaced()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    startAccent(control, applied, 350);
+
+    QVERIFY(writeFile(m_systemctlDelay, QStringLiteral("2\n")));
+    control.setMode(QStringLiteral("off"));
+    QTRY_VERIFY_WITH_TIMEOUT(starts().size() == 1, waitMs);
+    control.setMode(QStringLiteral("accent"));
+    control.setHue(10);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
+    QCOMPARE(applied.count(), 2);
+    QVERIFY(control.busy());
+    QFile::remove(m_systemctlDelay);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-off"));
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-hue-10"));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-off")), unit(QStringLiteral("rgb-hue-10"))}));
+}
+
+void RgbTest::screenOffHolds()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    startAccent(control, applied, 350);
+
+    control.setScreenOff(true);
+    QVERIFY(control.screenOff());
+    control.setHue(120);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 2);
     QVERIFY(!QFile::exists(m_log));
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: no accent word for \"#123456\"");
-    control.setAccent(QStringLiteral("#123456"));
-    QTest::qWait(300);
+    control.setScreenOff(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-hue-120"));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-hue-120"))}));
+
+    QFile::remove(m_log);
+    control.setScreenOff(true);
+    control.setScreenOff(false);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
     QCOMPARE(applied.count(), 3);
     QVERIFY(!QFile::exists(m_log));
 }
@@ -230,14 +298,17 @@ void RgbTest::unsupportedRunsNothing()
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
     QSignalSpy supportedSpy(&control, &RgbControl::supportedChanged);
-    control.start(QStringLiteral("accent"), QStringLiteral("#FA2A55"));
+    control.start(QStringLiteral("accent"), 350);
     QTRY_VERIFY_WITH_TIMEOUT(control.probed(), waitMs);
     QVERIFY(!control.supported());
     QCOMPARE(supportedSpy.count(), 0);
     QVERIFY(!control.busy());
     control.setMode(QStringLiteral("off"));
-    control.setAccent(QStringLiteral("#1BA1E2"));
-    QTest::qWait(300);
+    control.setMode(QStringLiteral("accent"));
+    control.setHue(200);
+    control.setScreenOff(true);
+    control.setScreenOff(false);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
     QCOMPARE(applied.count(), 0);
     QCOMPARE(readFile(m_log), QStringLiteral("armada-rgb supported\n"));
 }
@@ -247,7 +318,7 @@ void RgbTest::missingBinaryUnsupported()
     qputenv("CASDAP_RGB_BIN", (m_dir.path() + QStringLiteral("/missing/armada-rgb")).toUtf8());
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
-    control.start(QStringLiteral("off"), QStringLiteral("#FA2A55"));
+    control.start(QStringLiteral("off"), 350);
     QTRY_VERIFY_WITH_TIMEOUT(control.probed(), waitMs);
     QVERIFY(!control.supported());
     QVERIFY(!control.busy());
@@ -262,7 +333,7 @@ void RgbTest::failedWordReported()
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
     QTest::ignoreMessage(QtWarningMsg, "casdap rgb: unknown mode \"disco\"");
-    control.start(QStringLiteral("disco"), QStringLiteral("#FA2A55"));
+    control.start(QStringLiteral("disco"), 350);
     QCOMPARE(control.mode(), QStringLiteral("armada"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
     QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("rgb-restore"));
@@ -270,7 +341,14 @@ void RgbTest::failedWordReported()
     QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
     QTest::qWait(300);
     QCOMPARE(applied.count(), 1);
-    QCOMPARE(starts(), QStringList({QStringLiteral("casdap-priv@rgb-restore.service")}));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore"))}));
+
+    QFile::remove(m_log);
+    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: \"rgb-hue-350\" failed");
+    control.setMode(QStringLiteral("accent"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QVERIFY(!applied.at(1).at(1).toBool());
+    QCOMPARE(control.sentHue(), -1);
 }
 
 QTEST_GUILESS_MAIN(RgbTest)

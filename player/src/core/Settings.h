@@ -14,7 +14,8 @@ class Settings : public QObject
     Q_OBJECT
     Q_PROPERTY(QString output READ output WRITE setOutput NOTIFY outputChanged)
     Q_PROPERTY(QStringList roots READ roots WRITE setRoots NOTIFY rootsChanged)
-    Q_PROPERTY(QString accent READ accent WRITE setAccent NOTIFY accentChanged)
+    Q_PROPERTY(int accentHue READ accentHue WRITE setAccentHue NOTIFY accentHueChanged)
+    Q_PROPERTY(bool accentFromArt READ accentFromArt WRITE setAccentFromArt NOTIFY accentFromArtChanged)
     Q_PROPERTY(double scale READ scale WRITE setScale NOTIFY scaleChanged)
     Q_PROPERTY(bool pocketControls READ pocketControls WRITE setPocketControls NOTIFY pocketControlsChanged)
     Q_PROPERTY(int saverSeconds READ saverSeconds WRITE setSaverSeconds NOTIFY saverSecondsChanged)
@@ -40,6 +41,7 @@ public:
     static constexpr int minSaverSeconds = 10;
     static constexpr int maxSaverSeconds = 300;
     static constexpr int syncDelayMs = 500;
+    static constexpr int defaultAccentHue = 350;
 
     explicit Settings(QObject *parent = nullptr);
     explicit Settings(const QString &path, QObject *parent = nullptr);
@@ -48,7 +50,8 @@ public:
     static QString defaultPath();
     static QStringList outputs();
     static QStringList codecs();
-    static QStringList accents();
+    static int normalizeHue(int hue);
+    static int hueFromColor(const QString &color);
     static QStringList hpGains();
     static QStringList hpAmps();
     static QList<int> spkGains();
@@ -63,8 +66,10 @@ public:
     void setOutput(const QString &output);
     QStringList roots() const;
     void setRoots(const QStringList &roots);
-    QString accent() const;
-    void setAccent(const QString &accent);
+    int accentHue() const;
+    void setAccentHue(int hue);
+    bool accentFromArt() const;
+    void setAccentFromArt(bool on);
     double scale() const;
     void setScale(double scale);
     bool pocketControls() const;
@@ -109,7 +114,8 @@ public:
 signals:
     void outputChanged();
     void rootsChanged();
-    void accentChanged();
+    void accentHueChanged();
+    void accentFromArtChanged();
     void scaleChanged();
     void pocketControlsChanged();
     void saverSecondsChanged();
@@ -137,7 +143,9 @@ private:
     QVariantMap m_dirty;
     QString m_output;
     QStringList m_roots;
-    QString m_accent;
+    int m_accentHue = defaultAccentHue;
+    bool m_accentFromArt = false;
+    bool m_dropAccent = false;
     double m_scale = 1.0;
     bool m_pocketControls = false;
     int m_saverSeconds = 30;

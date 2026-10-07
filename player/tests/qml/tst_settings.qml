@@ -38,7 +38,8 @@ TestCase {
         property string rgb: "armada"
         property string btCodec: "auto"
         property var roots: ["/home/armada/Music"]
-        property string accent: "#FA2A55"
+        property int accentHue: 350
+        property bool accentFromArt: false
         property real scale: 1.0
         property bool pocketControls: false
         property int saverSeconds: 30
@@ -181,7 +182,7 @@ TestCase {
     readonly property var expectedKeys: [
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
-        "label-display", "accent", "orientation", "scale", "saver", "rgb", "toasts",
+        "label-display", "accent", "accentArt", "orientation", "scale", "saver", "rgb", "toasts",
         "label-power", "screenOff", "suspend", "pocket", "wifi", "keepPhone", "gameMode",
         "about"
     ]
@@ -199,7 +200,6 @@ TestCase {
 
     function init() {
         tc.setWindow(640, 960)
-        Ui.accent = "#FA2A55"
         pages.clear()
         pages.animate = false
         fakeSettings.output = "auto"
@@ -210,7 +210,8 @@ TestCase {
         fakeSettings.rgb = "armada"
         fakeSettings.btCodec = "auto"
         fakeSettings.roots = ["/home/armada/Music"]
-        fakeSettings.accent = "#FA2A55"
+        fakeSettings.accentHue = 350
+        fakeSettings.accentFromArt = false
         fakeSettings.scale = 1.0
         fakeSettings.pocketControls = false
         fakeSettings.saverSeconds = 30
@@ -244,7 +245,6 @@ TestCase {
 
     function cleanup() {
         Ui.userScale = 1.0
-        Ui.accent = "#FA2A55"
     }
 
     function open(properties) {
@@ -798,37 +798,77 @@ TestCase {
         compare(page.rows[folders + 2].kind, "label")
     }
 
-    function test_accent_swatches() {
+    function test_accent_hue_swatch() {
         const page = open()
         tc.focusKey(page, "accent")
-        const row = tc.itemOf(page, "accent")
+        compare(tc.rowOf(page, "accent").readOnly, false)
+        let row = tc.itemOf(page, "accent")
         compare(row.valueItem.visible, false)
         compare(row.swatchItem.visible, true)
-        compare(row.swatchItem.children.length >= 5, true)
-        let swatches = 0
-        let selected = 0
-        for (const c of row.swatchItem.children) {
-            if (c.width === undefined || c.width !== Ui.px(12))
-                continue
-            swatches++
-            compare(c.height, Ui.px(12))
-            if (c.selected) {
-                selected++
-                compare(c.border.width, Ui.px(2))
-                compare(String(c.color).toUpperCase(), "#FA2A55")
-            }
-        }
-        compare(swatches, 5)
-        compare(selected, 1)
+        compare(row.swatchItem.width, Ui.px(12))
+        compare(row.swatchItem.height, Ui.px(12))
         fuzzyCompare(row.swatchItem.x + row.swatchItem.width, page.width - Ui.px(20), 0.01)
-        fuzzyCompare(row.swatchItem.spacing, Ui.px(4), 0.01)
+        verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(350)))
+        verify(Qt.colorEqual(row.swatchItem.color, "#FA2A4D"))
         verify(router.dispatch("right", false))
-        compare(fakeSettings.accent, "#F09609")
-        compare(String(Ui.accent).toUpperCase(), "#F09609")
+        compare(fakeSettings.accentHue, 0)
+        row = tc.itemOf(page, "accent")
+        verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(0)))
+        verify(router.dispatch("right", true))
+        verify(router.dispatch("right", true))
+        compare(fakeSettings.accentHue, 20)
+        for (let i = 0; i < 3; i++)
+            verify(router.dispatch("left", false))
+        compare(fakeSettings.accentHue, 350)
         verify(router.dispatch("left", false))
-        compare(fakeSettings.accent, "#FA2A55")
+        compare(fakeSettings.accentHue, 340)
+        row = tc.itemOf(page, "accent")
+        verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(340)))
+        fakeSettings.accentHue = 240
+        row = tc.itemOf(page, "accent")
+        verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(240)))
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.accentHue, 240)
+        compare(page.focusIndex, tc.keyIndex(page, "accent"))
+        verify(Qt.colorEqual(Ui.accent, "#FA2A4D"))
+    }
+
+    function test_accent_swatch_ignores_art() {
+        fakeSettings.accentFromArt = true
+        fakeSettings.accentHue = 200
+        const page = open()
+        verify(Qt.colorEqual(tc.itemOf(page, "accent").swatchItem.color, Ui.accentForHue(200)))
+    }
+
+    function test_accent_from_art_toggles() {
+        const page = open()
+        const accent = tc.keyIndex(page, "accent")
+        compare(tc.keyIndex(page, "accentArt"), accent + 1)
+        tc.focusKey(page, "accentArt")
+        compare(tc.rowOf(page, "accentArt").title, "accent from art")
+        compare(tc.rowOf(page, "accentArt").value, "off")
+        compare(tc.rowOf(page, "accentArt").readOnly, false)
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.accentFromArt, true)
+        compare(tc.rowOf(page, "accentArt").value, "on")
+        compare(tc.itemOf(page, "accentArt").valueItem.text, "on")
         verify(router.dispatch("left", false))
-        compare(fakeSettings.accent, "#FA2A55")
+        compare(fakeSettings.accentFromArt, false)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.accentFromArt, true)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.accentFromArt, false)
+        compare(fakeSettings.accentHue, 350)
+    }
+
+    function test_accent_rows_in_overlay() {
+        const page = open({ overlay: true, bridge: fakeBridge })
+        verify(page.indexOfKey("accent") >= 0)
+        verify(page.indexOfKey("accentArt") >= 0)
+        compare(page.indexOfKey("rgb"), -1)
+        tc.focusKey(page, "accent")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.accentHue, 0)
     }
 
     function test_orientation_read_only() {

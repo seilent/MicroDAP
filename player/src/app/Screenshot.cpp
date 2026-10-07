@@ -1,5 +1,6 @@
 #include "Screenshot.h"
 
+#include "AccentControl.h"
 #include "Eq.h"
 #include "FakeBluezModel.h"
 #include "HubModels.h"
@@ -262,7 +263,9 @@ int screenshot(const ScreenshotOptions &options)
     if (const std::optional<EqProfile> sample = EqParser::parse(QString::fromUtf8(sampleEq)))
         eq.setCustom(QStringLiteral("headphones"), *sample);
     eq.setActiveOutput(QStringLiteral("headphones"));
+    AccentControl accent;
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("Accent"), &accent);
     engine.rootContext()->setContextProperty(QStringLiteral("Eq"), &eq);
     engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"), &bluez);
     engine.rootContext()->setContextProperty(QStringLiteral("HistoryRecent"),
