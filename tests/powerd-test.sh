@@ -37,6 +37,11 @@ case "$*" in
         [[ -s "${STATE}/profile" ]] || exit 1
         echo "s \"$(cat "${STATE}/profile")\""
         ;;
+    "--system tree --list org.shadowblip.InputPlumber")
+        echo /org/shadowblip/InputPlumber
+        echo /org/shadowblip/InputPlumber/CompositeDevice0
+        ;;
+    *org.shadowblip.Output.ForceFeedback*) echo "busctl $*" >> "${STATE}/buzz" ;;
     *) echo "busctl $*" >> "${STATE}/calls" ;;
 esac
 EOF
@@ -58,6 +63,8 @@ export CASDAP_POWERD_LONG_MS=200
 export CASDAP_POWERD_DEVICE_WAIT_SEC=0
 export CASDAP_POWERD_DEVICE_NAME=casdap-test-pwrkey
 export CASDAP_POWERD_POLL_SEC=0.05
+export CASDAP_POWERD_BUZZ_MS=20
+export CASDAP_POWER_DEBOUNCE_MS=2000
 export CASDAP_DEV_INPUT="${T}/nodev" CASDAP_SYS_INPUT="${T}/nosys"
 
 failures=0
@@ -75,6 +82,15 @@ run_case() {
         mkdir -p "${CASDAP_RUNTIME_DIR}"
         : > "${CASDAP_RUNTIME_DIR}/off"
     fi
+    if [[ "${RECENT:-0}" == 1 ]]; then
+        mkdir -p "${CASDAP_RUNTIME_DIR}"
+        date +%s%3N > "${CASDAP_RUNTIME_DIR}/last-ms"
+    fi
+    if [[ "${LOCKED:-0}" == 1 ]]; then
+        mkdir -p "${CASDAP_RUNTIME_DIR}"
+        ( flock 9; sleep 1.5 ) 9>"${CASDAP_RUNTIME_DIR}/lock" &
+        sleep 0.2
+    fi
     [[ -z "$2" ]] || printf '%s\n' "$2" | tr ';' '\n' > "${STATE}/script-event0"
     rc=0
     CASDAP_POWERD_DRY_RUN="${3:-0}" "${daemon}" || rc=$?
@@ -88,6 +104,13 @@ expect_sequence() {
     local expected
     expected=$(printf '%s\n' "$@")
     [[ "$(cat "${STATE}/calls")" == "${expected}" ]] || fail "calls were:"$'\n'"$(cat "${STATE}/calls")"$'\n'"expected:"$'\n'"${expected}"
+}
+expect_buzz() {
+    local n=0
+    if [[ -e "${STATE}/buzz" ]]; then
+        n=$(grep -cF -- "CompositeDevice0 org.shadowblip.Output.ForceFeedback Rumble d 0.6" "${STATE}/buzz" || true)
+    fi
+    [[ "${n}" == "$1" ]] || fail "${n} buzzes, expected $1"
 }
 
 toggle="casdap-power toggle"
@@ -106,37 +129,64 @@ export CASDAP_DEV_INPUT="${T}/dev" CASDAP_SYS_INPUT="${T}/sys"
 
 run_case "short press" "press;sleep 0.05;release"
 expect_sequence "${toggle}"
+expect_buzz 1
 expect_log "watching ${T}/dev/event0 for KEY_POWER"
 
 run_case "short press dry run" "press;sleep 0.05;release" 1
 expect_calls 0
+expect_buzz 0
+expect_log "would: buzz 20"
 expect_log "would: ${toggle}"
+
+RECENT=1 run_case "short press within the debounce" "press;sleep 0.05;release"
+expect_sequence "${toggle}"
+expect_buzz 0
+expect_log "tap during a transition or the debounce, no buzz"
+
+RECENT=1 run_case "short press within the debounce dry run" "press;sleep 0.05;release" 1
+expect_calls 0
+expect_log "would: ${toggle}"
+grep -qF -- "would: buzz" "${STATE}/log" && fail "dry run buzzed within the debounce" || true
+
+LOCKED=1 run_case "short press during a transition" "press;sleep 0.05;release"
+wait
+expect_sequence "${toggle}"
+expect_buzz 0
+expect_log "tap during a transition or the debounce, no buzz"
 
 run_case "two short presses" "press;sleep 0.05;release;sleep 0.1;press;sleep 0.05;release"
 expect_sequence "${toggle}" "${toggle}"
+expect_buzz 2
 
 run_case "hold with the screen on" "press;sleep 0.4;release"
 expect_sequence "${menu}"
+expect_buzz 1
 expect_log "hold"
 expect_no_call "${toggle}"
 
 OFF=1 run_case "hold with the screen off" "press;sleep 0.4;release"
 expect_sequence "${screen_on}" "${menu}"
+expect_buzz 1
 expect_log "hold while off, screen on first"
 
 OFF=1 run_case "hold with the screen off dry run" "press;sleep 0.4;release" 1
 expect_calls 0
+expect_buzz 0
+expect_log "would: buzz 20"
 expect_log "would: ${screen_on}"
 expect_log "would: ${menu}"
 
 OFF=1 run_case "short press with the screen off" "press;sleep 0.05;release"
 expect_sequence "${toggle}"
+expect_buzz 1
 
 run_case "autorepeat keeps the hold" "press;sleep 0.05;repeat;sleep 0.05;repeat;sleep 0.3;release"
 expect_sequence "${menu}"
+expect_buzz 1
 
 run_case "release without press" "release;sleep 0.05;release"
 expect_calls 0
+expect_buzz 0
 
 run_case "release then press" "release;press;sleep 0.05;release"
 expect_sequence "${toggle}"

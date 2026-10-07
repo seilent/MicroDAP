@@ -58,6 +58,13 @@ setting() {
     printf '%s\n' "${value:-$2}"
 }
 
+lights_on() {
+    case "$(setting rgb armada)" in
+        accent|armada) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 set_screen_off() {
     run busctl --user --timeout=2 call "${player[@]}" SetScreenOff b "$1"
 }
@@ -79,8 +86,9 @@ screen_off() {
     : > "${runtime}/off"
     set_screen_off true
     run systemctl start casdap-priv@backlight-off.service
+    now_ms > "${runtime}/last-ms"
     run systemctl start casdap-priv@cpu-off.service
-    if [[ "$(setting rgb armada)" == accent ]]; then
+    if lights_on; then
         run systemctl start casdap-priv@rgb-sleep.service
     fi
     if [[ "$(setting wifiOffScreenOff false)" == true && ! -e "${runtime}/wifi" ]]; then
@@ -91,36 +99,36 @@ screen_off() {
         fi
     fi
     arm_idle
-    now_ms > "${runtime}/last-ms"
 }
 
 screen_on() {
-    local state
+    local state was_off=
     state=$(session_state)
     take_lock blocking
     log "screen on (session ${state:-unknown})"
+    [[ -e "${runtime}/off" ]] && was_off=1
+    run systemctl start casdap-priv@backlight-on.service
+    rm -f -- "${runtime}/off"
+    if [[ "${state}" == active ]]; then
+        set_screen_off false
+    fi
+    now_ms > "${runtime}/last-ms"
     stop_idle
     if [[ -e "${runtime}/wifi" ]]; then
         run nmcli radio wifi on
         rm -f -- "${runtime}/wifi"
     fi
     if [[ "${state}" == active ]]; then
-        if [[ ! -e "${runtime}/off" && -e "${before}" ]]; then
+        if [[ -z "${was_off}" && -e "${before}" ]]; then
             run systemctl start casdap-priv@cpu-restore.service
         fi
         run systemctl start casdap-priv@cpu-dap.service
     else
         run systemctl start casdap-priv@cpu-restore.service
     fi
-    if [[ "$(setting rgb armada)" == accent ]]; then
+    if lights_on; then
         run systemctl start casdap-priv@rgb-wake.service
     fi
-    run systemctl start casdap-priv@backlight-on.service
-    if [[ "${state}" == active ]]; then
-        set_screen_off false
-    fi
-    rm -f -- "${runtime}/off"
-    now_ms > "${runtime}/last-ms"
 }
 
 toggle() {

@@ -5,6 +5,9 @@ LONG_MS="${CASDAP_POWERD_LONG_MS:-1000}"
 DEVICE_WAIT_SEC="${CASDAP_POWERD_DEVICE_WAIT_SEC:-15}"
 DEVICE_NAME="${CASDAP_POWERD_DEVICE_NAME:-pm8941_pwrkey}"
 POLL_SEC="${CASDAP_POWERD_POLL_SEC:-5}"
+BUZZ_LEVEL="${CASDAP_POWERD_BUZZ_LEVEL:-0.6}"
+BUZZ_MS="${CASDAP_POWERD_BUZZ_MS:-60}"
+DEBOUNCE_MS="${CASDAP_POWER_DEBOUNCE_MS:-2000}"
 DRY_RUN="${CASDAP_POWERD_DRY_RUN:-0}"
 KEY="${CASDAP_POWERD_KEY:-KEY_POWER}"
 DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
@@ -22,6 +25,45 @@ run() {
         return 0
     fi
     "$@" || log "failed: $* (rc=$?)"
+}
+
+ms_sec() { printf '%d.%03d' $((10#$1 / 1000)) $((10#$1 % 1000)); }
+
+rumble() {
+    local level=$1 path
+    shift
+    for path in "$@"; do
+        busctl --system call org.shadowblip.InputPlumber "${path}" org.shadowblip.Output.ForceFeedback Rumble d "${level}" \
+            >/dev/null 2>&1 || true
+    done
+}
+
+buzz() {
+    if [[ "${DRY_RUN}" == 1 ]]; then
+        log "would: buzz $*"
+        return 0
+    fi
+    (
+        local devs ms
+        [[ "$1" =~ ^[0-9]+$ ]] || exit 0
+        ms=$1
+        mapfile -t devs < <(busctl --system tree --list org.shadowblip.InputPlumber 2>/dev/null \
+            | grep -E '^/org/shadowblip/InputPlumber/CompositeDevice[0-9]+$')
+        (( ${#devs[@]} )) || exit 0
+        trap 'rumble 0 "${devs[@]}"; exit 0' INT TERM
+        rumble "${BUZZ_LEVEL}" "${devs[@]}"
+        sleep "$(ms_sec "${ms}")"
+        rumble 0 "${devs[@]}"
+    ) 3<&- </dev/null >/dev/null 2>&1 &
+}
+
+toggle_will_act() {
+    local last
+    last=$(cat "${RUNTIME}/last-ms" 2>/dev/null) || last=0
+    [[ "${last}" =~ ^[0-9]+$ ]] || last=0
+    (( $(now_ms) - last >= DEBOUNCE_MS )) || return 1
+    [[ -d "${RUNTIME}" ]] || return 0
+    flock -n "${RUNTIME}/lock" true 2>/dev/null
 }
 
 key_device() {
@@ -66,10 +108,16 @@ event_stream() {
 }
 
 on_tap() {
+    if toggle_will_act; then
+        buzz "${BUZZ_MS}"
+    else
+        log "tap during a transition or the debounce, no buzz"
+    fi
     run casdap-power toggle
 }
 
 on_hold() {
+    buzz "${BUZZ_MS}"
     if [[ -e "${RUNTIME}/off" ]]; then
         log "hold while off, screen on first"
         run casdap-power screen-on
