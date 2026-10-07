@@ -617,13 +617,14 @@ expect_rc 1
 expect_calls 0
 
 begin "drop in"
-grep -qxF 'ExecStopPost=/usr/libexec/casdap/casdap-power screen-on' "${dropin}" || fail "drop in lacks ExecStopPost screen-on"
+grep -qxF 'ExecStopPost=-/usr/libexec/casdap/casdap-power screen-on' "${dropin}" || fail "drop in lacks ExecStopPost screen-on"
 grep -qxF 'Wants=casdap-powerd.service' "${dropin}" || fail "drop in lacks Wants=casdap-powerd.service"
 for word in hp-gain-normal hp-amp-lohifi spk-gain-102 rgb-restore; do
-    grep -qxF "ExecStopPost=systemctl start casdap-priv@${word}.service" "${dropin}" || fail "drop in lacks ExecStopPost casdap-priv@${word}"
+    grep -qxF "ExecStopPost=-systemctl start casdap-priv@${word}.service" "${dropin}" || fail "drop in lacks ExecStopPost casdap-priv@${word}"
 done
 [[ "$(grep -c '^ExecStopPost=' "${dropin}")" == 5 ]] || fail "drop in has $(grep -c '^ExecStopPost=' "${dropin}") ExecStopPost lines, expected 5"
-[[ "$(grep -n '^ExecStopPost=' "${dropin}" | head -n 1)" == *"casdap-power screen-on" ]] || fail "screen-on is not the first ExecStopPost"
+[[ "$(grep -n '^ExecStopPost=' "${dropin}" | head -n 1)" == *"casdap-priv@rgb-restore.service" ]] || fail "rgb-restore is not the first ExecStopPost"
+[[ "$(grep -c '^ExecStopPost=-' "${dropin}")" == 5 ]] || fail "an ExecStopPost step can stop the rest"
 LC_ALL=C grep -q -P '\xe2\x80[\x93\x94]' "${dropin}" && fail "drop in has a dash" || true
 grep -q '^#' "${dropin}" && fail "drop in has a comment" || true
 
