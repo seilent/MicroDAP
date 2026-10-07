@@ -17,7 +17,7 @@ measurement run and the release image.
 | `sysext/` | Static overlay, copied into `dist/` as is. `/usr` only, nothing under `/etc`. |
 | `patches/<class>/<path>.patch` | Patches against files of the Armada image. `armada/` Armada scripts, `generic/` InputPlumber profile, `pm2/` Pocket MICRO 2 capability map. |
 | `build/` | `base.env` (pinned image), `Containerfile`, `toolchain.sh`, `build.sh`, device scripts for the dev loop. |
-| `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. Playback is `playbin`, audio only, sink from `CASDAP_AUDIO_SINK` (default `pulsesink`), gapless through `about-to-finish`. Index, position, shuffle, repeat, `status` (`playing`, `paused`, `stopped`), `savedAt` (unix seconds), `handoff`, `stack` (the page stack as `name` and `id` pairs from each page's `objectName` and `pageId`, sheets, dialogs, the jump grid and the saver left out) and `queueRev` persist in `~/.config/casdap/state.json`, written every 10 s while playing with `handoff` false, on quit and on SIGTERM with `handoff` true, on every overlay hide and on `PrepareForSleep(true)` with `handoff` false, and by the switch prompt before the switch starts (KEEP IN BACKGROUND `handoff` true, CLOSE PLAYER `handoff` false; the session switch ends the player with SIGKILL, so nothing is written at exit). The queue lives in `queue.json` next to it: `rev` (counts every queue and order change), `index`, `ids` and `paths` (parallel arrays) and `order` (the shuffle play order as queue rows, empty with shuffle off), written 1000 ms after the last change on a worker thread through `QSaveFile` (one write in flight, a newer request replaces the waiting one); every `state.json` write except the 10 s one writes a `queue.json` that is behind on the calling thread first. A start resumes playing when `handoff` is true, `status` is `playing` and `savedAt` is under 60 s old, every other file restores the queue paused; entries resolve by id through `Library.queueEntries`, an id the library lacks or whose path differs by path, and an entry found by neither keeps its path with the file base name as title; a `queueRev` that differs from the `queue.json` `rev` (or no `state.json`) restores at the `queue.json` index, 0:00, paused; a saved `order` that is a permutation of the restored rows is kept, any other is rebuilt with the current row first; a `state.json` that still holds a `queue` array restores from it, then both files are written once; a resume waits for the first `SystemBluezModel` object read (`BluezModel.ready`) and restores paused while a phone transport is active; both modes restore the saved `stack` at start (an id gone from the library truncates it at that page, no key gives the home). Every play start adds a `history` row and emits `Library.played(id)`; every 100th insert of the process keeps the newest 2000 rows. `HistoryModel` takes `limit` (0 unbounded): a Recent model moves the played row to row 0 or inserts it there and drops the row past `limit`, and reloads on `tracksChanged`; a New model reloads only on `albumsChanged`. The library (`library.db`, `PRAGMA user_version` 5) reads `ARTISTS` or `ARTIST` tag values as a list, splits a single value on `; `, ` / ` and `, ` unless the whole value equals the album artist (not on ` feat. `), stores each per track in `track_artists(track_id, artist_id, pos)`, keeps `tracks.artist` as the joined display string and `albums.artist` as the album artist; `ArtistsModel` lists individual artists with album and song counts, `Library.artistAlbums(id)` and `artistTracks(id)` resolve through `track_artists`, and a version 1 database gets the table and every track marked for reread on the next scan. Scans run in DAP mode only and always cover the whole `Settings.roots` list: at start on the first `frameSwapped` after the state and stack restore, on every `Settings.rootsChanged`, from `Library.rescanRoots()`, and 5000 ms after the last `directoryChanged` of `LibraryWatcher` (a `QFileSystemWatcher` on every directory the last scan walked, breadth first in roots order, plus the nearest existing ancestor of each missing root, the climb stopping at the media base and `$HOME`, at most 4096 directories, `casdap: watch limit 4096 reached` logged once per process), and when the 5000 ms poll of a missing root finds it a directory; a trigger during a scan becomes the one pending request. Overlay mode never scans and builds no watcher. A track whose file is gone is removed under an enabled root that exists, kept under an enabled root that is missing or unreadable, kept when no directory between `/run/media` (`CASDAP_MEDIA_ROOT` replaces it) and the file is an existing mount point, and removed when no enabled root holds it (a folder turned OFF). `.m3u` and `.m3u8` files under the roots are read in the same scan: `.m3u8` as UTF-8, `.m3u` as UTF-8 when the whole file decodes, else Latin-1, a BOM dropped, empty and `#` lines skipped, `file://` decoded, `\` read as `/`, relative entries against the playlist folder; an entry takes the exact `tracks.path` match, else the single case folded match, else it is skipped, counted in `playlists.skipped` and logged as `casdap: playlist <name>: <n> entries not in the library`. `playlists` carries `source` (the file path, unique index), `skipped`, `mtime` and `size`; a playlist whose mtime and size match is not read unless the scan added tracks, a read one upserts by `source`, so a playlist keeps its id and pin, rewrites its `playlist_items` in file order (an entry listed twice plays twice) only when the resolved list differs, an unreadable file leaves its row as it is (`casdap: playlist <path>: unreadable, kept as is`), and a row whose file is gone is dropped by the track rules. A scan with nothing added, updated, removed or read runs no transaction and emits only `scanned`; `tracksChanged`, `albumsChanged` and `countsChanged` follow track changes, `playlistsChanged` and `playlistCountChanged` playlist changes, and the album, artist and art prune runs only after track changes. A version 2 or 3 database gains both columns and drops its playlists without `source`; every older version gains `mtime`, `size` and the `playlist_items(track_id)` index. `PlaylistsModel` sorts by name case folded, then `source`. `Library.songCount`, `allTracks()` (every song id in the `Songs` order) and `genreTracks(id)` (that order filtered to the genre) return song ids for the play verbs; `queueEntries` and `trackRows` query 500 ids per statement and keep the given order, `artistAlbumRows(id)` and `artistTrackRows(id)` return the artist page rows in one query each. Pins live in `pins(id, kind, ref_id, pos)`: `Library.pin(kind, refId)` (kinds `album`, `artist`, `song`, `playlist`; appends at max pos + 1, false on a duplicate or an unknown kind), `unpin(kind, refId)`, `isPinned(kind, refId)`, signal `pinsChanged`; a scan deletes every pin whose ref no longer exists and emits `pinsChanged` when it removed one. `PinsModel` (context property `Pins`) lists the pins in pos order with roles `id` (the ref id), `kind`, `title`, `subtitle`, `artPath`, `section` (`pins`): album title, album artist and art; artist name, `N ALBUMS` and the first album art; song title, artist and its album art; playlist name, `N SONGS`, no art; a pin whose ref is missing is skipped. `Mpris` registers `org.mpris.MediaPlayer2.casdap` at `/org/mpris/MediaPlayer2` on the session bus (root and `Player` interfaces, XML in `player/dbus/`, installed to `share/dbus-1/interfaces`): `Identity` is `CASDAP`, no `DesktopEntry`, track ids are `/org/casdap/track/<id>`, `Volume` reads 1.0 and ignores writes, `OpenUri` plays one `file://` uri, `Seeked` and `PropertiesChanged` are emitted for status, metadata, shuffle and loop. `PowerBridge` registers `org.casdap.Player` at `/org/casdap/Player` (`SetScreenOff(b)`, `ShowPowerMenu()`, `ShowOverlay()`, `HideOverlay()`, `ToggleOverlay()`, `ShowSwitchPrompt()`, `ScreenOff`, `PlaybackStatus`, `OverlayShown`, signal `ScreenOffChanged`; the three overlay methods answer `org.casdap.Error.NotSupported` and `OverlayShown` reads false in DAP mode, `ShowSwitchPrompt` answers `NotSupported` in overlay mode and emits `showSwitchPrompt` to QML in DAP mode), listens to `org.casdap.Hotkeys.VolumeChanged(d)`, reads `/run/casdap/drift` and runs only the verbs `screen-off`, `game-mode`, `suspend`, `poweroff` (`/usr/libexec/casdap/casdap-power <verb>`, `CASDAP_POWER_BIN` overrides the path; `systemctl start casdap-switch-back.service`); settings live in `~/.config/casdap/settings.ini` (`output` `auto`, `speaker`, `headphones`, `usb`; `btCodec`; `hpGain` `low`, `normal`, `high`, default `normal`; `hpAmp` `lohifi`, `ulp`, `hifi`, default `lohifi`; `spkGain` 84, 90, 96, 99, 102, 105, 108, default 102; `volumeStep` 2, 5, 10, default 5; `rgb` `accent`, `off`, `armada`, default `armada`; `overlayToasts`; `eqHeadphones`, `eqUsb`, `eqSpeaker` (`off`, a profile path, `custom`, default `off`); `roots`, `accentHue` (a multiple of 10 from 0 to 350, default 350; an old `accent` hex migrates to its nearest hue and is dropped by the next save), `accentFromArt` (default off), `scale`, `pocketControls`, `saverSeconds`, `screenOffSeconds`, `suspendMinutes`, `wifiOffScreenOff`, written 500 ms after the last change and on quit), battery comes from UPower `DisplayDevice` with a `/sys/class/power_supply` fallback, and local playback pauses when the Bluetooth transport goes active. Every local start while the transport is active (`play`, `playTracks`, `playAt`, `playPause` and `resume` from paused or stopped, MPRIS `Play`, `PlayPause` and `OpenUri`) emits `localPlayRequested` (wired to `BluezModel.pause`, AVRCP `MediaPlayer1.Pause`), holds the start paused with `playPending` true and starts once the transport leaves `active` or 1000 ms later; `pause` and `stop` drop the pending start. `CASDAP_BLUEZ_FAKE=1` wires `FakeBluezModel` in place of the Bluetooth model. Removing the current queue row starts the next one or stops when none follows. `Player.enqueueTracks(ids)` appends the rows and `playNextTracks(ids)` inserts them after the current row, both dropping ids the library does not know, returning the count added and emitting `added(count)` when it is above 0; on an empty or stopped queue either sets the queue to the added rows (shuffle kept, a new play order) and lands paused at 0:00 on the first one. `Player.playSource(kind, id, mode, startId)` (kinds `album`, `artist`, `playlist`, `genre`, `all` through `Library.entriesFor`, `song` the one track; modes `play` from the `startId` row or the first, `shuffle` with shuffle on from a random row, `add` and `next` with the enqueue and play next rules) returns the rows queued. With shuffle on, turning it on puts the current row in slot 0, an appended row takes a random slot after the current one and a play next row the slot right after it; off returns to list order on the same row. `Queue` reads in play order through `orderedRows()`, `rowAt(slot)`, `slotOf(row)`, `currentSlot` and `upcoming(n)` (the next n rows, wrapping with repeat all); `moveSlot(from, to)` and `playNextRow(row)` edit the play order under shuffle and the list without it, `remove(row)` drops the row from both. An index move emits `dataChanged` on the old and new row, `indexChanged` and `currentSlotChanged`; `set` emits one `modelReset`; `orderChanged` follows a shuffle toggle, an enqueue or play next under shuffle, `moveSlot`, `playNextRow` and `setOrder`. `Queue.playOrder` is a list model in play order (roles `row`, `slot`, `number`, `id`, `title`, `artist`, `album`, `durationMs`, `isCurrent`, `get(slot)`, `count`) with one insert, remove or move per queue edit (an enqueue of more than 64 rows under shuffle, the shuffle toggle and `set` reset it). The gapless chain shares the queue's entry list and resyncs on resets, inserts, removes, moves and order, shuffle and repeat changes. A track error starts the next row in the state the player was in; errors on every row of one pass stop the player on the first failed row and log `casdap: no playable track`. Pad input is SDL3 gamepad events (Guide never mapped), polled every 16 ms while a pad is open and the screen is on, every 1 s while no pad is open, not at all with the screen off; d-pad and stick repeat at 300 ms then 80 ms, `CASDAP_PAD_LOG=1` logs each action. `Pad` and `DbusPad` derive from `PadSource` (the `Action` enum, `screenOff`, `connected`, `actionName`, `action`, `pressed`, `released`); `main.cpp` hands `Pad` to QML as `Pad`, `DbusPad` under `--overlay`. `DbusPad` reads `org.shadowblip.Input.DBusDevice.InputEvent(s,d)` from InputPlumber on the system bus (`CASDAP_INPUTPLUMBER_BUS` overrides the address): `ui_up/down/left/right`, `ui_accept` A, `ui_back` B, `ui_context` X, `ui_action` Y, `ui_l1` LB, `ui_r1` RB, `ui_l2` LT, `ui_r2` RT, `ui_option` Start, `ui_select` Back, value >= 0.5 press, below release, same 300/80 repeat; `ui_guide`, `ui_quick`, `ui_l3` and unknown names are logged once and dropped; `connected` while a `devices/target/dbus*` path exists. Its `Intercept` writes `InterceptMode` on every `org.shadowblip.Input.CompositeDevice` from `GetManagedObjects` on `/org/shadowblip/InputPlumber`: 3 on `setShown(true)` and on a device added while shown, 0 on `setShown(false)` and in the destructor. |
+| `player/` | Qt 6 QML player with a C++ core (`casdapcore`). CMake project, built by `build.sh` inside the builder, installed to `/usr/bin/casdap-player`. Playback is `playbin`, audio only, sink from `CASDAP_AUDIO_SINK` (default `pulsesink`), gapless through `about-to-finish`. Index, position, shuffle, repeat, `status` (`playing`, `paused`, `stopped`), `savedAt` (unix seconds), `handoff`, `stack` (the page stack as `name` and `id` pairs from each page's `objectName` and `pageId`, sheets, dialogs, the jump grid and the saver left out) and `queueRev` persist in `~/.config/casdap/state.json`, written every 10 s while playing with `handoff` false, on quit and on SIGTERM with `handoff` true, on every overlay hide and on `PrepareForSleep(true)` with `handoff` false, and by the switch prompt before the switch starts (KEEP IN BACKGROUND `handoff` true, CLOSE PLAYER `handoff` false; the session switch ends the player with SIGKILL, so nothing is written at exit). The queue lives in `queue.json` next to it: `rev` (counts every queue and order change), `index`, `ids` and `paths` (parallel arrays) and `order` (the shuffle play order as queue rows, empty with shuffle off), written 1000 ms after the last change on a worker thread through `QSaveFile` (one write in flight, a newer request replaces the waiting one); every `state.json` write except the 10 s one writes a `queue.json` that is behind on the calling thread first. A start resumes playing when `handoff` is true, `status` is `playing` and `savedAt` is under 60 s old, every other file restores the queue paused; entries resolve by id through `Library.queueEntries`, an id the library lacks or whose path differs by path, and an entry found by neither keeps its path with the file base name as title; a `queueRev` that differs from the `queue.json` `rev` (or no `state.json`) restores at the `queue.json` index, 0:00, paused; a saved `order` that is a permutation of the restored rows is kept, any other is rebuilt with the current row first; a `state.json` that still holds a `queue` array restores from it, then both files are written once; a resume waits for the first `SystemBluezModel` object read (`BluezModel.ready`) and restores paused while a phone transport is active; both modes restore the saved `stack` at start (an id gone from the library truncates it at that page, no key gives the home). Every play start adds a `history` row and emits `Library.played(id)`; every 100th insert of the process keeps the newest 2000 rows. `HistoryModel` takes `limit` (0 unbounded): a Recent model moves the played row to row 0 or inserts it there and drops the row past `limit`, and reloads on `tracksChanged`; a New model reloads only on `albumsChanged`. The library (`library.db`, `PRAGMA user_version` 5) reads `ARTISTS` or `ARTIST` tag values as a list, splits a single value on `; `, ` / ` and `, ` unless the whole value equals the album artist (not on ` feat. `), stores each per track in `track_artists(track_id, artist_id, pos)`, keeps `tracks.artist` as the joined display string and `albums.artist` as the album artist; `ArtistsModel` lists individual artists with album and song counts, `Library.artistAlbums(id)` and `artistTracks(id)` resolve through `track_artists`, and a version 1 database gets the table and every track marked for reread on the next scan. Scans run in DAP mode only and always cover the whole `Settings.roots` list: at start on the first `frameSwapped` after the state and stack restore, on every `Settings.rootsChanged`, from `Library.rescanRoots()`, and 5000 ms after the last `directoryChanged` of `LibraryWatcher` (a `QFileSystemWatcher` on every directory the last scan walked, breadth first in roots order, plus the nearest existing ancestor of each missing root, the climb stopping at the media base and `$HOME`, at most 4096 directories, `casdap: watch limit 4096 reached` logged once per process), and when the 5000 ms poll of a missing root finds it a directory; a trigger during a scan becomes the one pending request. Overlay mode never scans and builds no watcher. A track whose file is gone is removed under an enabled root that exists, kept under an enabled root that is missing or unreadable, kept when no directory between `/run/media` (`CASDAP_MEDIA_ROOT` replaces it) and the file is an existing mount point, and removed when no enabled root holds it (a folder turned OFF). `.m3u` and `.m3u8` files under the roots are read in the same scan: `.m3u8` as UTF-8, `.m3u` as UTF-8 when the whole file decodes, else Latin-1, a BOM dropped, empty and `#` lines skipped, `file://` decoded, `\` read as `/`, relative entries against the playlist folder; an entry takes the exact `tracks.path` match, else the single case folded match, else it is skipped, counted in `playlists.skipped` and logged as `casdap: playlist <name>: <n> entries not in the library`. `playlists` carries `source` (the file path, unique index), `skipped`, `mtime` and `size`; a playlist whose mtime and size match is not read unless the scan added tracks, a read one upserts by `source`, so a playlist keeps its id and pin, rewrites its `playlist_items` in file order (an entry listed twice plays twice) only when the resolved list differs, an unreadable file leaves its row as it is (`casdap: playlist <path>: unreadable, kept as is`), and a row whose file is gone is dropped by the track rules. A scan with nothing added, updated, removed or read runs no transaction and emits only `scanned`; `tracksChanged`, `albumsChanged` and `countsChanged` follow track changes, `playlistsChanged` and `playlistCountChanged` playlist changes, and the album, artist and art prune runs only after track changes. A version 2 or 3 database gains both columns and drops its playlists without `source`; every older version gains `mtime`, `size` and the `playlist_items(track_id)` index. `PlaylistsModel` sorts by name case folded, then `source`. `Library.songCount`, `allTracks()` (every song id in the `Songs` order) and `genreTracks(id)` (that order filtered to the genre) return song ids for the play verbs; `queueEntries` and `trackRows` query 500 ids per statement and keep the given order, `artistAlbumRows(id)` and `artistTrackRows(id)` return the artist page rows in one query each. Pins live in `pins(id, kind, ref_id, pos)`: `Library.pin(kind, refId)` (kinds `album`, `artist`, `song`, `playlist`; appends at max pos + 1, false on a duplicate or an unknown kind), `unpin(kind, refId)`, `isPinned(kind, refId)`, signal `pinsChanged`; a scan deletes every pin whose ref no longer exists and emits `pinsChanged` when it removed one. `PinsModel` (context property `Pins`) lists the pins in pos order with roles `id` (the ref id), `kind`, `title`, `subtitle`, `artPath`, `section` (`pins`): album title, album artist and art; artist name, `N ALBUMS` and the first album art; song title, artist and its album art; playlist name, `N SONGS`, no art; a pin whose ref is missing is skipped. `Mpris` registers `org.mpris.MediaPlayer2.casdap` at `/org/mpris/MediaPlayer2` on the session bus (root and `Player` interfaces, XML in `player/dbus/`, installed to `share/dbus-1/interfaces`): `Identity` is `CASDAP`, no `DesktopEntry`, track ids are `/org/casdap/track/<id>`, `Volume` reads 1.0 and ignores writes, `OpenUri` plays one `file://` uri, `Seeked` and `PropertiesChanged` are emitted for status, metadata, shuffle and loop. `PowerBridge` registers `org.casdap.Player` at `/org/casdap/Player` (`SetScreenOff(b)`, `ShowPowerMenu()`, `ShowOverlay()`, `HideOverlay()`, `ToggleOverlay()`, `ShowSwitchPrompt()`, `ScreenOff`, `PlaybackStatus`, `OverlayShown`, signal `ScreenOffChanged`; the three overlay methods answer `org.casdap.Error.NotSupported` and `OverlayShown` reads false in DAP mode, `ShowSwitchPrompt` answers `NotSupported` in overlay mode and emits `showSwitchPrompt` to QML in DAP mode), listens to `org.casdap.Hotkeys.VolumeChanged(d)`, reads `/run/casdap/drift` and runs only the verbs `screen-off`, `game-mode`, `suspend`, `poweroff` (`/usr/libexec/casdap/casdap-power <verb>`, `CASDAP_POWER_BIN` overrides the path; `systemctl start casdap-switch-back.service`); settings live in `~/.config/casdap/settings.ini` (`output` `auto`, `speaker`, `headphones`, `usb`; `btCodec`; `hpGain` `low`, `normal`, `high`, default `normal`; `hpAmp` `lohifi`, `ulp`, `hifi`, default `lohifi`; `spkGain` 84, 90, 96, 99, 102, 105, 108, default 102; `volumeStep` 2, 5, 10, default 5; `rgb` `accent`, `off`, `armada`, default `armada`; `overlayToasts`; `eqHeadphones`, `eqUsb`, `eqSpeaker` (`off`, a profile path, `custom`, default `off`); `roots`, `accentHue` (a multiple of 10 from 0 to 350, default 350; an old `accent` hex migrates to its nearest hue and is dropped by the next save), `accentFromArt` (default off), `scale`, `saverSeconds`, `screenOffSeconds`, `suspendMinutes`, `wifiOffScreenOff`, written 500 ms after the last change and on quit), battery comes from UPower `DisplayDevice` with a `/sys/class/power_supply` fallback, and local playback pauses when the Bluetooth transport goes active. Every local start while the transport is active (`play`, `playTracks`, `playAt`, `playPause` and `resume` from paused or stopped, MPRIS `Play`, `PlayPause` and `OpenUri`) emits `localPlayRequested` (wired to `BluezModel.pause`, AVRCP `MediaPlayer1.Pause`), holds the start paused with `playPending` true and starts once the transport leaves `active` or 1000 ms later; `pause` and `stop` drop the pending start. `CASDAP_BLUEZ_FAKE=1` wires `FakeBluezModel` in place of the Bluetooth model. Removing the current queue row starts the next one or stops when none follows. `Player.enqueueTracks(ids)` appends the rows and `playNextTracks(ids)` inserts them after the current row, both dropping ids the library does not know, returning the count added and emitting `added(count)` when it is above 0; on an empty or stopped queue either sets the queue to the added rows (shuffle kept, a new play order) and lands paused at 0:00 on the first one. `Player.playSource(kind, id, mode, startId)` (kinds `album`, `artist`, `playlist`, `genre`, `all` through `Library.entriesFor`, `song` the one track; modes `play` from the `startId` row or the first, with shuffle already on from a random row with no `startId` and from the `startId` row first with one, the rest in a new play order, `shuffle` with shuffle on from a random row, `add` and `next` with the enqueue and play next rules) returns the rows queued. With shuffle on, turning it on puts the current row in slot 0, a new queue from a play verb or `playTracks(ids, start)` puts its start row in slot 0 and the rest in a random order, an appended row takes a random slot after the current one and a play next row the slot right after it; off returns to list order on the same row. `Queue` reads in play order through `orderedRows()`, `rowAt(slot)`, `slotOf(row)`, `currentSlot` and `upcoming(n)` (the next n rows, wrapping with repeat all); `moveSlot(from, to)` and `playNextRow(row)` edit the play order under shuffle and the list without it, `remove(row)` drops the row from both. An index move emits `dataChanged` on the old and new row, `indexChanged` and `currentSlotChanged`; `set` emits one `modelReset`; `orderChanged` follows a shuffle toggle, an enqueue or play next under shuffle, `moveSlot`, `playNextRow` and `setOrder`. `Queue.playOrder` is a list model in play order (roles `row`, `slot`, `number`, `id`, `title`, `artist`, `album`, `durationMs`, `isCurrent`, `get(slot)`, `count`) with one insert, remove or move per queue edit (an enqueue of more than 64 rows under shuffle, the shuffle toggle and `set` reset it). The gapless chain shares the queue's entry list and resyncs on resets, inserts, removes, moves and order, shuffle and repeat changes. A track error starts the next row in the state the player was in; errors on every row of one pass stop the player on the first failed row and log `casdap: no playable track`. Pad input is SDL3 gamepad events (Guide never mapped), polled every 16 ms while a pad is open and the screen is on, every 1 s while no pad is open, not at all with the screen off; d-pad and stick repeat at 300 ms then 80 ms, `CASDAP_PAD_LOG=1` logs each action. `Pad` and `DbusPad` derive from `PadSource` (the `Action` enum, `screenOff`, `connected`, `actionName`, `action`, `pressed`, `released`); `main.cpp` hands `Pad` to QML as `Pad`, `DbusPad` under `--overlay`. `DbusPad` reads `org.shadowblip.Input.DBusDevice.InputEvent(s,d)` from InputPlumber on the system bus (`CASDAP_INPUTPLUMBER_BUS` overrides the address): `ui_up/down/left/right`, `ui_accept` A, `ui_back` B, `ui_context` X, `ui_action` Y, `ui_l1` LB, `ui_r1` RB, `ui_l2` LT, `ui_r2` RT, `ui_option` Start, `ui_select` Back, value >= 0.5 press, below release, same 300/80 repeat; `ui_guide`, `ui_quick`, `ui_l3` and unknown names are logged once and dropped; `connected` while a `devices/target/dbus*` path exists. Its `Intercept` writes `InterceptMode` on every `org.shadowblip.Input.CompositeDevice` from `GetManagedObjects` on `/org/shadowblip/InputPlumber`: 3 on `setShown(true)` and on a device added while shown, 0 on `setShown(false)` and in the destructor. |
 | `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`, `busctl`, `amixer`, `armada-rgb`. `bt-test.sh` runs `bt-test.py` under `dbus-run-session` with a fake `org.bluez` (needs `dbus-python` and `python3-gobject`). `keep-test.sh` drives `casdap-keep` through `CASDAP_KEEP_FILE` and `CASDAP_BOOT_ID_FILE`; `power-test.sh` drives `casdap-power` with stubbed `busctl`, `systemctl`, `systemd-run`, `nmcli` and `CASDAP_RUNTIME_DIR`, `CASDAP_SETTINGS_FILE`, `CASDAP_CPU_BEFORE_FILE`; `powerd-test.sh` replays `evtest` lines and profile reads into `casdap-powerd`; `wait-x-test.sh` drives `casdap-wait-x` with a stubbed `xprop` and `CASDAP_X_SOCKET_DIR`; `overlay-unit-test.sh` greps `casdap-overlay.service` and its drop in under `sysext/` and runs `systemd-analyze --user verify` where the image units and the player binary exist (`skip:` otherwise). Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures; `tst_mpris`, `tst_power`, `tst_systembluez`, `tst_dbuspad` and `tst_overlay` run under `dbus-run-session`, `tst_dbuspad` and `tst_overlay` against `fake_inputplumber.py`, `tst_overlay` and `tst_power` against `fake_login1.py` (a fake `org.freedesktop.login1` with `Inhibit` and `PrepareForSleep` on the private bus, `CASDAP_LOGIN1_BUS`), `tst_overlay` also against a unix datagram `NOTIFY_SOCKET`; each `player/tests/qml/tst_*.qml` is its own ctest entry `qml-<name>` running `tst_qml -input <file>`). |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
@@ -125,11 +125,11 @@ track and no phone transport, or an unknown name truncates the stack there). A B
 menu in overlay mode emits `hideRequested` and Main calls `OverlayBridge.hide()` only when the matching B press
 landed on the home menu with Quickplay and the pin sheet closed; a B that pops to home, pans Quickplay back or
 closes the sheet does not hide. `Home.overlay`, `Bluetooth.overlay` and `SettingsScreen.overlay` carry the mode:
-the settings GAME MODE row reads CLOSE PLAYER with a sheet `close player` whose accept calls
+the settings POWER group ends with CLOSE PLAYER, a sheet `close player` whose accept calls
 `OverlayBridge.closePlayer()`, PAIR A PHONE shows `PAIR IN DAP MODE` and A does nothing, the Bluetooth
 PAIRING pivot shows `pair in dap mode` (11 u Light upper case at baseline CONTENT_TOP + 16) in place of
 the ring and instructions and A does nothing. The saver and the screen off timer never arm in overlay
-mode. Track toasts while hidden follow `Settings.overlayToasts` (row OVERLAY TOASTS under SAVER,
+mode. Track toasts while hidden follow `Settings.overlayToasts` (row TOASTS IN GAME under SAVER,
 default off): with it on, a new `Player.current` id while hidden maps `toastWindow`, a second 40 u
 `Window` (output width, black) carrying its own `Toast`, for the F11 slide, hold and slide out, then
 unmaps it; `OverlayBridge.prepareToast()` creates the X window with the overlay atoms before the map and
@@ -245,7 +245,7 @@ upper case value right aligned at W - HUB_EDGE; focused 1.0 and 0.85, others 0.6
 `OutputControl.jackPresent` is false, `USB (NOT PRESENT)` while it is `usb` and no USB sink is listed, the
 setting is kept either way), `HEADPHONE GAIN` (`LOW`, `NORMAL`, `HIGH` on
 `Settings.hpGain`), `HEADPHONE AMP` (`LOHIFI`, `ULP`, `HIFI` on `Settings.hpAmp`; both read `BUILT IN ONLY` and
-ignore left, right and A while `OutputControl.activeOutput` is `usb`), `SPEAKER DIGITAL GAIN`
+A enters no edit mode while `OutputControl.activeOutput` is `usb`), `SPEAKER DIGITAL GAIN`
 (84 to 108 on `Settings.spkGain`, shown as dB from 84: `0 DB`, `+6 DB`, `+12 DB`, `+15 DB`, `+18 DB`, `+21 DB`,
 `+24 DB`; the hardware takes the value when playback restarts), `VOLUME STEP` (`2%`, `5%`, `10%` on
 `Settings.volumeStep`), `BLUETOOTH CODEC` (`AUTO`, `APTX`, `AAC`,
@@ -260,28 +260,32 @@ mount under the other children, each with its `Music` subfolder when present, `C
 overrides the base) plus `Settings.roots`, path as written in 11 u Light with `ON` or `OFF`, A toggles it in
 `Settings.roots`; the last root stays on), `RESCAN LIBRARY` (`N SONGS` from `Library.songCount`, `SCANNING` while
 `Library.scanning`; left/right inert, A calls `Library.rescanRoots()` and does nothing while scanning). DISPLAY: `ACCENT` (one 12 u swatch of
-`Ui.accentForHue(Settings.accentHue)` at the value position, no border; left/right step `Settings.accentHue` 10
-degrees, wrapping 350 to 0 and 0 to 350, held directions repeat; A does nothing; the swatch shows the slider hue
-also while the art holds the accent), `ACCENT FROM ART` (`ON`, `OFF` on `Settings.accentFromArt`; left, right and A
-toggle),
+`Ui.accentForHue(Settings.accentHue)` at the value position, no border; in edit mode left/right step
+`Settings.accentHue` 10 degrees, wrapping 350 to 0 and 0 to 350, held directions repeat; the swatch shows the slider
+hue also while the art holds the accent), `ACCENT FROM ART` (`ON`, `OFF` on `Settings.accentFromArt`; left and
+right toggle),
 `ORIENTATION` (read only, the current orientation), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps; `Ui.userScale` and
 `Settings.scale` follow live, focus and the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
-`Settings.saverSeconds`), `RGB` (`ACCENT`, `OFF`, `ARMADA` on `Settings.rgb`; reads `UNSUPPORTED` and ignores
-left/right and A while `RgbControl.supported` is false; absent in overlay mode), `OVERLAY TOASTS` (`ON`, `OFF`
+`Settings.saverSeconds`), `RGB` (`ACCENT`, `OFF`, `ARMADA` on `Settings.rgb`; reads `UNSUPPORTED` and A enters no
+edit mode while `RgbControl.supported` is false; absent in overlay mode), `TOASTS IN GAME` (`ON`, `OFF`
 on `Settings.overlayToasts`). POWER: `SCREEN OFF AFTER`
 (`OFF`, 1, 2, 5, 10, 30 MIN on `Settings.screenOffSeconds`),
-`SUSPEND AFTER` (`OFF`, 5, 10, 30, 60 MIN on `Settings.suspendMinutes`), `POCKET CONTROLS` (`ON`, `OFF` on
-`Settings.pocketControls`, read by `casdap-hotkeyd` for the guide button with the screen off),
-`WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), `KEEP PHONE IN GAME MODE` (`ON`, `OFF` on
-`Settings.keepPhoneInGameMode`; absent in overlay mode), `GAME MODE` (A opens the sheet `game mode`
-with `switch to game mode`, T12; accepting calls `PowerBridge.closeAndSwitch()`, or `runVerb("game-mode")` on
-a bridge without `closeAndSwitch`; in overlay mode the row reads `CLOSE PLAYER`, the sheet `close player` and
-accepting calls `OverlayBridge.closePlayer()`). `ABOUT` is the last row with the version (`Env.version`) as its value; A opens
+`SUSPEND AFTER` (`OFF`, 5, 10, 30, 60 MIN on `Settings.suspendMinutes`),
+`WI-FI WHEN OFF` (`KEEP`, `OFF` on `Settings.wifiOffScreenOff`), then in overlay mode only `CLOSE PLAYER` (A opens
+the sheet `close player`, T12; accepting emits `closePlayerRequested` and calls `OverlayBridge.closePlayer()`).
+`ABOUT` is the last row with the version (`Env.version`) as its value; A opens
 read only lines in the value role: `ARMADA <IMAGE_VERSION>` and `IMAGE <digest>` from `Env.manifest` (the
 `key=value` head of `/usr/share/casdap/build-manifest`, `CASDAP_MANIFEST_FILE` overrides), `DRIFT N FILES`
 while `PowerBridge.driftPaths` is not empty, `TRACK 44100 HZ 16 BIT` from `Player.current.sampleRate` and
-`bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. Left/right step a value (A steps it too),
-read only rows ignore them, a changed value text runs F7 (opacity 1 to 0.2 over 200, swap, 0.2 to 1 over 200).
+`bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. Value rows (OUTPUT, HEADPHONE GAIN, HEADPHONE AMP,
+SPEAKER DIGITAL GAIN, VOLUME STEP, BLUETOOTH CODEC, ACCENT, ACCENT FROM ART, SCALE, SAVER, RGB, TOASTS IN GAME,
+SCREEN OFF AFTER, SUSPEND AFTER, WI-FI WHEN OFF) change only in edit mode: A enters it (`editing`, `editKey`; the
+value text turns `Ui.accent`, the title stays), left/right step the value live (lists stop at their ends), A
+confirms, B writes back the value the row had when edit mode began and leaves edit mode without popping; up,
+down, LT, RT, LB, RB, X, Y, Start and Back/View are taken and do nothing while editing; leaving the page, the
+screen turning off or the overlay hiding confirms. Outside edit mode left/right do nothing on every row. The
+other rows keep A as their action, read only rows take A and do nothing. A changed value text runs F7 (opacity 1
+to 0.2 over 200, swap, 0.2 to 1 over 200).
 The sub rows opened by LIBRARY FOLDERS and ABOUT arrive with F12 from the row under the opener.
 LT/RT page by the content height. B pops. Main applies `Settings.scale` to `Ui` at start and binds `Ui.accent` and
 `Ui.accentBright` to `Accent.color` and `Accent.brightColor` (without `Accent`, `Ui.accentForHue` and
@@ -291,17 +295,25 @@ LT/RT page by the content height. B pops. Main applies `Settings.scale` to `Ui` 
 header `eq`, pivots `headphones`, `usb`, `speaker` (the `Eq.activeOutput` pivot active at open, an output change
 while open leaves it), rows from CONTENT_TOP in the settings row style at SETTINGS_PITCH with the value right
 aligned at W - HUB_EDGE in a slot starting `Ui.eqValueGap` (8 u) right of the title, clipped at its left edge.
-`PROFILE` (`OFF`, the file name, `CUSTOM`, `<NAME> (MISSING)`; left/right and A call `Eq.cycleProfile(output,
-delta)`), then, only while the profile is a parsed file or CUSTOM, `PREAMP` (`-6.5 DB`, `Eq.stepPreamp`) and
+`PROFILE` (`OFF`, the file name, `CUSTOM`, `<NAME> (MISSING)`; `Eq.cycleProfile(output, delta)`), then, only while
+the profile is a parsed file or CUSTOM, `PREAMP` (`-6.5 DB`, `Eq.stepPreamp(output, delta, coarse)`) and
 `BAND 1` to `BAND 10` (`PK 105 HZ +2.1 DB Q 0.70`, `LS`, `HS`, `2.5 KHZ` from 1000 Hz, `OFF` for a disabled
 band). A on a band opens the sub rows `TYPE`, `FREQUENCY`, `GAIN`, `Q` under it (11 u Light upper case,
-`Eq.stepBand(output, band, field, delta)` with field `type`, `freq`, `gain`, `q`) with F12, a second A closes
-them, A on another band moves them there. Values come from `Eq.profile(output)` and refresh on
-`profilesChanged`; a changed value swaps with F7, rows listed by a profile step arrive with F12. Up/down move
-through the rows, LT/RT page, LB/RB switch pivots with T5 (no wrap; the switch closes the sub rows and focuses
-PROFILE), X, Y and Back/View do nothing, B pops. Rows feather once on first show (T2a). Without `Eq` the page
-lists PROFILE `OFF` on every pivot and steps nothing. `screenOff` or `animated` false lands the pivot and the
-rows.
+`Eq.stepBand(output, band, field, delta, coarse)` with field `type`, `freq`, `gain`, `q`) with F12, a second A closes
+them, A on another band moves them there. PROFILE, PREAMP and the sub rows change only in edit mode, as in
+`SettingsScreen`: A enters it (the value turns `Ui.accent`), left/right make the fine step (`coarse` false), LB/RB
+the coarse step on PREAMP and the sub rows (`coarse` true; nothing on PROFILE), A confirms, B cancels without
+popping, every other key is taken and does nothing; leaving the page, the screen turning off or an outside pivot
+change confirms. Cancel replays the steps that changed `Eq.profileMap(output)`, newest first, with the direction
+inverted (TYPE and PROFILE step back through their cycles), then, while the key differs from the one at edit start,
+steps `cycleProfile(output, -1)` at most `Eq.sources.length + 2` times to reach it (a file edited into CUSTOM
+returns to the file). A step that hit a clamp or snapped an off grid value is not undone exactly, and a
+`<NAME> (MISSING)` key left by a PROFILE edit is not restored. Values come from `Eq.profile(output)` and refresh on
+`profilesChanged`; a changed value swaps with F7, rows listed by a profile step arrive with F12. Outside edit mode
+up/down move through the rows, LT/RT page, LB/RB switch pivots with T5 (no wrap; the switch closes the sub rows and
+focuses PROFILE), left/right, X, Y and Back/View do nothing, B pops. Rows feather once on first show (T2a). Without
+`Eq` the page lists PROFILE `OFF` on every pivot, A enters no edit mode and nothing steps. `screenOff` or `animated`
+false lands the pivot and the rows.
 
 `ArtistDetail` is the `artist` page, pushed with the turnstile (T3) by `open("artist", id)` from the hub:
 header `artist`, pivots `albums`, `songs`, the name (11 u Bold upper case) at HUB_EDGE on a baseline 15 u
@@ -526,8 +538,12 @@ sends `READY=1` once after `org.casdap.Player` is registered and the hidden wind
 `WATCHDOG=1` every 7 s, shown or hidden. When `org.casdap.Player` is already owned at start the
 overlay instance logs `another player owns org.casdap.Player, exiting` and exits 0; the DAP instance
 warns and continues. CLOSE PLAYER in the overlay settings (`OverlayBridge.closePlayer()`) writes
-`InterceptMode` 0, deletes the keep marker, saves `state.json` with `handoff` false and quits 0, so the
-unit ends inactive. Every hide saves `state.json` with `handoff` false and the current stack.
+`InterceptMode` 0, hides the overlay, deletes the keep marker and saves `state.json` with `handoff` false, then
+runs `casdap-bt --disconnect-sources` and `casdap-codec clear` one after the other through a tracked `QProcess`
+(`CASDAP_BT_BIN`, `CASDAP_CODEC_BIN` override the paths; a failed or missing step is logged and skipped), emits
+`closed` and quits 0, so the unit ends inactive. Steps still running 2500 ms after the call are killed and the
+player quits. A second call while it runs is logged and does nothing. Every hide saves `state.json` with
+`handoff` false and the current stack.
 
 Sleep (`SleepInhibitor`, `src/core/`): both modes subscribe to `org.freedesktop.login1.Manager`
 `PrepareForSleep` on the system bus (`CASDAP_LOGIN1_BUS` overrides the address for tests) and hold a
@@ -584,9 +600,10 @@ The verbs are fixed words (`bt-class-headphones`, `bt-class-default`, `backlight
 `cpu-dap`, `cpu-off`, `cpu-restore`, `hp-gain-low`, `hp-gain-normal`, `hp-gain-high`, `hp-amp-lohifi`,
 `hp-amp-ulp`, `hp-amp-hifi`, `spk-gain-84`, `spk-gain-90`, `spk-gain-96`, `spk-gain-99`, `spk-gain-102`,
 `spk-gain-105`, `spk-gain-108`, `rgb-hue-0`, `rgb-hue-10`, ... `rgb-hue-350` (36 words, multiples of 10),
+`rgb-color-<h>-<s>` (144 words, `h` a multiple of 10 from 0 to 350, `s` 1 to 4),
 `rgb-off`, `rgb-sleep`, `rgb-wake`, `rgb-restore`);
-`casdap-priv` exits 1 on anything else. No value from the caller reaches root: the mixer step and
-the hue are part of the word.
+`casdap-priv` exits 1 on anything else. No value from the caller reaches root: the mixer step, the hue and
+the saturation level are part of the word.
 
 Mixer words: `hp-gain-low`, `hp-gain-normal`, `hp-gain-high` write `HPHL Volume` then `HPHR Volume` 8, 20,
 24; `hp-amp-lohifi`, `hp-amp-ulp`, `hp-amp-hifi` write `RX HPH Mode` CLS_H_LOHIFI, CLS_H_ULP, CLS_H_HIFI
@@ -598,13 +615,22 @@ and the word exits 1.
 RGB words run `/usr/libexec/armada/armada-rgb-env` (`CASDAP_RGB_BIN`) against `/etc/armada/rgb.json`
 (`CASDAP_RGB_CONFIG`) with the save file `/run/casdap/rgb-before.json` (`CASDAP_RGB_BEFORE_FILE`).
 `rgb-hue-<n>` takes `<n>` matching `^(0|[1-9][0-9]{1,2})$`, a multiple of 10 and at most 350, and exits 1
-before any step otherwise. It copies the config to the save while the save is absent (no config saves a zero
+before any step otherwise; it is `rgb-color-<n>-4`. `rgb-color-<h>-<s>` takes `<h>` the same way and `<s>` one of
+1 to 4, else exits 1 before any step. It copies the config to the save while the save is absent (no config saves a zero
 byte file), reads `enabled`, `linkBrightness`, `brightness`, `maxBrightness` and `saturation` from
 `armada-rgb get` (a missing key exits 1) and runs `set --enabled <e> --link-brightness <l> --max-brightness <m>
---color <hex> --saturation <s> --brightness <b>` with every read value unchanged. The color is `hsv(n, 1, 1)`
-in integers: sector `k = n / 60`, `f = n % 60`, `up = (255 f + 30) / 60`, `down = (255 (60 - f) + 30) / 60`,
-RGB `(255, up, 0)`, `(down, 255, 0)`, `(0, 255, up)`, `(0, down, 255)`, `(up, 0, 255)`, `(255, 0, down)` for
-k 0 to 5 (0 `FF0000`, 20 `FF5500`, 200 `00AAFF`, 280 `AA00FF`, 350 `FF002B`). With Armada's `enabled` false
+--color <hex> --saturation <sat * L / 100> --brightness <b>` (`sat` is the `saturation` of the save file, Armada's own
+value before casdap touched it, 100 when the save is empty or has none) with `enabled`, `linkBrightness`, `maxBrightness` and
+`brightness` unchanged, so the stick is never brighter than Armada makes it: the applied level stays Armada's
+`brightness`, or with `linkBrightness` the screen percentage times `maxBrightness` that the Armada watcher computes
+(`armada-rgb` `controller.rs:35-44,78-86`, `display_brightness.rs:33-38`), and the `rgb.json` save restarts that watcher
+through its path unit. `L` is 40, 60, 80, 100 for `s` 1 to 4 and Armada's `saturation` is scaled by it (rounded),
+because Armada replaces the color's own saturation with `saturation` (`backend.rs:426-427`, `rgb_saturation.rs:4-15`). The color is `hsv(h, L / 100, 1)`
+in integers: `lo = (255 (100 - L) + 50) / 100`, `span = 255 - lo`, sector `k = h / 60`, `f = h % 60`,
+`up = lo + (span f + 30) / 60`, `down = lo + (span (60 - f) + 30) / 60`,
+RGB `(255, up, lo)`, `(down, 255, lo)`, `(lo, 255, up)`, `(lo, down, 255)`, `(up, lo, 255)`, `(255, lo, down)` for
+k 0 to 5 (level 4: 0 `FF0000`, 20 `FF5500`, 200 `00AAFF`, 280 `AA00FF`, 350 `FF002B`; `rgb-color-0-1` `FF9999`,
+`rgb-color-200-2` `66CCFF`), 144 distinct colors. With Armada's `enabled` false
 the color is saved and the lights stay off; a `maxBrightness` 0 with `linkBrightness` true is passed as is
 and `set` rejects it. `rgb-off` saves the same way
 and runs `off`. `rgb-sleep` and `rgb-wake` run `sleep` and `wake` and touch no file. `rgb-restore` with a
@@ -629,17 +655,18 @@ Settings come from `CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.in
 `suspendMinutes`, `rgb`). `screen-off`, `toggle` and `cpu-apply` exit 1 unless `systemctl --user is-active
 gamescope-session-plus@casdap.service` prints `active`; `screen-on` runs in every state. `screen-off`, in
 order: the `off` marker, `busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player
-SetScreenOff b true` (a failed call is logged), `casdap-priv@backlight-off.service`, `last-ms`,
-`casdap-priv@cpu-off.service`, `casdap-priv@rgb-sleep.service` when `rgb` is `accent` or `armada` (the default), `nmcli radio wifi off`
+SetScreenOff b true` (a failed call is logged), `casdap-priv@backlight-off.service`,
+`casdap-priv@rgb-sleep.service` when `rgb` is `accent` or `armada` (the default), `last-ms`,
+`casdap-priv@cpu-off.service`, `nmcli radio wifi off`
 with the `wifi` marker when `wifiOffScreenOff=true`
 and the marker is absent, then `systemctl --user stop casdap-idle.timer` and `systemd-run --user
 --unit=casdap-idle --on-active=60 --on-unit-inactive=60 --timer-property=AccuracySec=1min casdap-power
 idle-check`. `screen-on`, in order: `casdap-priv@backlight-on.service`, removes the `off` marker, `SetScreenOff b
-false` (session `active` only), `last-ms`, then stops the timer, `nmcli radio wifi on` when the `wifi` marker
+false` (session `active` only), `casdap-priv@rgb-wake.service` when `rgb` is `accent` or `armada`, `last-ms`,
+then stops the timer, `nmcli radio wifi on` when the `wifi` marker
 exists, then with the session `active` starts `cpu-restore` (only when the `off` marker was absent at the start and
-`CASDAP_CPU_BEFORE_FILE` is present) and `cpu-dap`, in any other state `cpu-restore`; then
-`casdap-priv@rgb-wake.service` when `rgb` is `accent` or `armada`. `last-ms` marks the visible change, the slower
-CPU, light and Wi-Fi steps follow it. `screen-off` and `screen-on` hold
+`CASDAP_CPU_BEFORE_FILE` is present) and `cpu-dap`, in any other state `cpu-restore`. The stick lights change with
+the backlight; `last-ms` follows both, the slower CPU and Wi-Fi steps follow it. `screen-off` and `screen-on` hold
 `lock` (`flock -w 10`, `lock timeout` and exit 1 when it fails) for their whole run. `toggle` takes the lock
 with `flock -n` and with it held logs `toggle during a transition, ignored` and exits 0; it does nothing within
 2 s of `last-ms` (`CASDAP_POWER_DEBOUNCE_MS`, both directions), else runs `screen-on` with the `off` marker and
@@ -663,8 +690,8 @@ alone while casdap runs. The daemon finds the node named `pm8941_pwrkey` (`CASDA
 --system get-property` every 5 s (`CASDAP_POWERD_POLL_SEC`). `KEY_POWER` released under 1000 ms
 (`CASDAP_POWERD_LONG_MS`) runs `casdap-power toggle`; held 1000 ms, with the `off` marker it runs
 `casdap-power screen-on` first, then `busctl --user call org.casdap.Player /org/casdap/Player
-org.casdap.Player ShowPowerMenu`; a release without a press is dropped. The pad buzzes for 60 ms
-(`CASDAP_POWERD_BUZZ_MS`, level `CASDAP_POWERD_BUZZ_LEVEL` 0.6) when a tap is classified, before the toggle runs,
+org.casdap.Player ShowPowerMenu`; a release without a press is dropped. The pad ticks for 15 ms
+(`CASDAP_POWERD_BUZZ_MS`, level `CASDAP_POWERD_BUZZ_LEVEL` 1.0) when a tap is classified, before the toggle runs,
 and once when a hold passes 1000 ms. A tap within `CASDAP_POWER_DEBOUNCE_MS` (2000) of `last-ms` or while
 `flock -n` on the `lock` marker fails logs `tap during a transition or the debounce, no buzz` and still runs the
 toggle, which ignores it. The buzz is `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`, on
@@ -700,21 +727,21 @@ timeout, waiting for the next tap`, a second in a row runs `casdap-intercept get
 hotkeyd never starts the unit. Hold in casdap calls `busctl --user call
 org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt` (the player opens the switch
 prompt, a second hold closes it); `Call failed: The name is not activatable` (no player on the bus) logs
-`no player, switching back` and starts `casdap-switch-back.service`, any other failure is logged. With the
-screen off (`$CASDAP_RUNTIME_DIR/off`, default `$XDG_RUNTIME_DIR/casdap-power/off`) a hold in casdap runs
-`casdap-power screen-on` instead and the next hold opens the prompt. Tap in
-casdap sends `PlayPause` to `org.mpris.MediaPlayer2.casdap` at once. With the screen off and `pocketControls=true`
-in `CASDAP_SETTINGS_FILE` (read at each press) the guide button is the transport: a hold sends `Previous`, a tap
+`no player, switching back` and starts `casdap-switch-back.service`, any other failure is logged. Tap in
+casdap sends `PlayPause` to `org.mpris.MediaPlayer2.casdap` at once. With the screen off
+(`$CASDAP_RUNTIME_DIR/off`, default `$XDG_RUNTIME_DIR/casdap-power/off`) the guide button is the transport: a
+hold sends `Previous`, a tap
 opens a 350 ms window (`CASDAP_HOTKEYD_DOUBLE_MS`) in which a second tap sends `Next` for both, else `PlayPause`
-goes out when the window ends; a hold inside the window sends the pending `PlayPause` first. The window runs on a
+goes out when the window ends; a hold inside the window sends the pending `PlayPause` first. The power key wakes
+the screen. The window runs on a
 read timeout, so volume keys keep flowing. In Plasma a hold switches; in any other session it
-logs. Every hold that acts (switch, switch prompt, screen on, `Previous`) buzzes the pad for 60 ms the
+logs. Every hold that acts (switch, switch prompt, `Previous`) ticks the pad for 15 ms at level 1.0 the
 moment the 1 s threshold passes, while the button is still down; the first hold while a title runs and a
-hold in an unknown session do not. A pocket double tap buzzes 40 ms, 60 ms off, 40 ms as it sends `Next`;
-taps never buzz. The buzz runs `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`,
+hold in an unknown session do not. A pocket double tap ticks 15 ms, 50 ms off, 15 ms as it sends `Next`;
+taps never tick. The tick runs `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`,
 on every `/org/shadowblip/InputPlumber/CompositeDevice<N>` in a background subshell, a failed call is
-skipped silently; `CASDAP_HOTKEYD_BUZZ_LEVEL` (default 0.6), `CASDAP_HOTKEYD_BUZZ_MS` (60) and
-`CASDAP_HOTKEYD_BUZZ_DOUBLE_MS` (`40 60 40`, on and off in turn) override it, dry run logs `would: buzz <ms>`. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
+skipped silently; `CASDAP_HOTKEYD_BUZZ_LEVEL` (default 1.0), `CASDAP_HOTKEYD_BUZZ_MS` (15) and
+`CASDAP_HOTKEYD_BUZZ_DOUBLE_MS` (`15 50 15`, on and off in turn) override it, dry run logs `would: buzz <ms>`. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
 list override `CASDAP_HOTKEYD_VOLUME_NAMES=a:b`, read with their own `evtest` streams) step
 `wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@` per press and autorepeat by the `volumeStep` key of
 `CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.ini`, read at each press; 2, 5 or 10, anything
@@ -751,8 +778,10 @@ restore the saved values and set `Discoverable=false`. The window also closes th
 keeps a device that paired while it was open (journal `pairing window closed: paired <path>`) or
 when an already paired A2DP source connects during it (`closed: connected <path>`); a device the
 gate removes leaves it open. On exit it disconnects every connected A2DP source unless
-`keepPhoneInGameMode=true` in `~/.config/casdap/settings.ini` (default false; `casdap-bt --print-keep`
-prints `keep` or `drop`).
+`/usr/libexec/casdap/casdap-keep check` (`CASDAP_KEEP_BIN`) exits 0, that is unless KEEP IN BACKGROUND wrote the
+marker this boot (`casdap-bt --print-keep` prints `keep` or `drop`). `casdap-bt --disconnect-sources` disconnects
+every connected A2DP source over the system bus with a 2 s call timeout and exits (1 when bluez is absent or a
+disconnect fails); overlay CLOSE PLAYER runs it.
 
 `AuthorizeService` accepts `110b`, `110c`, `110d`, `110e` and rejects every other uuid with a
 `Rejected <uuid> <device>` journal line, so HFP (`111e`, `111f`), HSP (`1108`, `1112`) and HID
@@ -774,9 +803,9 @@ reads true, the deferral is logged and the restart runs when `transportActive` g
 unchanged file runs nothing. `restarting` is true while the restart runs, `restartFinished(ok)` ends it;
 a failed restart leaves `pending` true. The phone picks among the offered codecs when it connects.
 `gamescope-session-plus@casdap.service.d/10-casdap-bt.conf` runs `casdap-codec clear` from `ExecStopPost`:
-it removes the fragment and, when it removed one and `keepPhoneInGameMode` in `settings.ini`
-(`CASDAP_SETTINGS_FILE`) is not `true`, runs `systemctl --user restart wireplumber`; with no fragment it runs
-nothing. `CASDAP_WP_CONF_DIR` and `CASDAP_SYSTEMCTL_BIN` override the directory and the binary.
+with no fragment it runs nothing; while `casdap-keep check` (`CASDAP_KEEP_BIN`) exits 0 it keeps the fragment;
+otherwise it removes the fragment and runs `systemctl --user restart wireplumber`. Overlay CLOSE PLAYER runs it
+after deleting the marker. `CASDAP_WP_CONF_DIR` and `CASDAP_SYSTEMCTL_BIN` override the directory and the binary.
 
 ## Audio
 
@@ -860,20 +889,23 @@ bandwidth is logged once per loaded profile. CUSTOM lives in `~/.config/casdap/e
 (0 is 20 Hz, 1 to 59 `1000 * 2^((i - 34)/6)`, 60 is 20000 Hz) or `freq` for a file value, `gain`, `q`),
 written 500 ms after the last edit and on quit, temp file then rename; a missing or unreadable store is ten PEAK
 bands at grid 4, 10, 16, 22, 28, 34, 40, 46, 52, 58, gain 0, Q 1.4. `cycleProfile` steps OFF, the listed files,
-CUSTOM (wrapping); `stepPreamp` and `stepGain` move 0.5 dB, `stepFrequency` one grid point, `stepQ` through
-0.3 0.5 0.7 1.0 1.4 2.0 2.8 4.0 5.6 8.0 10, `stepType` cycles OFF, PEAK, LOW SHELF, HIGH SHELF. An edit while
+CUSTOM (wrapping); `stepPreamp` and `stepGain` move 0.1 dB (1 dB with `coarse`), `stepQ` 0.1 (1.0 with
+`coarse`, clamped 0.1 to 10), each snapping to its step grid and rounded to one decimal (gain, preamp) or two (Q),
+`stepFrequency` one grid point (1/6 octave, 6 points with `coarse`), `stepBand` passes `coarse` on, `stepType`
+cycles OFF, PEAK, LOW SHELF, HIGH SHELF. An edit while
 the key is a file copies the parsed file into the store and sets the key to `custom` first; the `.txt` is never
 written. `CASDAP_EQ_DIR` replaces `~/.config/casdap` for both the `eq/` folder and the stores.
 
 `RgbControl` (context property, DAP mode only, null under `--overlay`) runs `armada-rgb supported`
 (`/usr/libexec/armada/armada-rgb-env`, `CASDAP_RGB_BIN` overrides) once at start; exit 0 sets `supported`,
 `probed` goes true either way. Supported, it starts `casdap-priv@rgb-restore.service` and then the word for
-`Settings.rgb`: `rgb-off` for `off`, `rgb-hue-<Accent.hue>` for `accent`, nothing more for `armada`. A changed
-`Settings.rgb` starts the word for the new mode at once (`rgb-restore` for `armada`). A changed `Accent.hue`
-(`setHue`) while the mode is `accent` arms a 500 ms single shot timer, restarted by every further change; when it
-fires the hue word starts unless that hue is the last one sent (`rgb-restore` and `rgb-off` clear it, a failed
-hue word clears it too). A hue word waiting behind a running word is replaced by a newer one. While
-`PowerBridge.screenOff` (`setScreenOff`) is true no hue word starts; on screen on the latest hue starts at once
+`Settings.rgb`: `rgb-off` for `off`, `rgb-hue-<Accent.hue>` for `accent` (`rgb-color-<Accent.hue>-<Accent.level>`
+while the accent comes from art), nothing more for `armada`. A changed
+`Settings.rgb` starts the word for the new mode at once (`rgb-restore` for `armada`). A changed `Accent.hue` or
+`Accent.level` (`setColor(hue, level)`, level 0 for the slider) while the mode is `accent` arms a 500 ms single shot
+timer, restarted by every further change; when it fires the color word starts unless it names the color last sent
+(`rgb-hue-<h>` and `rgb-color-<h>-4` count as one; `rgb-restore` and `rgb-off` clear it, a failed color word clears it too). A color word waiting behind a running word is replaced by a newer one. While
+`PowerBridge.screenOff` (`setScreenOff`) is true no color word starts; on screen on the latest color starts at once
 when it differs from the last sent. `setSaver(bool)` (property `saver`, called by `Main.qml` on every
 `Saver.shown` change) puts the lights to sleep while the saver is up in `accent` and `armada`: true starts
 `rgb-sleep`, false starts `rgb-wake` and then, in `accent`, the latest hue when it differs from the last sent
@@ -884,20 +916,28 @@ on with the saver still up starts `rgb-sleep` again. An unknown mode is logged a
 Unsupported, nothing runs and the settings RGB row reads `UNSUPPORTED`.
 
 `AccentControl` (context property `Accent`, both modes and `--screenshot`) holds `sliderHue` (from
-`Settings.accentHue`), `fromArt` (from `Settings.accentFromArt`), `artHue` (-1 for none), `hue`, `color`,
+`Settings.accentHue`), `fromArt` (from `Settings.accentFromArt`), `artHue` (-1 for none), `artLevel`, `hue`, `level`
+(the art saturation level 1 to 4, 0 on the slider), `color`,
 `brightColor`, `colorFor(h)` and `brightColorFor(h)`. `hue` is `artHue` while `fromArt` is true and `artHue` is
 not -1, else `sliderHue`. `artHue` is -1 while `fromArt` is false, while `Player.current` has no `artPath` and
-while `BluezModel.transportActive`. `color` is `hsv(hue, s, 0.98)` with `s` the largest of 0.83, 0.82, ... 0.40
+while `BluezModel.transportActive`. On the slider `color` is `hsv(hue, s, 0.98)` with `s` the largest of 0.83, 0.82, ... 0.40
 whose WCAG luminance is at least 0.149 (`#FA2A4D` at 350), channels `round(255 c)`; `brightColor` is
-`hsv(hue, 0.84 s, 1.0)` (`#FF4D6B` at 350). The art hue (`ArtColor`) reads the file (a path or a `file://` url)
-with `QImageReader` scaled to 32 x 32 on a one thread pool; a pixel with HSV saturation at least 0.25 and value at
-least 0.20 adds `s * v` to bin `round(h * 36) % 36` (hue `10 * bin`), the top bin wins with a tie to the lower bin,
-and fewer than 21 qualifying pixels (2 percent) or an unreadable file is -1. A new art path keeps the previous
-`artHue` until its result arrives. Results are cached by path (512 entries, cleared when full and on
+`hsv(hue, 0.84 s, 1.0)` (`#FF4D6B` at 350). From art `color` is the picked hue with the cluster's saturation and
+value in whole percent: the value rises to at most 0.98 until the luminance reaches 0.149, then the saturation drops
+toward 0.40 while it is still under; `brightColor` is `hsv(hue, 0.84 s, 1.0)` of that saturation. The art pick
+(`ArtColor`) reads the file (a path or a `file://` url) with `QImageReader` scaled to 48 x 48 on a one thread pool.
+Neutral pixels (saturation under 0.18, value under 0.12, or value over 0.97 with saturation under 0.25) are left out;
+fewer than 3 percent colored pixels (69 or fewer of 2304) or an unreadable file is -1. The rest is clustered by k means (k 5,
+points `(cos h, sin h, s, v)`, each weighted by its saturation, seeds the most saturated pixel then the farthest
+saturation weighted pixel at least 0.2 away, 10 passes), clusters closer than 0.2 merge, and the cluster with the top
+`share * mean saturation * (0.5 + 0.5 max(0, 1 - |mean value - 0.6| / 0.6))` wins (a tie to the earlier seed). The
+result is the circular mean hue 0 to 359, the level from the mean saturation (under 0.35 1, under 0.55 2, under 0.75
+3, else 4) and the mean color. A new art path keeps the previous
+pick until its result arrives. Results are cached by path (512 entries, cleared when full and on
 `Library.albumsChanged`); a result for a path that is no longer the current one is cached and not applied. The
-journal gets `casdap accent: art hue <h> for <path>` or `casdap accent: no art hue for <path>` when a result is
-applied for a path other than the last logged one, and `casdap accent: hue <h> (art|slider)` on every change of
-`hue`.
+journal gets `casdap accent: art hue <h> s <level> for <path>` or `casdap accent: no art hue for <path>` when a result is
+applied for a path other than the last logged one, and `casdap accent: hue <h> s <level> (art|slider)` on every change of
+`hue` or `level` (the slider logs `s 4`).
 
 aptX: `build/aptx.sh <cache> <dist>` downloads `libfreeaptx` (RPM Fusion free releases/44) and
 `pipewire-codec-aptx-1.6.7-1.fc44` (updates/44), both aarch64 and sha256 pinned, extracts

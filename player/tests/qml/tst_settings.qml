@@ -41,13 +41,11 @@ TestCase {
         property int accentHue: 350
         property bool accentFromArt: false
         property real scale: 1.0
-        property bool pocketControls: false
         property int saverSeconds: 30
         property bool overlayToasts: false
         property int screenOffSeconds: 300
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
-        property bool keepPhoneInGameMode: false
     }
 
     QtObject {
@@ -82,17 +80,6 @@ TestCase {
 
         function closeAndSwitch() {
             fakePower.switches++
-        }
-    }
-
-    QtObject {
-        id: legacyPower
-
-        property var verbs: []
-        property var driftPaths: []
-
-        function runVerb(verb) {
-            legacyPower.verbs = legacyPower.verbs.concat([verb])
         }
     }
 
@@ -137,7 +124,7 @@ TestCase {
         id: counters
 
         property int pair: 0
-        property int gameMode: 0
+        property int closePlayer: 0
         property int eq: 0
     }
 
@@ -169,7 +156,7 @@ TestCase {
             folders: ["/home/armada/Music", "/run/media/armada/SD"]
             onPairPhone: counters.pair++
             onOpenEq: counters.eq++
-            onGameModeRequested: counters.gameMode++
+            onClosePlayerRequested: counters.closePlayer++
         }
     }
 
@@ -183,10 +170,16 @@ TestCase {
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
         "label-display", "accent", "accentArt", "orientation", "scale", "saver", "rgb", "toasts",
-        "label-power", "screenOff", "suspend", "pocket", "wifi", "keepPhone", "gameMode",
+        "label-power", "screenOff", "suspend", "wifi",
         "about"
     ]
-    readonly property var overlayKeys: tc.expectedKeys.filter((k) => k !== "rgb" && k !== "keepPhone")
+    readonly property var overlayKeys: [
+        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
+        "label-library", "folders", "rescan",
+        "label-display", "accent", "accentArt", "orientation", "scale", "saver", "toasts",
+        "label-power", "screenOff", "suspend", "wifi", "closePlayer",
+        "about"
+    ]
 
     function setWindow(w, h) {
         Ui.userScale = 1.0
@@ -213,13 +206,11 @@ TestCase {
         fakeSettings.accentHue = 350
         fakeSettings.accentFromArt = false
         fakeSettings.scale = 1.0
-        fakeSettings.pocketControls = false
         fakeSettings.saverSeconds = 30
         fakeSettings.overlayToasts = false
         fakeSettings.screenOffSeconds = 300
         fakeSettings.suspendMinutes = 10
         fakeSettings.wifiOffScreenOff = false
-        fakeSettings.keepPhoneInGameMode = false
         fakeLibrary.scanning = false
         fakeLibrary.songCount = 9
         fakeLibrary.rescans = 0
@@ -233,10 +224,9 @@ TestCase {
         fakePower.verbs = []
         fakePower.switches = 0
         fakePower.driftPaths = []
-        legacyPower.verbs = []
         fakeBridge.closes = 0
         counters.pair = 0
-        counters.gameMode = 0
+        counters.closePlayer = 0
         counters.eq = 0
         fakeEq.activeOutput = "headphones"
         fakeEq.keys = ({ headphones: "/home/armada/.config/casdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
@@ -281,6 +271,18 @@ TestCase {
         page.ensureVisible(0)
     }
 
+    function edit(page, key) {
+        tc.focusKey(page, key)
+        verify(router.dispatch("a", false))
+        compare(page.editing, true)
+        compare(page.editKey, key)
+    }
+
+    function confirm(page) {
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+    }
+
     function keys(page) {
         return page.rows.map((r) => r.key)
     }
@@ -296,6 +298,24 @@ TestCase {
         compare(page.rows[page.rows.length - 1].title, "about")
         compare(page.flick.y, Ui.px(128))
         compare(page.focusIndex, 1)
+        compare(page.editing, false)
+    }
+
+    function test_dap_rows_removed() {
+        const page = open()
+        compare(page.indexOfKey("keepPhone"), -1)
+        compare(page.indexOfKey("gameMode"), -1)
+        compare(page.indexOfKey("closePlayer"), -1)
+        compare(tc.keyIndex(page, "about"), tc.keyIndex(page, "wifi") + 1)
+        for (const r of page.rows) {
+            verify(r.title !== "keep phone in game mode")
+            verify(r.title !== "game mode")
+            verify(r.title !== "close player")
+        }
+        const overlayPage = open({ overlay: true, bridge: fakeBridge })
+        compare(overlayPage.indexOfKey("keepPhone"), -1)
+        compare(overlayPage.indexOfKey("gameMode"), -1)
+        compare(tc.keyIndex(overlayPage, "closePlayer"), tc.keyIndex(overlayPage, "wifi") + 1)
     }
 
     function test_row_geometry() {
@@ -360,8 +380,16 @@ TestCase {
         verify(top + Ui.px(43) <= page.flick.height + 0.01)
     }
 
-    function test_output_cycles() {
+    function test_edit_enter_change_confirm() {
         const page = open()
+        compare(router.dispatch("right", false), false)
+        compare(router.dispatch("left", false), false)
+        compare(fakeSettings.output, "auto")
+        compare(page.editing, false)
+        verify(router.dispatch("a", false))
+        compare(page.editing, true)
+        compare(page.editKey, "output")
+        compare(fakeSettings.output, "auto")
         verify(router.dispatch("right", false))
         compare(fakeSettings.output, "speaker")
         verify(router.dispatch("right", false))
@@ -371,12 +399,142 @@ TestCase {
         verify(router.dispatch("left", false))
         compare(fakeSettings.output, "speaker")
         compare(tc.rowItem(page, 1).valueItem.text, "speaker")
-        verify(router.dispatch("a", false))
+        tc.confirm(page)
+        compare(fakeSettings.output, "speaker")
+        compare(page.editKey, "")
+        compare(router.dispatch("left", false), false)
+        compare(fakeSettings.output, "speaker")
+    }
+
+    function test_edit_cancel_restores() {
+        const page = open()
+        tc.edit(page, "output")
+        router.dispatch("right", false)
+        router.dispatch("right", false)
         compare(fakeSettings.output, "headphones")
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.output, "auto")
+        compare(tc.rowOf(page, "output").value, "auto")
+        compare(pages.depth, 2)
+        tc.edit(page, "spkGain")
+        router.dispatch("left", false)
+        router.dispatch("left", false)
+        compare(fakeSettings.spkGain, 96)
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.spkGain, 102)
+        tc.edit(page, "toasts")
+        router.dispatch("right", false)
+        compare(fakeSettings.overlayToasts, true)
+        router.dispatch("b", false)
+        compare(fakeSettings.overlayToasts, false)
+        tc.edit(page, "wifi")
+        router.dispatch("left", false)
+        router.dispatch("left", false)
+        router.dispatch("left", false)
+        compare(fakeSettings.wifiOffScreenOff, true)
+        router.dispatch("b", false)
+        compare(fakeSettings.wifiOffScreenOff, false)
+        tc.edit(page, "suspend")
+        router.dispatch("b", false)
+        compare(fakeSettings.suspendMinutes, 10)
+        compare(pages.depth, 2)
+    }
+
+    function test_edit_b_does_not_pop() {
+        const page = open()
+        tc.edit(page, "volumeStep")
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 2)
+        compare(page.editing, false)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_edit_keys_ignored() {
+        const page = open()
+        tc.edit(page, "codec")
+        const at = page.focusIndex
+        const contentY = page.flick.contentY
+        for (const name of ["up", "down", "lt", "rt", "x", "y", "start", "back", "lb", "rb"]) {
+            verify(router.dispatch(name, false))
+            compare(page.focusIndex, at)
+            compare(page.editing, true)
+        }
+        compare(page.flick.contentY, contentY)
+        compare(fakeSettings.btCodec, "auto")
+        compare(pages.depth, 2)
+        verify(router.dispatch("a", true))
+        compare(page.editing, true)
+        verify(router.dispatch("b", true))
+        compare(page.editing, true)
+        compare(pages.depth, 2)
+        tc.confirm(page)
+    }
+
+    function test_edit_value_color() {
+        const page = open()
+        const row = tc.itemOf(page, "output")
+        fuzzyCompare(row.valueItem.color.a, 0.85, 1 / 255)
+        tc.edit(page, "output")
+        compare(row.editing, true)
+        verify(Qt.colorEqual(row.valueItem.color, Ui.accent))
+        fuzzyCompare(row.titleItem.color.a, 1.0, 1 / 255)
+        compare(tc.itemOf(page, "hpGain").editing, false)
+        router.dispatch("right", false)
+        const next = tc.itemOf(page, "output")
+        verify(Qt.colorEqual(next.valueItem.color, Ui.accent))
+        tc.confirm(page)
+        const done = tc.itemOf(page, "output")
+        compare(done.editing, false)
+        fuzzyCompare(done.valueItem.color.a, 0.85, 1 / 255)
+        verify(!Qt.colorEqual(done.valueItem.color, Ui.accent))
+    }
+
+    function test_edit_confirmed_on_leave_and_screen_off() {
+        const page = open()
+        tc.edit(page, "output")
+        router.dispatch("right", false)
+        page.screenOff = true
+        compare(page.editing, false)
+        compare(fakeSettings.output, "speaker")
+        page.screenOff = false
+        tc.edit(page, "output")
+        router.dispatch("right", false)
+        pages.push(blankComponent, {})
+        compare(page.editing, false)
+        compare(fakeSettings.output, "headphones")
+    }
+
+    function test_act_rows_keep_a() {
+        const page = open({ eq: fakeEq, library: fakeLibrary })
+        tc.focusKey(page, "eq")
         verify(router.dispatch("a", false))
-        compare(fakeSettings.output, "auto")
-        verify(router.dispatch("left", false))
-        compare(fakeSettings.output, "auto")
+        compare(counters.eq, 1)
+        compare(page.editing, false)
+        tc.focusKey(page, "pair")
+        verify(router.dispatch("a", false))
+        compare(counters.pair, 1)
+        compare(page.editing, false)
+        tc.focusKey(page, "rescan")
+        verify(router.dispatch("a", false))
+        compare(fakeLibrary.rescans, 1)
+        compare(page.editing, false)
+        tc.focusKey(page, "folders")
+        verify(router.dispatch("a", false))
+        compare(page.foldersOpen, true)
+        compare(page.editing, false)
+        router.dispatch("a", false)
+        compare(page.foldersOpen, false)
+        tc.focusKey(page, "about")
+        verify(router.dispatch("a", false))
+        compare(page.aboutOpen, true)
+        compare(page.editing, false)
+        for (const key of ["rate", "replaygain", "orientation"]) {
+            tc.focusKey(page, key)
+            verify(router.dispatch("a", false))
+            compare(page.editing, false)
+        }
     }
 
     function test_output_no_jack() {
@@ -386,9 +544,11 @@ TestCase {
         fakeOutput.jackPresent = false
         compare(tc.rowOf(page, "output").value, "no jack")
         compare(fakeSettings.output, "headphones")
+        tc.edit(page, "output")
         verify(router.dispatch("left", false))
         compare(fakeSettings.output, "speaker")
         compare(tc.rowOf(page, "output").value, "speaker")
+        tc.confirm(page)
         fakeSettings.output = "headphones"
         fakeOutput.jackPresent = true
         compare(tc.rowOf(page, "output").value, "headphones")
@@ -402,6 +562,7 @@ TestCase {
         compare(JSON.stringify(page.outputs), JSON.stringify(["auto", "speaker", "headphones"]))
         fakeOutput.usbPresent = true
         compare(JSON.stringify(page.outputs), JSON.stringify(["auto", "speaker", "headphones", "usb"]))
+        tc.edit(page, "output")
         router.dispatch("right", false)
         router.dispatch("right", false)
         verify(router.dispatch("right", false))
@@ -410,10 +571,7 @@ TestCase {
         compare(tc.rowItem(page, 1).valueItem.text, "usb")
         verify(router.dispatch("right", false))
         compare(fakeSettings.output, "usb")
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.output, "auto")
-        fakeSettings.output = "headphones"
-        verify(router.dispatch("a", false))
+        tc.confirm(page)
         compare(fakeSettings.output, "usb")
         fakeOutput.usbPresent = false
         compare(JSON.stringify(page.outputs), JSON.stringify(["auto", "speaker", "headphones"]))
@@ -428,11 +586,16 @@ TestCase {
         fakeOutput.usbPresent = true
         compare(tc.rowOf(page, "output").value, "usb")
         fakeOutput.usbPresent = false
+        tc.edit(page, "output")
         verify(router.dispatch("right", false))
         compare(fakeSettings.output, "speaker")
+        tc.confirm(page)
         fakeSettings.output = "usb"
+        tc.edit(page, "output")
         verify(router.dispatch("left", false))
         compare(fakeSettings.output, "auto")
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.output, "usb")
         const bare = open({ outputControl: null })
         fakeSettings.output = "usb"
         compare(tc.rowOf(bare, "output").value, "usb (not present)")
@@ -451,18 +614,21 @@ TestCase {
         compare(router.dispatch("right", false), false)
         compare(router.dispatch("left", false), false)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(fakeSettings.hpGain, "normal")
         tc.focusKey(page, "hpAmp")
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(fakeSettings.hpAmp, "lohifi")
         fakeOutput.activeOutput = "headphones"
         compare(tc.rowOf(page, "hpGain").value, "normal")
         compare(tc.rowOf(page, "hpGain").readOnly, false)
         compare(tc.rowOf(page, "hpAmp").value, "lohifi")
-        tc.focusKey(page, "hpGain")
+        tc.edit(page, "hpGain")
         verify(router.dispatch("right", false))
         compare(fakeSettings.hpGain, "high")
+        tc.confirm(page)
         fakeOutput.activeOutput = "speaker"
         compare(tc.rowOf(page, "hpGain").value, "high")
         compare(tc.rowOf(page, "hpGain").readOnly, false)
@@ -470,9 +636,9 @@ TestCase {
 
     function test_codec_cycles() {
         const page = open()
-        tc.focusKey(page, "codec")
         compare(tc.rowOf(page, "codec").title, "bluetooth codec")
         compare(tc.rowOf(page, "codec").value, "auto")
+        tc.edit(page, "codec")
         verify(router.dispatch("right", false))
         compare(fakeSettings.btCodec, "aptx")
         verify(router.dispatch("right", false))
@@ -486,7 +652,8 @@ TestCase {
         for (let i = 0; i < 5; i++)
             router.dispatch("left", false)
         compare(fakeSettings.btCodec, "auto")
-        verify(router.dispatch("a", false))
+        verify(router.dispatch("right", false))
+        tc.confirm(page)
         compare(fakeSettings.btCodec, "aptx")
         compare(tc.itemOf(page, "codec").valueItem.text, "aptx")
         compare(tc.itemOf(page, "codec").valueItem.font.capitalization, Font.AllUppercase)
@@ -518,42 +685,44 @@ TestCase {
 
     function test_headphone_gain_cycles() {
         const page = open()
-        tc.focusKey(page, "hpGain")
+        tc.edit(page, "hpGain")
         verify(router.dispatch("right", false))
         compare(fakeSettings.hpGain, "high")
         verify(router.dispatch("right", false))
         compare(fakeSettings.hpGain, "high")
-        verify(router.dispatch("a", false))
+        verify(router.dispatch("left", false))
+        verify(router.dispatch("left", false))
         compare(fakeSettings.hpGain, "low")
         verify(router.dispatch("left", false))
         compare(fakeSettings.hpGain, "low")
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.hpGain, "normal")
-        compare(tc.rowOf(page, "hpGain").value, "normal")
+        tc.confirm(page)
+        compare(tc.rowOf(page, "hpGain").value, "low")
     }
 
     function test_headphone_amp_cycles() {
         const page = open()
-        tc.focusKey(page, "hpAmp")
+        tc.edit(page, "hpAmp")
         verify(router.dispatch("right", false))
         compare(fakeSettings.hpAmp, "ulp")
         verify(router.dispatch("right", false))
         compare(fakeSettings.hpAmp, "hifi")
         verify(router.dispatch("right", false))
         compare(fakeSettings.hpAmp, "hifi")
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.hpAmp, "lohifi")
-        verify(router.dispatch("left", false))
-        compare(fakeSettings.hpAmp, "lohifi")
-        compare(tc.rowOf(page, "hpAmp").value, "lohifi")
+        tc.confirm(page)
+        compare(tc.rowOf(page, "hpAmp").value, "hifi")
+        tc.edit(page, "hpAmp")
+        router.dispatch("left", false)
+        compare(fakeSettings.hpAmp, "ulp")
+        router.dispatch("b", false)
+        compare(fakeSettings.hpAmp, "hifi")
     }
 
     function test_speaker_gain_steps() {
         const page = open()
-        tc.focusKey(page, "spkGain")
         compare(page.spkGainText(84), "0 db")
         compare(page.spkGainText(90), "+6 db")
         compare(page.spkGainText(108), "+24 db")
+        tc.edit(page, "spkGain")
         verify(router.dispatch("right", false))
         compare(fakeSettings.spkGain, 105)
         compare(tc.rowOf(page, "spkGain").value, "+21 db")
@@ -561,7 +730,8 @@ TestCase {
         compare(fakeSettings.spkGain, 108)
         verify(router.dispatch("right", false))
         compare(fakeSettings.spkGain, 108)
-        verify(router.dispatch("a", false))
+        for (let i = 0; i < 6; i++)
+            router.dispatch("left", false)
         compare(fakeSettings.spkGain, 84)
         compare(tc.rowOf(page, "spkGain").value, "0 db")
         verify(router.dispatch("left", false))
@@ -569,30 +739,32 @@ TestCase {
         for (let i = 0; i < 4; i++)
             router.dispatch("right", false)
         compare(fakeSettings.spkGain, 102)
+        tc.confirm(page)
         compare(tc.rowOf(page, "spkGain").value, "+18 db")
     }
 
     function test_volume_step_cycles() {
         const page = open()
-        tc.focusKey(page, "volumeStep")
+        tc.edit(page, "volumeStep")
         verify(router.dispatch("right", false))
         compare(fakeSettings.volumeStep, 10)
         compare(tc.rowOf(page, "volumeStep").value, "10%")
         verify(router.dispatch("right", false))
         compare(fakeSettings.volumeStep, 10)
-        verify(router.dispatch("a", false))
+        router.dispatch("left", false)
+        router.dispatch("left", false)
         compare(fakeSettings.volumeStep, 2)
         compare(tc.rowOf(page, "volumeStep").value, "2%")
         verify(router.dispatch("left", false))
         compare(fakeSettings.volumeStep, 2)
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.volumeStep, 5)
+        tc.confirm(page)
+        compare(fakeSettings.volumeStep, 2)
     }
 
     function test_rgb_cycles() {
         const page = open()
-        tc.focusKey(page, "rgb")
         compare(tc.rowOf(page, "rgb").readOnly, false)
+        tc.edit(page, "rgb")
         verify(router.dispatch("right", false))
         compare(fakeSettings.rgb, "armada")
         verify(router.dispatch("left", false))
@@ -601,13 +773,13 @@ TestCase {
         compare(fakeSettings.rgb, "accent")
         verify(router.dispatch("left", false))
         compare(fakeSettings.rgb, "accent")
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.rgb, "off")
-        verify(router.dispatch("a", false))
+        verify(router.dispatch("b", false))
         compare(fakeSettings.rgb, "armada")
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.rgb, "accent")
-        compare(tc.rowOf(page, "rgb").value, "accent")
+        tc.edit(page, "rgb")
+        router.dispatch("left", false)
+        tc.confirm(page)
+        compare(fakeSettings.rgb, "off")
+        compare(tc.rowOf(page, "rgb").value, "off")
     }
 
     function test_rgb_unsupported() {
@@ -620,16 +792,20 @@ TestCase {
         compare(router.dispatch("right", false), false)
         compare(router.dispatch("left", false), false)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(fakeSettings.rgb, "armada")
         fakeRgb.supported = true
         compare(tc.rowOf(page, "rgb").value, "armada")
+        tc.edit(page, "rgb")
         verify(router.dispatch("left", false))
         compare(fakeSettings.rgb, "off")
+        tc.confirm(page)
         const bare = open({ rgbControl: null })
         tc.focusKey(bare, "rgb")
         compare(tc.rowOf(bare, "rgb").value, "unsupported")
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
+        compare(bare.editing, false)
         compare(fakeSettings.rgb, "off")
     }
 
@@ -645,6 +821,7 @@ TestCase {
         compare(router.dispatch("right", false), false)
         compare(router.dispatch("left", false), false)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(tc.rowOf(page, "rate").value, "on 44100")
         fakeAudio.graphRate = 96000
         compare(tc.rowOf(page, "rate").value, "on 96000")
@@ -653,6 +830,7 @@ TestCase {
         tc.focusKey(page, "replaygain")
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(tc.rowOf(page, "replaygain").value, "off")
         const item = tc.itemOf(page, "replaygain")
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
@@ -680,6 +858,7 @@ TestCase {
         compare(router.dispatch("left", false), false)
         verify(router.dispatch("a", false))
         compare(counters.eq, 1)
+        compare(page.editing, false)
         compare(tc.rowOf(page, "eq").value, "HD 600 (missing)")
     }
 
@@ -708,19 +887,25 @@ TestCase {
         compare(router.dispatch("right", false), false)
     }
 
-    function test_overlay_toasts_row() {
+    function test_toasts_in_game_row() {
         const page = open()
-        tc.focusKey(page, "toasts")
-        compare(tc.rowOf(page, "toasts").title, "overlay toasts")
+        compare(tc.rowOf(page, "toasts").title, "toasts in game")
+        compare(tc.itemOf(page, "toasts").titleItem.text, "toasts in game")
         compare(tc.rowOf(page, "toasts").value, "off")
         verify(tc.keyIndex(page, "toasts") > tc.keyIndex(page, "saver"))
         verify(tc.keyIndex(page, "toasts") < tc.keyIndex(page, "label-power"))
+        tc.edit(page, "toasts")
         verify(router.dispatch("right", false))
         compare(fakeSettings.overlayToasts, true)
         compare(tc.rowOf(page, "toasts").value, "on")
-        verify(router.dispatch("a", false))
+        verify(router.dispatch("left", false))
         compare(fakeSettings.overlayToasts, false)
-        compare(tc.rowOf(page, "toasts").value, "off")
+        verify(router.dispatch("right", false))
+        tc.confirm(page)
+        compare(fakeSettings.overlayToasts, true)
+        compare(tc.rowOf(page, "toasts").value, "on")
+        for (const r of page.rows)
+            verify(r.title !== "overlay toasts")
     }
 
     function test_overlay_mode_rows() {
@@ -728,7 +913,7 @@ TestCase {
         compare(JSON.stringify(tc.keys(page)), JSON.stringify(tc.overlayKeys))
         compare(page.indexOfKey("rgb"), -1)
         compare(tc.rowOf(page, "hpGain").title, "headphone gain")
-        compare(tc.rowOf(page, "gameMode").title, "close player")
+        compare(tc.rowOf(page, "closePlayer").title, "close player")
         compare(tc.rowOf(page, "pair").value, "pair in dap mode")
         compare(tc.itemOf(page, "pair").valueItem.visible, true)
         compare(tc.itemOf(page, "pair").valueItem.text, "pair in dap mode")
@@ -736,21 +921,25 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(counters.pair, 0)
         compare(router.dispatch("right", false), false)
-        tc.focusKey(page, "gameMode")
+        tc.focusKey(page, "closePlayer")
+        compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "close player")
         compare(page.sheet.items, ["close player"])
         verify(router.dispatch("b", false))
         compare(page.sheet.shown, false)
+        compare(pages.depth, 2)
         compare(fakeBridge.closes, 0)
         router.dispatch("a", false)
         router.dispatch("a", false)
+        compare(page.sheet.shown, false)
         compare(fakeBridge.closes, 1)
         compare(fakePower.verbs.length, 0)
         compare(fakePower.switches, 0)
-        compare(counters.gameMode, 1)
-        compare(tc.rowOf(page, "toasts").title, "overlay toasts")
+        compare(counters.closePlayer, 1)
+        compare(tc.rowOf(page, "toasts").title, "toasts in game")
         compare(tc.rowOf(page, "saver").title, "saver")
     }
 
@@ -761,6 +950,7 @@ TestCase {
         compare(page.rows[folders].value, "1 on")
         verify(router.dispatch("a", false))
         compare(page.foldersOpen, true)
+        compare(page.editing, false)
         compare(page.rows[folders + 1].kind, "sub")
         compare(page.rows[folders + 1].title, "/home/armada/Music")
         compare(page.rows[folders + 1].value, "on")
@@ -778,6 +968,7 @@ TestCase {
         router.dispatch("down", false)
         compare(page.focusIndex, folders + 2)
         verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/armada/Music", "/run/media/armada/SD"]))
         compare(page.rows[folders + 2].value, "on")
         compare(page.rows[folders].value, "2 on")
@@ -800,7 +991,6 @@ TestCase {
 
     function test_accent_hue_swatch() {
         const page = open()
-        tc.focusKey(page, "accent")
         compare(tc.rowOf(page, "accent").readOnly, false)
         let row = tc.itemOf(page, "accent")
         compare(row.valueItem.visible, false)
@@ -810,6 +1000,10 @@ TestCase {
         fuzzyCompare(row.swatchItem.x + row.swatchItem.width, page.width - Ui.px(20), 0.01)
         verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(350)))
         verify(Qt.colorEqual(row.swatchItem.color, "#FA2A4D"))
+        tc.focusKey(page, "accent")
+        compare(router.dispatch("right", false), false)
+        compare(fakeSettings.accentHue, 350)
+        tc.edit(page, "accent")
         verify(router.dispatch("right", false))
         compare(fakeSettings.accentHue, 0)
         row = tc.itemOf(page, "accent")
@@ -824,10 +1018,16 @@ TestCase {
         compare(fakeSettings.accentHue, 340)
         row = tc.itemOf(page, "accent")
         verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(340)))
+        tc.confirm(page)
+        compare(fakeSettings.accentHue, 340)
         fakeSettings.accentHue = 240
         row = tc.itemOf(page, "accent")
         verify(Qt.colorEqual(row.swatchItem.color, Ui.accentForHue(240)))
-        verify(router.dispatch("a", false))
+        tc.edit(page, "accent")
+        verify(router.dispatch("left", true))
+        verify(router.dispatch("left", true))
+        compare(fakeSettings.accentHue, 220)
+        verify(router.dispatch("b", false))
         compare(fakeSettings.accentHue, 240)
         compare(page.focusIndex, tc.keyIndex(page, "accent"))
         verify(Qt.colorEqual(Ui.accent, "#FA2A4D"))
@@ -844,20 +1044,19 @@ TestCase {
         const page = open()
         const accent = tc.keyIndex(page, "accent")
         compare(tc.keyIndex(page, "accentArt"), accent + 1)
-        tc.focusKey(page, "accentArt")
         compare(tc.rowOf(page, "accentArt").title, "accent from art")
         compare(tc.rowOf(page, "accentArt").value, "off")
         compare(tc.rowOf(page, "accentArt").readOnly, false)
+        tc.edit(page, "accentArt")
         verify(router.dispatch("right", false))
         compare(fakeSettings.accentFromArt, true)
         compare(tc.rowOf(page, "accentArt").value, "on")
         compare(tc.itemOf(page, "accentArt").valueItem.text, "on")
         verify(router.dispatch("left", false))
         compare(fakeSettings.accentFromArt, false)
-        verify(router.dispatch("a", false))
+        verify(router.dispatch("right", false))
+        tc.confirm(page)
         compare(fakeSettings.accentFromArt, true)
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.accentFromArt, false)
         compare(fakeSettings.accentHue, 350)
     }
 
@@ -866,9 +1065,10 @@ TestCase {
         verify(page.indexOfKey("accent") >= 0)
         verify(page.indexOfKey("accentArt") >= 0)
         compare(page.indexOfKey("rgb"), -1)
-        tc.focusKey(page, "accent")
+        tc.edit(page, "accent")
         verify(router.dispatch("right", false))
         compare(fakeSettings.accentHue, 0)
+        tc.confirm(page)
     }
 
     function test_orientation_read_only() {
@@ -877,6 +1077,8 @@ TestCase {
         compare(tc.rowOf(page, "orientation").value, "portrait")
         compare(router.dispatch("right", false), false)
         compare(router.dispatch("left", false), false)
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
         compare(tc.rowOf(page, "orientation").value, "portrait")
         tc.setWindow(1920, 1080)
         compare(tc.rowOf(page, "orientation").value, "landscape")
@@ -887,13 +1089,14 @@ TestCase {
         const page = open()
         compare(Ui.sMax, 1.1)
         compare(JSON.stringify(page.scaleSteps), JSON.stringify([0.8, 0.9, 1.0, 1.1]))
-        tc.focusKey(page, "scale")
         const scale = tc.keyIndex(page, "scale")
         compare(page.rows[scale].value, "1.0")
+        tc.edit(page, "scale")
         verify(router.dispatch("right", false))
         compare(Ui.userScale, 1.1)
         compare(fakeSettings.scale, 1.1)
         compare(page.focusIndex, scale)
+        compare(page.editing, true)
         compare(page.rows[scale].value, "1.1")
         compare(tc.rowItem(page, scale).height, Ui.px(43))
         fuzzyCompare(Ui.u, 2 * 1.1, 0.001)
@@ -909,12 +1112,23 @@ TestCase {
         compare(router.dispatch("left", false), true)
         compare(Ui.userScale, 0.8)
         compare(page.focusIndex, scale)
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(Ui.userScale, 1.0)
+        compare(fakeSettings.scale, 1.0)
+        compare(page.focusIndex, scale)
+        compare(pages.depth, 2)
+        tc.edit(page, "scale")
+        router.dispatch("left", false)
+        tc.confirm(page)
+        compare(Ui.userScale, 0.9)
+        compare(fakeSettings.scale, 0.9)
     }
 
     function test_saver_steps() {
         const page = open()
-        tc.focusKey(page, "saver")
         compare(tc.rowOf(page, "saver").value, "30 s")
+        tc.edit(page, "saver")
         router.dispatch("right", false)
         compare(fakeSettings.saverSeconds, 60)
         compare(tc.rowOf(page, "saver").value, "1 min")
@@ -925,13 +1139,14 @@ TestCase {
         for (let i = 0; i < 9; i++)
             router.dispatch("left", false)
         compare(fakeSettings.saverSeconds, 10)
+        tc.confirm(page)
         compare(tc.rowOf(page, "saver").value, "10 s")
     }
 
     function test_power_rows() {
         const page = open()
-        tc.focusKey(page, "screenOff")
         compare(tc.rowOf(page, "screenOff").value, "5 min")
+        tc.edit(page, "screenOff")
         router.dispatch("right", false)
         compare(fakeSettings.screenOffSeconds, 600)
         router.dispatch("right", false)
@@ -943,9 +1158,10 @@ TestCase {
         compare(tc.rowOf(page, "screenOff").value, "off")
         router.dispatch("right", false)
         compare(fakeSettings.screenOffSeconds, 60)
+        tc.confirm(page)
         compare(tc.rowOf(page, "screenOff").value, "1 min")
-        tc.focusKey(page, "suspend")
         compare(tc.rowOf(page, "suspend").value, "10 min")
+        tc.edit(page, "suspend")
         router.dispatch("right", false)
         compare(fakeSettings.suspendMinutes, 30)
         router.dispatch("right", false)
@@ -953,50 +1169,15 @@ TestCase {
         for (let i = 0; i < 5; i++)
             router.dispatch("left", false)
         compare(fakeSettings.suspendMinutes, 0)
+        tc.confirm(page)
         compare(tc.rowOf(page, "suspend").value, "off")
-        tc.focusKey(page, "pocket")
-        compare(tc.rowOf(page, "pocket").value, "off")
-        router.dispatch("right", false)
-        compare(fakeSettings.pocketControls, true)
-        compare(tc.rowOf(page, "pocket").value, "on")
-        router.dispatch("a", false)
-        compare(fakeSettings.pocketControls, false)
-        tc.focusKey(page, "wifi")
+        compare(tc.keys(page).indexOf("pocket"), -1)
         compare(tc.rowOf(page, "wifi").value, "keep")
+        tc.edit(page, "wifi")
         router.dispatch("left", false)
         compare(fakeSettings.wifiOffScreenOff, true)
+        tc.confirm(page)
         compare(tc.rowOf(page, "wifi").value, "off")
-    }
-
-    function test_game_mode_confirm() {
-        const page = open()
-        tc.focusKey(page, "gameMode")
-        compare(tc.rowOf(page, "gameMode").title, "game mode")
-        compare(router.dispatch("right", false), false)
-        verify(router.dispatch("a", false))
-        compare(page.sheet.shown, true)
-        compare(page.sheet.title, "game mode")
-        compare(page.sheet.items.length, 1)
-        compare(page.sheet.duration, 380)
-        verify(router.dispatch("b", false))
-        compare(page.sheet.shown, false)
-        compare(fakePower.verbs.length, 0)
-        compare(pages.depth, 2)
-        router.dispatch("a", false)
-        router.dispatch("a", false)
-        compare(page.sheet.shown, false)
-        compare(fakePower.verbs.length, 0)
-        compare(fakePower.switches, 1)
-        compare(fakeBridge.closes, 0)
-        compare(counters.gameMode, 1)
-    }
-
-    function test_game_mode_falls_back_to_verb() {
-        const page = open({ power: legacyPower })
-        tc.focusKey(page, "gameMode")
-        router.dispatch("a", false)
-        router.dispatch("a", false)
-        compare(JSON.stringify(legacyPower.verbs), JSON.stringify(["game-mode"]))
     }
 
     function test_about_rows() {
@@ -1008,6 +1189,7 @@ TestCase {
         compare(page.rows.length, tc.expectedKeys.length)
         verify(router.dispatch("a", false))
         compare(page.aboutOpen, true)
+        compare(page.editing, false)
         const list = tc.keys(page)
         verify(list.indexOf("drift") > about)
         verify(list.indexOf("track") > about)
@@ -1023,6 +1205,8 @@ TestCase {
         compare(track.valueItem.font.capitalization, Font.AllUppercase)
         router.dispatch("down", false)
         compare(router.dispatch("right", false), false)
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
         fakePlayer.current = ({ id: 4, title: "x", sampleRate: 44100, bitDepth: 0 })
         compare(tc.rowOf(page, "track").value, "44100 hz")
         fakeAudio.pcmFormat = ""
@@ -1038,6 +1222,8 @@ TestCase {
         const page = open({ animated: true })
         const row = tc.rowItem(page, 1)
         compare(row.shownValue, "auto")
+        router.dispatch("a", false)
+        compare(page.editing, true)
         router.dispatch("right", false)
         const next = tc.rowItem(page, 1)
         compare(next.valueSwapping, true)
@@ -1052,6 +1238,7 @@ TestCase {
 
     function test_value_change_settled_without_animation() {
         const page = open()
+        router.dispatch("a", false)
         router.dispatch("right", false)
         const row = tc.rowItem(page, 1)
         compare(row.valueSwapping, false)
@@ -1080,8 +1267,8 @@ TestCase {
     }
 
     function test_screen_off_settles() {
-        const page = open({ animated: true })
-        tc.focusKey(page, "gameMode")
+        const page = open({ animated: true, overlay: true, bridge: fakeBridge })
+        tc.focusKey(page, "closePlayer")
         router.dispatch("a", false)
         verify(page.sheet.animating)
         page.screenOff = true
@@ -1181,21 +1368,5 @@ TestCase {
         compare(tc.rowOf(page, "codec").value, "aptx (pending)")
         fakeCodec.pending = false
         compare(tc.rowOf(page, "codec").value, "aptx")
-    }
-
-    function test_keep_phone_row() {
-        const page = open({ settings: fakeSettings })
-        compare(tc.rowOf(page, "keepPhone").title, "keep phone in game mode")
-        compare(tc.rowOf(page, "keepPhone").value, "off")
-        compare(tc.keyIndex(page, "keepPhone"), tc.keyIndex(page, "wifi") + 1)
-        compare(tc.keyIndex(page, "gameMode"), tc.keyIndex(page, "keepPhone") + 1)
-        tc.focusKey(page, "keepPhone")
-        router.dispatch("right", false)
-        compare(fakeSettings.keepPhoneInGameMode, true)
-        compare(tc.rowOf(page, "keepPhone").value, "on")
-        router.dispatch("a", false)
-        compare(fakeSettings.keepPhoneInGameMode, false)
-        const overlayPage = open({ settings: fakeSettings, overlay: true })
-        compare(overlayPage.indexOfKey("keepPhone"), -1)
     }
 }

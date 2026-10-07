@@ -150,6 +150,7 @@ private slots:
     void queueSignals();
     void addStoppedShuffle();
     void playSource();
+    void playSourceShuffleOn();
     void stateQueueWorker();
     void stateMigration();
     void stateRevMismatch();
@@ -1326,6 +1327,69 @@ void PlayerTest::playSource()
 
     Player noLibrary;
     QCOMPARE(noLibrary.playSource(QStringLiteral("album"), albumId, QStringLiteral("play")), 0);
+}
+
+void PlayerTest::playSourceShuffleOn()
+{
+    const qint64 albumId = scalar(m_library->database(), QStringLiteral("SELECT album_id FROM tracks WHERE id = ?"),
+                                  {m_tracks.at(0).id})
+                               .toLongLong();
+    QVERIFY(albumId > 0);
+    const int albumSize = static_cast<int>(m_library->albumTracks(albumId).size());
+    QVERIFY(albumSize >= 3);
+
+    const auto isPermutation = [](const QList<int> &order, int n) {
+        QList<int> sorted = order;
+        std::sort(sorted.begin(), sorted.end());
+        if (sorted.size() != n)
+            return false;
+        for (int i = 0; i < n; ++i) {
+            if (sorted.at(i) != i)
+                return false;
+        }
+        return true;
+    };
+
+    Player player(m_library.get());
+    player.queue()->setShuffle(true);
+    bool movedOff = false;
+    for (int run = 0; run < 40; ++run) {
+        QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("play")), albumSize);
+        QVERIFY(player.queue()->shuffle());
+        QCOMPARE(player.queue()->count(), albumSize);
+        QCOMPARE(player.queue()->currentSlot(), 0);
+        QCOMPARE(player.queue()->rowAt(0), player.queue()->currentIndex());
+        QVERIFY(isPermutation(player.queue()->order(), albumSize));
+        QVERIFY(consistent(*player.queue()));
+        QCOMPARE(player.status(), Player::Playing);
+        if (player.queue()->currentIndex() != 0)
+            movedOff = true;
+    }
+    QVERIFY(movedOff);
+
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("play"), m_tracks.at(2).id),
+             albumSize);
+    QVERIFY(player.queue()->shuffle());
+    QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(2).id);
+    QCOMPARE(player.queue()->currentSlot(), 0);
+    QVERIFY(isPermutation(player.queue()->order(), albumSize));
+
+    const QVariantList ids = {m_tracks.at(0).id, m_tracks.at(1).id, m_tracks.at(2).id};
+    player.playTracks(ids, 1);
+    QVERIFY(player.queue()->shuffle());
+    QCOMPARE(player.queue()->count(), 3);
+    QCOMPARE(player.queue()->currentIndex(), 1);
+    QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(1).id);
+    QCOMPARE(player.queue()->currentSlot(), 0);
+    QVERIFY(isPermutation(player.queue()->order(), 3));
+
+    player.queue()->setShuffle(false);
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("play")), albumSize);
+    QVERIFY(!player.queue()->shuffle());
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(player.queue()->currentSlot(), 0);
+    QVERIFY(player.queue()->order().isEmpty());
+    player.stop();
 }
 
 void PlayerTest::stateQueueWorker()

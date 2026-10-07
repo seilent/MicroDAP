@@ -11,6 +11,10 @@ Page {
     property int pivotIndex: 0
     property int shownPivot: 0
     property int revision: 0
+    property bool editing: false
+    property string editKey: ""
+    property string editOutput: ""
+    property string editProfileKey: ""
 
     readonly property bool live: page.animated && !page.screenOff
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
@@ -96,30 +100,125 @@ Page {
         return page.hasEq && typeof page.eq[method] === "function"
     }
 
-    function step(delta: int): bool {
+    function snapshot(output: string): string {
+        if (!page.canCall("profileMap"))
+            return ""
+        return JSON.stringify(page.eq.profileMap(output))
+    }
+
+    function profileKey(output: string): string {
+        if (!page.canCall("profileMap"))
+            return ""
+        const p = page.eq.profileMap(output)
+        return p === undefined || p === null || p.key === undefined ? "" : String(p.key)
+    }
+
+    function invoke(s: var): void {
+        if (s.method === "cycleProfile")
+            page.eq.cycleProfile(s.output, s.delta)
+        else if (s.method === "stepPreamp")
+            page.eq.stepPreamp(s.output, s.delta, s.coarse)
+        else
+            page.eq.stepBand(s.output, s.band, s.field, s.delta, s.coarse)
+    }
+
+    function stepFor(r: var, output: string, delta: int, coarse: bool): var {
+        if (r.kind === "sub")
+            return { method: "stepBand", output: output, band: r.band, field: r.field, delta: delta, coarse: coarse }
+        if (r.key === "profile")
+            return coarse ? null : { method: "cycleProfile", output: output, delta: delta, coarse: false }
+        if (r.key === "preamp")
+            return { method: "stepPreamp", output: output, delta: delta, coarse: coarse }
+        return null
+    }
+
+    function step(delta: int, coarse: bool): bool {
         const r = page.focusedRow
         if (r === null)
             return false
-        const output = page.activePane.output
-        if (r.kind === "sub") {
-            if (!page.canCall("stepBand"))
-                return false
-            page.eq.stepBand(output, r.band, r.field, delta)
+        const s = page.stepFor(r, page.activePane.output, delta, coarse)
+        if (s === null || !page.canCall(s.method))
+            return false
+        const before = page.snapshot(s.output)
+        page.invoke(s)
+        if (page.editing && page.snapshot(s.output) !== before)
+            d.steps = d.steps.concat([s])
+        return true
+    }
+
+    function editable(r: var): bool {
+        return r !== null && (r.kind === "sub" || r.key === "profile" || r.key === "preamp")
+    }
+
+    function beginEdit(): void {
+        const r = page.focusedRow
+        if (!page.hasEq || !page.editable(r))
+            return
+        d.steps = []
+        page.editOutput = page.activePane.output
+        page.editProfileKey = page.profileKey(page.editOutput)
+        page.editKey = r.key
+        page.editing = true
+    }
+
+    function confirmEdit(): void {
+        page.editing = false
+        page.editKey = ""
+        d.steps = []
+    }
+
+    function restoreProfile(output: string, key: string): void {
+        if (key === "" || !page.canCall("cycleProfile") || page.profileKey(output) === key)
+            return
+        const list = page.eq.sources
+        if (list === undefined || list === null || list.length === undefined)
+            return
+        const n = list.length + 2
+        for (let i = 0; i < n && page.profileKey(output) !== key; i++)
+            page.eq.cycleProfile(output, -1)
+    }
+
+    function cancelEdit(): void {
+        if (!page.editing)
+            return
+        const steps = d.steps
+        const output = page.editOutput
+        const key = page.editProfileKey
+        page.confirmEdit()
+        for (let i = steps.length - 1; i >= 0; i--) {
+            const s = Object.assign({}, steps[i])
+            s.delta = -s.delta
+            if (page.canCall(s.method))
+                page.invoke(s)
+        }
+        page.restoreProfile(output, key)
+    }
+
+    function handleEdit(name: string, repeat: bool): bool {
+        switch (name) {
+        case "left":
+            page.step(-1, false)
+            return true
+        case "right":
+            page.step(1, false)
+            return true
+        case "lb":
+            page.step(-1, true)
+            return true
+        case "rb":
+            page.step(1, true)
+            return true
+        case "a":
+            if (!repeat)
+                page.confirmEdit()
+            return true
+        case "b":
+            if (!repeat)
+                page.cancelEdit()
+            return true
+        default:
             return true
         }
-        if (r.key === "profile") {
-            if (!page.canCall("cycleProfile"))
-                return false
-            page.eq.cycleProfile(output, delta)
-            return true
-        }
-        if (r.key === "preamp") {
-            if (!page.canCall("stepPreamp"))
-                return false
-            page.eq.stepPreamp(output, delta)
-            return true
-        }
-        return false
     }
 
     function toggleBand(band: int): void {
@@ -144,7 +243,7 @@ Page {
             page.toggleBand(r.band)
             return
         }
-        page.step(1)
+        page.beginEdit()
     }
 
     function fixFocus(): void {
@@ -204,15 +303,13 @@ Page {
     }
 
     function handleAction(name: string, repeat: bool): bool {
+        if (page.editing)
+            return page.handleEdit(name, repeat)
         switch (name) {
         case "up":
             return page.moveRow(-1)
         case "down":
             return page.moveRow(1)
-        case "left":
-            return page.step(-1)
-        case "right":
-            return page.step(1)
         case "lt":
             return page.pageRow(-1)
         case "rt":
@@ -242,11 +339,28 @@ Page {
         }
     }
 
-    onRowsChanged: page.fixFocus()
+    onRowsChanged: {
+        page.fixFocus()
+        const r = page.rows[page.focusIndex]
+        if (page.editing && (r === undefined || r === null || r.key !== page.editKey))
+            page.confirmEdit()
+    }
+
+    onActiveChanged: {
+        if (!page.active)
+            page.confirmEdit()
+    }
+
+    onScreenOffChanged: {
+        if (page.screenOff)
+            page.confirmEdit()
+    }
 
     onPivotIndexChanged: {
-        if (!d.internal)
+        if (!d.internal) {
+            page.confirmEdit()
             page.landPivot()
+        }
     }
 
     onEntered: (first, kind) => {
@@ -277,6 +391,7 @@ Page {
         id: d
 
         property bool internal: false
+        property var steps: []
     }
 
     Connections {
@@ -295,6 +410,7 @@ Page {
         required property var modelData
         property var owner: null
         readonly property bool isFocused: item.owner !== null && page.pivotIndex === item.owner.pivot && page.focusIndex === item.index
+        readonly property bool editing: item.isFocused && page.editing && page.editKey === item.modelData.key
         readonly property bool sub: item.modelData.kind === "sub"
         readonly property var titleRole: item.sub ? page.subRole : Ui.settingsItem
         readonly property real titleAlpha: item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
@@ -432,7 +548,7 @@ Page {
                 x: slot.width - valueText.width
                 y: titleText.y + titleText.baselineOffset - valueText.baselineOffset
                 text: item.shownValue
-                color: Ui.white(item.valueAlpha)
+                color: item.editing ? Ui.accent : Ui.white(item.valueAlpha)
                 font: Ui.font(Ui.settingsValue)
 
                 Behavior on color {

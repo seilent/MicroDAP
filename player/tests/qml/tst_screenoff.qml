@@ -78,7 +78,6 @@ TestCase {
         property var roots: []
         property string accent: "#FA2A55"
         property real scale: 1.0
-        property bool pocketControls: false
         property int saverSeconds: 30
         property bool overlayToasts: false
         property int screenOffSeconds: 0
@@ -108,7 +107,6 @@ TestCase {
         fakePower.calls = []
         fakePlayer.calls = []
         fakePlayer.status = 1
-        fakeSettings.pocketControls = false
         fakeSettings.screenOffSeconds = 0
         menu.close()
         menu.complete()
@@ -176,8 +174,7 @@ TestCase {
         main.router.dropped.disconnect(onDropped)
     }
 
-    function test_off_drops_pad_with_pocket_controls() {
-        fakeSettings.pocketControls = true
+    function test_off_drops_pad_transport() {
         fakePower.screenOff = true
         tryCompare(main, "rootHidden", true, 2000)
         const focus = home.focusIndex

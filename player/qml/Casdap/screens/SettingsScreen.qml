@@ -20,6 +20,9 @@ Page {
     property bool screenOff: false
     property bool foldersOpen: false
     property bool aboutOpen: false
+    property bool editing: false
+    property string editKey: ""
+    property var editOriginal: null
     property int eqRevision: 0
     property var folders: []
     property var shownValues: ({})
@@ -39,6 +42,12 @@ Page {
     readonly property var screenOffSteps: [0, 60, 120, 300, 600, 1800]
     readonly property var suspendSteps: [0, 5, 10, 30, 60]
     readonly property var scaleSteps: page.buildScaleSteps()
+    readonly property var editKeys: ({
+        output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
+        codec: "btCodec", accent: "accentHue", accentArt: "accentFromArt", scale: "scale", saver: "saverSeconds",
+        rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds", suspend: "suspendMinutes",
+        wifi: "wifiOffScreenOff"
+    })
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
     readonly property string codec: page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto"
@@ -58,7 +67,6 @@ Page {
     readonly property string hpGainValue: page.usbActive ? "built in only" : page.hpGain
     readonly property string hpAmpValue: page.usbActive ? "built in only" : page.hpAmp
     readonly property string rateValue: page.graphRate > 0 ? "on " + page.graphRate : "on"
-    readonly property string gameModeTitle: page.overlay ? "close player" : "game mode"
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
     readonly property string eqOutput: page.hasEq && page.eq.activeOutput !== undefined ? String(page.eq.activeOutput) : ""
     readonly property string eqValue: page.eqText(page.eqOutput, page.eqRevision)
@@ -67,9 +75,7 @@ Page {
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
-    readonly property bool pocketControls: page.settings !== null && page.settings.pocketControls === true
     readonly property bool wifiOffScreenOff: page.settings !== null && page.settings.wifiOffScreenOff === true
-    readonly property bool keepPhone: page.settings !== null && page.settings.keepPhoneInGameMode === true
     readonly property bool codecPending: page.codecFragment !== null && page.codecFragment.pending === true
     readonly property string codecValue: page.codecPending ? page.codec + " (pending)" : page.codec
     readonly property bool scanning: page.library !== null && page.library.scanning === true
@@ -95,7 +101,7 @@ Page {
 
     signal pairPhone()
     signal openEq()
-    signal gameModeRequested()
+    signal closePlayerRequested()
     signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve, int from)
     signal settle()
 
@@ -202,15 +208,13 @@ Page {
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
         if (!page.overlay)
             out.push(page.row("rgb", "rgb", page.rgbValue, !page.rgbSupported))
-        out.push(page.row("toasts", "overlay toasts", page.overlayToasts ? "on" : "off", false))
+        out.push(page.row("toasts", "toasts in game", page.overlayToasts ? "on" : "off", false))
         out.push(page.label("power"))
         out.push(page.row("screenOff", "screen off after", page.offOr(Math.round(page.screenOffSeconds / 60), "min"), false))
         out.push(page.row("suspend", "suspend after", page.offOr(page.suspendMinutes, "min"), false))
-        out.push(page.row("pocket", "pocket controls", page.pocketControls ? "on" : "off", false))
         out.push(page.row("wifi", "wi-fi when off", page.wifiOffScreenOff ? "off" : "keep", false))
-        if (!page.overlay)
-            out.push(page.row("keepPhone", "keep phone in game mode", page.keepPhone ? "on" : "off", false))
-        out.push(page.row("gameMode", page.gameModeTitle, "", true))
+        if (page.overlay)
+            out.push(page.row("closePlayer", "close player", "", true))
         out.push(page.row("about", "about", page.version, true))
         if (page.aboutOpen) {
             const image = page.manifest.IMAGE_VERSION === undefined ? "" : String(page.manifest.IMAGE_VERSION)
@@ -344,7 +348,7 @@ Page {
         return true
     }
 
-    function cycle(list: var, value: var, delta: int, wrap: bool): var {
+    function cycle(list: var, value: var, delta: int): var {
         let i = list.indexOf(value)
         if (i < 0) {
             let best = 0
@@ -354,8 +358,7 @@ Page {
             }
             i = best
         }
-        const next = wrap ? (i + delta + list.length) % list.length : Math.max(0, Math.min(list.length - 1, i + delta))
-        return list[next]
+        return list[Math.max(0, Math.min(list.length - 1, i + delta))]
     }
 
     function set(key: string, value: var) {
@@ -373,37 +376,37 @@ Page {
         flick.contentY = page.visibleY(index, flick.contentY)
     }
 
-    function step(delta: int, wrap: bool): bool {
+    function step(delta: int): bool {
         const r = page.focusedRow
         if (r === null)
             return false
         switch (r.key) {
         case "output":
-            page.set("output", page.cycle(page.outputs, page.output, delta, wrap))
+            page.set("output", page.cycle(page.outputs, page.output, delta))
             return true
         case "hpGain":
             if (page.usbActive)
                 return false
-            page.set("hpGain", page.cycle(page.hpGains, page.hpGain, delta, wrap))
+            page.set("hpGain", page.cycle(page.hpGains, page.hpGain, delta))
             return true
         case "hpAmp":
             if (page.usbActive)
                 return false
-            page.set("hpAmp", page.cycle(page.hpAmps, page.hpAmp, delta, wrap))
+            page.set("hpAmp", page.cycle(page.hpAmps, page.hpAmp, delta))
             return true
         case "spkGain":
-            page.set("spkGain", page.cycle(page.spkGainSteps, page.spkGain, delta, wrap))
+            page.set("spkGain", page.cycle(page.spkGainSteps, page.spkGain, delta))
             return true
         case "volumeStep":
-            page.set("volumeStep", page.cycle(page.volumeSteps, page.volumeStep, delta, wrap))
+            page.set("volumeStep", page.cycle(page.volumeSteps, page.volumeStep, delta))
             return true
         case "rgb":
             if (!page.rgbSupported)
                 return false
-            page.set("rgb", page.cycle(page.rgbModes, page.rgb, delta, wrap))
+            page.set("rgb", page.cycle(page.rgbModes, page.rgb, delta))
             return true
         case "codec":
-            page.set("btCodec", page.cycle(page.codecs, page.codec, delta, wrap))
+            page.set("btCodec", page.cycle(page.codecs, page.codec, delta))
             return true
         case "toasts":
             page.set("overlayToasts", !page.overlayToasts)
@@ -415,28 +418,109 @@ Page {
             page.set("accentFromArt", !page.accentFromArt)
             return true
         case "scale":
-            page.applyScale(page.cycle(page.scaleSteps, Math.round(Ui.userScale * 10) / 10, delta, wrap))
+            page.applyScale(page.cycle(page.scaleSteps, Math.round(Ui.userScale * 10) / 10, delta))
             return true
         case "saver":
-            page.set("saverSeconds", page.cycle(page.saverSteps, page.saverSeconds, delta, wrap))
+            page.set("saverSeconds", page.cycle(page.saverSteps, page.saverSeconds, delta))
             return true
         case "screenOff":
-            page.set("screenOffSeconds", page.cycle(page.screenOffSteps, page.screenOffSeconds, delta, wrap))
+            page.set("screenOffSeconds", page.cycle(page.screenOffSteps, page.screenOffSeconds, delta))
             return true
         case "suspend":
-            page.set("suspendMinutes", page.cycle(page.suspendSteps, page.suspendMinutes, delta, wrap))
-            return true
-        case "pocket":
-            page.set("pocketControls", !page.pocketControls)
+            page.set("suspendMinutes", page.cycle(page.suspendSteps, page.suspendMinutes, delta))
             return true
         case "wifi":
             page.set("wifiOffScreenOff", !page.wifiOffScreenOff)
             return true
-        case "keepPhone":
-            page.set("keepPhoneInGameMode", !page.keepPhone)
-            return true
         default:
             return false
+        }
+    }
+
+    function settingOf(key: string): string {
+        const s = page.editKeys[key]
+        return s === undefined ? "" : s
+    }
+
+    function currentOf(key: string): var {
+        switch (key) {
+        case "output":
+            return page.output
+        case "hpGain":
+            return page.hpGain
+        case "hpAmp":
+            return page.hpAmp
+        case "spkGain":
+            return page.spkGain
+        case "volumeStep":
+            return page.volumeStep
+        case "codec":
+            return page.codec
+        case "accent":
+            return page.accentHue
+        case "accentArt":
+            return page.accentFromArt
+        case "scale":
+            return Math.round(Ui.userScale * 10) / 10
+        case "saver":
+            return page.saverSeconds
+        case "rgb":
+            return page.rgb
+        case "toasts":
+            return page.overlayToasts
+        case "screenOff":
+            return page.screenOffSeconds
+        case "suspend":
+            return page.suspendMinutes
+        case "wifi":
+            return page.wifiOffScreenOff
+        default:
+            return undefined
+        }
+    }
+
+    function beginEdit(key: string): void {
+        page.editOriginal = page.currentOf(key)
+        page.editKey = key
+        page.editing = true
+    }
+
+    function confirmEdit(): void {
+        page.editing = false
+        page.editKey = ""
+        page.editOriginal = null
+    }
+
+    function cancelEdit(): void {
+        if (!page.editing)
+            return
+        const key = page.editKey
+        const original = page.editOriginal
+        if (key === "scale")
+            page.applyScale(Number(original))
+        else
+            page.set(page.settingOf(key), original)
+        page.confirmEdit()
+    }
+
+    function handleEdit(name: string, repeat: bool): bool {
+        switch (name) {
+        case "left":
+            page.step(-1)
+            return true
+        case "right":
+            page.step(1)
+            return true
+        case "a":
+            if (!repeat)
+                page.confirmEdit()
+            return true
+        case "b":
+            if (!repeat)
+                page.cancelEdit()
+            return true
+        default:
+            return true
         }
     }
 
@@ -453,23 +537,12 @@ Page {
         page.set("roots", next)
     }
 
-    function runGameMode() {
-        page.gameModeRequested()
-        if (page.overlay) {
-            if (page.bridge !== null && typeof page.bridge.closePlayer === "function")
-                page.bridge.closePlayer()
-            else
-                console.info("casdap: close player")
-            return
-        }
-        if (page.power === null) {
-            console.info("casdap: game mode")
-            return
-        }
-        if (typeof page.power.closeAndSwitch === "function")
-            page.power.closeAndSwitch()
-        else if (typeof page.power.runVerb === "function")
-            page.power.runVerb("game-mode")
+    function closePlayer(): void {
+        page.closePlayerRequested()
+        if (page.bridge !== null && typeof page.bridge.closePlayer === "function")
+            page.bridge.closePlayer()
+        else
+            console.info("casdap: close player")
     }
 
     function activate(): bool {
@@ -485,6 +558,11 @@ Page {
         default:
             break
         }
+        if (page.settingOf(r.key) !== "") {
+            if (!r.readOnly)
+                page.beginEdit(r.key)
+            return true
+        }
         switch (r.key) {
         case "pair":
             if (!page.overlay)
@@ -497,9 +575,9 @@ Page {
             page.foldersOpen = !page.foldersOpen
             page.refreshFrom(page.focusIndex + 1)
             return true
-        case "gameMode":
-            sheet.title = page.gameModeTitle
-            sheet.items = [page.overlay ? "close player" : "switch to game mode"]
+        case "closePlayer":
+            sheet.title = "close player"
+            sheet.items = ["close player"]
             sheet.open()
             return true
         case "about":
@@ -512,22 +590,8 @@ Page {
             if (!page.scanning && page.library !== null && typeof page.library.rescanRoots === "function")
                 page.library.rescanRoots()
             return true
-        case "orientation":
-        case "rate":
-        case "replaygain":
-        case "accent":
-            return true
-        case "rgb":
-            if (!page.rgbSupported)
-                return true
-            return page.step(1, true)
-        case "hpGain":
-        case "hpAmp":
-            if (page.usbActive)
-                return true
-            return page.step(1, true)
         default:
-            return page.step(1, true)
+            return true
         }
     }
 
@@ -558,15 +622,13 @@ Page {
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
+        if (page.editing)
+            return page.handleEdit(name, repeat)
         switch (name) {
         case "up":
             return page.moveRow(-1)
         case "down":
             return page.moveRow(1)
-        case "left":
-            return page.step(-1, false)
-        case "right":
-            return page.step(1, false)
         case "lt":
             return page.pageRow(-1)
         case "rt":
@@ -584,7 +646,22 @@ Page {
         }
     }
 
-    onRowsChanged: page.fixFocus()
+    onRowsChanged: {
+        page.fixFocus()
+        const r = page.rows[page.focusIndex]
+        if (page.editing && (r === undefined || r === null || r.key !== page.editKey))
+            page.confirmEdit()
+    }
+
+    onActiveChanged: {
+        if (!page.active)
+            page.confirmEdit()
+    }
+
+    onScreenOffChanged: {
+        if (page.screenOff)
+            page.confirmEdit()
+    }
 
     onEntered: (first, kind) => {
         if (page.arriving)
@@ -629,6 +706,7 @@ Page {
         required property int index
         required property var modelData
         readonly property bool isFocused: page.focusIndex === item.index
+        readonly property bool editing: page.editing && page.editKey === item.modelData.key
         readonly property bool label: item.modelData.kind === "label"
         readonly property bool sub: item.modelData.kind === "sub"
         readonly property bool info: item.modelData.kind === "info"
@@ -756,7 +834,7 @@ Page {
             x: item.width - Ui.px(Ui.hubEdge) - valueText.width
             anchors.baseline: titleText.baseline
             text: item.shownValue
-            color: Ui.white(item.valueAlpha)
+            color: item.editing ? Ui.accent : Ui.white(item.valueAlpha)
             font: Ui.font(Ui.settingsValue)
 
             Behavior on color {
@@ -830,7 +908,7 @@ Page {
         screenOff: !page.live
         onAccepted: (index) => {
             sheet.close()
-            page.runGameMode()
+            page.closePlayer()
         }
     }
 

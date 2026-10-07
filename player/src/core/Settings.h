@@ -17,9 +17,7 @@ class Settings : public QObject
     Q_PROPERTY(int accentHue READ accentHue WRITE setAccentHue NOTIFY accentHueChanged)
     Q_PROPERTY(bool accentFromArt READ accentFromArt WRITE setAccentFromArt NOTIFY accentFromArtChanged)
     Q_PROPERTY(double scale READ scale WRITE setScale NOTIFY scaleChanged)
-    Q_PROPERTY(bool pocketControls READ pocketControls WRITE setPocketControls NOTIFY pocketControlsChanged)
     Q_PROPERTY(int saverSeconds READ saverSeconds WRITE setSaverSeconds NOTIFY saverSecondsChanged)
-    Q_PROPERTY(bool keepPhoneInGameMode READ keepPhoneInGameMode WRITE setKeepPhoneInGameMode NOTIFY keepPhoneInGameModeChanged)
     Q_PROPERTY(int screenOffSeconds READ screenOffSeconds WRITE setScreenOffSeconds NOTIFY screenOffSecondsChanged)
     Q_PROPERTY(int suspendMinutes READ suspendMinutes WRITE setSuspendMinutes NOTIFY suspendMinutesChanged)
     Q_PROPERTY(bool wifiOffScreenOff READ wifiOffScreenOff WRITE setWifiOffScreenOff NOTIFY wifiOffScreenOffChanged)
@@ -72,12 +70,8 @@ public:
     void setAccentFromArt(bool on);
     double scale() const;
     void setScale(double scale);
-    bool pocketControls() const;
-    void setPocketControls(bool on);
     int saverSeconds() const;
     void setSaverSeconds(int seconds);
-    bool keepPhoneInGameMode() const;
-    void setKeepPhoneInGameMode(bool on);
     int screenOffSeconds() const;
     void setScreenOffSeconds(int seconds);
     int suspendMinutes() const;
@@ -117,9 +111,7 @@ signals:
     void accentHueChanged();
     void accentFromArtChanged();
     void scaleChanged();
-    void pocketControlsChanged();
     void saverSecondsChanged();
-    void keepPhoneInGameModeChanged();
     void screenOffSecondsChanged();
     void suspendMinutesChanged();
     void wifiOffScreenOffChanged();
@@ -147,9 +139,7 @@ private:
     bool m_accentFromArt = false;
     bool m_dropAccent = false;
     double m_scale = 1.0;
-    bool m_pocketControls = false;
     int m_saverSeconds = 30;
-    bool m_keepPhoneInGameMode = false;
     int m_screenOffSeconds = 300;
     int m_suspendMinutes = 10;
     bool m_wifiOffScreenOff = false;

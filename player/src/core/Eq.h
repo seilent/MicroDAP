@@ -65,7 +65,7 @@ struct EqGrid
     static constexpr int anchor = 34;
 
     static double frequency(int index);
-    static int step(const EqBand &band, int direction);
+    static int step(const EqBand &band, int direction, int count = 1);
 };
 
 struct EqParser
@@ -106,6 +106,11 @@ public:
     static constexpr int syncDelayMs = 500;
     static constexpr int sinkTimeoutMs = 1000;
     static constexpr int sinkPollMs = 2000;
+    static constexpr double gainFine = 0.1;
+    static constexpr double gainCoarse = 1.0;
+    static constexpr double qFine = 0.1;
+    static constexpr double qCoarse = 1.0;
+    static constexpr int freqCoarseSteps = 6;
 
     explicit EqControl(Settings *settings, QObject *parent = nullptr);
     ~EqControl() override;
@@ -117,7 +122,6 @@ public:
     static QString displayName(const QString &path);
     static QString outputForSink(const QString &sink);
     static QString defaultSinkOutput();
-    static QList<double> qSteps();
 
     void setOutputControl(OutputControl *control);
     void startSinkPoll();
@@ -141,12 +145,13 @@ public:
     Q_INVOKABLE QVariantMap profileMap(const QString &output) const;
     Q_INVOKABLE void relist();
     Q_INVOKABLE void cycleProfile(const QString &output, int direction);
-    Q_INVOKABLE void stepPreamp(const QString &output, int direction);
+    Q_INVOKABLE void stepPreamp(const QString &output, int direction, bool coarse = false);
     Q_INVOKABLE void stepType(const QString &output, int band, int direction);
-    Q_INVOKABLE void stepFrequency(const QString &output, int band, int direction);
-    Q_INVOKABLE void stepGain(const QString &output, int band, int direction);
-    Q_INVOKABLE void stepQ(const QString &output, int band, int direction);
-    Q_INVOKABLE void stepBand(const QString &output, int band, const QString &field, int direction);
+    Q_INVOKABLE void stepFrequency(const QString &output, int band, int direction, bool coarse = false);
+    Q_INVOKABLE void stepGain(const QString &output, int band, int direction, bool coarse = false);
+    Q_INVOKABLE void stepQ(const QString &output, int band, int direction, bool coarse = false);
+    Q_INVOKABLE void stepBand(const QString &output, int band, const QString &field, int direction,
+                              bool coarse = false);
     Q_INVOKABLE void sync();
 
 signals:

@@ -256,11 +256,11 @@ int main(int argc, char *argv[])
                          [&settings, fragment = codecFragment.get()] { fragment->apply(settings.btCodec()); });
         rgbControl = std::make_unique<casdap::RgbControl>();
         rgbControl->setScreenOff(power.screenOff());
-        rgbControl->start(settings.rgb(), accent.hue());
+        rgbControl->start(settings.rgb(), accent.hue(), accent.level());
         QObject::connect(&settings, &casdap::Settings::rgbChanged, rgbControl.get(),
                          [&settings, rgb = rgbControl.get()] { rgb->setMode(settings.rgb()); });
         QObject::connect(&accent, &casdap::AccentControl::hueChanged, rgbControl.get(),
-                         [&accent, rgb = rgbControl.get()] { rgb->setHue(accent.hue()); });
+                         [&accent, rgb = rgbControl.get()] { rgb->setColor(accent.hue(), accent.level()); });
         QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, rgbControl.get(),
                          [&power, rgb = rgbControl.get()] { rgb->setScreenOff(power.screenOff()); });
     }

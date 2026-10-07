@@ -94,7 +94,6 @@ TestCase {
         property var roots: []
         property string accent: "#FA2A55"
         property real scale: 1.0
-        property bool pocketControls: false
         property int saverSeconds: 1
         property bool overlayToasts: false
         property int screenOffSeconds: 1
@@ -368,14 +367,41 @@ TestCase {
         overlayMain.pageStack.completeAll()
         const page = overlayMain.pageStack.currentItem
         compare(page.overlay, true)
-        compare(page.rows[page.indexOfKey("gameMode")].title, "close player")
+        compare(page.indexOfKey("gameMode"), -1)
+        compare(page.indexOfKey("keepPhone"), -1)
+        compare(page.rows[page.indexOfKey("closePlayer")].title, "close player")
+        compare(page.rows[page.indexOfKey("toasts")].title, "toasts in game")
         compare(page.rows[page.indexOfKey("pair")].value, "pair in dap mode")
         page.bridge = fakeBridge
-        page.focusIndex = page.indexOfKey("gameMode")
+        page.focusIndex = page.indexOfKey("closePlayer")
         overlayMain.router.dispatch("a", false)
+        compare(page.editing, false)
         compare(page.sheet.title, "close player")
         overlayMain.router.dispatch("a", false)
         compare(fakeBridge.closes, 1)
+    }
+
+    function test_settings_edit_mode() {
+        overlayMain.overlayMapped = true
+        overlayMain.overlayFade = 1
+        overlayMain.navigate("settings")
+        overlayMain.pageStack.completeAll()
+        const page = overlayMain.pageStack.currentItem
+        page.focusIndex = page.indexOfKey("toasts")
+        verify(overlayMain.router.dispatch("a", false))
+        compare(page.editing, true)
+        verify(overlayMain.router.dispatch("right", false))
+        compare(fakeSettings.overlayToasts, true)
+        verify(overlayMain.router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.overlayToasts, false)
+        compare(overlayMain.pageStack.depth, 2)
+        verify(overlayMain.router.dispatch("a", false))
+        verify(overlayMain.router.dispatch("right", false))
+        overlayMain.overlayMapped = false
+        compare(page.editing, false)
+        compare(fakeSettings.overlayToasts, true)
+        fakeSettings.overlayToasts = false
     }
 
     function test_bluetooth_pairing_inert() {

@@ -42,19 +42,9 @@ QString keyScale()
     return QStringLiteral("scale");
 }
 
-QString keyPocketControls()
-{
-    return QStringLiteral("pocketControls");
-}
-
 QString keySaverSeconds()
 {
     return QStringLiteral("saverSeconds");
-}
-
-QString keyKeepPhoneInGameMode()
-{
-    return QStringLiteral("keepPhoneInGameMode");
 }
 
 QString keyScreenOffSeconds()
@@ -276,9 +266,7 @@ void Settings::load()
     m_accentFromArt = m_settings.value(keyAccentFromArt(), false).toBool();
 
     m_scale = normalizeScale(m_settings.value(keyScale(), 1.0).toDouble());
-    m_pocketControls = m_settings.value(keyPocketControls(), false).toBool();
     m_saverSeconds = normalizeSaver(m_settings.value(keySaverSeconds(), 30).toInt());
-    m_keepPhoneInGameMode = m_settings.value(keyKeepPhoneInGameMode(), false).toBool();
     m_screenOffSeconds = qMax(0, m_settings.value(keyScreenOffSeconds(), 300).toInt());
     m_suspendMinutes = qMax(0, m_settings.value(keySuspendMinutes(), 10).toInt());
     m_wifiOffScreenOff = m_settings.value(keyWifiOffScreenOff(), false).toBool();
@@ -380,20 +368,6 @@ void Settings::setScale(double scale)
     emit scaleChanged();
 }
 
-bool Settings::pocketControls() const
-{
-    return m_pocketControls;
-}
-
-void Settings::setPocketControls(bool on)
-{
-    if (m_pocketControls == on)
-        return;
-    m_pocketControls = on;
-    store(keyPocketControls(), m_pocketControls);
-    emit pocketControlsChanged();
-}
-
 int Settings::saverSeconds() const
 {
     return m_saverSeconds;
@@ -407,20 +381,6 @@ void Settings::setSaverSeconds(int seconds)
     m_saverSeconds = value;
     store(keySaverSeconds(), m_saverSeconds);
     emit saverSecondsChanged();
-}
-
-bool Settings::keepPhoneInGameMode() const
-{
-    return m_keepPhoneInGameMode;
-}
-
-void Settings::setKeepPhoneInGameMode(bool on)
-{
-    if (m_keepPhoneInGameMode == on)
-        return;
-    m_keepPhoneInGameMode = on;
-    store(keyKeepPhoneInGameMode(), m_keepPhoneInGameMode);
-    emit keepPhoneInGameModeChanged();
 }
 
 void Settings::store(const QString &key, const QVariant &value)

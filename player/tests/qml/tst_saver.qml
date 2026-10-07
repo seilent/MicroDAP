@@ -56,7 +56,6 @@ TestCase {
         property var roots: []
         property string accent: "#FA2A55"
         property real scale: 1.0
-        property bool pocketControls: false
         property int saverSeconds: 1
         property bool overlayToasts: false
         property int screenOffSeconds: 0

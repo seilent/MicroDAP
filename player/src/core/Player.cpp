@@ -571,7 +571,7 @@ int Player::playSource(const QString &kind, qint64 id, const QString &mode, qint
     if (add || next)
         return addEntries(entries, next);
     const int n = static_cast<int>(entries.size());
-    if (shuffle) {
+    if (shuffle || (startId < 0 && m_queue->shuffle())) {
         playEntries(entries, QRandomGenerator::global()->bounded(n), true);
         return n;
     }

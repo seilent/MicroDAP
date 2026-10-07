@@ -25,7 +25,6 @@ Item {
         property int accentHue: 350
         property bool accentFromArt: false
         property real scale: 1.0
-        property bool pocketControls: false
         property int saverSeconds: 30
         property bool overlayToasts: false
         property int screenOffSeconds: 300

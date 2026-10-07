@@ -70,11 +70,11 @@ int sign(int direction)
     return direction > 0 ? 1 : direction < 0 ? -1 : 0;
 }
 
-double stepHalf(double value, int direction)
+double stepGrid(double value, double increment, int direction, double precision)
 {
-    if (direction > 0)
-        return std::floor(value * 2.0 + epsilon) / 2.0 + 0.5;
-    return std::ceil(value * 2.0 - epsilon) / 2.0 - 0.5;
+    const double units = value / increment;
+    const double next = direction > 0 ? std::floor(units + epsilon) + 1.0 : std::ceil(units - epsilon) - 1.0;
+    return std::round(next * increment * precision) / precision;
 }
 
 }
@@ -139,21 +139,22 @@ double EqGrid::frequency(int index)
     return 1000.0 * std::pow(2.0, (i - anchor) / 6.0);
 }
 
-int EqGrid::step(const EqBand &band, int direction)
+int EqGrid::step(const EqBand &band, int direction, int count)
 {
     const int s = sign(direction);
+    const int extra = s * qMax(0, count - 1);
     if (band.freqIndex >= 0 && band.freqIndex < size)
-        return qBound(0, band.freqIndex + s, size - 1);
+        return qBound(0, band.freqIndex + s * qMax(1, count), size - 1);
     if (s > 0) {
         for (int i = 0; i < size; ++i) {
             if (frequency(i) > band.freq * (1.0 + epsilon))
-                return i;
+                return qBound(0, i + extra, size - 1);
         }
         return size - 1;
     }
     for (int i = size - 1; i >= 0; --i) {
         if (frequency(i) < band.freq * (1.0 - epsilon))
-            return i;
+            return qBound(0, i + extra, size - 1);
     }
     return 0;
 }
@@ -440,11 +441,6 @@ QString EqControl::defaultSinkOutput()
     return outputForSink(QString::fromUtf8(process.readAllStandardOutput()).trimmed());
 }
 
-QList<double> EqControl::qSteps()
-{
-    return {0.3, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0, 10.0};
-}
-
 void EqControl::setOutputControl(OutputControl *control)
 {
     if (m_outputControl == control)
@@ -696,14 +692,15 @@ void EqControl::cycleProfile(const QString &output, int direction)
     setKey(output, cycle.at(next));
 }
 
-void EqControl::stepPreamp(const QString &output, int direction)
+void EqControl::stepPreamp(const QString &output, int direction, bool coarse)
 {
     if (sign(direction) == 0)
         return;
     EqProfile *profile = beginEdit(output);
     if (!profile)
         return;
-    profile->preamp = qBound(EqParser::minPreamp, stepHalf(profile->preamp, direction), EqParser::maxPreamp);
+    const double next = stepGrid(profile->preamp, coarse ? gainCoarse : gainFine, direction, 10.0);
+    profile->preamp = qBound(EqParser::minPreamp, next, EqParser::maxPreamp);
     endEdit(output);
 }
 
@@ -723,53 +720,39 @@ void EqControl::stepType(const QString &output, int band, int direction)
     endEdit(output);
 }
 
-void EqControl::stepFrequency(const QString &output, int band, int direction)
+void EqControl::stepFrequency(const QString &output, int band, int direction, bool coarse)
 {
     if (sign(direction) == 0)
         return;
     EqBand *b = beginBandEdit(output, band);
     if (!b)
         return;
-    b->freqIndex = EqGrid::step(*b, direction);
+    b->freqIndex = EqGrid::step(*b, direction, coarse ? freqCoarseSteps : 1);
     b->freq = EqGrid::frequency(b->freqIndex);
     endEdit(output);
 }
 
-void EqControl::stepGain(const QString &output, int band, int direction)
+void EqControl::stepGain(const QString &output, int band, int direction, bool coarse)
 {
     if (sign(direction) == 0)
         return;
     EqBand *b = beginBandEdit(output, band);
     if (!b)
         return;
-    b->gain = qBound(EqParser::minGain, stepHalf(b->gain, direction), EqParser::maxGain);
+    const double next = stepGrid(b->gain, coarse ? gainCoarse : gainFine, direction, 10.0);
+    b->gain = qBound(EqParser::minGain, next, EqParser::maxGain);
     endEdit(output);
 }
 
-void EqControl::stepQ(const QString &output, int band, int direction)
+void EqControl::stepQ(const QString &output, int band, int direction, bool coarse)
 {
-    const int s = sign(direction);
-    if (s == 0)
+    if (sign(direction) == 0)
         return;
     EqBand *b = beginBandEdit(output, band);
     if (!b)
         return;
-    const QList<double> steps = qSteps();
-    if (s > 0) {
-        for (double q : steps) {
-            if (q > b->q + epsilon) {
-                b->q = q;
-                break;
-            }
-        }
-    } else {
-        for (auto it = steps.crbegin(); it != steps.crend(); ++it) {
-            if (*it < b->q - epsilon) {
-                b->q = *it;
-                break;
-            }
-        }
-    }
+    const double next = stepGrid(b->q, coarse ? qCoarse : qFine, direction, 100.0);
+    b->q = qBound(EqParser::minQ, next, EqParser::maxQ);
     endEdit(output);
 }
 
@@ -907,16 +890,16 @@ void EqControl::applyActive()
     emit profileApplied(m_applied);
 }
 
-void EqControl::stepBand(const QString &output, int band, const QString &field, int direction)
+void EqControl::stepBand(const QString &output, int band, const QString &field, int direction, bool coarse)
 {
     if (field == QLatin1StringView("type"))
         stepType(output, band, direction);
     else if (field == QLatin1StringView("freq"))
-        stepFrequency(output, band, direction);
+        stepFrequency(output, band, direction, coarse);
     else if (field == QLatin1StringView("gain"))
-        stepGain(output, band, direction);
+        stepGain(output, band, direction, coarse);
     else if (field == QLatin1StringView("q"))
-        stepQ(output, band, direction);
+        stepQ(output, band, direction, coarse);
     else
         qWarning() << "casdap eq: unknown band field" << field;
 }
