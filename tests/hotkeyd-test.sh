@@ -308,33 +308,33 @@ expect_log "hold in casdap"
 run_case "hold buzzes before release" casdap 0 0 "press;sleep 0.8;mark release;release"
 expect_call "${prompt}"
 expect_calls 1
-expect_system_count "${dev0} 0.6" 1
+expect_system_count "${dev0} 1.0" 1
 expect_system_count "${dev0} 0" 1
-expect_system_count "${dev1} 0.6" 1
+expect_system_count "${dev1} 1.0" 1
 expect_system_count "${dev1} 0" 1
 grep -qF "devices/target/dbus0 ${ff}" "${STATE}/system" && fail "rumble on a target path" || true
-expect_system_before "${dev0} 0.6" "${dev0} 0"
+expect_system_before "${dev0} 1.0" "${dev0} 0"
 expect_system_before "${dev0} 0" "mark release"
 expect_system_before "${dev1} 0" "mark release"
 
 RUMBLE_FAIL=1 run_case "hold with a failing rumble" casdap 0 0 "press;sleep 0.4;release"
 expect_call "${prompt}"
 expect_calls 1
-expect_system_count "${dev0} 0.6" 1
+expect_system_count "${dev0} 1.0" 1
 expect_no_log "failed"
 
 export CASDAP_HOTKEYD_BUZZ_LEVEL=0.3
 run_case "hold with a buzz level" game 0 0 "press;sleep 0.4;release"
 expect_call "${switch}"
 expect_system_count "${dev0} 0.3" 1
-expect_system_count "${dev0} 0.6" 0
+expect_system_count "${dev0} 1.0" 0
 expect_system_count "${dev0} 0" 1
 unset CASDAP_HOTKEYD_BUZZ_LEVEL
 
 run_case "hold in casdap dry run" casdap 0 0 "press;sleep 0.4;release" 1
 expect_calls 0
 expect_log "would: ${prompt}"
-expect_log "would: buzz 60"
+expect_log "would: buzz 15"
 expect_no_system
 
 BUSCTL_ERR="Call failed: The name is not activatable" run_case "hold in casdap without a player" casdap 0 0 "press;sleep 0.4;release"
@@ -359,37 +359,37 @@ expect_no_call "${prompt}"
 expect_calls 1
 expect_no_rumble
 
-printf '[General]\npocketControls=true\n' > "${CASDAP_SETTINGS_FILE}"
-
-run_case "tap in casdap with pocket controls and the screen on is immediate" casdap 0 0 "press;sleep 0.05;release" 0 "sleep 0.2;up;up-release"
+run_case "tap in casdap with the screen on is immediate" casdap 0 0 "press;sleep 0.05;release" 0 "sleep 0.2;up;up-release"
 expect_first_call "${playpause}"
 expect_call_count "${playpause}" 1
 expect_no_call "${next}"
 expect_calls 5
 
-run_case "hold in casdap with pocket controls and the screen on" casdap 0 0 "press;sleep 0.4;release"
+run_case "hold in casdap with the screen on" casdap 0 0 "press;sleep 0.4;release"
 expect_call "${prompt}"
 expect_no_call "${previous}"
 expect_calls 1
 
-rm -f "${CASDAP_SETTINGS_FILE}"
-
 mkdir -p "${CASDAP_RUNTIME_DIR}"
 : > "${CASDAP_RUNTIME_DIR}/off"
 
-run_case "hold in casdap while the screen is off" casdap 0 0 "press;sleep 0.4;release"
-expect_call "${screen_on}"
+run_case "pocket hold" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${previous}"
+expect_no_call "${screen_on}"
 expect_no_call "${prompt}"
 expect_no_call "${back}"
 expect_calls 1
-expect_log "screen off, turning it on"
-expect_system_count "${dev0} 0.6" 1
+expect_log "hold, previous"
+expect_system_count "${dev0} 1.0" 1
+expect_system_count "${dev1} 0" 1
 
-run_case "hold in casdap while the screen is off dry run" casdap 0 0 "press;sleep 0.4;release" 1
+run_case "pocket hold dry run" casdap 0 0 "press;sleep 0.4;release" 1
 expect_calls 0
-expect_log "would: ${screen_on}"
+expect_log "would: ${previous}"
+expect_log "would: buzz 15"
+expect_no_system
 
-run_case "tap in casdap while the screen is off" casdap 0 0 "press;sleep 0.05;release"
+run_case "tap in casdap while the screen is off" casdap 0 0 "press;sleep 0.05;release;sleep 0.4"
 expect_call "${playpause}"
 expect_no_call "${screen_on}"
 expect_calls 1
@@ -397,16 +397,17 @@ expect_calls 1
 run_case "hold in game while the casdap marker is left" game 0 0 "press;sleep 0.4;release"
 expect_call "${switch}"
 expect_no_call "${screen_on}"
-expect_calls 1
-
-printf 'pocketControls=false\n' > "${CASDAP_SETTINGS_FILE}"
-
-run_case "hold in casdap while the screen is off with pocket controls off" casdap 0 0 "press;sleep 0.4;release"
-expect_call "${screen_on}"
 expect_no_call "${previous}"
 expect_calls 1
 
-printf '[General]\npocketControls=true\r\n' > "${CASDAP_SETTINGS_FILE}"
+printf '[General]\npocketControls=false\n' > "${CASDAP_SETTINGS_FILE}"
+
+run_case "pocket hold ignores a pocketControls key" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${previous}"
+expect_no_call "${screen_on}"
+expect_calls 1
+
+rm -f "${CASDAP_SETTINGS_FILE}"
 
 run_case "pocket tap waits for the double tap window" casdap 0 0 "press;sleep 0.05;release;sleep 0.4" 0 "sleep 0.1;up;up-release"
 expect_call_count "${playpause}" 1
@@ -421,25 +422,16 @@ expect_call "${next}"
 expect_no_call "${playpause}"
 expect_calls 1
 expect_log "double tap, next"
-expect_system_count "${dev0} 0.6" 2
+expect_system_count "${dev0} 1.0" 2
 expect_system_count "${dev0} 0" 2
-expect_system_count "${dev1} 0.6" 2
+expect_system_count "${dev1} 1.0" 2
 expect_system_count "${dev1} 0" 2
 
 run_case "pocket double tap dry run" casdap 0 0 "press;sleep 0.05;release;sleep 0.05;press;sleep 0.05;release;sleep 0.4" 1
 expect_calls 0
 expect_log "would: ${next}"
-expect_log "would: buzz 40 60 40"
+expect_log "would: buzz 15 50 15"
 expect_no_system
-
-run_case "pocket hold" casdap 0 0 "press;sleep 0.4;release"
-expect_call "${previous}"
-expect_no_call "${screen_on}"
-expect_no_call "${prompt}"
-expect_calls 1
-expect_log "hold, previous"
-expect_system_count "${dev0} 0.6" 1
-expect_system_count "${dev1} 0" 1
 
 run_case "pocket taps spaced over the window" casdap 0 0 "press;sleep 0.05;release;sleep 0.4;press;sleep 0.05;release;sleep 0.4"
 expect_call_count "${playpause}" 2
@@ -451,17 +443,6 @@ expect_first_call "${playpause}"
 expect_last_call "${previous}"
 expect_no_call "${next}"
 expect_calls 2
-
-run_case "pocket hold dry run" casdap 0 0 "press;sleep 0.4;release" 1
-expect_calls 0
-expect_log "would: ${previous}"
-
-run_case "hold in game with pocket controls while the casdap marker is left" game 0 0 "press;sleep 0.4;release"
-expect_call "${switch}"
-expect_no_call "${previous}"
-expect_calls 1
-
-rm -f "${CASDAP_SETTINGS_FILE}"
 
 rm -f "${CASDAP_RUNTIME_DIR}/off"
 

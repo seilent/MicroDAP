@@ -8,9 +8,9 @@ DOUBLE_MS="${CASDAP_HOTKEYD_DOUBLE_MS:-350}"
 DEVICE_WAIT_SEC="${CASDAP_HOTKEYD_DEVICE_WAIT_SEC:-15}"
 DEVICE_NAME="${CASDAP_HOTKEYD_DEVICE_NAME:-InputPlumber Keyboard}"
 VOLUME_NAMES="${CASDAP_HOTKEYD_VOLUME_NAMES-gpio-keys:pm8941_resin}"
-BUZZ_LEVEL="${CASDAP_HOTKEYD_BUZZ_LEVEL:-0.6}"
-BUZZ_MS="${CASDAP_HOTKEYD_BUZZ_MS:-60}"
-BUZZ_DOUBLE_MS="${CASDAP_HOTKEYD_BUZZ_DOUBLE_MS:-40 60 40}"
+BUZZ_LEVEL="${CASDAP_HOTKEYD_BUZZ_LEVEL:-1.0}"
+BUZZ_MS="${CASDAP_HOTKEYD_BUZZ_MS:-15}"
+BUZZ_DOUBLE_MS="${CASDAP_HOTKEYD_BUZZ_DOUBLE_MS:-15 50 15}"
 DRY_RUN="${CASDAP_HOTKEYD_DRY_RUN:-0}"
 KEY="${CASDAP_HOTKEYD_KEY:-KEY_F13}"
 DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
@@ -279,12 +279,7 @@ on_hold() {
             ;;
         casdap)
             buzz "${BUZZ_MS}"
-            if [[ -e "${POWER_RUNTIME}/off" ]]; then
-                log "screen off, turning it on"
-                run casdap-power screen-on
-            else
-                show_switch_prompt
-            fi
+            show_switch_prompt
             ;;
         other)
             if plasma_running; then
@@ -308,8 +303,6 @@ setting() {
     fi
     printf '%s\n' "${value}"
 }
-
-pocket_controls() { [[ "$(setting pocketControls)" == true ]]; }
 
 volume_step() {
     local value
@@ -404,7 +397,7 @@ main() {
                 if (( ! pending )); then
                     session=$(session_state)
                     pocket=0
-                    if [[ "${session}" == casdap && -e "${POWER_RUNTIME}/off" ]] && pocket_controls; then
+                    if [[ "${session}" == casdap && -e "${POWER_RUNTIME}/off" ]]; then
                         pocket=1
                     fi
                 fi

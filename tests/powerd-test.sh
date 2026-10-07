@@ -108,7 +108,7 @@ expect_sequence() {
 expect_buzz() {
     local n=0
     if [[ -e "${STATE}/buzz" ]]; then
-        n=$(grep -cF -- "CompositeDevice0 org.shadowblip.Output.ForceFeedback Rumble d 0.6" "${STATE}/buzz" || true)
+        n=$(grep -cF -- "CompositeDevice0 org.shadowblip.Output.ForceFeedback Rumble d 1.0" "${STATE}/buzz" || true)
     fi
     [[ "${n}" == "$1" ]] || fail "${n} buzzes, expected $1"
 }
@@ -138,6 +138,18 @@ expect_buzz 0
 expect_log "would: buzz 20"
 expect_log "would: ${toggle}"
 
+unset CASDAP_POWERD_BUZZ_MS
+run_case "short press dry run with the default tick" "press;sleep 0.05;release" 1
+expect_calls 0
+expect_log "would: buzz 15"
+export CASDAP_POWERD_BUZZ_MS=20
+
+export CASDAP_POWERD_BUZZ_LEVEL=0.3
+run_case "short press with a buzz level" "press;sleep 0.05;release"
+expect_sequence "${toggle}"
+expect_buzz 0
+grep -qF -- "CompositeDevice0 org.shadowblip.Output.ForceFeedback Rumble d 0.3" "${STATE}/buzz" || fail "no buzz at level 0.3"
+unset CASDAP_POWERD_BUZZ_LEVEL
 RECENT=1 run_case "short press within the debounce" "press;sleep 0.05;release"
 expect_sequence "${toggle}"
 expect_buzz 0
