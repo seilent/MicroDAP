@@ -563,6 +563,15 @@ Window {
         }
     }
 
+    Connections {
+        target: saver
+
+        function onShownChanged() {
+            if (root.rgbControl !== null && typeof root.rgbControl.setSaver === "function")
+                root.rgbControl.setSaver(saver.shown)
+        }
+    }
+
     Binding {
         target: root.contentItem
         property: "opacity"

@@ -150,6 +150,7 @@ Item {
             anchors.bottom: parent.bottom
             glyph: "repeatOne"
             on: true
+            toggle: true
             animated: false
         }
 

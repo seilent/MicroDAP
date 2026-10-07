@@ -29,7 +29,6 @@ Page {
     readonly property int rowIndex: page.activeList.focusIndex
     readonly property var focusedRow: page.currentRows[page.rowIndex] === undefined ? null : page.currentRows[page.rowIndex]
     readonly property bool switching: pivotAnim.running
-    readonly property string artUrl: page.artPath === "" ? "" : "file://" + page.artPath
     readonly property real listX: Ui.px(Ui.detailListX)
     readonly property real listY: Ui.px(Ui.detailRowsTop)
     readonly property real labelX: Ui.px(Ui.detailListX + Ui.hubEdge)
@@ -44,6 +43,7 @@ Page {
     property alias focusBar: focusBar
     property alias sheet: sheet
     property alias backdrop: backdrop
+    property alias surface: surface
 
     signal openAlbum(int id)
     signal openQueue()
@@ -634,15 +634,17 @@ Page {
         }
     }
 
-    PageSurface {
+    Rectangle {
+        id: surface
+
         anchors.fill: parent
+        color: Ui.bg
     }
 
     Backdrop {
         id: backdrop
 
         anchors.fill: parent
-        source: page.artUrl
         paused: !page.live
         screenOff: page.screenOff
     }

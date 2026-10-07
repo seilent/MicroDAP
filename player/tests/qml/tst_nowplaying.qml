@@ -257,6 +257,8 @@ TestCase {
         pages.clear()
         pages.animate = false
         fakeQueue.fill(8)
+        fakeQueue.shuffle = false
+        fakeQueue.repeat = 0
         fakePlayer.status = 1
         fakePlayer.position = 5000
         fakePlayer.duration = 240000
@@ -290,10 +292,14 @@ TestCase {
         compare(Ui.u, 2)
         compare(Ui.canvasH, 480)
         compare(page.shownVariant, false)
-        compare(page.backRing.x, Ui.px(4))
-        compare(page.backRing.y, Ui.px(4))
+        compare(page.backRing.x, Ui.px(0))
+        compare(page.backRing.y, Ui.px(-15))
         compare(page.backRing.width, Ui.px(64))
         compare(page.backRing.glyph, "back")
+        compare(page.backRing.parent.clip, true)
+        compare(page.backRing.parent.y, 0)
+        compare(page.backRing.parent.height, Ui.px(49))
+        verify(page.backRing.y + page.backRing.height < tc.baselineOf(page.artistItem) - Ui.px(0.7 * 20))
         compare(page.artistItem.text, "Addison Road")
         compare(page.artistItem.font.capitalization, Font.AllUppercase)
         compare(page.artistItem.font.pixelSize, Ui.fontPx(20))
@@ -348,7 +354,8 @@ TestCase {
         compare(page.statusStrip.bluetoothGlyph.visible, false)
         compare(page.statusStrip.batteryGlyph.visible, true)
         compare(Qt.colorEqual(page.statusStrip.batteryGlyph.color, Ui.textFull), true)
-        compare(page.backdropA.source.toString(), "")
+        compare(page.backdrop.source.toString(), "")
+        verify(Qt.colorEqual(page.surface.color, Ui.bg))
         compare(page.localLayer.visible, true)
     }
 
@@ -643,22 +650,44 @@ TestCase {
         compare(page.nextRepeater.count, 2)
     }
 
-    function test_backdrop_crossfade() {
+    function test_art_not_backdrop() {
         fakeQueue.rows[0].artPath = "/tmp/a.png"
         fakeQueue.rows[5].artPath = "/tmp/b.png"
         fakePlayer.select(0)
         const page = open({ animated: true })
-        compare(page.backdropA.source.toString(), "file:///tmp/a.png")
-        compare(page.frontIsA, true)
+        compare(page.backdrop.source.toString(), "")
+        compare(page.backdrop.animating, false)
         fakePlayer.select(5)
-        tryCompare(page, "crossfading", true, 3000)
-        compare(page.backdropB.source.toString(), "file:///tmp/b.png")
-        compare(page.crossfadeAnimation.duration, 2000)
-        verify(page.backdropB.opacity < 1)
-        tryCompare(page, "crossfading", false, 4000)
-        compare(page.frontIsA, false)
-        compare(page.backdropA.source.toString(), "")
-        compare(page.backdropB.opacity, 1)
+        tryCompare(page, "trackAnimating", false, 3000)
+        compare(page.shown.artPath, "/tmp/b.png")
+        compare(page.backdrop.source.toString(), "")
+    }
+
+    function test_ring_states_white() {
+        const page = open()
+        for (let i = 0; i < 3; i++) {
+            compare(page.ring(i).toggle, true)
+            compare(page.ring(i).on, false)
+            fuzzyCompare(page.ring(i).ringAlpha, Ui.alphaMid, 1e-6)
+            verify(Qt.colorEqual(page.ring(i).iconItem.color, Ui.white(Ui.alphaMid)))
+            compare(page.ring(i).arcSweep, 0)
+        }
+        compare(page.ring(0).strokeWidth, Ui.px(4))
+        compare(page.ring(1).strokeWidth, Ui.px(3))
+        router.dispatch("a", false)
+        compare(page.ring(0).on, true)
+        fuzzyCompare(page.ring(0).ringAlpha, Ui.alphaFull, 1e-6)
+        verify(Qt.colorEqual(page.ring(0).iconItem.color, Ui.white(Ui.alphaFull)))
+        verify(!Qt.colorEqual(page.ring(0).iconItem.color, Ui.accent))
+        router.dispatch("right", false)
+        compare(page.ring(0).strokeWidth, Ui.px(3))
+        fuzzyCompare(page.ring(0).ringAlpha, Ui.alphaFull, 1e-6)
+        compare(page.ring(1).strokeWidth, Ui.px(4))
+        fuzzyCompare(page.ring(1).ringAlpha, Ui.alphaMid, 1e-6)
+        fakeBluez.activate()
+        compare(page.shownVariant, true)
+        compare(page.ring(0).toggle, false)
+        compare(page.ring(1).toggle, true)
     }
 
     function test_variant_from_other_screen() {
@@ -763,7 +792,7 @@ TestCase {
         compare(page.trackAnimating, false)
         compare(page.shown.id, 2)
         compare(page.idleTimer.running, false)
-        compare(page.backdropA.animating, false)
+        compare(page.backdrop.animating, false)
         page.screenOff = false
         compare(page.idleTimer.running, true)
     }

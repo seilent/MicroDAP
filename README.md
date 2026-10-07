@@ -74,8 +74,11 @@ lands at `enter` 1 in `ListView.onPooled`.
 `PressScale` scales its item to 0.96 while A is held, 100 ms linear each way.
 
 Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
-32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, an accent arc
-from `Ui.ringArcStart`, and runs the F4 swap (scale 0.7 to 1 in 400 ms, opacity in 200 ms) on every
+32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, white only: the
+stroke and glyph read at 1.0 while lit and 0.6 otherwise, lit is `on` for a `toggle` ring (the now playing
+shuffle, repeat and rate rings, the phone variant's shuffle and repeat) and `focused` for every other ring.
+An accent arc from `Ui.ringArcStart` is drawn while `arcSweep` is set (the Bluetooth pairing countdown only).
+The ring runs the F4 swap (scale 0.7 to 1 in 400 ms, opacity in 200 ms) on every
 glyph change after the first one. `Tile` is the TILE_S art square with, while `captioned`, a 24 u caption
 band under it: title and artist in the 9 u grid caption role, each as wide as the tile and clipped at its
 right edge (no ellipsis), baselines at art bottom + 11 and + 22; the title goes to alpha 1 while focused,
@@ -83,10 +86,11 @@ the artist stays at 0.6. `ListRow` builds its `Ring` in a `Loader` only while `r
 otherwise). `CroppedHeader`, `PivotStrip`, `ListRow`, `Tile`, `LetterTile`,
 `Ring` and `FocusBar` take `animated` (default true); cleared, every Behavior is off and a running
 swap jumps to its end. `PageSurface` is `Ui.bg` under a vertical gradient from accent at alpha
-`Ui.backdropStops[0][1]` (0.15) to accent at 0, the first child of every page except `Home` (`MusicHub`,
-`QueueScreen`, `ArtistDetail`, `AlbumDetail`, `NowPlaying`, `Bluetooth`), so the turnstile swings a
-visible page. `Backdrop` draws its `Ui.bg` fill, image and shade only with a source (`hasArt`), else the
-`PageSurface` under it shows, and pauses its loops while `paused`, `screenOff` or not `visible`.
+`Ui.backdropStops[0][1]` (0.15) to accent at 0, the first child of `MusicHub`, `QueueScreen`, `Bluetooth`
+and the other pushed list pages, so the turnstile swings a visible page. `ArtistDetail`, `AlbumDetail` and
+`NowPlaying` put a plain opaque `Ui.bg` rectangle (`surface`) there instead and carry a `Backdrop` with no
+source. `Backdrop` draws its `Ui.bg` fill, image and shade only with a source (`hasArt`) and holds its loops
+while it has none, while `paused`, `screenOff` or not `visible`.
 `Toast.show()` during the exit restarts the entrance from the strip's current position. The volume
 overlay ring is `focused` inside the 0.4 group, so it reads at 0.4 (O20). `CroppedHeader` is 70 u
 tall with the x-height bottom at 66 u in both orientations.
@@ -302,7 +306,7 @@ rows.
 `ArtistDetail` is the `artist` page, pushed with the turnstile (T3) by `open("artist", id)` from the hub:
 header `artist`, pivots `albums`, `songs`, the name (11 u Bold upper case) at HUB_EDGE on a baseline 15 u
 under the pivot baseline (110 portrait, 94 landscape), the ring row play, add, shuffle (32 u, top y 150, 56 u pitch from HUB_EDGE), `IN COLLECTION` on
-baseline 200, content from 212 on a `Backdrop` (L1 pan) of the artist art. The rows come from `Library`:
+baseline 200, content from 212 on plain `Ui.bg` (the `Backdrop` carries no source). The rows come from `Library`:
 `artistInfo(id)` (`name`, `artPath`: the first of the artist's albums with art), `artistAlbumRows(id)` (`id`,
 `title`, `artist`, `year`, `artPath`) and `artistTrackRows(id)`
 (`id`, `title`, `artist`, `album`, `albumId`, `durationMs`), one query each; a null library leaves the lists empty; a new `artistId` reloads them with F12 on the shown pivot. `albums`
@@ -321,15 +325,15 @@ focus; `play` plays (the artist, the album through `playSource("album", id, "pla
 verb emits `sheetAction(action, kind, id)` and runs through Main's queue verbs. B pops. Landscape keeps the name and rings in
 the column to 200 and runs the label and the list from x 216 (`IN COLLECTION` with its cap top at
 CONTENT_TOP, rows 12 u under its baseline). `screenOff` or `animated` false lands the pivot, settles the
-rows and the sheet and pauses the backdrop.
+rows and the sheet.
 
 `AlbumDetail` is the `album` page, pushed with the turnstile (T3) by `open("album", id)` from the hub or
-`openAlbum` from the artist page, laid out as the now playing top stack: no header word, back ring (64 u,
-inset 4, decorative) top left, `StatusStrip` top right, the album artist (20 u Bold upper case) on baseline
+`openAlbum` from the artist page, laid out as the now playing top stack: no header word, back ring (64 u at
+x 0, y -15, clipped by the screen edge, decorative) top left, `StatusStrip` top right, the album artist (20 u Bold upper case) on baseline
 117 and the title (20 u Light upper case) on 141 at EDGE, TILE_L art at EDGE y 155, track rows from y 283
 (art bottom + 12; `albumInfo(id)` and `albumTracks(id)`, a new `albumId` reloads them with F12): 1 based number, title, the
 duration `m:ss` right aligned at W - HUB_EDGE (absent when unknown), the accent dot left of the number on the
-row whose id is `Player.current.id`. The `Backdrop` is the album art. Focus starts on row 0; up/down and
+row whose id is `Player.current.id`. The page is plain `Ui.bg`; the art shows only in its square. Focus starts on row 0; up/down and
 LT/RT move, A calls `Player.playSource("album", id, "play", trackId)` (the album in disc and track order from that row), Y emits
 `sheetAction("add to queue", "album", id)`, X opens the sheet `play`, `play next`, `add to queue`, `pin to quickplay`
 (`play` from the row, the rest emit `sheetAction(action, "song", id)`), Back/View emits `openQueue`, B pops. Landscape keeps the back
@@ -338,15 +342,16 @@ runs the rows from x 216, y CONTENT_TOP.
 
 `NowPlaying` is the `nowplaying` page, pushed with the `fade` kind (T7) by Start on any other page, A on the
 hub's `NOW PLAYING` row, A on the Bluetooth page's transport row and the Quickplay phone tile; Start with
-no current track and no phone transport logs `now playing empty`. Portrait is three stacks on a `Backdrop`
-(the current track's art, L1 pan): back ring (64 u, inset 4, decorative), `StatusStrip` top right (battery
+no current track and no phone transport logs `now playing empty`. Portrait is three stacks on plain `Ui.bg`
+(the `Backdrop` carries no source): back ring (64 u at x 0, y -15, clipped by the screen edge, decorative), `StatusStrip` top right (battery
 from `StatusModel`, accent under 10 percent, Bluetooth glyph while a phone is connected, play or pause
 glyph), artist baseline 117 and album 141 at EDGE, art square at y 155 with side `min(168, W - 2 EDGE,
 H - 311)`, progress line at y H - 156 from EDGE to the art right edge (fill accent from `Player.position`,
 read every 250 ms; elapsed at EDGE and remaining right aligned at the art right edge under it, refreshed at
 1 Hz), title baseline H - 118, the next three rows of the play order (`Queue.upcoming(3)`, refreshed on
 `modelReset`, `currentSlotChanged`, `countChanged`, `rowsMoved`, `orderChanged` and `repeatChanged`) at EDGE + 40
-and 18 u pitch, three rings (shuffle, repeat, rate) centered at 0.13, 0.5 and 0.87 of W on y H - 40.
+and 18 u pitch, three rings (shuffle, repeat, rate) centered at 0.13, 0.5 and 0.87 of W on y H - 40, white
+only: on at 1.0, off at 0.6, the focused one with the 4 u stroke.
 Landscape: back ring and art (y 72, side `min(168, H - 106)`) with the progress line 8 u under it and as
 wide as the art in the
 left column, artist 60, album 84, title 116, next rows from 140 at x 216, rings on the same fractions of
@@ -357,9 +362,7 @@ or pauses, Y and Back/View emit `openQueue`, LT and RT released under 400 ms see
 seek 1000 ms every 250 ms until release with no 10 s step; RT clamps at the duration - 1000 ms. B and Start pop with the fade kind (T8).
 A track change runs T9 (title, next rows and times out 500 easeOut with the art, in 400 easeIn with the
 art scaling from 0.8 about (0.2, 0.5)); a second `currentChanged` for the same track or a new track during
-the out phase replaces the pending track without restarting the animation; a new art source crossfades the
-backdrop over 2000 linear and
-restarts its pan (T10). After 5000 ms without input the unfocused rings and the status strip fade to 0.4
+the out phase replaces the pending track without restarting the animation. After 5000 ms without input the unfocused rings and the status strip fade to 0.4
 over 380 decel, the focused ring stays at 1.0, the first input only restores them. With
 `BluezModel.transportActive` the page shows the Bluetooth variant: `FROM <PHONE>` at baseline 97 (39 in
 landscape, `Ui.npFromBaselineLandscape`), artist,
@@ -401,7 +404,7 @@ decel through `progress` (the `PageStack` opacity is `1 - saver.progress`). 7000
 black layer fades to 0.6 over 380 decel (T17, `dimmed`). The text group drifts `y` 8 to -27 u over 18 000 ms
 linear, reverse infinite (L2), paused with the screen off. Any pad action goes to `Saver.hide()` through
 `PadRouter.saver` and is otherwise dropped (the page below sees nothing); the saver timer rearms when the
-page is back. `screenOff` lands the fades and stops the clock, the dim timer and the drift.
+page is back. The stick lights sleep while the saver is up (`RgbControl.setSaver`). `screenOff` lands the fades and stops the clock, the dim timer and the drift.
 
 `PowerMenu` (`screens/PowerMenu.qml`) is a `Dialog` titled `power` with SCREEN OFF, GAME MODE, SUSPEND,
 POWER OFF (3.13, T13), opened by `PowerBridge.showPowerMenu` (DAP mode only; with the screen off the signal
@@ -626,17 +629,17 @@ Settings come from `CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.in
 `suspendMinutes`, `rgb`). `screen-off`, `toggle` and `cpu-apply` exit 1 unless `systemctl --user is-active
 gamescope-session-plus@casdap.service` prints `active`; `screen-on` runs in every state. `screen-off`, in
 order: the `off` marker, `busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player
-SetScreenOff b true` (a failed call is logged), `casdap-priv@backlight-off.service`,
-`casdap-priv@cpu-off.service`, `casdap-priv@rgb-sleep.service` when `rgb=accent`, `nmcli radio wifi off`
+SetScreenOff b true` (a failed call is logged), `casdap-priv@backlight-off.service`, `last-ms`,
+`casdap-priv@cpu-off.service`, `casdap-priv@rgb-sleep.service` when `rgb` is `accent` or `armada` (the default), `nmcli radio wifi off`
 with the `wifi` marker when `wifiOffScreenOff=true`
 and the marker is absent, then `systemctl --user stop casdap-idle.timer` and `systemd-run --user
 --unit=casdap-idle --on-active=60 --on-unit-inactive=60 --timer-property=AccuracySec=1min casdap-power
-idle-check`. `screen-on` reverses: stops the timer, `nmcli radio wifi on` when the `wifi` marker exists,
-then with the session `active` starts `cpu-restore` (only without the `off` marker and with
-`CASDAP_CPU_BEFORE_FILE` present) and `cpu-dap`, in any other state `cpu-restore`; then
-`casdap-priv@rgb-wake.service` when `rgb=accent`, `casdap-priv@backlight-on.service`, `SetScreenOff b false`
-(session `active` only), removes the `off` marker
-and writes `last-ms`. `screen-off` writes `last-ms` as its last step too. `screen-off` and `screen-on` hold
+idle-check`. `screen-on`, in order: `casdap-priv@backlight-on.service`, removes the `off` marker, `SetScreenOff b
+false` (session `active` only), `last-ms`, then stops the timer, `nmcli radio wifi on` when the `wifi` marker
+exists, then with the session `active` starts `cpu-restore` (only when the `off` marker was absent at the start and
+`CASDAP_CPU_BEFORE_FILE` is present) and `cpu-dap`, in any other state `cpu-restore`; then
+`casdap-priv@rgb-wake.service` when `rgb` is `accent` or `armada`. `last-ms` marks the visible change, the slower
+CPU, light and Wi-Fi steps follow it. `screen-off` and `screen-on` hold
 `lock` (`flock -w 10`, `lock timeout` and exit 1 when it fails) for their whole run. `toggle` takes the lock
 with `flock -n` and with it held logs `toggle during a transition, ignored` and exits 0; it does nothing within
 2 s of `last-ms` (`CASDAP_POWER_DEBOUNCE_MS`, both directions), else runs `screen-on` with the `off` marker and
@@ -660,8 +663,14 @@ alone while casdap runs. The daemon finds the node named `pm8941_pwrkey` (`CASDA
 --system get-property` every 5 s (`CASDAP_POWERD_POLL_SEC`). `KEY_POWER` released under 1000 ms
 (`CASDAP_POWERD_LONG_MS`) runs `casdap-power toggle`; held 1000 ms, with the `off` marker it runs
 `casdap-power screen-on` first, then `busctl --user call org.casdap.Player /org/casdap/Player
-org.casdap.Player ShowPowerMenu`; a release without a press is dropped. A changed `Profile` value runs
-`casdap-power cpu-apply`. `CASDAP_POWERD_DRY_RUN=1` logs `would:` lines. In the Steam session the daemon is
+org.casdap.Player ShowPowerMenu`; a release without a press is dropped. The pad buzzes for 60 ms
+(`CASDAP_POWERD_BUZZ_MS`, level `CASDAP_POWERD_BUZZ_LEVEL` 0.6) when a tap is classified, before the toggle runs,
+and once when a hold passes 1000 ms. A tap within `CASDAP_POWER_DEBOUNCE_MS` (2000) of `last-ms` or while
+`flock -n` on the `lock` marker fails logs `tap during a transition or the debounce, no buzz` and still runs the
+toggle, which ignores it. The buzz is `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`, on
+every `/org/shadowblip/InputPlumber/CompositeDevice<N>` in a background subshell, a failed call skipped silently.
+A changed `Profile` value runs `casdap-power cpu-apply`. `CASDAP_POWERD_DRY_RUN=1` logs `would:` lines (`would: buzz
+<ms>` for the buzz). In the Steam session the daemon is
 not running and Steam owns the key.
 
 Pad target: `casdap-pad.service` (user unit, `BindsTo=` the casdap session) sets every InputPlumber
@@ -865,7 +874,12 @@ written. `CASDAP_EQ_DIR` replaces `~/.config/casdap` for both the `eq/` folder a
 fires the hue word starts unless that hue is the last one sent (`rgb-restore` and `rgb-off` clear it, a failed
 hue word clears it too). A hue word waiting behind a running word is replaced by a newer one. While
 `PowerBridge.screenOff` (`setScreenOff`) is true no hue word starts; on screen on the latest hue starts at once
-when it differs from the last sent. An unknown mode is logged and runs nothing. Words run one at a time through
+when it differs from the last sent. `setSaver(bool)` (property `saver`, called by `Main.qml` on every
+`Saver.shown` change) puts the lights to sleep while the saver is up in `accent` and `armada`: true starts
+`rgb-sleep`, false starts `rgb-wake` and then, in `accent`, the latest hue when it differs from the last sent
+(`rgb-sleep` and `rgb-wake` keep it); no hue word starts while the saver is up. A screen off while the lights
+sleep leaves the wake to `casdap-power screen-on`, so a saver closed with the screen off starts no word; a screen
+on with the saver still up starts `rgb-sleep` again. An unknown mode is logged and runs nothing. Words run one at a time through
 `systemctl start` (`CASDAP_SYSTEMCTL_BIN`), `busy` is true while one runs or waits, `applied(word, ok)` ends each.
 Unsupported, nothing runs and the settings RGB row reads `UNSUPPORTED`.
 

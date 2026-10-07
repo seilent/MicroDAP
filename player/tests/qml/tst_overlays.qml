@@ -16,6 +16,7 @@ TestCase {
 
         width: 640
         height: 960
+        source: "file:///tmp/casdap-backdrop-test.png"
     }
 
     StatusStrip {
@@ -141,6 +142,16 @@ TestCase {
         verify(backdrop.art.scale > held)
         backdrop.paused = true
         compare(backdrop.animating, false)
+        backdrop.paused = false
+        compare(backdrop.animating, true)
+        backdrop.source = ""
+        compare(backdrop.hasArt, false)
+        compare(backdrop.holding, true)
+        compare(backdrop.animating, false)
+        compare(backdrop.art.visible, false)
+        compare(backdrop.shade.visible, false)
+        backdrop.source = "file:///tmp/casdap-backdrop-test.png"
+        compare(backdrop.animating, true)
     }
 
     function test_status_geometry() {

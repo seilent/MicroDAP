@@ -283,7 +283,8 @@ QtObject {
     readonly property real queueRowsTop: ui.contentTop
     readonly property real backRing: 64
     readonly property real backRingStroke: 4
-    readonly property real backRingInset: 4
+    readonly property real backRingX: 0
+    readonly property real backRingY: -15
     readonly property real npTextTop: 117
     readonly property real npAlbumBaseline: 141
     readonly property real npFromBaseline: 97

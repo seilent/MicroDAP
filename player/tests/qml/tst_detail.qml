@@ -496,14 +496,13 @@ TestCase {
     function test_artist_backdrop() {
         const page = openArtist({ animated: true })
         compare(page.artPath, "/tmp/casdap-artist.jpg")
-        compare(page.backdrop.source.toString(), "file:///tmp/casdap-artist.jpg")
-        compare(page.backdrop.hasArt, true)
-        tryCompare(page.backdrop, "animating", true, 2000)
-        page.screenOff = true
+        compare(page.backdrop.source.toString(), "")
+        compare(page.backdrop.hasArt, false)
         compare(page.backdrop.holding, true)
         compare(page.backdrop.animating, false)
-        page.screenOff = false
-        tryCompare(page.backdrop, "animating", true, 2000)
+        verify(Qt.colorEqual(page.surface.color, Ui.bg))
+        compare(page.surface.width, page.width)
+        compare(page.surface.height, page.height)
     }
 
     function test_artist_back_pops() {
@@ -555,10 +554,12 @@ TestCase {
         compare(page.title, "Addison Road")
         compare(page.artist, "Addison Road")
         compare(page.year, 2008)
-        compare(page.backRing.x, Ui.px(4))
-        compare(page.backRing.y, Ui.px(4))
+        compare(page.backRing.x, Ui.px(0))
+        compare(page.backRing.y, Ui.px(-15))
         compare(page.backRing.width, Ui.px(64))
         compare(page.backRing.glyph, "back")
+        compare(page.backRing.parent.clip, true)
+        compare(page.backRing.parent.height, Ui.px(49))
         compare(page.statusStrip.row.y, Ui.px(10))
         compare(page.statusStrip.playing, true)
         compare(page.artistItem.x, Ui.px(16))
@@ -584,7 +585,8 @@ TestCase {
         compare(page.rowIndex, 0)
         compare(page.focusBar.visible, true)
         compare(page.focusBar.rowY, Ui.px(283))
-        compare(page.backdrop.source.toString(), "file:///tmp/casdap-album.jpg")
+        compare(page.backdrop.source.toString(), "")
+        verify(Qt.colorEqual(page.surface.color, Ui.bg))
     }
 
     function test_album_rows() {
@@ -669,7 +671,7 @@ TestCase {
     function test_album_landscape() {
         const page = openAlbum()
         tc.setWindow(1920, 1080)
-        compare(page.backRing.x, Ui.px(4))
+        compare(page.backRing.x, Ui.px(0))
         compare(page.artItem.x, Ui.px(16))
         compare(page.artItem.y, Ui.px(98))
         compare(page.artistItem.x, Ui.px(216))

@@ -8,6 +8,7 @@ PressScale {
     property real size: Ui.npRing
     property bool focused: false
     property bool on: false
+    property bool toggle: false
     property string glyph: ""
     property real glyphSize: root.size / 2
     property real level: 1.0
@@ -17,7 +18,8 @@ PressScale {
     readonly property bool swapping: swap.running
 
     readonly property real strokeWidth: Ui.px(root.focused ? Ui.ringStrokeFocused : Ui.ringStrokeIdle)
-    readonly property real ringAlpha: root.focused ? Ui.alphaFull : Ui.alphaMid
+    readonly property bool lit: root.toggle ? root.on : root.focused
+    readonly property real ringAlpha: root.lit ? Ui.alphaFull : Ui.alphaMid
     readonly property color ringColor: Ui.white(root.ringAlpha)
 
     property bool completed: false
@@ -90,7 +92,7 @@ PressScale {
         name: root.glyph
         size: root.glyphSize
         level: root.level
-        color: root.on ? Ui.accent : root.ringColor
+        color: root.ringColor
         transformOrigin: Item.Center
     }
 

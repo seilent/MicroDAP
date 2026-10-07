@@ -13,8 +13,6 @@ Page {
     property int ringIndex: 0
     property bool idle: false
     property bool shownVariant: false
-    property bool frontIsA: true
-    property real crossfade: 0
     property real trackShift: 0
     property real trackOpacity: 1
     property real artOpacity: 1
@@ -70,6 +68,7 @@ Page {
     readonly property var ringOn: np.shownVariant
         ? [false, np.phoneShuffle !== "off", np.phoneRepeat !== "off"]
         : [np.shuffleOn, np.repeatMode !== 0, np.rated]
+    readonly property var ringToggle: np.shownVariant ? [false, true, true] : [true, true, true]
     readonly property int battery: np.status !== null && np.status.battery !== undefined ? np.status.battery : -1
     readonly property bool batteryPresent: np.status !== null && np.status.batteryPresent === true
     readonly property string clock: np.status !== null && np.status.clock !== undefined ? np.status.clock : ""
@@ -100,10 +99,9 @@ Page {
         : Motion.lerp(Motion.nowPlayingScale, 1, np.contentFade)
     readonly property bool trackAnimating: trackAnim.running
     readonly property bool variantAnimating: variantIn.running || variantOut.running
-    readonly property bool crossfading: crossfadeAnim.running
 
-    property alias backdropA: backA
-    property alias backdropB: backB
+    property alias surface: surface
+    property alias backdrop: backdrop
     property alias localLayer: localLayer
     property alias content: content
     property alias backRing: backRing
@@ -126,7 +124,6 @@ Page {
     property alias trackAnimation: trackAnim
     property alias variantInAnimation: variantIn
     property alias variantOutAnimation: variantOut
-    property alias crossfadeAnimation: crossfadeAnim
 
     signal openQueue()
 
@@ -204,43 +201,9 @@ Page {
         np.nextTitles = np.buildNext()
     }
 
-    function frontBackdrop(): Item {
-        return np.frontIsA ? backA : backB
-    }
-
-    function backBackdrop(): Item {
-        return np.frontIsA ? backB : backA
-    }
-
-    function setBackdrop(source: string, immediate: bool) {
-        if (crossfadeAnim.running)
-            crossfadeAnim.complete()
-        const front = np.frontBackdrop()
-        if (String(front.source) === source)
-            return
-        if (immediate || !np.live) {
-            front.source = source
-            np.backBackdrop().source = ""
-            front.restart()
-            return
-        }
-        const back = np.backBackdrop()
-        back.source = source
-        back.restart()
-        crossfadeAnim.start()
-    }
-
-    function finishCrossfade() {
-        const old = np.frontBackdrop()
-        np.frontIsA = !np.frontIsA
-        np.crossfade = 0
-        old.source = ""
-    }
-
     function applyShown(map: var) {
         np.shown = map
         np.nextTitles = np.buildNext()
-        np.setBackdrop(np.artUrl(map.artPath), !d.ready)
     }
 
     function trackChanged() {
@@ -443,8 +406,6 @@ Page {
             variantIn.complete()
         if (variantOut.running)
             variantOut.complete()
-        if (crossfadeAnim.running)
-            crossfadeAnim.complete()
         for (let i = 0; i < ringRepeater.count; i++) {
             const item = ringRepeater.itemAt(i)
             if (item !== null && item.swapping)
@@ -676,8 +637,11 @@ Page {
         }
     }
 
-    PageSurface {
+    Rectangle {
+        id: surface
+
         anchors.fill: parent
+        color: Ui.bg
         opacity: np.backdropFade
     }
 
@@ -689,21 +653,9 @@ Page {
         visible: np.localLayerOpacity > 0
 
         Backdrop {
-            id: backA
+            id: backdrop
 
             anchors.fill: parent
-            z: np.frontIsA ? 0 : 1
-            opacity: np.frontIsA ? 1 : np.crossfade
-            paused: !np.live || np.shownVariant
-            screenOff: np.screenOff
-        }
-
-        Backdrop {
-            id: backB
-
-            anchors.fill: parent
-            z: np.frontIsA ? 1 : 0
-            opacity: np.frontIsA ? np.crossfade : 1
             paused: !np.live || np.shownVariant
             screenOff: np.screenOff
         }
@@ -721,15 +673,23 @@ Page {
             yScale: np.contentScale
         }
 
-        Ring {
-            id: backRing
+        Item {
+            id: backRingClip
 
-            x: Ui.px(Ui.backRingInset)
-            y: Ui.px(Ui.backRingInset)
-            size: Ui.backRing
-            focused: true
-            glyph: "back"
-            animated: np.live
+            width: Ui.px(Ui.backRingX + Ui.backRing)
+            height: Ui.px(Ui.backRingY + Ui.backRing)
+            clip: true
+
+            Ring {
+                id: backRing
+
+                x: Ui.px(Ui.backRingX)
+                y: Ui.px(Ui.backRingY)
+                size: Ui.backRing
+                focused: true
+                glyph: "back"
+                animated: np.live
+            }
         }
 
         StatusStrip {
@@ -949,6 +909,7 @@ Page {
                 size: Ui.npRing
                 focused: ringItem.isFocused
                 on: np.ringOn[ringItem.index]
+                toggle: np.ringToggle[ringItem.index]
                 glyph: np.ringGlyphs[ringItem.index]
                 pressed: ringItem.isFocused && np.pressed
                 animated: np.live
@@ -964,18 +925,6 @@ Page {
                 }
             }
         }
-    }
-
-    NumberAnimation {
-        id: crossfadeAnim
-
-        target: np
-        property: "crossfade"
-        from: 0
-        to: 1
-        duration: Motion.artistFade
-        easing.type: Motion.linear
-        onFinished: np.finishCrossfade()
     }
 
     SequentialAnimation {

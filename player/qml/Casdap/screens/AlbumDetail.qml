@@ -55,6 +55,7 @@ Page {
     property alias focusBar: focusBar
     property alias sheet: sheet
     property alias backdrop: backdrop
+    property alias surface: surface
 
     signal openQueue()
     signal sheetAction(string action, string kind, int id)
@@ -326,15 +327,17 @@ Page {
         }
     }
 
-    PageSurface {
+    Rectangle {
+        id: surface
+
         anchors.fill: parent
+        color: Ui.bg
     }
 
     Backdrop {
         id: backdrop
 
         anchors.fill: parent
-        source: page.artUrl
         paused: !page.live
         screenOff: page.screenOff
     }
@@ -378,15 +381,23 @@ Page {
         animated: page.live
     }
 
-    Ring {
-        id: backRing
+    Item {
+        id: backRingClip
 
-        x: Ui.px(Ui.backRingInset)
-        y: Ui.px(Ui.backRingInset)
-        size: Ui.backRing
-        focused: true
-        glyph: "back"
-        animated: page.live
+        width: Ui.px(Ui.backRingX + Ui.backRing)
+        height: Ui.px(Ui.backRingY + Ui.backRing)
+        clip: true
+
+        Ring {
+            id: backRing
+
+            x: Ui.px(Ui.backRingX)
+            y: Ui.px(Ui.backRingY)
+            size: Ui.backRing
+            focused: true
+            glyph: "back"
+            animated: page.live
+        }
     }
 
     StatusStrip {

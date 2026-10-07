@@ -7,14 +7,14 @@ Item {
     property url source
     property bool paused: false
     property bool screenOff: false
-    readonly property bool holding: root.paused || root.screenOff || !root.visible
+    readonly property bool hasArt: root.source.toString() !== ""
+    readonly property bool holding: root.paused || root.screenOff || !root.visible || !root.hasArt
     readonly property var stops: Ui.backdropStops
     readonly property real amplitude: Ui.px(Motion.backdropPanAmplitude)
     property alias art: art
     property alias shade: shade
     readonly property bool animating: scaleLoop.running && !scaleLoop.paused
         && panLoop.running && !panLoop.paused
-    readonly property bool hasArt: root.source.toString() !== ""
 
     clip: true
 

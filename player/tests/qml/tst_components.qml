@@ -99,6 +99,7 @@ TestCase {
 
             glyph: "shuffle"
             on: true
+            toggle: true
         }
     }
 
@@ -384,9 +385,26 @@ TestCase {
         const img = grabImage(onBoard)
         verify(img !== null)
         const accent = ringInk(img, 64, 20, (r, g, b) => r > 120 && r - g > 60)
-        verify(accent > 0, "accent pixels inside the ring: " + accent)
-        const white = ringInk(img, 64, 20, (r, g, b) => r > 120 && g > 120 && b > 120)
-        compare(white, 0)
+        compare(accent, 0)
+        const white = ringInk(img, 64, 20, (r, g, b) => r > 200 && g > 200 && b > 200)
+        verify(white > 0, "white glyph pixels inside the ring: " + white)
+    }
+
+    function test_ring_toggle_alpha() {
+        fuzzyCompare(ringOn.ringAlpha, Ui.alphaFull, 1e-6)
+        verify(Qt.colorEqual(ringOn.iconItem.color, Ui.white(Ui.alphaFull)))
+        compare(ringOn.strokeWidth, Ui.px(Ui.ringStrokeIdle))
+        ringOn.on = false
+        fuzzyCompare(ringOn.ringAlpha, Ui.alphaMid, 1e-6)
+        verify(Qt.colorEqual(ringOn.iconItem.color, Ui.white(Ui.alphaMid)))
+        ringOn.focused = true
+        fuzzyCompare(ringOn.ringAlpha, Ui.alphaMid, 1e-6)
+        compare(ringOn.strokeWidth, Ui.px(Ui.ringStrokeFocused))
+        ringOn.focused = false
+        ringOn.on = true
+        ring.on = true
+        fuzzyCompare(ring.ringAlpha, Ui.alphaMid, 1e-6)
+        ring.on = false
     }
 
     function test_tile_caption_clip() {
@@ -537,7 +555,7 @@ TestCase {
     }
 
     function test_pagesurface_first_child() {
-        const screens = [hubComponent, queueComponent, artistComponent, albumComponent, nowPlayingComponent, bluetoothComponent]
+        const screens = [hubComponent, queueComponent, bluetoothComponent]
         for (let i = 0; i < screens.length; i++) {
             const page = createTemporaryObject(screens[i], tc, { width: 640, height: 960, visible: false })
             verify(page !== null)
@@ -547,6 +565,23 @@ TestCase {
             verify(first instanceof PageSurface, "screen " + i + " first child")
             compare(first.width, page.width)
             compare(first.height, page.height)
+        }
+    }
+
+    function test_backdrop_pages_plain_bg() {
+        const screens = [artistComponent, albumComponent, nowPlayingComponent]
+        for (let i = 0; i < screens.length; i++) {
+            const page = createTemporaryObject(screens[i], tc, { width: 640, height: 960, visible: false })
+            verify(page !== null)
+            const first = page.children[0]
+            verify(!(first instanceof PageSurface), "screen " + i + " first child")
+            compare(first, page.surface)
+            verify(Qt.colorEqual(first.color, Ui.bg))
+            compare(first.width, page.width)
+            compare(first.height, page.height)
+            compare(page.backdrop.source.toString(), "")
+            compare(page.backdrop.hasArt, false)
+            compare(page.backdrop.animating, false)
         }
     }
 }
