@@ -5,6 +5,7 @@
 #include <QSqlQuery>
 
 #include <algorithm>
+#include <utility>
 
 namespace casdap {
 
@@ -13,12 +14,34 @@ LibraryModel::LibraryModel(Library *library, const QByteArray &titleRole, QObjec
     , m_library(library)
     , m_titleRole(titleRole)
 {
-    connect(m_library, &Library::changed, this, &LibraryModel::reload);
+    connect(m_library, &Library::tracksChanged, this, &LibraryModel::refresh);
 }
 
 Library *LibraryModel::library() const
 {
     return m_library;
+}
+
+bool LibraryModel::isLoaded() const
+{
+    return m_loaded;
+}
+
+void LibraryModel::ensureLoaded()
+{
+    if (!m_loaded)
+        reload();
+}
+
+void LibraryModel::refresh()
+{
+    if (m_loaded)
+        reload();
+}
+
+QList<LibraryModel::Entry> &LibraryModel::rows()
+{
+    return m_entries;
 }
 
 int LibraryModel::rowCount(const QModelIndex &parent) const
@@ -90,6 +113,7 @@ void LibraryModel::reload()
 {
     beginResetModel();
     m_entries = load();
+    m_loaded = true;
     endResetModel();
 }
 
@@ -123,7 +147,6 @@ QString LibraryModel::countLabel(int count, const char *singular, const char *pl
 ArtistsModel::ArtistsModel(Library *library, QObject *parent)
     : LibraryModel(library, QByteArrayLiteral("name"), parent)
 {
-    reload();
 }
 
 QList<LibraryModel::Entry> ArtistsModel::load() const
@@ -153,7 +176,6 @@ QList<LibraryModel::Entry> ArtistsModel::load() const
 AlbumsModel::AlbumsModel(Library *library, QObject *parent)
     : LibraryModel(library, QByteArrayLiteral("title"), parent)
 {
-    reload();
 }
 
 QList<LibraryModel::Entry> AlbumsModel::load() const
@@ -177,14 +199,13 @@ QList<LibraryModel::Entry> AlbumsModel::load() const
 SongsModel::SongsModel(Library *library, QObject *parent)
     : LibraryModel(library, QByteArrayLiteral("title"), parent)
 {
-    reload();
 }
 
 QList<LibraryModel::Entry> SongsModel::load() const
 {
     QList<Entry> entries;
     QSqlQuery query(QStringLiteral("SELECT t.id, t.title, t.artist, a.art_path FROM tracks t "
-                                   "JOIN albums a ON a.id = t.album_id"),
+                                   "JOIN albums a ON a.id = t.album_id ORDER BY t.id"),
                     library()->database());
     while (query.next()) {
         Entry entry;
@@ -202,14 +223,13 @@ QList<LibraryModel::Entry> SongsModel::load() const
 GenresModel::GenresModel(Library *library, QObject *parent)
     : LibraryModel(library, QByteArrayLiteral("name"), parent)
 {
-    reload();
 }
 
 QList<LibraryModel::Entry> GenresModel::load() const
 {
     QList<Entry> entries;
     QSqlQuery query(QStringLiteral("SELECT g.id, g.name, COUNT(t.id) FROM genres g "
-                                   "JOIN tracks t ON t.genre = g.name GROUP BY g.id"),
+                                   "JOIN tracks t ON t.genre = g.name GROUP BY g.id ORDER BY g.id"),
                     library()->database());
     while (query.next()) {
         Entry entry;
@@ -224,9 +244,25 @@ QList<LibraryModel::Entry> GenresModel::load() const
 }
 
 HistoryModel::HistoryModel(Library *library, QObject *parent)
-    : LibraryModel(library, QByteArrayLiteral("title"), parent)
+    : HistoryModel(library, Recent, 0, parent)
 {
-    connect(library, &Library::historyChanged, this, &LibraryModel::reload);
+}
+
+HistoryModel::HistoryModel(Library *library, Mode mode, int limit, QObject *parent)
+    : LibraryModel(library, QByteArrayLiteral("title"), parent)
+    , m_mode(mode)
+    , m_limit(qMax(0, limit))
+{
+    disconnect(library, &Library::tracksChanged, this, &LibraryModel::refresh);
+    connect(library, &Library::tracksChanged, this, [this] {
+        if (m_mode == Recent)
+            reload();
+    });
+    connect(library, &Library::albumsChanged, this, [this] {
+        if (m_mode == New)
+            reload();
+    });
+    connect(library, &Library::played, this, &HistoryModel::onPlayed);
     reload();
 }
 
@@ -244,15 +280,76 @@ void HistoryModel::setMode(Mode mode)
     reload();
 }
 
+int HistoryModel::limit() const
+{
+    return m_limit;
+}
+
+void HistoryModel::setLimit(int limit)
+{
+    const int value = qMax(0, limit);
+    if (m_limit == value)
+        return;
+    m_limit = value;
+    emit limitChanged();
+    reload();
+}
+
+bool HistoryModel::readTrack(qint64 trackId, Entry &entry) const
+{
+    QSqlQuery query(library()->database());
+    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, a.art_path FROM tracks t "
+                                 "JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
+    query.addBindValue(trackId);
+    if (!query.exec() || !query.next())
+        return false;
+    entry.id = query.value(0).toLongLong();
+    entry.title = query.value(1).toString();
+    entry.subtitle = query.value(2).toString();
+    entry.artPath = query.value(3).toString();
+    entry.kind = QStringLiteral("song");
+    return true;
+}
+
+void HistoryModel::onPlayed(qint64 trackId)
+{
+    if (m_mode != Recent)
+        return;
+    QList<Entry> &entries = rows();
+    const int row = indexOf(trackId);
+    if (row == 0)
+        return;
+    if (row > 0) {
+        beginMoveRows(QModelIndex(), row, row, QModelIndex(), 0);
+        entries.move(row, 0);
+        endMoveRows();
+        return;
+    }
+    Entry entry;
+    if (!readTrack(trackId, entry))
+        return;
+    beginInsertRows(QModelIndex(), 0, 0);
+    entries.prepend(entry);
+    endInsertRows();
+    if (m_limit > 0 && entries.size() > m_limit) {
+        beginRemoveRows(QModelIndex(), m_limit, static_cast<int>(entries.size()) - 1);
+        entries.resize(m_limit);
+        endRemoveRows();
+    }
+}
+
 QList<LibraryModel::Entry> HistoryModel::load() const
 {
     QList<Entry> entries;
-    const QString sql = m_mode == Recent
+    QString sql = m_mode == Recent
         ? QStringLiteral("SELECT t.id, t.title, t.artist, a.art_path, MAX(h.played_at) AS last "
                          "FROM history h JOIN tracks t ON t.id = h.track_id "
-                         "JOIN albums a ON a.id = t.album_id GROUP BY t.id ORDER BY last DESC")
+                         "JOIN albums a ON a.id = t.album_id GROUP BY t.id ORDER BY last DESC, MAX(h.id) DESC")
         : QStringLiteral("SELECT id, title, artist, art_path FROM albums "
                          "ORDER BY added DESC, id DESC");
+    if (m_limit > 0)
+        sql += QStringLiteral(" LIMIT %1").arg(m_limit);
+    const QString kind = m_mode == Recent ? QStringLiteral("song") : QStringLiteral("album");
     QSqlQuery query(sql, library()->database());
     while (query.next()) {
         Entry entry;
@@ -260,6 +357,7 @@ QList<LibraryModel::Entry> HistoryModel::load() const
         entry.title = query.value(1).toString();
         entry.subtitle = query.value(2).toString();
         entry.artPath = query.value(3).toString();
+        entry.kind = kind;
         entries.append(entry);
     }
     return entries;
@@ -362,9 +460,9 @@ PlaylistsModel::PlaylistsModel(Library *library, QObject *parent)
 
 QList<LibraryModel::Entry> PlaylistsModel::load() const
 {
-    QList<Entry> entries;
+    QList<std::pair<QString, Entry>> rows;
     QSqlQuery query(QStringLiteral("SELECT p.id, p.name, (SELECT COUNT(*) FROM playlist_items i "
-                                   "WHERE i.playlist_id = p.id) FROM playlists p ORDER BY p.name COLLATE NOCASE"),
+                                   "WHERE i.playlist_id = p.id), p.source FROM playlists p"),
                     library()->database());
     while (query.next()) {
         Entry entry;
@@ -373,9 +471,17 @@ QList<LibraryModel::Entry> PlaylistsModel::load() const
         entry.subtitle = countLabel(query.value(2).toInt(), "song", "songs");
         entry.kind = QStringLiteral("playlist");
         entry.section = QStringLiteral("playlists");
-        entry.sortKey = entry.title.toLower();
-        entries.append(entry);
+        entry.sortKey = entry.title.toCaseFolded();
+        rows.append({query.value(3).toString(), entry});
     }
+    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) {
+        if (a.second.sortKey != b.second.sortKey)
+            return a.second.sortKey < b.second.sortKey;
+        return a.first < b.first;
+    });
+    QList<Entry> entries;
+    for (const auto &row : std::as_const(rows))
+        entries.append(row.second);
     return entries;
 }
 

@@ -32,9 +32,12 @@ public:
 
     Q_INVOKABLE QVariantMap get(int row) const;
     Q_INVOKABLE int indexOf(qint64 id) const;
+    Q_INVOKABLE void ensureLoaded();
+    bool isLoaded() const;
 
 public slots:
     void reload();
+    void refresh();
 
 protected:
     struct Entry
@@ -52,6 +55,7 @@ protected:
 
     virtual QList<Entry> load() const = 0;
     Library *library() const;
+    QList<Entry> &rows();
 
     static void classify(Entry &entry, bool ignoreThe);
     static void sortEntries(QList<Entry> &entries);
@@ -61,6 +65,7 @@ private:
     Library *m_library;
     QByteArray m_titleRole;
     QList<Entry> m_entries;
+    bool m_loaded = false;
 };
 
 class ArtistsModel : public LibraryModel
@@ -111,6 +116,7 @@ class HistoryModel : public LibraryModel
 {
     Q_OBJECT
     Q_PROPERTY(Mode mode READ mode WRITE setMode NOTIFY modeChanged)
+    Q_PROPERTY(int limit READ limit WRITE setLimit NOTIFY limitChanged)
 
 public:
     enum Mode {
@@ -120,18 +126,26 @@ public:
     Q_ENUM(Mode)
 
     explicit HistoryModel(Library *library, QObject *parent = nullptr);
+    HistoryModel(Library *library, Mode mode, int limit, QObject *parent = nullptr);
 
     Mode mode() const;
     void setMode(Mode mode);
+    int limit() const;
+    void setLimit(int limit);
 
 signals:
     void modeChanged();
+    void limitChanged();
 
 protected:
     QList<Entry> load() const override;
 
 private:
+    void onPlayed(qint64 trackId);
+    bool readTrack(qint64 trackId, Entry &entry) const;
+
     Mode m_mode = Recent;
+    int m_limit = 0;
 };
 
 class PinsModel : public LibraryModel
