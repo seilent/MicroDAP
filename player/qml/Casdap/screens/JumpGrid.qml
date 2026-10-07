@@ -42,7 +42,7 @@ Item {
         const out = ["#"]
         for (let i = 0; i < 26; i++)
             out.push(String.fromCharCode(97 + i))
-        return out
+        return out.concat(["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ", "漢"])
     }
 
     function has(letter: string): bool {

@@ -1,4 +1,5 @@
 #include "HubModels.h"
+#include "SectionKey.h"
 
 #include <QAbstractListModel>
 #include <QElapsedTimer>
@@ -267,6 +268,12 @@ private slots:
     void gridColumnsReset();
     void gridInsertRepacks();
     void gridDataChanged();
+    void sectionKeyFolding();
+    void sectionKeyGroups();
+    void sectionKeyOrder();
+    void sectionLetterList();
+    void kanaLetters();
+    void gridPackingKana();
     void scaleSongs();
     void scaleAlbums();
 };
@@ -658,6 +665,135 @@ void HubModelsTest::gridDataChanged()
     QCOMPARE(model.cellAt(1, 2).value(QStringLiteral("title")).toString(), QStringLiteral("avocado"));
     source.set(3, item(13, QStringLiteral("cat"), QStringLiteral("C")));
     QCOMPARE(reset.count(), 1);
+}
+
+void HubModelsTest::sectionKeyFolding()
+{
+    QCOMPARE(foldKana(QStringLiteral("ガ")), QStringLiteral("か"));
+    QCOMPARE(foldKana(QStringLiteral("ゃゅょっ")), QStringLiteral("やゆよつ"));
+    QCOMPARE(foldKana(QStringLiteral("パピプペポ")), QStringLiteral("はひふへほ"));
+    QCOMPARE(foldKana(QStringLiteral("ふるーり")), QStringLiteral("ふるり"));
+    QCOMPARE(foldKana(QStringLiteral("ヴ")), QStringLiteral("う"));
+    QCOMPARE(foldKana(QStringLiteral("ヷヲン")), QStringLiteral("わをん"));
+    QCOMPARE(foldKana(QStringLiteral("みょみょ")), QStringLiteral("みよみよ"));
+    QCOMPARE(sectionKey(QStringLiteral("ガラス")).letter, QStringLiteral("か"));
+    QCOMPARE(sectionKey(QStringLiteral("ゃ")).letter, QStringLiteral("や"));
+    QCOMPARE(sectionKey(QStringLiteral("ぱぴぷ")).letter, QStringLiteral("は"));
+    QCOMPARE(sectionKey(QStringLiteral("ヴィジョン")).letter, QStringLiteral("あ"));
+    QCOMPARE(sectionKey(QStringLiteral("ーあ")).letter, QStringLiteral("あ"));
+    QCOMPARE(sectionKey(QStringLiteral("ゝさ")).letter, QStringLiteral("さ"));
+    QCOMPARE(sectionKey(QStringLiteral("ｶﾞﾗｽ")).letter, QStringLiteral("か"));
+    QCOMPARE(sectionKey(QStringLiteral("ゐ")).letter, QStringLiteral("わ"));
+    QCOMPARE(sectionKey(QStringLiteral("ゑ")).letter, QStringLiteral("わ"));
+    QCOMPARE(sectionKey(QStringLiteral("ヲ")).letter, QStringLiteral("わ"));
+    QCOMPARE(sectionKey(QStringLiteral("ん")).letter, QStringLiteral("わ"));
+    QCOMPARE(sectionKey(QStringLiteral("ヨノ")).letter, QStringLiteral("や"));
+    QCOMPARE(sectionKey(QStringLiteral("マドロミ")).letter, QStringLiteral("ま"));
+    QCOMPARE(sectionKey(QStringLiteral("わかばやし")).letter, QStringLiteral("わ"));
+    QCOMPARE(sectionKey(QStringLiteral("ふるーり")).letter, QStringLiteral("は"));
+    QCOMPARE(sectionKey(QStringLiteral("ナ")).letter, QStringLiteral("な"));
+    QCOMPARE(sectionKey(QStringLiteral("ちゃ")).letter, QStringLiteral("た"));
+    QCOMPARE(sectionKey(QStringLiteral("ライト")).letter, QStringLiteral("ら"));
+}
+
+void HubModelsTest::sectionKeyGroups()
+{
+    QCOMPARE(sectionKey(QStringLiteral("香椎モイミ")).letter, QStringLiteral("漢"));
+    QCOMPARE(sectionKey(QStringLiteral("皇美緒奈")).letter, QStringLiteral("漢"));
+    QCOMPARE(sectionKey(QStringLiteral("芥田レンリ")).letter, QStringLiteral("漢"));
+    QCOMPARE(sectionKey(QStringLiteral("3 Doors Down")).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QStringLiteral("!!!")).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QStringLiteral("★Star")).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QStringLiteral("「かぎ」")).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QStringLiteral("\u00c9clair")).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QStringLiteral("ー")).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QString()).letter, QStringLiteral("#"));
+    QCOMPARE(sectionKey(QStringLiteral("  Zoo")).letter, QStringLiteral("z"));
+    QCOMPARE(sectionKey(QStringLiteral("\uff21bc")).letter, QStringLiteral("a"));
+    QCOMPARE(sectionKey(QStringLiteral("The Band"), true).letter, QStringLiteral("b"));
+    QCOMPARE(sectionKey(QStringLiteral("The Band")).letter, QStringLiteral("t"));
+    QCOMPARE(HubSource::letterOf(QStringLiteral("ガラス")), QStringLiteral("か"));
+    QCOMPARE(HubSource::letterOf(QStringLiteral("香椎")), QStringLiteral("漢"));
+}
+
+void HubModelsTest::sectionKeyOrder()
+{
+    const QStringList expected = {
+        QStringLiteral("!!!"), QStringLiteral("1st"), QStringLiteral("alpha"), QStringLiteral("Beta"),
+        QStringLiteral("zed"), QStringLiteral("あい"), QStringLiteral("アオ"), QStringLiteral("かき"),
+        QStringLiteral("ガキ"), QStringLiteral("きく"), QStringLiteral("ふるーり"), QStringLiteral("マドロミ"),
+        QStringLiteral("みょみょ"), QStringLiteral("ヨノ"), QStringLiteral("わかばやし"), QStringLiteral("ん"),
+        QStringLiteral("一"), QStringLiteral("香椎モイミ"),
+    };
+    QStringList sorted = expected;
+    std::reverse(sorted.begin(), sorted.end());
+    std::stable_sort(sorted.begin(), sorted.end(), [](const QString &a, const QString &b) {
+        return sectionKey(a).sortKey < sectionKey(b).sortKey;
+    });
+    QCOMPARE(sorted, expected);
+}
+
+void HubModelsTest::sectionLetterList()
+{
+    const QStringList &letters = sectionLetters();
+    QCOMPARE(letters.size(), 38);
+    QCOMPARE(letters.first(), QStringLiteral("#"));
+    QCOMPARE(letters.at(1), QStringLiteral("a"));
+    QCOMPARE(letters.at(26), QStringLiteral("z"));
+    QCOMPARE(letters.mid(27).join(QString()), QStringLiteral("あかさたなはまやらわ漢"));
+}
+
+void HubModelsTest::kanaLetters()
+{
+    const QStringList titles = {
+        QStringLiteral("1st"), QStringLiteral("alpha"), QStringLiteral("Beta"), QStringLiteral("zed"),
+        QStringLiteral("あい"), QStringLiteral("ガキ"), QStringLiteral("マドロミ"), QStringLiteral("ヨノ"),
+        QStringLiteral("わかばやし"), QStringLiteral("ん"), QStringLiteral("香椎モイミ"),
+    };
+    QList<Item> items;
+    for (qsizetype i = 0; i < titles.size(); ++i)
+        items.append(item(i + 1, titles.at(i), QString()));
+    FakeSource source(items);
+    SectionedModel model;
+    model.setSource(&source);
+    model.setActive(true);
+    QCOMPARE(model.letters(), QStringList({QStringLiteral("#"), QStringLiteral("a"), QStringLiteral("b"),
+                                           QStringLiteral("z"), QStringLiteral("あ"), QStringLiteral("か"),
+                                           QStringLiteral("ま"), QStringLiteral("や"), QStringLiteral("わ"),
+                                           QStringLiteral("漢")}));
+    QCOMPARE(model.rowOfLetter(QStringLiteral("か")), 10);
+    QCOMPARE(model.firstRowOfLetter(QStringLiteral("か")), 11);
+    QCOMPARE(model.get(11).value(QStringLiteral("title")).toString(), QStringLiteral("ガキ"));
+    QCOMPARE(model.rowOfLetter(QStringLiteral("わ")), 16);
+    QCOMPARE(model.firstRowOfLetter(QStringLiteral("わ")), 17);
+    QCOMPARE(model.get(18).value(QStringLiteral("title")).toString(), QStringLiteral("ん"));
+    QCOMPARE(model.firstRowOfLetter(QStringLiteral("漢")), 20);
+    QCOMPARE(model.get(19).value(QStringLiteral("kind")).toString(), QStringLiteral("divider"));
+    QCOMPARE(model.get(19).value(QStringLiteral("title")).toString(), QStringLiteral("漢"));
+    QCOMPARE(model.rowOfLetter(QStringLiteral("さ")), -1);
+    QCOMPARE(model.count(), 21);
+}
+
+void HubModelsTest::gridPackingKana()
+{
+    FakeSource source({item(1, QStringLiteral("1st"), QString()), item(2, QStringLiteral("alpha"), QString()),
+                       item(3, QStringLiteral("かき"), QString()), item(4, QStringLiteral("ガキ"), QString()),
+                       item(5, QStringLiteral("一"), QString())});
+    AlbumGridModel model;
+    model.setSource(&source);
+    model.setActive(true);
+    QCOMPARE(gridShape(model), QStringLiteral("L# 1 La | 2 Lか 3 | 4 L漢 5"));
+    QCOMPARE(model.letters(), QStringList({QStringLiteral("#"), QStringLiteral("a"), QStringLiteral("か"),
+                                           QStringLiteral("漢")}));
+    const QVariantMap ka = model.cellOfLetter(QStringLiteral("か"));
+    QCOMPARE(ka.value(QStringLiteral("row")).toInt(), 1);
+    QCOMPARE(ka.value(QStringLiteral("col")).toInt(), 1);
+    QCOMPARE(model.rowOfLetter(QStringLiteral("漢")), 2);
+    QCOMPARE(model.cellAt(2, 1).value(QStringLiteral("title")).toString(), QStringLiteral("漢"));
+    QCOMPARE(model.cellAt(2, 1).value(QStringLiteral("kind")).toString(), QStringLiteral("letter"));
+    model.setColumns(6);
+    QCOMPARE(gridShape(model), QStringLiteral("L# 1 La 2 Lか 3 | 4 L漢 5"));
+    QCOMPARE(model.cellOfAlbum(5).value(QStringLiteral("col")).toInt(), 2);
 }
 
 void HubModelsTest::scaleSongs()

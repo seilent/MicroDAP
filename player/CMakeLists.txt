@@ -62,6 +62,8 @@ add_library(casdapcore STATIC
     src/core/RgbControl.h
     src/core/Scanner.cpp
     src/core/Scanner.h
+    src/core/SectionKey.cpp
+    src/core/SectionKey.h
     src/core/Settings.cpp
     src/core/Settings.h
     src/core/SleepInhibitor.cpp

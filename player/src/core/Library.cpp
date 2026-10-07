@@ -1,4 +1,5 @@
 #include "Library.h"
+#include "SectionKey.h"
 
 #include <QDebug>
 #include <QDir>
@@ -254,11 +255,7 @@ constexpr const char *pinKinds[] = {"album", "artist", "song", "playlist"};
 
 QString songSortKey(const QString &title)
 {
-    QString key = title.trimmed().toLower();
-    const char16_t first = key.isEmpty() ? u'\0' : key.at(0).unicode();
-    if (first >= u'a' && first <= u'z')
-        return key;
-    return key.prepend(QLatin1Char(' '));
+    return sectionKey(title).sortKey;
 }
 
 }

@@ -1,5 +1,7 @@
 #include "HubModels.h"
 
+#include "SectionKey.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -92,11 +94,7 @@ void HubSource::ensureLoaded() const
 
 QString HubSource::letterOf(const QString &title)
 {
-    const QString key = title.trimmed().toLower();
-    if (key.isEmpty())
-        return QStringLiteral("#");
-    const QChar c = key.at(0);
-    return c >= u'a' && c <= u'z' ? QString(c) : QStringLiteral("#");
+    return sectionKey(title).letter;
 }
 
 SectionedModel::SectionedModel(QObject *parent)
@@ -186,7 +184,7 @@ void SectionedModel::build()
     if (!m_active || !m_source.model())
         return;
     const int n = m_source.count();
-    m_rows.reserve(n + 27);
+    m_rows.reserve(n + sectionLetters().size());
     m_sourceToRow.resize(n);
     for (int r = 0; r < n; ++r) {
         QString letter = m_source.letter(r);
@@ -546,7 +544,7 @@ void AlbumGridModel::build()
     if (!m_active || !m_source.model())
         return;
     const int n = m_source.count();
-    m_cells.reserve(n + 27);
+    m_cells.reserve(n + sectionLetters().size());
     m_sourceToCell.resize(n);
     m_idToCell.reserve(n);
     for (int r = 0; r < n; ++r) {

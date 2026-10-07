@@ -343,9 +343,11 @@ QtObject {
     readonly property real toastTitleBaseline: 34
     readonly property int jumpCols: ui.landscape ? 9 : 5
     readonly property real jumpGap: 8
-    readonly property real jumpTile: (ui.canvasW - 2 * ui.edge - (ui.jumpCols - 1) * ui.jumpGap) / ui.jumpCols
+    readonly property real jumpTile: Math.min(
+        (ui.canvasW - 2 * ui.edge - (ui.jumpCols - 1) * ui.jumpGap) / ui.jumpCols,
+        (ui.canvasH - 2 * ui.edge - (ui.jumpRows - 1) * ui.jumpGap) / ui.jumpRows)
     readonly property int jumpExitCells: 2
-    readonly property int jumpCells: 27
+    readonly property int jumpCells: 38
     readonly property int jumpRows: Math.ceil((ui.jumpExitCells + ui.jumpCells) / ui.jumpCols)
     readonly property real jumpGridH: ui.jumpRows * ui.jumpTile + (ui.jumpRows - 1) * ui.jumpGap
     readonly property real jumpTop: Math.max(ui.edge, (ui.canvasH - ui.jumpGridH) / 2)

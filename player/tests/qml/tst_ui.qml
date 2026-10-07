@@ -162,7 +162,7 @@ TestCase {
         compare(Ui.npTitleY, 362)
         compare(Ui.npRingY, 440)
         compare(Ui.jumpCols, 5)
-        fuzzyCompare(Ui.jumpTile, (320 - 32 - 32) / 5, 1e-6)
+        fuzzyCompare(Ui.jumpTile, (480 - 32 - 7 * 8) / 8, 1e-6)
         fuzzyCompare(Ui.qpPeekScale, 0.30, 1e-9)
         compare(Ui.qpPeekY, 130)
         fuzzyCompare(Ui.qpPeekW, 64.8, 1e-6)

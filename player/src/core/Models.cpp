@@ -1,6 +1,7 @@
 #include "Models.h"
 
 #include "Library.h"
+#include "SectionKey.h"
 
 #include <QSqlQuery>
 
@@ -119,18 +120,9 @@ void LibraryModel::reload()
 
 void LibraryModel::classify(Entry &entry, bool ignoreThe)
 {
-    QString key = entry.title.trimmed().toLower();
-    if (ignoreThe && key.startsWith(QLatin1StringView("the ")))
-        key = key.sliced(4).trimmed();
-
-    const char16_t first = key.isEmpty() ? u'\0' : key.at(0).unicode();
-    if (first >= u'a' && first <= u'z') {
-        entry.section = QString(key.at(0).toUpper());
-        entry.sortKey = key;
-    } else {
-        entry.section = QStringLiteral("#");
-        entry.sortKey = key.prepend(QLatin1Char(' '));
-    }
+    SectionKey key = sectionKey(entry.title, ignoreThe);
+    entry.section = key.letter.toUpper();
+    entry.sortKey = std::move(key.sortKey);
 }
 
 void LibraryModel::sortEntries(QList<Entry> &entries)

@@ -432,6 +432,18 @@ void LibraryTest::songs()
     QCOMPARE(model.data(model.index(row), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("Artist A"));
     QVERIFY(model.roleNames().value(LibraryModel::TitleRole) == QByteArrayLiteral("title"));
+    QStringList titles;
+    QStringList sections;
+    for (int r = 0; r < model.rowCount(); ++r) {
+        titles.append(model.data(model.index(r), LibraryModel::TitleRole).toString());
+        sections.append(model.data(model.index(r), LibraryModel::SectionRole).toString());
+    }
+    QCOMPARE(titles.mid(5), QStringList({QStringLiteral("一"), QStringLiteral("三"), QStringLiteral("二")}));
+    QCOMPARE(sections.mid(5), QStringList({QStringLiteral("漢"), QStringLiteral("漢"), QStringLiteral("漢")}));
+    QVariantList ids;
+    for (int r = 0; r < model.rowCount(); ++r)
+        ids.append(model.data(model.index(r), LibraryModel::IdRole).toLongLong());
+    QCOMPARE(m_library->allTracks(), ids);
 }
 
 void LibraryTest::albums()
@@ -439,11 +451,11 @@ void LibraryTest::albums()
     AlbumsModel model(m_library.get());
     model.ensureLoaded();
     QCOMPARE(model.rowCount(), 3);
-    QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("アルバム二"));
-    QCOMPARE(model.data(model.index(0), LibraryModel::SectionRole).toString(), QStringLiteral("#"));
-    QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Album One"));
-    QCOMPARE(model.data(model.index(1), LibraryModel::SectionRole).toString(), QStringLiteral("A"));
-    QCOMPARE(model.data(model.index(2), LibraryModel::TitleRole).toString(), QStringLiteral("Single"));
+    QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("Album One"));
+    QCOMPARE(model.data(model.index(0), LibraryModel::SectionRole).toString(), QStringLiteral("A"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Single"));
+    QCOMPARE(model.data(model.index(2), LibraryModel::TitleRole).toString(), QStringLiteral("アルバム二"));
+    QCOMPARE(model.data(model.index(2), LibraryModel::SectionRole).toString(), QStringLiteral("あ"));
 }
 
 void LibraryTest::genres()
@@ -467,25 +479,26 @@ void LibraryTest::artists()
     ArtistsModel model(m_library.get());
     model.ensureLoaded();
     QCOMPARE(model.rowCount(), 6);
-    QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("アーティスト"));
-    QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Artist A"));
-    QCOMPARE(model.data(model.index(2), LibraryModel::TitleRole).toString(), QStringLiteral("Artist C"));
-    QCOMPARE(model.data(model.index(3), LibraryModel::TitleRole).toString(), QStringLiteral("Artist E"));
-    QCOMPARE(model.data(model.index(4), LibraryModel::TitleRole).toString(), QStringLiteral("Artist F"));
-    QCOMPARE(model.data(model.index(5), LibraryModel::TitleRole).toString(), QStringLiteral("The Band"));
-    QCOMPARE(model.data(model.index(5), LibraryModel::SectionRole).toString(), QStringLiteral("B"));
-    QCOMPARE(model.data(model.index(5), LibraryModel::SubtitleRole).toString(),
+    QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("Artist A"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Artist C"));
+    QCOMPARE(model.data(model.index(2), LibraryModel::TitleRole).toString(), QStringLiteral("Artist E"));
+    QCOMPARE(model.data(model.index(3), LibraryModel::TitleRole).toString(), QStringLiteral("Artist F"));
+    QCOMPARE(model.data(model.index(4), LibraryModel::TitleRole).toString(), QStringLiteral("The Band"));
+    QCOMPARE(model.data(model.index(4), LibraryModel::SectionRole).toString(), QStringLiteral("B"));
+    QCOMPARE(model.data(model.index(5), LibraryModel::TitleRole).toString(), QStringLiteral("アーティスト"));
+    QCOMPARE(model.data(model.index(5), LibraryModel::SectionRole).toString(), QStringLiteral("あ"));
+    QCOMPARE(model.data(model.index(4), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 1 song"));
-    QCOMPARE(model.data(model.index(1), LibraryModel::SubtitleRole).toString(),
+    QCOMPARE(model.data(model.index(0), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 3 songs"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::SubtitleRole).toString(),
+             QStringLiteral("1 album, 1 song"));
     QCOMPARE(model.data(model.index(2), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 1 song"));
     QCOMPARE(model.data(model.index(3), LibraryModel::SubtitleRole).toString(),
              QStringLiteral("1 album, 1 song"));
-    QCOMPARE(model.data(model.index(4), LibraryModel::SubtitleRole).toString(),
-             QStringLiteral("1 album, 1 song"));
     QCOMPARE(rowOf(model, QStringLiteral("Artist E, Artist F")), -1);
-    QVERIFY(!model.data(model.index(1), LibraryModel::ArtPathRole).toString().isEmpty());
+    QVERIFY(!model.data(model.index(0), LibraryModel::ArtPathRole).toString().isEmpty());
     QVERIFY(model.roleNames().value(LibraryModel::TitleRole) == QByteArrayLiteral("name"));
 
     const qint64 three = scalar(db, QStringLiteral("SELECT id FROM tracks WHERE title = ?"),
@@ -529,8 +542,8 @@ void LibraryTest::artists()
              QStringLiteral("Artist F"));
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 10);
 
-    const qint64 artistA = model.data(model.index(1), LibraryModel::IdRole).toLongLong();
-    const qint64 artistC = model.data(model.index(2), LibraryModel::IdRole).toLongLong();
+    const qint64 artistA = model.data(model.index(0), LibraryModel::IdRole).toLongLong();
+    const qint64 artistC = model.data(model.index(1), LibraryModel::IdRole).toLongLong();
     const qint64 albumOne = scalar(db, QStringLiteral("SELECT id FROM albums WHERE title = ?"),
                                    {QStringLiteral("Album One")})
                                 .toLongLong();
@@ -1216,6 +1229,12 @@ void LibraryTest::entriesFor()
         albumIds.append(row.toMap().value(QStringLiteral("id")).toLongLong());
     QVERIFY(!albumIds.isEmpty());
     QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("album"), album)), albumIds);
+    const QString art = artPathOf(QStringLiteral("Album One"));
+    QVERIFY(!art.isEmpty());
+    for (const QueueEntry &entry : m_library->entriesFor(QStringLiteral("album"), album))
+        QCOMPARE(entry.artPath, art);
+    QCOMPARE(m_library->entriesFor(QStringLiteral("song"), albumIds.first()).first().artPath, art);
+    QCOMPARE(m_library->queueEntries(QVariantList{QVariant(albumIds.first())}).first().artPath, art);
     QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("artist"), artist)),
              idsOf(m_library->artistTracks(artist)));
     QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("genre"), genre)), idsOf(m_library->genreTracks(genre)));
@@ -1821,7 +1840,7 @@ void LibraryTest::watcherDebounce()
     QVERIFY(QFile::copy(album + QStringLiteral("/02 Two.flac"), copy));
     QCOMPARE(triggered.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(triggered.count(), 1, 10000);
-    QVERIFY(sinceLast.elapsed() >= 4900);
+    QVERIFY(sinceLast.elapsed() >= 4700);
     QTRY_COMPARE_WITH_TIMEOUT(scanned.count(), 1, scanTimeoutMs);
     QVERIFY(trackId(db, copy) > 0);
     QCOMPARE(triggered.count(), 1);

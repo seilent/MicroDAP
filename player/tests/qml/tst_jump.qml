@@ -118,18 +118,31 @@ TestCase {
     function test_tokens_portrait() {
         compare(Ui.jumpCols, 5)
         compare(Ui.jumpGap, 8)
-        fuzzyCompare(Ui.jumpTile, (320 - 32 - 32) / 5, 0.01)
+        compare(Ui.jumpCells, 38)
         compare(Ui.jumpExitCells, 2)
-        compare(Ui.jumpRows, 6)
-        fuzzyCompare(Ui.jumpTop, (480 - (6 * Ui.jumpTile + 5 * 8)) / 2, 0.01)
+        compare(Ui.jumpRows, 8)
+        fuzzyCompare(Ui.jumpTile, (480 - 32 - 7 * 8) / 8, 0.01)
+        verify(Ui.jumpTile <= (320 - 32 - 32) / 5)
+        fuzzyCompare(Ui.jumpTop, 16, 0.01)
+        verify(Ui.jumpTop + Ui.jumpGridH <= Ui.canvasH - Ui.edge + 0.01)
     }
 
     function test_tokens_landscape() {
         tc.setWindow(1920, 1080)
         compare(Ui.jumpCols, 9)
-        compare(Ui.jumpRows, 4)
-        fuzzyCompare(Ui.jumpTile, (Ui.canvasW - 32 - 64) / 9, 0.01)
+        compare(Ui.jumpRows, 5)
+        fuzzyCompare(Ui.jumpTile, Math.min((Ui.canvasW - 32 - 64) / 9, (Ui.canvasH - 32 - 32) / 5), 0.01)
         verify(Ui.jumpTop >= Ui.edge)
+        verify(Ui.jumpTop + Ui.jumpGridH <= Ui.canvasH - Ui.edge + 0.01)
+    }
+
+    function test_tokens_landscape_960() {
+        tc.setWindow(960, 640)
+        compare(Ui.jumpCols, 9)
+        compare(Ui.jumpRows, 5)
+        fuzzyCompare(Ui.jumpTile, (480 - 32 - 64) / 9, 0.01)
+        fuzzyCompare(Ui.jumpTop, (320 - (5 * Ui.jumpTile + 4 * 8)) / 2, 0.01)
+        verify(Ui.jumpTop + Ui.jumpGridH <= Ui.canvasH - Ui.edge + 0.01)
     }
 
     function test_open_layout_and_available() {
@@ -138,7 +151,7 @@ TestCase {
         const grid = page.jumpGrid
         compare(grid.shown, true)
         compare(counters.jumps, 1)
-        compare(grid.letters.length, 27)
+        compare(grid.letters.length, 38)
         compare(grid.letters[0], "#")
         compare(grid.letters[1], "a")
         compare(JSON.stringify(grid.available), JSON.stringify(["a", "c", "h", "m"]))
@@ -163,6 +176,55 @@ TestCase {
         fuzzyCompare(c.y, Ui.px(Ui.jumpTop + Ui.jumpTile + 8), 0.01)
         compare(grid.cellAt(26).letter, "z")
         fuzzyCompare(grid.cellAt(26).y, Ui.px(Ui.jumpTop + 5 * (Ui.jumpTile + 8)), 0.01)
+        compare(grid.letters.slice(27).join(""), "あかさたなはまやら" + "わ漢")
+        const ka = grid.cellAt(28)
+        compare(ka.letter, "か")
+        compare(ka.empty, true)
+        fuzzyCompare(ka.x, Ui.px(16), 0.01)
+        fuzzyCompare(ka.y, Ui.px(Ui.jumpTop + 6 * (Ui.jumpTile + 8)), 0.01)
+        const kanji = grid.cellAt(37)
+        compare(kanji.letter, "漢")
+        fuzzyCompare(kanji.x, Ui.px(16 + 4 * (Ui.jumpTile + 8)), 0.01)
+        fuzzyCompare(kanji.y, Ui.px(Ui.jumpTop + 7 * (Ui.jumpTile + 8)), 0.01)
+        verify(kanji.y + kanji.height <= Ui.px(Ui.canvasH - Ui.edge) + 0.5)
+        compare(grid.cellAt(38), null)
+    }
+
+    function test_kana_letters_jump() {
+        artists.load(tc.entries("artist", ["a", "か", "は", "漢"], 2), "artist")
+        const page = open()
+        compare(page.entryAt(0, 3).kind, "divider")
+        compare(page.entryAt(0, 3).letter, "か")
+        router.dispatch("back", false)
+        const grid = page.jumpGrid
+        compare(JSON.stringify(grid.available), JSON.stringify(["a", "か", "は", "漢"]))
+        compare(grid.focusLetter, "a")
+        verify(router.dispatch("right", false))
+        compare(grid.focusLetter, "か")
+        verify(router.dispatch("right", false))
+        compare(grid.focusLetter, "は")
+        verify(router.dispatch("down", false))
+        compare(grid.focusLetter, "漢")
+        compare(router.dispatch("right", false), false)
+        compare(router.dispatch("down", false), false)
+        verify(router.dispatch("up", false))
+        compare(grid.focusLetter, "は")
+        verify(router.dispatch("left", false))
+        compare(grid.focusLetter, "か")
+        verify(router.dispatch("a", false))
+        compare(grid.shown, false)
+        compare(page.rowIndex, 4)
+        compare(page.jump.letter, "か")
+        router.dispatch("back", false)
+        compare(grid.focusLetter, "か")
+        router.dispatch("right", false)
+        router.dispatch("right", false)
+        compare(grid.focusLetter, "漢")
+        router.dispatch("a", false)
+        compare(page.entryAt(0, 9).kind, "divider")
+        compare(page.entryAt(0, 9).letter, "漢")
+        compare(page.rowIndex, 10)
+        compare(page.jump.letter, "漢")
     }
 
     function test_focus_starts_on_current_letter_and_skips_empty() {

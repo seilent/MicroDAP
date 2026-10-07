@@ -291,6 +291,18 @@ TestCase {
         letter.empty = false
     }
 
+    function test_letter_tile_kana() {
+        for (const glyph of ["か", "わ", "漢"]) {
+            letter.letter = glyph
+            compare(letter.letterItem.text, glyph)
+            compare(letter.letterItem.font.family, Ui.family)
+            compare(letter.letterItem.font.pixelSize, Ui.fontPx(20))
+            fuzzyCompare(letter.letterItem.y + letter.letterItem.baselineOffset,
+                         letter.height - Ui.px(Ui.letterInsetBaseline), 0.5)
+        }
+        letter.letter = "a"
+    }
+
     function test_ring_geometry() {
         compare(ring.width, Ui.px(32))
         compare(ring.width, 64)
