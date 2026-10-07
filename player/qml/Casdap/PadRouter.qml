@@ -6,11 +6,9 @@ Item {
 
     property PageStack stack: null
     property QtObject pad: null
-    property QtObject player: null
     property Item modal: null
     property Item saver: null
     property bool screenOff: false
-    property bool pocketControls: false
     property bool keyboard: true
     readonly property bool locked: router.stack !== null && router.stack.inputLocked
     readonly property bool modalUp: router.modal !== null && router.modal.shown === true
@@ -55,28 +53,10 @@ Item {
         return router.stack.currentItem
     }
 
-    function pocket(name: string): bool {
-        if (!router.screenOff)
-            return false
-        if (!router.pocketControls || router.player === null)
-            return true
-        if (name === "lb")
-            router.player.previous()
-        else if (name === "rb")
-            router.player.next()
-        else if (name === "start")
-            router.player.playPause()
-        return true
-    }
-
     function dispatch(name: string, repeat: bool): bool {
         if (name === "")
             return false
-        if (router.pocket(name)) {
-            router.dropped(name, repeat)
-            return false
-        }
-        if (router.locked) {
+        if (router.screenOff || router.locked) {
             router.dropped(name, repeat)
             return false
         }

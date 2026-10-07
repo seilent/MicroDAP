@@ -80,7 +80,6 @@ private slots:
     void threshold();
     void dropped();
     void lateDevice();
-    void pocketControls();
     void screenOff();
     void hideWritesZero();
     void serializedWrites();
@@ -367,29 +366,6 @@ void DbusPadTest::lateDevice()
     QTRY_COMPARE_WITH_TIMEOUT(mode(path), 3, busTimeoutMs);
     QCOMPARE(mode(devicePath(0)), 3);
     QCOMPARE(mode(devicePath(1)), 3);
-}
-
-void DbusPadTest::pocketControls()
-{
-    QSignalSpy changed(m_pad.get(), &PadSource::pocketControlsChanged);
-    QSignalSpy pressed(m_pad.get(), &PadSource::pressed);
-    QSignalSpy released(m_pad.get(), &PadSource::released);
-    QVERIFY(!m_pad->pocketControls());
-    m_pad->setPocketControls(true);
-    QCOMPARE(changed.count(), 1);
-    QVERIFY(m_pad->pocketControls());
-    QVERIFY(!m_pad->screenOff());
-    QVERIFY(m_pad->shown());
-    QCOMPARE(mode(devicePath(0)), 3);
-
-    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 1.0);
-    QTRY_COMPARE_WITH_TIMEOUT(pressed.count(), 1, busTimeoutMs);
-    QCOMPARE(actionAt(pressed, 0), PadSource::A);
-    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
-    QTRY_COMPARE_WITH_TIMEOUT(released.count(), 1, busTimeoutMs);
-
-    m_pad->setPocketControls(false);
-    QCOMPARE(changed.count(), 2);
 }
 
 void DbusPadTest::screenOff()

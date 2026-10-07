@@ -128,7 +128,7 @@ private slots:
     void stickDeadzone();
     void triggers();
     void screenOffDrops();
-    void screenOffPocketControls();
+    void screenOffStopsPolling();
     void screenOffReleasesHeld();
     void hotplug();
 
@@ -353,52 +353,35 @@ void PadTest::screenOffDrops()
     QTRY_VERIFY_WITH_TIMEOUT(count(rig.released) == 1, waitMs);
 }
 
-void PadTest::screenOffPocketControls()
+void PadTest::screenOffStopsPolling()
 {
     Rig rig;
     ATTACH(rig);
+    QVERIFY(rig.pad.polling());
 
-    rig.pad.setPocketControls(true);
     rig.pad.setScreenOff(true);
+    QVERIFY(!rig.pad.polling());
 
-    const struct {
-        SDL_GamepadButton button;
-        Pad::Action action;
-    } rows[] = {
-        {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, Pad::LB},
-        {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, Pad::RB},
-        {SDL_GAMEPAD_BUTTON_START, Pad::Start},
+    const SDL_GamepadButton buttons[] = {
+        SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
+        SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+        SDL_GAMEPAD_BUTTON_START,
     };
-    int expected = 0;
-    for (const auto &row : rows) {
-        QVERIFY(rig.vp.button(row.button, true));
-        ++expected;
-        QTRY_VERIFY_WITH_TIMEOUT(count(rig.actions) == expected, waitMs);
-        QCOMPARE(actionAt(rig.actions, expected - 1), row.action);
-        QVERIFY(rig.vp.button(row.button, false));
-        QTRY_VERIFY_WITH_TIMEOUT(count(rig.released) == expected, waitMs);
-        QCOMPARE(actionAt(rig.released, expected - 1), row.action);
+    for (const SDL_GamepadButton button : buttons) {
+        QVERIFY(rig.vp.button(button, true));
+        QTest::qWait(quietMs);
+        QVERIFY(rig.vp.button(button, false));
+        QTest::qWait(quietMs);
     }
+    QCOMPARE(count(rig.actions), 0);
+    QCOMPARE(count(rig.pressed), 0);
+    QCOMPARE(count(rig.released), 0);
+    QVERIFY(!rig.pad.polling());
 
-    QVERIFY(rig.vp.button(SDL_GAMEPAD_BUTTON_SOUTH, true));
+    rig.pad.setScreenOff(false);
+    QVERIFY(rig.pad.polling());
     QTest::qWait(quietMs);
-    QCOMPARE(count(rig.actions), expected);
-    QVERIFY(rig.vp.button(SDL_GAMEPAD_BUTTON_SOUTH, false));
-
-    QVERIFY(rig.vp.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN, true));
-    QTest::qWait(Pad::RepeatInitialMs + quietMs);
-    QCOMPARE(count(rig.actions), expected);
-    QVERIFY(rig.vp.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN, false));
-    QTest::qWait(quietMs);
-    QCOMPARE(count(rig.released), expected);
-
-    rig.pad.setPocketControls(false);
-    QVERIFY(rig.vp.button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, true));
-    QTest::qWait(quietMs);
-    QCOMPARE(count(rig.actions), expected);
-    QVERIFY(rig.vp.button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, false));
-    QTest::qWait(quietMs);
-    QCOMPARE(count(rig.released), expected);
+    QCOMPARE(count(rig.actions), 0);
 }
 
 void PadTest::screenOffReleasesHeld()

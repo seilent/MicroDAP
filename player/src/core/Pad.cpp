@@ -110,32 +110,16 @@ void Pad::setScreenOff(bool off)
         pump();
     m_screenOff = off;
     if (off) {
+        stopRepeat();
         for (int i = 0; i < ActionCount; ++i) {
-            const Action a = static_cast<Action>(i);
-            if (!m_down[i] || allowed(a))
+            if (!m_down[i])
                 continue;
             m_down[i] = false;
-            emit released(a);
+            emit released(static_cast<Action>(i));
         }
-        if (m_repeatAction >= 0 && !allowed(static_cast<Action>(m_repeatAction)))
-            stopRepeat();
     }
     updatePump();
     emit screenOffChanged();
-}
-
-bool Pad::pocketControls() const
-{
-    return m_pocketControls;
-}
-
-void Pad::setPocketControls(bool on)
-{
-    if (m_pocketControls == on)
-        return;
-    m_pocketControls = on;
-    updatePump();
-    emit pocketControlsChanged();
 }
 
 bool Pad::connected() const
@@ -148,10 +132,15 @@ int Pad::gamepadCount() const
     return static_cast<int>(m_pads.size());
 }
 
+bool Pad::polling() const
+{
+    return m_pump.isActive();
+}
+
 int Pad::pumpInterval() const
 {
     if (m_screenOff)
-        return m_pocketControls && !m_pads.isEmpty() ? PocketPumpIntervalMs : 0;
+        return 0;
     return m_pads.isEmpty() ? DetectIntervalMs : PumpIntervalMs;
 }
 
@@ -368,11 +357,9 @@ void Pad::emitAction(Action a, bool repeat)
     emit action(a, repeat);
 }
 
-bool Pad::allowed(Action a) const
+bool Pad::allowed(Action) const
 {
-    if (!m_screenOff)
-        return true;
-    return m_pocketControls && (a == LB || a == RB || a == Start);
+    return !m_screenOff;
 }
 
 void Pad::resetState()

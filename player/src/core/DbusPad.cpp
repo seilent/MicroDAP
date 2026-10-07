@@ -106,19 +106,6 @@ void DbusPad::setScreenOff(bool off)
     emit screenOffChanged();
 }
 
-bool DbusPad::pocketControls() const
-{
-    return m_pocketControls;
-}
-
-void DbusPad::setPocketControls(bool on)
-{
-    if (m_pocketControls == on)
-        return;
-    m_pocketControls = on;
-    emit pocketControlsChanged();
-}
-
 bool DbusPad::connected() const
 {
     return m_intercept->hasTargets();

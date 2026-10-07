@@ -9,7 +9,6 @@ class PadSource : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool screenOff READ screenOff WRITE setScreenOff NOTIFY screenOffChanged)
-    Q_PROPERTY(bool pocketControls READ pocketControls WRITE setPocketControls NOTIFY pocketControlsChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
 
 public:
@@ -42,8 +41,6 @@ public:
 
     virtual bool screenOff() const = 0;
     virtual void setScreenOff(bool off) = 0;
-    virtual bool pocketControls() const = 0;
-    virtual void setPocketControls(bool on) = 0;
     virtual bool connected() const = 0;
 
     static const char *label(Action action)
@@ -73,7 +70,6 @@ signals:
     void pressed(casdap::PadSource::Action action);
     void released(casdap::PadSource::Action action);
     void screenOffChanged();
-    void pocketControlsChanged();
     void connectedChanged();
 };
 

@@ -30,18 +30,6 @@ TestCase {
         stack: pages
     }
 
-    QtObject {
-        id: fakePlayer
-
-        property int previousCalls: 0
-        property int nextCalls: 0
-        property int playPauseCalls: 0
-
-        function previous() { fakePlayer.previousCalls++ }
-        function next() { fakePlayer.nextCalls++ }
-        function playPause() { fakePlayer.playPauseCalls++ }
-    }
-
     Component {
         id: listPage
 
@@ -119,14 +107,9 @@ TestCase {
         pages.clear()
         pages.animate = true
         router.screenOff = false
-        router.pocketControls = false
-        router.player = null
         router.keyboard = true
         hold.stop()
         hold.interval = Ui.stickRepeatFirst
-        fakePlayer.previousCalls = 0
-        fakePlayer.nextCalls = 0
-        fakePlayer.playPauseCalls = 0
     }
 
     function openList() {
@@ -378,27 +361,24 @@ TestCase {
         router.view.disconnect(onView)
     }
 
-    function test_screen_off_pocket_controls() {
+    function test_screen_off_drops_every_action() {
         const page = openList()
-        router.player = fakePlayer
+        let dropped = 0
+        const onDropped = function() { dropped++ }
+        router.dropped.connect(onDropped)
         router.screenOff = true
-        router.pocketControls = false
-        verify(!router.dispatch("rb", false))
-        compare(fakePlayer.nextCalls, 0)
-        router.pocketControls = true
         verify(!router.dispatch("rb", false))
         verify(!router.dispatch("lb", false))
         verify(!router.dispatch("start", false))
         verify(!router.dispatch("down", false))
-        compare(fakePlayer.nextCalls, 1)
-        compare(fakePlayer.previousCalls, 1)
-        compare(fakePlayer.playPauseCalls, 1)
+        compare(dropped, 4)
         compare(page.focusIndex, 0)
         router.press("a")
         compare(page.pressed, false)
         router.screenOff = false
         verify(router.dispatch("down", false))
         compare(page.focusIndex, 1)
+        router.dropped.disconnect(onDropped)
     }
 
     function test_keyboard_path() {

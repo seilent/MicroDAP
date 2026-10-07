@@ -32,8 +32,6 @@ public:
 
     bool screenOff() const override;
     void setScreenOff(bool off) override;
-    bool pocketControls() const override;
-    void setPocketControls(bool on) override;
     bool connected() const override;
 
 private slots:
@@ -53,7 +51,6 @@ private:
     Intercept *m_intercept;
     bool m_log = false;
     bool m_screenOff = false;
-    bool m_pocketControls = false;
     QTimer m_repeat;
     int m_repeatAction = -1;
     std::array<bool, ActionCount> m_down{};

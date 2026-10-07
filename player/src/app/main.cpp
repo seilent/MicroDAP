@@ -290,9 +290,6 @@ int main(int argc, char *argv[])
     } else {
         outputControl->setActive(true);
     }
-    pad->setPocketControls(settings.pocketControls());
-    QObject::connect(&settings, &casdap::Settings::pocketControlsChanged, pad.get(),
-                     [&settings, source = pad.get()] { source->setPocketControls(settings.pocketControls()); });
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, pad.get(),
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
 

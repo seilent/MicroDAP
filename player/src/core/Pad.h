@@ -19,7 +19,6 @@ class Pad : public PadSource
 
 public:
     static constexpr int PumpIntervalMs = 16;
-    static constexpr int PocketPumpIntervalMs = 50;
     static constexpr int DetectIntervalMs = 1000;
 
     explicit Pad(QObject *parent = nullptr);
@@ -28,10 +27,9 @@ public:
     bool isValid() const;
     bool screenOff() const override;
     void setScreenOff(bool off) override;
-    bool pocketControls() const override;
-    void setPocketControls(bool on) override;
     bool connected() const override;
     int gamepadCount() const;
+    bool polling() const;
 
 private:
     static bool SDLCALL eventWatch(void *userdata, SDL_Event *event);
@@ -58,7 +56,6 @@ private:
     bool m_valid = false;
     bool m_log = false;
     bool m_screenOff = false;
-    bool m_pocketControls = false;
     QTimer m_pump;
     QTimer m_repeat;
     std::atomic_bool m_pumpQueued{false};

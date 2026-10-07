@@ -106,6 +106,7 @@ export PATH="${T}/bin:${PATH}"
 export CASDAP_HOTKEYD_LONG_MS=200
 export CASDAP_HOTKEYD_CONFIRM_MS=1000
 export CASDAP_HOTKEYD_TAP_MAX_AGE_MS=600
+export CASDAP_HOTKEYD_DOUBLE_MS=250
 export CASDAP_HOTKEYD_DEVICE_WAIT_SEC=0
 export CASDAP_HOTKEYD_DEVICE_NAME=casdap-test-node
 export CASDAP_HOTKEYD_VOLUME_NAMES=casdap-test-volup:casdap-test-voldown
@@ -142,10 +143,14 @@ expect_no_call() { grep -qF -- "$1" "${STATE}/calls" && fail "unexpected call: $
 expect_log() { grep -qF -- "$1" "${STATE}/log" || fail "missing log: $1"; }
 expect_calls() { [[ "$(grep -c . "${STATE}/calls" || true)" == "$1" ]] || fail "$(grep -c . "${STATE}/calls" || true) calls, expected $1"; }
 expect_call_count() { [[ "$(grep -cF -- "$1" "${STATE}/calls" || true)" == "$2" ]] || fail "$(grep -cF -- "$1" "${STATE}/calls" || true) of '$1', expected $2"; }
+expect_first_call() { [[ "$(head -n 1 "${STATE}/calls")" == "$1" ]] || fail "first call is not: $1"; }
+expect_last_call() { [[ "$(tail -n 1 "${STATE}/calls")" == "$1" ]] || fail "last call is not: $1"; }
 
 switch="systemctl start casdap-switch.service"
 back="systemctl start casdap-switch-back.service"
 playpause="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause"
+next="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Next"
+previous="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Previous"
 volup="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
 voldown="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%-"
 getvol="wpctl get-volume @DEFAULT_AUDIO_SINK@"
@@ -290,6 +295,21 @@ expect_call "${playpause}"
 expect_no_call "${prompt}"
 expect_calls 1
 
+printf '[General]\npocketControls=true\n' > "${CASDAP_SETTINGS_FILE}"
+
+run_case "tap in casdap with pocket controls and the screen on is immediate" casdap 0 0 "press;sleep 0.05;release" 0 "sleep 0.2;up;up-release"
+expect_first_call "${playpause}"
+expect_call_count "${playpause}" 1
+expect_no_call "${next}"
+expect_calls 5
+
+run_case "hold in casdap with pocket controls and the screen on" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${prompt}"
+expect_no_call "${previous}"
+expect_calls 1
+
+rm -f "${CASDAP_SETTINGS_FILE}"
+
 mkdir -p "${CASDAP_RUNTIME_DIR}"
 : > "${CASDAP_RUNTIME_DIR}/off"
 
@@ -313,6 +333,57 @@ run_case "hold in game while the casdap marker is left" game 0 0 "press;sleep 0.
 expect_call "${switch}"
 expect_no_call "${screen_on}"
 expect_calls 1
+
+printf 'pocketControls=false\n' > "${CASDAP_SETTINGS_FILE}"
+
+run_case "hold in casdap while the screen is off with pocket controls off" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${screen_on}"
+expect_no_call "${previous}"
+expect_calls 1
+
+printf '[General]\npocketControls=true\r\n' > "${CASDAP_SETTINGS_FILE}"
+
+run_case "pocket tap waits for the double tap window" casdap 0 0 "press;sleep 0.05;release;sleep 0.4" 0 "sleep 0.1;up;up-release"
+expect_call_count "${playpause}" 1
+expect_last_call "${playpause}"
+expect_call "${volup}"
+expect_calls 5
+expect_log "tap, play pause"
+
+run_case "pocket double tap" casdap 0 0 "press;sleep 0.05;release;sleep 0.05;press;sleep 0.05;release;sleep 0.4"
+expect_call "${next}"
+expect_no_call "${playpause}"
+expect_calls 1
+expect_log "double tap, next"
+
+run_case "pocket hold" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${previous}"
+expect_no_call "${screen_on}"
+expect_no_call "${prompt}"
+expect_calls 1
+expect_log "hold, previous"
+
+run_case "pocket taps spaced over the window" casdap 0 0 "press;sleep 0.05;release;sleep 0.4;press;sleep 0.05;release;sleep 0.4"
+expect_call_count "${playpause}" 2
+expect_no_call "${next}"
+expect_calls 2
+
+run_case "pocket tap then hold" casdap 0 0 "press;sleep 0.05;release;sleep 0.05;press;sleep 0.4;release"
+expect_first_call "${playpause}"
+expect_last_call "${previous}"
+expect_no_call "${next}"
+expect_calls 2
+
+run_case "pocket hold dry run" casdap 0 0 "press;sleep 0.4;release" 1
+expect_calls 0
+expect_log "would: ${previous}"
+
+run_case "hold in game with pocket controls while the casdap marker is left" game 0 0 "press;sleep 0.4;release"
+expect_call "${switch}"
+expect_no_call "${previous}"
+expect_calls 1
+
+rm -f "${CASDAP_SETTINGS_FILE}"
 
 rm -f "${CASDAP_RUNTIME_DIR}/off"
 

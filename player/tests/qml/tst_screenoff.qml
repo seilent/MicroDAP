@@ -176,23 +176,26 @@ TestCase {
         main.router.dropped.disconnect(onDropped)
     }
 
-    function test_pocket_controls() {
+    function test_off_drops_pad_with_pocket_controls() {
         fakeSettings.pocketControls = true
         fakePower.screenOff = true
         tryCompare(main, "rootHidden", true, 2000)
-        compare(main.router.pocketControls, true)
         const focus = home.focusIndex
+        let dropped = 0
+        const onDropped = function() { dropped++ }
+        main.router.dropped.connect(onDropped)
         compare(main.router.dispatch("start", false), false)
-        compare(fakePlayer.calls, ["playPause"])
         compare(main.router.dispatch("rb", false), false)
         compare(main.router.dispatch("lb", false), false)
-        compare(fakePlayer.calls, ["playPause", "next", "previous"])
         compare(main.router.dispatch("down", false), false)
         compare(main.router.dispatch("a", false), false)
+        compare(dropped, 5)
+        compare(fakePlayer.calls, [])
         compare(home.focusIndex, focus)
         compare(main.pageStack.depth, 1)
         compare(main.rootHidden, true)
         compare(main.overlayLayer.toast.shown, false)
+        main.router.dropped.disconnect(onDropped)
     }
 
     function test_saver_then_off_returns_to_page() {

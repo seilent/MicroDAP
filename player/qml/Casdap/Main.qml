@@ -59,7 +59,6 @@ Window {
     readonly property int saverSeconds: root.settings !== null && root.settings.saverSeconds !== undefined ? Number(root.settings.saverSeconds) : 0
     readonly property int screenOffSeconds: root.settings !== null && root.settings.screenOffSeconds !== undefined ? Number(root.settings.screenOffSeconds) : 0
     readonly property bool overlayToasts: root.settings !== null && root.settings.overlayToasts === true
-    readonly property bool pocketControls: !root.overlay && root.settings !== null && root.settings.pocketControls === true
 
     property bool overlay: root.bridge !== null
     property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
@@ -629,9 +628,7 @@ Window {
         modal: powerMenu.shown ? powerMenu : switchPrompt
         saver: saver
         pad: typeof Pad === "undefined" ? null : Pad
-        player: root.player
         screenOff: root.off
-        pocketControls: root.pocketControls
         onNowPlaying: root.openNowPlaying()
     }
 
