@@ -1,5 +1,6 @@
 #include "State.h"
 
+#include "Library.h"
 #include "Player.h"
 #include "Queue.h"
 
@@ -9,10 +10,14 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMutexLocker>
 #include <QSaveFile>
+#include <QSet>
 #include <QSocketNotifier>
+#include <QSqlQuery>
 #include <QStandardPaths>
 
 #include <atomic>
@@ -21,12 +26,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <utility>
+
 namespace casdap {
 
 namespace {
 
 constexpr int saveIntervalMs = 10000;
+constexpr int queueDelayMs = 1000;
 constexpr qint64 handoffWindowS = 60;
+constexpr int pathChunk = 500;
 
 std::atomic<int> signalFd{-1};
 
@@ -53,6 +62,61 @@ QString statusName(Player::Status status)
     return QStringLiteral("stopped");
 }
 
+bool handoffPlaying(const QJsonObject &object)
+{
+    const qint64 savedAt = static_cast<qint64>(object.value(QStringLiteral("savedAt")).toDouble(0));
+    const qint64 age = QDateTime::currentSecsSinceEpoch() - savedAt;
+    return object.value(QStringLiteral("handoff")).toBool(false)
+           && object.value(QStringLiteral("status")).toString() == QLatin1String("playing")
+           && age < handoffWindowS;
+}
+
+QList<int> parseOrder(const QJsonArray &array)
+{
+    QList<int> order;
+    order.reserve(array.size());
+    for (const QJsonValue &value : array) {
+        if (!value.isDouble())
+            return {};
+        order.append(value.toInt());
+    }
+    return order;
+}
+
+QHash<QString, QueueEntry> entriesByPath(const QSqlDatabase &db, const QStringList &paths)
+{
+    QHash<QString, QueueEntry> found;
+    const QStringList unique = QSet<QString>(paths.begin(), paths.end()).values();
+    for (qsizetype from = 0; from < unique.size(); from += pathChunk) {
+        const QStringList chunk = unique.mid(from, pathChunk);
+        QStringList marks;
+        marks.reserve(chunk.size());
+        for (qsizetype i = 0; i < chunk.size(); ++i)
+            marks.append(QStringLiteral("?"));
+        QSqlQuery query(db);
+        query.prepare(QStringLiteral("SELECT t.id, t.path, t.title, t.artist, a.title, a.art_path, "
+                                     "t.duration_ms FROM tracks t JOIN albums a ON a.id = t.album_id "
+                                     "WHERE t.path IN (%1)")
+                          .arg(marks.join(QLatin1Char(','))));
+        for (const QString &path : chunk)
+            query.addBindValue(path);
+        if (!query.exec())
+            continue;
+        while (query.next()) {
+            QueueEntry entry;
+            entry.id = query.value(0).toLongLong();
+            entry.path = query.value(1).toString();
+            entry.title = query.value(2).toString();
+            entry.artist = query.value(3).toString();
+            entry.album = query.value(4).toString();
+            entry.artPath = query.value(5).toString();
+            entry.durationMs = query.value(6).toLongLong();
+            found.insert(entry.path, entry);
+        }
+    }
+    return found;
+}
+
 }
 
 State::State(Player *player, QObject *parent)
@@ -64,17 +128,32 @@ State::State(Player *player, const QString &path, QObject *parent)
     : QObject(parent)
     , m_player(player)
     , m_path(path)
+    , m_queuePath(queuePathFor(path))
 {
     m_timer.setInterval(saveIntervalMs);
-    connect(&m_timer, &QTimer::timeout, this, &State::saveNow);
+    connect(&m_timer, &QTimer::timeout, this, [this] { saveState(false); });
+    m_queueTimer.setSingleShot(true);
+    m_queueTimer.setInterval(queueDelayMs);
+    connect(&m_queueTimer, &QTimer::timeout, this, &State::writeQueueLater);
     connect(m_player, &Player::statusChanged, this, &State::onStatusChanged);
+    Queue *queue = m_player->queue();
+    connect(queue, &QAbstractItemModel::modelReset, this, &State::onQueueChanged);
+    connect(queue, &QAbstractItemModel::rowsInserted, this, &State::onQueueChanged);
+    connect(queue, &QAbstractItemModel::rowsRemoved, this, &State::onQueueChanged);
+    connect(queue, &QAbstractItemModel::rowsMoved, this, &State::onQueueChanged);
+    connect(queue, &Queue::orderChanged, this, &State::onQueueChanged);
     onStatusChanged();
+    m_worker = new QObject;
+    m_worker->moveToThread(&m_thread);
     if (QCoreApplication *app = QCoreApplication::instance())
         connect(app, &QCoreApplication::aboutToQuit, this, &State::saveExit);
 }
 
 State::~State()
 {
+    m_thread.quit();
+    m_thread.wait();
+    delete m_worker;
     if (m_fds[0] >= 0) {
         signalFd.store(-1, std::memory_order_relaxed);
         struct sigaction action {};
@@ -95,9 +174,30 @@ QString State::defaultPath()
            + QStringLiteral("/casdap/state.json");
 }
 
+QString State::queuePathFor(const QString &statePath)
+{
+    return QFileInfo(statePath).absolutePath() + QStringLiteral("/queue.json");
+}
+
 QString State::path() const
 {
     return m_path;
+}
+
+QString State::queuePath() const
+{
+    return m_queuePath;
+}
+
+qint64 State::queueRev() const
+{
+    return m_rev;
+}
+
+qint64 State::writtenQueueRev()
+{
+    QMutexLocker lock(&m_writeMutex);
+    return m_writtenRev;
 }
 
 void State::onStatusChanged()
@@ -108,14 +208,92 @@ void State::onStatusChanged()
         m_timer.stop();
 }
 
-QJsonObject State::snapshot(const Player *player, bool handoff, const QJsonArray &stack)
+void State::onQueueChanged()
+{
+    if (m_loading)
+        return;
+    ++m_rev;
+    m_queueTimer.start();
+}
+
+QueueSnapshot State::queueSnapshot() const
+{
+    const Queue *queue = m_player->queue();
+    QueueSnapshot out;
+    out.path = m_queuePath;
+    out.rev = m_rev;
+    out.index = queue->currentIndex();
+    out.entries = queue->entries();
+    out.order = queue->order();
+    return out;
+}
+
+void State::writeQueueLater()
+{
+    m_queueTimer.stop();
+    QueueSnapshot job = queueSnapshot();
+    bool schedule = false;
+    {
+        QMutexLocker lock(&m_jobMutex);
+        std::swap(m_job, job);
+        m_hasJob = true;
+        schedule = !m_scheduled;
+        m_scheduled = true;
+    }
+    if (!schedule)
+        return;
+    if (!m_thread.isRunning())
+        m_thread.start();
+    QMetaObject::invokeMethod(m_worker, [this] { runQueueJobs(); }, Qt::QueuedConnection);
+}
+
+void State::runQueueJobs()
+{
+    for (;;) {
+        QueueSnapshot job;
+        {
+            QMutexLocker lock(&m_jobMutex);
+            if (!m_hasJob) {
+                m_scheduled = false;
+                return;
+            }
+            std::swap(job, m_job);
+            m_hasJob = false;
+        }
+        QMutexLocker lock(&m_writeMutex);
+        if (job.rev <= m_writtenRev)
+            continue;
+        if (writeQueue(job))
+            m_writtenRev = job.rev;
+        else
+            qWarning() << "casdap state: cannot write" << job.path;
+    }
+}
+
+bool State::flushQueue()
+{
+    m_queueTimer.stop();
+    QueueSnapshot dropped;
+    {
+        QMutexLocker lock(&m_jobMutex);
+        std::swap(dropped, m_job);
+        m_hasJob = false;
+    }
+    QMutexLocker lock(&m_writeMutex);
+    if (m_writtenRev == m_rev)
+        return true;
+    if (!writeQueue(queueSnapshot())) {
+        qWarning() << "casdap state: cannot write" << m_queuePath;
+        return false;
+    }
+    m_writtenRev = m_rev;
+    return true;
+}
+
+QJsonObject State::snapshot(const Player *player, bool handoff, const QJsonArray &stack, qint64 queueRev)
 {
     const Queue *queue = player->queue();
-    QJsonArray items;
-    for (const QueueEntry &entry : queue->entries())
-        items.append(QJsonObject::fromVariantMap(entry.toMap()));
     QJsonObject object;
-    object.insert(QStringLiteral("queue"), items);
     object.insert(QStringLiteral("index"), queue->currentIndex());
     object.insert(QStringLiteral("position"), player->position());
     object.insert(QStringLiteral("shuffle"), queue->shuffle());
@@ -124,7 +302,28 @@ QJsonObject State::snapshot(const Player *player, bool handoff, const QJsonArray
     object.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
     object.insert(QStringLiteral("handoff"), handoff);
     object.insert(QStringLiteral("stack"), stack);
+    object.insert(QStringLiteral("queueRev"), queueRev);
     return object;
+}
+
+bool State::writeQueue(const QueueSnapshot &job)
+{
+    QJsonArray ids;
+    QJsonArray paths;
+    for (const QueueEntry &entry : job.entries) {
+        ids.append(entry.id);
+        paths.append(entry.path);
+    }
+    QJsonArray order;
+    for (int row : job.order)
+        order.append(row);
+    QJsonObject object;
+    object.insert(QStringLiteral("rev"), job.rev);
+    object.insert(QStringLiteral("index"), job.index);
+    object.insert(QStringLiteral("ids"), ids);
+    object.insert(QStringLiteral("paths"), paths);
+    object.insert(QStringLiteral("order"), order);
+    return write(job.path, object);
 }
 
 bool State::write(const QString &path, const QJsonObject &object)
@@ -151,12 +350,19 @@ bool State::read(const QString &path, QJsonObject &object)
     return true;
 }
 
-bool State::save(bool handoff)
+bool State::saveState(bool handoff)
 {
-    const bool ok = write(m_path, snapshot(m_player, handoff, m_stack));
+    const bool ok = write(m_path, snapshot(m_player, handoff, m_stack, m_rev));
     if (!ok)
         qWarning() << "casdap state: cannot write" << m_path;
     return ok;
+}
+
+bool State::save(bool handoff)
+{
+    const bool queueOk = flushQueue();
+    const bool stateOk = saveState(handoff);
+    return queueOk && stateOk;
 }
 
 bool State::saveNow()
@@ -208,36 +414,139 @@ QJsonArray State::savedStack(const QString &path)
     return object.value(QStringLiteral("stack")).toArray();
 }
 
-bool State::loadInto(Player *player, const QString &path)
+void State::applyModes(const QJsonObject &state)
 {
-    QJsonObject object;
-    if (!read(path, object))
-        return false;
+    Queue *queue = m_player->queue();
+    queue->setShuffle(state.value(QStringLiteral("shuffle")).toBool(false));
+    const int repeat = state.value(QStringLiteral("repeat")).toInt(0);
+    queue->setRepeat(static_cast<Queue::Repeat>(qBound(0, repeat, 2)));
+}
+
+QList<QueueEntry> State::resolveEntries(const QList<qint64> &ids, const QStringList &paths) const
+{
+    const qsizetype n = paths.size();
+    QList<QueueEntry> entries(n);
+    QList<bool> found(n, false);
+    Library *library = m_player->library();
+    if (library) {
+        QVariantList unique;
+        QSet<qint64> seen;
+        for (qint64 id : ids) {
+            if (id > 0 && !seen.contains(id)) {
+                seen.insert(id);
+                unique.append(id);
+            }
+        }
+        QHash<qint64, QueueEntry> byId;
+        for (const QueueEntry &entry : library->queueEntries(unique))
+            byId.insert(entry.id, entry);
+        QStringList missing;
+        for (qsizetype i = 0; i < n; ++i) {
+            const auto it = byId.constFind(ids.value(i));
+            if (it != byId.constEnd() && it->path == paths.at(i)) {
+                entries[i] = *it;
+                found[i] = true;
+            } else {
+                missing.append(paths.at(i));
+            }
+        }
+        if (!missing.isEmpty()) {
+            const QHash<QString, QueueEntry> byPath = entriesByPath(library->database(), missing);
+            for (qsizetype i = 0; i < n; ++i) {
+                if (found.at(i))
+                    continue;
+                const auto it = byPath.constFind(paths.at(i));
+                if (it == byPath.constEnd())
+                    continue;
+                entries[i] = *it;
+                found[i] = true;
+            }
+        }
+    }
+    for (qsizetype i = 0; i < n; ++i) {
+        if (found.at(i))
+            continue;
+        QueueEntry entry;
+        entry.id = library ? 0 : ids.value(i);
+        entry.path = paths.at(i);
+        entry.title = QFileInfo(entry.path).completeBaseName();
+        entries[i] = entry;
+    }
+    return entries;
+}
+
+bool State::restoreLegacy(const QJsonObject &object)
+{
     QList<QueueEntry> entries;
     for (const QJsonValue &value : object.value(QStringLiteral("queue")).toArray())
         entries.append(QueueEntry::fromMap(value.toObject().toVariantMap()));
     if (entries.isEmpty())
         return false;
-    Queue *queue = player->queue();
-    queue->setShuffle(object.value(QStringLiteral("shuffle")).toBool(false));
-    const int repeat = object.value(QStringLiteral("repeat")).toInt(0);
-    queue->setRepeat(static_cast<Queue::Repeat>(qBound(0, repeat, 2)));
+    applyModes(object);
     const int index = object.value(QStringLiteral("index")).toInt(0);
     const qint64 position = static_cast<qint64>(object.value(QStringLiteral("position")).toDouble(0));
-    const qint64 savedAt = static_cast<qint64>(object.value(QStringLiteral("savedAt")).toDouble(0));
-    const qint64 age = QDateTime::currentSecsSinceEpoch() - savedAt;
-    const bool playing = object.value(QStringLiteral("handoff")).toBool(false)
-                         && object.value(QStringLiteral("status")).toString()
-                                == QLatin1String("playing")
-                         && age < handoffWindowS;
-    player->restore(entries, index, position, playing);
+    m_player->restore(entries, index, position, handoffPlaying(object),
+                      parseOrder(object.value(QStringLiteral("order")).toArray()));
+    return true;
+}
+
+bool State::restoreQueue(const QJsonObject &state, bool hasState)
+{
+    QJsonObject queue;
+    if (!read(m_queuePath, queue))
+        return false;
+    const qint64 rev = queue.value(QStringLiteral("rev")).toInteger(0);
+    m_rev = rev;
+    {
+        QMutexLocker lock(&m_writeMutex);
+        m_writtenRev = rev;
+    }
+    const QJsonArray pathValues = queue.value(QStringLiteral("paths")).toArray();
+    const QJsonArray idValues = queue.value(QStringLiteral("ids")).toArray();
+    QStringList paths;
+    QList<qint64> ids;
+    paths.reserve(pathValues.size());
+    ids.reserve(pathValues.size());
+    for (qsizetype i = 0; i < pathValues.size(); ++i) {
+        paths.append(pathValues.at(i).toString());
+        ids.append(idValues.at(i).toInteger(0));
+    }
+    if (paths.isEmpty())
+        return false;
+    const QList<int> order = parseOrder(queue.value(QStringLiteral("order")).toArray());
+    const QList<QueueEntry> entries = resolveEntries(ids, paths);
+    if (hasState) {
+        applyModes(state);
+    } else {
+        QJsonObject modes;
+        modes.insert(QStringLiteral("shuffle"), !order.isEmpty());
+        applyModes(modes);
+    }
+    const bool match = hasState && state.value(QStringLiteral("queueRev")).toInteger(-1) == rev;
+    if (match) {
+        m_player->restore(entries, state.value(QStringLiteral("index")).toInt(0),
+                          static_cast<qint64>(state.value(QStringLiteral("position")).toDouble(0)),
+                          handoffPlaying(state), order);
+    } else {
+        m_player->restore(entries, queue.value(QStringLiteral("index")).toInt(0), 0, false, order);
+    }
     return true;
 }
 
 bool State::load()
 {
-    m_stack = savedStack(m_path);
-    return loadInto(m_player, m_path);
+    QJsonObject object;
+    const bool hasState = read(m_path, object);
+    m_stack = hasState ? object.value(QStringLiteral("stack")).toArray() : QJsonArray();
+    const bool legacy = hasState && object.value(QStringLiteral("queue")).isArray();
+    m_loading = true;
+    const bool ok = legacy ? restoreLegacy(object) : restoreQueue(object, hasState);
+    m_loading = false;
+    if (legacy) {
+        ++m_rev;
+        save(false);
+    }
+    return ok;
 }
 
 void State::installSignalHandlers()

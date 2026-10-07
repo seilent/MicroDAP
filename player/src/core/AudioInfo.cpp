@@ -1,6 +1,7 @@
 #include "AudioInfo.h"
 
 #include <QDebug>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -57,6 +58,14 @@ QJsonObject nodeNamed(const QJsonArray &objects, const QString &name)
     return {};
 }
 
+QString readText(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    return QString::fromUtf8(file.readAll());
+}
+
 }
 
 AudioInfo::AudioInfo(QObject *parent)
@@ -106,11 +115,36 @@ void AudioInfo::setActive(bool active)
     emit activeChanged();
 }
 
+QString AudioInfo::asoundDir()
+{
+    return qEnvironmentVariable("CASDAP_ASOUND_DIR", QStringLiteral("/proc/asound"));
+}
+
+QString AudioInfo::parseState(const QString &text)
+{
+    static const QRegularExpression stateRe(QStringLiteral("^state:\\s*(\\S+)"), QRegularExpression::MultilineOption);
+    return stateRe.match(text).captured(1);
+}
+
 QString AudioInfo::hwParamsPath()
 {
-    const QString dir = qEnvironmentVariable("CASDAP_HW_PARAMS_DIR", QStringLiteral("/proc/asound/card0"));
-    const QString pcm = qEnvironmentVariable("CASDAP_HW_PARAMS_PCM", QStringLiteral("1"));
-    return dir + QStringLiteral("/pcm") + pcm + QStringLiteral("p/sub0/hw_params");
+    const QDir root(asoundDir());
+    const auto dirs = QDir::Dirs | QDir::NoDotAndDotDot;
+    QString open;
+    for (const QString &card : root.entryList({QStringLiteral("card*")}, dirs, QDir::Name)) {
+        const QDir cardDir(root.filePath(card));
+        for (const QString &pcm : cardDir.entryList({QStringLiteral("pcm*p")}, dirs, QDir::Name)) {
+            const QString sub = cardDir.filePath(pcm + QStringLiteral("/sub0"));
+            const QString params = sub + QStringLiteral("/hw_params");
+            if (parse(readText(params)).isEmpty())
+                continue;
+            if (parseState(readText(sub + QStringLiteral("/status"))) == QLatin1StringView("RUNNING"))
+                return params;
+            if (open.isEmpty())
+                open = params;
+        }
+    }
+    return open;
 }
 
 QString AudioInfo::pwDumpPath()
@@ -159,15 +193,15 @@ int AudioInfo::parseGraphRate(const QByteArray &json)
 
 void AudioInfo::refresh()
 {
-    QString value;
-    QFile file(hwParamsPath());
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text))
-        value = parse(QString::fromUtf8(file.readAll()));
+    const QString path = hwParamsPath();
+    const QString value = path.isEmpty() ? QString() : parse(readText(path));
     m_hwRate = value.section(QLatin1Char(' '), 0, 0).toInt();
     if (value != m_pcmFormat) {
         m_pcmFormat = value;
         emit pcmFormatChanged();
     }
+    if (m_pwRate == 0)
+        updateGraphRate();
 }
 
 void AudioInfo::refreshGraphRate()

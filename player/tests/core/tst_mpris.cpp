@@ -1,3 +1,4 @@
+#include "FakeBluezModel.h"
 #include "Library.h"
 #include "Mpris.h"
 #include "Player.h"
@@ -90,6 +91,7 @@ private slots:
     void loopStatus();
     void seek();
     void openUri();
+    void phoneGuard();
 
 private:
     QString playbackStatus() const;
@@ -380,6 +382,52 @@ void MprisTest::openUri()
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QCOMPARE(m_player->queue()->count(), 1);
     QCOMPARE(m_player->queue()->entry(0).path, target.path);
+}
+
+void MprisTest::phoneGuard()
+{
+    FakeBluezModel fake;
+    fake.setTransportActive(true);
+    m_player->setBluez(&fake);
+
+    QDBusReply<void> reply = m_remote->call(QStringLiteral("PlayPause"));
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(fake.commands(), QStringList({QStringLiteral("pause")}), busTimeoutMs);
+    QCOMPARE(m_player->status(), Player::Paused);
+    QVERIFY(m_player->playPending());
+    QCOMPARE(playbackStatus(), QStringLiteral("Paused"));
+
+    fake.setTransportActive(false);
+    QCOMPARE(m_player->status(), Player::Playing);
+    QTRY_COMPARE_WITH_TIMEOUT(playbackStatus(), QStringLiteral("Playing"), busTimeoutMs);
+
+    fake.setTransportActive(true);
+    QCOMPARE(m_player->status(), Player::Paused);
+    reply = m_remote->call(QStringLiteral("Play"));
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(fake.commands().size(), 2, busTimeoutMs);
+    QVERIFY(m_player->playPending());
+    QTRY_COMPARE_WITH_TIMEOUT(m_player->status(), Player::Playing, busTimeoutMs);
+    QVERIFY(fake.transportActive());
+
+    fake.setTransportActive(false);
+    m_player->stop();
+    reply = m_remote->call(QStringLiteral("OpenUri"),
+                           QUrl::fromLocalFile(m_tracks.at(1).path).toString());
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(m_player->queue()->entry(0).path, m_tracks.at(1).path, busTimeoutMs);
+    QCOMPARE(fake.commands().size(), 2);
+    m_player->stop();
+
+    fake.setTransportActive(true);
+    reply = m_remote->call(QStringLiteral("OpenUri"),
+                           QUrl::fromLocalFile(m_tracks.at(2).path).toString());
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(fake.commands().size(), 3, busTimeoutMs);
+    QCOMPARE(m_player->status(), Player::Paused);
+    QCOMPARE(m_player->queue()->entry(0).path, m_tracks.at(2).path);
+    m_player->stop();
+    m_player->setBluez(nullptr);
 }
 
 QTEST_GUILESS_MAIN(MprisTest)

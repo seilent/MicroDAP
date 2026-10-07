@@ -39,6 +39,7 @@ test:
     bash tests/pad-test.sh
     bash tests/intercept-test.sh
     bash tests/keep-test.sh
+    bash tests/codec-test.sh
     bash tests/power-test.sh
     bash tests/powerd-test.sh
     bash tests/wait-x-test.sh

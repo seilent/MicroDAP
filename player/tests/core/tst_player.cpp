@@ -1,3 +1,4 @@
+#include "FakeBluezModel.h"
 #include "Library.h"
 #include "Player.h"
 #include "Queue.h"
@@ -7,6 +8,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -19,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <memory>
 
 using namespace casdap;
@@ -134,6 +137,23 @@ private slots:
     void stateRoundTrip();
     void stateHandoff();
     void eqFilter();
+    void queueSlots();
+    void queueShuffleEdits();
+    void addVerbs();
+    void addUnderShuffle();
+    void stateOrder();
+    void errorKeepsPaused();
+    void errorAllRows();
+    void phoneGuard();
+    void phoneGuardTimeout();
+    void handoffWaitsForTransport();
+    void queueSignals();
+    void addStoppedShuffle();
+    void playSource();
+    void stateQueueWorker();
+    void stateMigration();
+    void stateRevMismatch();
+    void stateRestoreByPath();
 
 private:
     int historyCount() const;
@@ -142,7 +162,67 @@ private:
     QString m_music;
     std::unique_ptr<Library> m_library;
     QList<QueueEntry> m_tracks;
+    QueueEntry m_long;
 };
+
+namespace {
+
+std::unique_ptr<Player> syncPlayer(Library *library = nullptr)
+{
+    const QByteArray sink = qgetenv("CASDAP_AUDIO_SINK");
+    qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    auto player = std::make_unique<Player>(library);
+    qputenv("CASDAP_AUDIO_SINK", sink);
+    return player;
+}
+
+QList<QueueEntry> namedEntries(int n)
+{
+    QList<QueueEntry> entries;
+    for (int i = 0; i < n; ++i) {
+        QueueEntry entry;
+        entry.id = i + 1;
+        entry.title = QStringLiteral("e%1").arg(i);
+        entry.path = QStringLiteral("/nonexistent/e%1.flac").arg(i);
+        entries.append(entry);
+    }
+    return entries;
+}
+
+QVariantList rows(std::initializer_list<int> values)
+{
+    QVariantList list;
+    for (int value : values)
+        list.append(value);
+    return list;
+}
+
+bool consistent(const Queue &queue)
+{
+    const PlayOrderModel *order = queue.playOrder();
+    if (order->rowCount() != queue.count())
+        return false;
+    for (int slot = 0; slot < queue.count(); ++slot) {
+        const QVariantMap map = order->get(slot);
+        const int row = queue.rowAt(slot);
+        if (map.value(QStringLiteral("row")).toInt() != row || queue.slotOf(row) != slot
+            || map.value(QStringLiteral("number")).toInt() != slot + 1
+            || map.value(QStringLiteral("id")).toLongLong() != queue.entry(row).id
+            || order->data(order->index(slot), PlayOrderModel::IsCurrentRole).toBool()
+                   != (row == queue.currentIndex()))
+            return false;
+    }
+    return true;
+}
+
+QJsonObject readJson(const QString &path)
+{
+    QJsonObject object;
+    State::read(path, object);
+    return object;
+}
+
+}
 
 int PlayerTest::historyCount() const
 {
@@ -173,6 +253,11 @@ void PlayerTest::initTestCase()
         QVERIFY(entry.id > 0);
         QVERIFY(QFileInfo::exists(entry.path));
     }
+
+    m_long.path = m_dir.path() + QStringLiteral("/guard.flac");
+    m_long.title = QStringLiteral("Guard");
+    m_long.durationMs = 6000;
+    QVERIFY(encodeSine(m_long.path, 6));
 }
 
 void PlayerTest::queueOrder()
@@ -519,7 +604,12 @@ void PlayerTest::stateRoundTrip()
     QJsonObject object;
     QVERIFY(State::read(path, object));
     QCOMPARE(object.value(QStringLiteral("index")).toInt(), 1);
-    QCOMPARE(static_cast<int>(object.value(QStringLiteral("queue")).toArray().size()), 3);
+    QVERIFY(!object.contains(QStringLiteral("queue")));
+    QJsonObject queueFile;
+    QVERIFY(State::read(State::queuePathFor(path), queueFile));
+    QCOMPARE(static_cast<int>(queueFile.value(QStringLiteral("ids")).toArray().size()), 3);
+    QCOMPARE(static_cast<int>(queueFile.value(QStringLiteral("paths")).toArray().size()), 3);
+    QCOMPARE(object.value(QStringLiteral("queueRev")).toInteger(), queueFile.value(QStringLiteral("rev")).toInteger());
 
     Player player;
     State state(&player, path);
@@ -699,6 +789,717 @@ void PlayerTest::eqFilter()
     g_object_unref(band2);
     gst_object_unref(eq);
     gst_object_unref(preamp);
+}
+
+void PlayerTest::queueSlots()
+{
+    Queue queue;
+    queue.set(namedEntries(5), 2);
+    QCOMPARE(queue.orderedRows(), rows({0, 1, 2, 3, 4}));
+    QCOMPARE(queue.currentSlot(), 2);
+    QCOMPARE(queue.rowAt(4), 4);
+    QCOMPARE(queue.rowAt(5), -1);
+    QCOMPARE(queue.slotOf(3), 3);
+    QCOMPARE(queue.upcoming(3), rows({3, 4}));
+    queue.setRepeat(Queue::All);
+    QCOMPARE(queue.upcoming(3), rows({3, 4, 0}));
+    queue.setRepeat(Queue::One);
+    QCOMPARE(queue.upcoming(3), rows({3, 4}));
+    queue.setRepeat(Queue::Off);
+
+    queue.playNextRow(0);
+    QCOMPARE(queue.currentIndex(), 1);
+    QCOMPARE(queue.entry(2).title, QStringLiteral("e0"));
+    QCOMPARE(queue.nextIndex(), 2);
+
+    queue.playNextRow(4);
+    QCOMPARE(queue.entry(2).title, QStringLiteral("e4"));
+    QCOMPARE(queue.entry(3).title, QStringLiteral("e0"));
+    QCOMPARE(queue.currentIndex(), 1);
+
+    QSignalSpy orderSpy(&queue, &Queue::orderChanged);
+    QSignalSpy movedSpy(queue.playOrder(), &QAbstractItemModel::rowsMoved);
+    queue.playNextRow(2);
+    queue.playNextRow(1);
+    QCOMPARE(orderSpy.count(), 0);
+    QCOMPARE(queue.entry(2).title, QStringLiteral("e4"));
+
+    queue.moveSlot(3, 4);
+    QCOMPARE(queue.entry(4).title, QStringLiteral("e0"));
+    QCOMPARE(queue.entry(3).title, QStringLiteral("e3"));
+    QCOMPARE(orderSpy.count(), 0);
+    QCOMPARE(movedSpy.count(), 1);
+    QCOMPARE(queue.playOrder()->get(4).value(QStringLiteral("title")).toString(), QStringLiteral("e0"));
+}
+
+void PlayerTest::queueShuffleEdits()
+{
+    Queue queue;
+    queue.set(namedEntries(5), 2);
+    queue.setShuffle(true);
+    QCOMPARE(queue.order().size(), 5);
+    QCOMPARE(queue.order().first(), 2);
+    QCOMPARE(queue.currentSlot(), 0);
+    QCOMPARE(queue.rowAt(0), 2);
+    QCOMPARE(queue.slotOf(2), 0);
+
+    QSignalSpy orderSpy(&queue, &Queue::orderChanged);
+    QVERIFY(queue.setOrder({2, 0, 1, 3, 4}));
+    QCOMPARE(orderSpy.count(), 1);
+    QCOMPARE(queue.orderedRows(), rows({2, 0, 1, 3, 4}));
+    QCOMPARE(queue.nextIndex(), 0);
+
+    queue.moveSlot(2, 1);
+    QCOMPARE(queue.orderedRows(), rows({2, 1, 0, 3, 4}));
+    QCOMPARE(queue.nextIndex(), 1);
+    QCOMPARE(queue.entry(1).title, QStringLiteral("e1"));
+    QCOMPARE(queue.entry(0).title, QStringLiteral("e0"));
+
+    queue.playNextRow(4);
+    QCOMPARE(queue.orderedRows(), rows({2, 4, 1, 0, 3}));
+    QCOMPARE(queue.nextIndex(), 4);
+    QCOMPARE(queue.entry(4).title, QStringLiteral("e4"));
+
+    queue.remove(1);
+    QCOMPARE(queue.count(), 4);
+    QCOMPARE(queue.currentIndex(), 1);
+    QCOMPARE(queue.entry(1).title, QStringLiteral("e2"));
+    QCOMPARE(queue.orderedRows(), rows({1, 3, 0, 2}));
+    QCOMPARE(queue.currentSlot(), 0);
+    QCOMPARE(queue.nextIndex(), 3);
+    QCOMPARE(queue.upcoming(3), rows({3, 0, 2}));
+    queue.setRepeat(Queue::All);
+    QCOMPARE(queue.upcoming(5), rows({3, 0, 2}));
+    queue.setRepeat(Queue::Off);
+
+    queue.setShuffle(false);
+    QCOMPARE(queue.orderedRows(), rows({0, 1, 2, 3}));
+    QCOMPARE(queue.currentIndex(), 1);
+    QCOMPARE(queue.entry(1).title, QStringLiteral("e2"));
+    QVERIFY(!queue.setOrder({0, 1, 2, 3}));
+
+    queue.setShuffle(true);
+    QCOMPARE(queue.order().first(), 1);
+    QVERIFY(!queue.setOrder({0, 0, 1, 2}));
+    QVERIFY(!queue.setOrder({1, 0, 2}));
+    QVERIFY(queue.setOrder({3, 2, 1, 0}));
+
+    queue.set(namedEntries(4), 1, {3, 2, 1, 0});
+    QCOMPARE(queue.order(), QList<int>({3, 2, 1, 0}));
+    queue.set(namedEntries(4), 1, {9, 0, 1, 2});
+    QCOMPARE(queue.order().size(), 4);
+    QCOMPARE(queue.order().first(), 1);
+}
+
+void PlayerTest::addVerbs()
+{
+    Player player(m_library.get());
+    QSignalSpy added(&player, &Player::added);
+    QCOMPARE(player.enqueueTracks({}), 0);
+    QCOMPARE(player.enqueueTracks({QVariant(qint64(999999))}), 0);
+    QCOMPARE(player.playNextTracks({QVariant(qint64(999999))}), 0);
+    QCOMPARE(added.count(), 0);
+    QCOMPARE(player.queue()->count(), 0);
+
+    QCOMPARE(player.enqueueTracks({QVariant(m_tracks.at(0).id), QVariant(qint64(999999)),
+                                   QVariant(m_tracks.at(1).id)}),
+             2);
+    QCOMPARE(added.count(), 1);
+    QCOMPARE(added.at(0).at(0).toInt(), 2);
+    QCOMPARE(player.queue()->count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(player.status(), Player::Paused);
+    QCOMPARE(player.position(), qint64(0));
+    QCOMPARE(player.queue()->entry(1).id, m_tracks.at(1).id);
+
+    QCOMPARE(player.playNextTracks({QVariant(m_tracks.at(2).id)}), 1);
+    QCOMPARE(player.queue()->count(), 3);
+    QCOMPARE(player.queue()->entry(1).id, m_tracks.at(2).id);
+    QCOMPARE(player.queue()->nextIndex(), 1);
+    QCOMPARE(player.status(), Player::Paused);
+
+    QCOMPARE(player.enqueueTracks({QVariant(m_tracks.at(0).id)}), 1);
+    QCOMPARE(player.queue()->count(), 4);
+    QCOMPARE(player.queue()->entry(3).id, m_tracks.at(0).id);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(added.count(), 3);
+
+    player.stop();
+    QCOMPARE(player.enqueueTracks({QVariant(m_tracks.at(1).id)}), 1);
+    QCOMPARE(player.queue()->count(), 1);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(player.status(), Player::Paused);
+    QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(1).id);
+    player.stop();
+
+    Player noLibrary;
+    QCOMPARE(noLibrary.enqueueTracks({QVariant(m_tracks.at(0).id)}), 0);
+    QCOMPARE(noLibrary.playNextTracks({QVariant(m_tracks.at(0).id)}), 0);
+}
+
+void PlayerTest::addUnderShuffle()
+{
+    Player player(m_library.get());
+    player.restore(m_tracks, 1, 0);
+    player.toggleShuffle();
+    QCOMPARE(player.queue()->currentSlot(), 0);
+
+    QCOMPARE(player.enqueueTracks({QVariant(m_tracks.at(0).id)}), 1);
+    QCOMPARE(player.queue()->count(), 4);
+    QCOMPARE(player.queue()->entry(3).id, m_tracks.at(0).id);
+    QVERIFY(player.queue()->slotOf(3) > player.queue()->currentSlot());
+    QCOMPARE(player.queue()->order().size(), 4);
+
+    QCOMPARE(player.playNextTracks({QVariant(m_tracks.at(2).id)}), 1);
+    QCOMPARE(player.queue()->count(), 5);
+    QCOMPARE(player.queue()->entry(2).id, m_tracks.at(2).id);
+    QCOMPARE(player.queue()->nextIndex(), 2);
+    QCOMPARE(player.queue()->rowAt(1), 2);
+    QCOMPARE(player.status(), Player::Paused);
+    player.stop();
+}
+
+void PlayerTest::stateOrder()
+{
+    const QString path = m_dir.path() + QStringLiteral("/order/state.json");
+    const QString queuePath = State::queuePathFor(path);
+    {
+        Player player;
+        State state(&player, path);
+        player.queue()->setShuffle(true);
+        player.queue()->set(m_tracks, 1);
+        QVERIFY(player.queue()->setOrder({1, 2, 0}));
+        QVERIFY(state.saveNow());
+    }
+    QJsonObject object;
+    QVERIFY(State::read(queuePath, object));
+    QCOMPARE(object.value(QStringLiteral("order")).toArray(), QJsonArray({1, 2, 0}));
+
+    {
+        Player player;
+        State state(&player, path);
+        QVERIFY(state.load());
+        QVERIFY(player.queue()->shuffle());
+        QCOMPARE(player.queue()->order(), QList<int>({1, 2, 0}));
+        QCOMPARE(player.queue()->nextIndex(), 2);
+        player.stop();
+    }
+
+    object.insert(QStringLiteral("order"), QJsonArray({0, 0, 1}));
+    QVERIFY(State::write(queuePath, object));
+    {
+        Player player;
+        State state(&player, path);
+        QVERIFY(state.load());
+        QList<int> order = player.queue()->order();
+        QCOMPARE(order.size(), 3);
+        QCOMPARE(order.first(), 1);
+        std::sort(order.begin(), order.end());
+        QCOMPARE(order, QList<int>({0, 1, 2}));
+        player.stop();
+    }
+
+    {
+        Player player;
+        State state(&player, path);
+        player.queue()->set(m_tracks, 0);
+        QVERIFY(state.saveNow());
+    }
+    QVERIFY(State::read(queuePath, object));
+    QCOMPARE(object.value(QStringLiteral("order")).toArray(), QJsonArray());
+}
+
+void PlayerTest::errorKeepsPaused()
+{
+    QueueEntry missing;
+    missing.path = m_dir.path() + QStringLiteral("/missing-one.flac");
+    missing.title = QStringLiteral("missing");
+    Player player;
+    QSignalSpy started(&player, &Player::trackStarted);
+    QSignalSpy errors(&player, &Player::error);
+
+    player.restore({missing, m_tracks.at(0), m_tracks.at(1)}, 0, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QVERIFY(errors.count() >= 1);
+    QCOMPARE(started.at(0).at(0).toInt(), 1);
+    QCOMPARE(player.status(), Player::Paused);
+    QCOMPARE(player.queue()->currentIndex(), 1);
+    QTest::qWait(200);
+    QCOMPARE(player.status(), Player::Paused);
+    player.stop();
+}
+
+void PlayerTest::errorAllRows()
+{
+    QList<QueueEntry> entries;
+    for (int i = 0; i < 3; ++i) {
+        QueueEntry missing;
+        missing.path = m_dir.path() + QStringLiteral("/missing-%1.flac").arg(i);
+        missing.title = QStringLiteral("missing %1").arg(i);
+        entries.append(missing);
+    }
+    Player player;
+    QSignalSpy started(&player, &Player::trackStarted);
+    QTest::ignoreMessage(QtWarningMsg, "casdap: no playable track");
+    player.restore(entries, 0, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(player.status(), Player::Stopped, playTimeoutMs);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(started.count(), 0);
+
+    QTest::ignoreMessage(QtWarningMsg, "casdap: no playable track");
+    player.queue()->setRepeat(Queue::All);
+    player.restore(entries, 2, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(player.status(), Player::Stopped, playTimeoutMs);
+    QCOMPARE(player.queue()->currentIndex(), 2);
+}
+
+void PlayerTest::phoneGuard()
+{
+    auto player = syncPlayer();
+    QVERIFY(player->isValid());
+    FakeBluezModel fake;
+    QVERIFY(fake.applyPreset(QStringLiteral("active")));
+    player->setBluez(&fake);
+    QVERIFY(player->transportActive());
+    fake.clearCommands();
+    QSignalSpy requested(player.get(), &Player::localPlayRequested);
+
+    player->play({m_long}, 0);
+    QCOMPARE(player->status(), Player::Paused);
+    QVERIFY(player->playPending());
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(fake.commands(), QStringList({QStringLiteral("pause")}));
+
+    player->playPause();
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(player->status(), Player::Paused);
+
+    fake.setTransportActive(false);
+    QCOMPARE(player->status(), Player::Playing);
+    QVERIFY(!player->playPending());
+
+    fake.setTransportActive(true);
+    QCOMPARE(player->status(), Player::Paused);
+    player->resume();
+    QVERIFY(player->playPending());
+    QCOMPARE(fake.commands().size(), 2);
+    player->pause();
+    QVERIFY(!player->playPending());
+    fake.setTransportActive(false);
+    QCOMPARE(player->status(), Player::Paused);
+
+    player->playAt(0);
+    QCOMPARE(player->status(), Player::Playing);
+    QCOMPARE(fake.commands().size(), 2);
+    player->stop();
+    player->setBluez(nullptr);
+}
+
+void PlayerTest::phoneGuardTimeout()
+{
+    auto player = syncPlayer();
+    FakeBluezModel fake;
+    fake.setTransportActive(true);
+    player->setBluez(&fake);
+
+    QElapsedTimer timer;
+    timer.start();
+    player->play({m_long}, 0);
+    QCOMPARE(player->status(), Player::Paused);
+    QTRY_COMPARE_WITH_TIMEOUT(player->status(), Player::Playing, 3000);
+    QVERIFY(timer.elapsed() >= 900);
+    QVERIFY(fake.transportActive());
+    QVERIFY(!player->playPending());
+    QCOMPARE(fake.commands(), QStringList({QStringLiteral("pause")}));
+    player->stop();
+    player->setBluez(nullptr);
+}
+
+void PlayerTest::handoffWaitsForTransport()
+{
+    auto player = syncPlayer();
+    player->setTransportReady(false);
+    player->restore({m_long}, 0, 0, true);
+    QCOMPARE(player->status(), Player::Paused);
+    player->setTransportReady(true);
+    QCOMPARE(player->status(), Player::Playing);
+    player->stop();
+
+    player->setTransportReady(false);
+    player->restore({m_long}, 0, 0, true);
+    QCOMPARE(player->status(), Player::Paused);
+    player->setTransportActive(true);
+    player->setTransportReady(true);
+    QCOMPARE(player->status(), Player::Paused);
+    QVERIFY(!player->playPending());
+
+    player->restore({m_long}, 0, 0, true);
+    QCOMPARE(player->status(), Player::Paused);
+    player->setTransportActive(false);
+    QCOMPARE(player->status(), Player::Paused);
+    player->stop();
+
+    const QString path = m_dir.path() + QStringLiteral("/guard/state.json");
+    {
+        auto source = syncPlayer();
+        State state(source.get(), path);
+        source->play({m_long}, 0);
+        QCOMPARE(source->status(), Player::Playing);
+        QVERIFY(state.saveExit());
+        source->stop();
+    }
+    auto resumed = syncPlayer();
+    FakeBluezModel fake;
+    fake.setTransportActive(true);
+    resumed->setBluez(&fake);
+    State state(resumed.get(), path);
+    QVERIFY(state.load());
+    QCOMPARE(resumed->status(), Player::Paused);
+    QVERIFY(fake.commands().isEmpty());
+    resumed->stop();
+    resumed->setBluez(nullptr);
+}
+
+void PlayerTest::queueSignals()
+{
+    Queue queue;
+    PlayOrderModel *order = queue.playOrder();
+    QSignalSpy resets(&queue, &QAbstractItemModel::modelReset);
+    QSignalSpy orderResets(order, &QAbstractItemModel::modelReset);
+    QSignalSpy orderSpy(&queue, &Queue::orderChanged);
+    QSignalSpy slotSpy(&queue, &Queue::currentSlotChanged);
+    QSignalSpy indexSpy(&queue, &Queue::indexChanged);
+
+    queue.set(namedEntries(6), 1);
+    QCOMPARE(resets.count(), 1);
+    QCOMPARE(orderResets.count(), 1);
+    QCOMPARE(orderSpy.count(), 0);
+    QCOMPARE(indexSpy.count(), 1);
+    QCOMPARE(slotSpy.count(), 1);
+    QCOMPARE(order->count(), 6);
+    QVERIFY(consistent(queue));
+    const QHash<int, QByteArray> names = order->roleNames();
+    for (const char *role : {"row", "slot", "number", "id", "title", "artist", "album", "durationMs", "isCurrent"})
+        QVERIFY(names.values().contains(QByteArray(role)));
+
+    orderSpy.clear();
+    indexSpy.clear();
+    slotSpy.clear();
+    QSignalSpy data(order, &QAbstractItemModel::dataChanged);
+    QSignalSpy queueData(&queue, &QAbstractItemModel::dataChanged);
+    queue.setCurrentIndex(3);
+    QCOMPARE(orderSpy.count(), 0);
+    QCOMPARE(indexSpy.count(), 1);
+    QCOMPARE(slotSpy.count(), 1);
+    QCOMPARE(data.count(), 2);
+    QCOMPARE(queueData.count(), 2);
+    QCOMPARE(resets.count(), 1);
+    QVERIFY(order->data(order->index(3), PlayOrderModel::IsCurrentRole).toBool());
+    QVERIFY(!order->data(order->index(1), PlayOrderModel::IsCurrentRole).toBool());
+
+    queue.setShuffle(true);
+    QCOMPARE(orderSpy.count(), 1);
+    QCOMPARE(orderResets.count(), 2);
+    QCOMPARE(queue.currentSlot(), 0);
+    QVERIFY(consistent(queue));
+
+    QSignalSpy inserted(order, &QAbstractItemModel::rowsInserted);
+    QSignalSpy removed(order, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy moved(order, &QAbstractItemModel::rowsMoved);
+    queue.enqueue(namedEntries(1));
+    QCOMPARE(inserted.count(), 1);
+    QCOMPARE(orderResets.count(), 2);
+    QVERIFY(queue.slotOf(6) > queue.currentSlot());
+    QVERIFY(consistent(queue));
+
+    queue.remove(queue.rowAt(4));
+    QCOMPARE(removed.count(), 1);
+    QCOMPARE(queue.count(), 6);
+    QVERIFY(consistent(queue));
+
+    queue.moveSlot(2, 5);
+    QCOMPARE(moved.count(), 1);
+    QVERIFY(consistent(queue));
+
+    const int current = queue.currentIndex();
+    queue.playNext(namedEntries(2));
+    QCOMPARE(inserted.count(), 2);
+    QCOMPARE(queue.rowAt(queue.currentSlot() + 1), current + 1);
+    QCOMPARE(queue.rowAt(queue.currentSlot() + 2), current + 2);
+    QVERIFY(consistent(queue));
+
+    queue.playNextRow(queue.rowAt(6));
+    QCOMPARE(moved.count(), 2);
+    QVERIFY(consistent(queue));
+
+    queue.setShuffle(false);
+    QVERIFY(consistent(queue));
+    queue.enqueue(namedEntries(2));
+    QCOMPARE(inserted.count(), 3);
+    QVERIFY(consistent(queue));
+    queue.move(0, 4);
+    QCOMPARE(moved.count(), 3);
+    QVERIFY(consistent(queue));
+    queue.remove(queue.currentIndex());
+    QCOMPARE(removed.count(), 2);
+    QVERIFY(consistent(queue));
+    QCOMPARE(resets.count(), 1);
+}
+
+void PlayerTest::addStoppedShuffle()
+{
+    Player player(m_library.get());
+    player.queue()->setShuffle(true);
+    player.restore(m_tracks, 1, 0);
+    player.stop();
+    QCOMPARE(player.status(), Player::Stopped);
+
+    QCOMPARE(player.enqueueTracks({QVariant(m_tracks.at(0).id), QVariant(m_tracks.at(2).id)}), 2);
+    QCOMPARE(player.queue()->count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(player.queue()->currentSlot(), 0);
+    QVERIFY(player.queue()->shuffle());
+    QCOMPARE(player.queue()->order().size(), 2);
+    QCOMPARE(player.status(), Player::Paused);
+    QCOMPARE(player.position(), qint64(0));
+    QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(0).id);
+
+    player.stop();
+    QCOMPARE(player.playNextTracks({QVariant(m_tracks.at(1).id)}), 1);
+    QCOMPARE(player.queue()->count(), 1);
+    QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(1).id);
+    player.stop();
+}
+
+void PlayerTest::playSource()
+{
+    const qint64 albumId = scalar(m_library->database(), QStringLiteral("SELECT album_id FROM tracks WHERE id = ?"),
+                                  {m_tracks.at(0).id})
+                               .toLongLong();
+    QVERIFY(albumId > 0);
+    const int albumSize = static_cast<int>(m_library->albumTracks(albumId).size());
+    QVERIFY(albumSize >= 3);
+
+    Player player(m_library.get());
+    QSignalSpy added(&player, &Player::added);
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("play"), m_tracks.at(1).id),
+             albumSize);
+    QCOMPARE(player.queue()->count(), albumSize);
+    QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(1).id);
+    QCOMPARE(player.status(), Player::Playing);
+    QCOMPARE(added.count(), 0);
+
+    player.pause();
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("next")), albumSize);
+    QCOMPARE(player.queue()->count(), 2 * albumSize);
+    QCOMPARE(added.count(), 1);
+    QCOMPARE(added.at(0).at(0).toInt(), albumSize);
+    QCOMPARE(player.status(), Player::Paused);
+
+    QCOMPARE(player.playSource(QStringLiteral("song"), m_tracks.at(2).id, QStringLiteral("add")), 1);
+    QCOMPARE(player.queue()->count(), 2 * albumSize + 1);
+    QCOMPARE(player.queue()->entry(2 * albumSize).id, m_tracks.at(2).id);
+    QCOMPARE(added.count(), 2);
+
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("shuffle")), albumSize);
+    QVERIFY(player.queue()->shuffle());
+    QCOMPARE(player.queue()->count(), albumSize);
+    QCOMPARE(player.queue()->currentSlot(), 0);
+    QCOMPARE(player.status(), Player::Playing);
+
+    player.stop();
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("add")), albumSize);
+    QCOMPARE(player.queue()->count(), albumSize);
+    QCOMPARE(player.status(), Player::Paused);
+
+    QTest::ignoreMessage(QtWarningMsg, "casdap player: unknown source mode \"jump\"");
+    QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("jump")), 0);
+    QCOMPARE(player.playSource(QStringLiteral("album"), 999999, QStringLiteral("play")), 0);
+    QCOMPARE(player.queue()->count(), albumSize);
+    player.stop();
+
+    Player noLibrary;
+    QCOMPARE(noLibrary.playSource(QStringLiteral("album"), albumId, QStringLiteral("play")), 0);
+}
+
+void PlayerTest::stateQueueWorker()
+{
+    const QString path = m_dir.path() + QStringLiteral("/worker/state.json");
+    Player player;
+    State state(&player, path);
+    QCOMPARE(state.queuePath(), m_dir.path() + QStringLiteral("/worker/queue.json"));
+    player.queue()->set(namedEntries(20), 3);
+    const qint64 first = state.queueRev();
+    QVERIFY(first > 0);
+    QTest::qWait(500);
+    QVERIFY(!QFileInfo::exists(state.queuePath()));
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(state.queuePath()), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(state.writtenQueueRev(), first, 3000);
+    QJsonObject object = readJson(state.queuePath());
+    QCOMPARE(object.value(QStringLiteral("rev")).toInteger(), first);
+    QCOMPARE(object.value(QStringLiteral("index")).toInt(), 3);
+    QCOMPARE(static_cast<int>(object.value(QStringLiteral("ids")).toArray().size()), 20);
+    QCOMPARE(object.value(QStringLiteral("paths")).toArray().at(4).toString(), QStringLiteral("/nonexistent/e4.flac"));
+
+    player.queue()->setCurrentIndex(5);
+    QCOMPARE(state.queueRev(), first);
+
+    player.queue()->enqueue(namedEntries(2));
+    player.queue()->enqueue(namedEntries(1));
+    const qint64 second = state.queueRev();
+    QVERIFY(second > first);
+    QTRY_COMPARE_WITH_TIMEOUT(state.writtenQueueRev(), second, 3000);
+    QCOMPARE(static_cast<int>(readJson(state.queuePath()).value(QStringLiteral("ids")).toArray().size()), 23);
+
+    player.queue()->remove(0);
+    QVERIFY(state.queueRev() > second);
+    QVERIFY(state.saveNow());
+    QCOMPARE(state.writtenQueueRev(), state.queueRev());
+    QCOMPARE(static_cast<int>(readJson(state.queuePath()).value(QStringLiteral("ids")).toArray().size()), 22);
+    const QJsonObject small = readJson(path);
+    QCOMPARE(small.value(QStringLiteral("queueRev")).toInteger(), state.queueRev());
+    QVERIFY(!small.contains(QStringLiteral("queue")));
+    QVERIFY(!small.contains(QStringLiteral("order")));
+    QTest::qWait(1300);
+    QCOMPARE(state.writtenQueueRev(), state.queueRev());
+}
+
+void PlayerTest::stateMigration()
+{
+    const QString path = m_dir.path() + QStringLiteral("/migrate/state.json");
+    QJsonArray items;
+    for (const QueueEntry &entry : m_tracks)
+        items.append(QJsonObject::fromVariantMap(entry.toMap()));
+    QJsonObject legacy;
+    legacy.insert(QStringLiteral("queue"), items);
+    legacy.insert(QStringLiteral("index"), 2);
+    legacy.insert(QStringLiteral("position"), 0);
+    legacy.insert(QStringLiteral("shuffle"), false);
+    legacy.insert(QStringLiteral("order"), QJsonArray());
+    legacy.insert(QStringLiteral("repeat"), 1);
+    legacy.insert(QStringLiteral("status"), QStringLiteral("paused"));
+    legacy.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
+    legacy.insert(QStringLiteral("handoff"), false);
+    legacy.insert(QStringLiteral("stack"), QJsonArray({QJsonObject{{QStringLiteral("name"), QStringLiteral("home")},
+                                                                   {QStringLiteral("id"), -1}}}));
+    QVERIFY(State::write(path, legacy));
+    const QString queuePath = State::queuePathFor(path);
+    QVERIFY(!QFileInfo::exists(queuePath));
+
+    {
+        Player player(m_library.get());
+        State state(&player, path);
+        QVERIFY(state.load());
+        QCOMPARE(player.queue()->count(), 3);
+        QCOMPARE(player.queue()->currentIndex(), 2);
+        QCOMPARE(player.queue()->repeat(), Queue::All);
+        QCOMPARE(player.queue()->entry(2).title, m_tracks.at(2).title);
+        QCOMPARE(static_cast<int>(state.stack().size()), 1);
+        QVERIFY(QFileInfo::exists(queuePath));
+        player.stop();
+    }
+    const QJsonObject small = readJson(path);
+    QVERIFY(!small.contains(QStringLiteral("queue")));
+    QCOMPARE(small.value(QStringLiteral("index")).toInt(), 2);
+    QCOMPARE(static_cast<int>(small.value(QStringLiteral("stack")).toArray().size()), 1);
+    const QJsonObject queueFile = readJson(queuePath);
+    QCOMPARE(small.value(QStringLiteral("queueRev")).toInteger(), queueFile.value(QStringLiteral("rev")).toInteger());
+    QCOMPARE(static_cast<int>(queueFile.value(QStringLiteral("paths")).toArray().size()), 3);
+
+    Player player(m_library.get());
+    State state(&player, path);
+    QVERIFY(state.load());
+    QCOMPARE(player.queue()->count(), 3);
+    QCOMPARE(player.queue()->currentIndex(), 2);
+    QCOMPARE(player.queue()->entry(1).id, m_tracks.at(1).id);
+    QCOMPARE(state.queueRev(), queueFile.value(QStringLiteral("rev")).toInteger());
+    player.stop();
+}
+
+void PlayerTest::stateRevMismatch()
+{
+    const QString path = m_dir.path() + QStringLiteral("/rev/state.json");
+    qint64 rev = 0;
+    {
+        Player player;
+        State state(&player, path);
+        player.queue()->set(m_tracks, 2);
+        QVERIFY(state.saveNow());
+        rev = state.queueRev();
+    }
+    QJsonObject object = readJson(path);
+    object.insert(QStringLiteral("index"), 1);
+    object.insert(QStringLiteral("position"), 1500);
+    object.insert(QStringLiteral("status"), QStringLiteral("playing"));
+    object.insert(QStringLiteral("handoff"), true);
+    object.insert(QStringLiteral("queueRev"), rev + 5);
+    QVERIFY(State::write(path, object));
+    {
+        Player player;
+        State state(&player, path);
+        QVERIFY(state.load());
+        QCOMPARE(player.queue()->currentIndex(), 2);
+        QCOMPARE(player.position(), qint64(0));
+        QCOMPARE(player.status(), Player::Paused);
+        QCOMPARE(state.queueRev(), rev);
+        player.stop();
+    }
+
+    object.insert(QStringLiteral("queueRev"), rev);
+    object.insert(QStringLiteral("handoff"), false);
+    QVERIFY(State::write(path, object));
+    {
+        Player player;
+        State state(&player, path);
+        QVERIFY(state.load());
+        QCOMPARE(player.queue()->currentIndex(), 1);
+        QCOMPARE(player.position(), qint64(1500));
+        QCOMPARE(player.status(), Player::Paused);
+        player.stop();
+    }
+
+    QVERIFY(QFile::remove(path));
+    {
+        Player player;
+        State state(&player, path);
+        QVERIFY(state.load());
+        QCOMPARE(player.queue()->currentIndex(), 2);
+        QCOMPARE(player.status(), Player::Paused);
+        player.stop();
+    }
+}
+
+void PlayerTest::stateRestoreByPath()
+{
+    const QString path = m_dir.path() + QStringLiteral("/bypath/state.json");
+    const QString lost = QStringLiteral("/nonexistent/Lost Song.flac");
+    QJsonObject queueFile;
+    queueFile.insert(QStringLiteral("rev"), 7);
+    queueFile.insert(QStringLiteral("index"), 0);
+    queueFile.insert(QStringLiteral("ids"), QJsonArray({999999, m_tracks.at(1).id, m_tracks.at(1).id, 424242}));
+    queueFile.insert(QStringLiteral("paths"),
+                     QJsonArray({m_tracks.at(0).path, m_tracks.at(1).path, m_tracks.at(2).path, lost}));
+    queueFile.insert(QStringLiteral("order"), QJsonArray());
+    QVERIFY(State::write(State::queuePathFor(path), queueFile));
+    QJsonObject small;
+    small.insert(QStringLiteral("index"), 0);
+    small.insert(QStringLiteral("queueRev"), 7);
+    QVERIFY(State::write(path, small));
+
+    Player player(m_library.get());
+    State state(&player, path);
+    QVERIFY(state.load());
+    QCOMPARE(player.queue()->count(), 4);
+    QCOMPARE(player.queue()->entry(0).id, m_tracks.at(0).id);
+    QCOMPARE(player.queue()->entry(0).title, m_tracks.at(0).title);
+    QCOMPARE(player.queue()->entry(1).id, m_tracks.at(1).id);
+    QCOMPARE(player.queue()->entry(2).id, m_tracks.at(2).id);
+    QCOMPARE(player.queue()->entry(2).album, m_tracks.at(2).album);
+    QCOMPARE(player.queue()->entry(3).id, qint64(0));
+    QCOMPARE(player.queue()->entry(3).path, lost);
+    QCOMPARE(player.queue()->entry(3).title, QStringLiteral("Lost Song"));
+    QCOMPARE(state.queueRev(), qint64(7));
+    player.stop();
 }
 
 QTEST_GUILESS_MAIN(PlayerTest)

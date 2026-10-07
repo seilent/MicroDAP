@@ -43,6 +43,7 @@ signals:
     void restartFinished(bool ok);
 
 private:
+    void onTransportActiveChanged();
     bool writeFragment(const QString &text);
     bool removeFragment();
     void restart();

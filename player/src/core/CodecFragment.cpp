@@ -87,8 +87,18 @@ void CodecFragment::setBluez(BluezModel *bluez)
     if (m_bluez)
         disconnect(m_bluez, nullptr, this, nullptr);
     m_bluez = bluez;
-    if (m_bluez)
-        connect(m_bluez, &QObject::destroyed, this, [this] { m_bluez = nullptr; });
+    if (!m_bluez)
+        return;
+    connect(m_bluez, &QObject::destroyed, this, [this] { m_bluez = nullptr; });
+    connect(m_bluez, &BluezModel::transportActiveChanged, this, &CodecFragment::onTransportActiveChanged);
+}
+
+void CodecFragment::onTransportActiveChanged()
+{
+    if (!m_bluez || m_bluez->transportActive() || !m_pending || m_process)
+        return;
+    qInfo() << "casdap codec: transport ended, applying" << m_codec;
+    restart();
 }
 
 BluezModel *CodecFragment::bluez() const

@@ -375,8 +375,7 @@ QDBusObjectPath Mpris::currentTrackId() const
 
 void Mpris::play()
 {
-    if (m_player->status() != Player::Playing)
-        m_player->playPause();
+    m_player->resume();
 }
 
 void Mpris::seek(qlonglong offsetUs)

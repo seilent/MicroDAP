@@ -115,6 +115,19 @@ void BluezModel::setActive(bool active)
     emit activeChanged();
 }
 
+bool BluezModel::ready() const
+{
+    return m_ready;
+}
+
+void BluezModel::updateReady(bool ready)
+{
+    if (m_ready == ready)
+        return;
+    m_ready = ready;
+    emit readyChanged();
+}
+
 void BluezModel::updateConnected(bool connected)
 {
     if (m_connected == connected)

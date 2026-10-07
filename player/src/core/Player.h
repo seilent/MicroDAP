@@ -51,17 +51,26 @@ public:
     bool isValid() const;
     BluezModel *bluez() const;
     void setBluez(BluezModel *bluez);
+    bool transportActive() const;
+    void setTransportActive(bool active);
+    bool transportReady() const;
+    void setTransportReady(bool ready);
+    bool playPending() const;
     bool positionPollEnabled() const;
     void setPositionPollEnabled(bool on);
     GstElement *audioFilter() const;
     void applyEq(const casdap::EqProfile &profile);
 
     void play(const QList<QueueEntry> &entries, int start = 0);
+    Q_INVOKABLE int playSource(const QString &kind, qint64 id, const QString &mode, qint64 startId = -1);
     Q_INVOKABLE void playTracks(const QVariantList &trackIds, int start = 0);
+    Q_INVOKABLE int enqueueTracks(const QVariantList &trackIds);
+    Q_INVOKABLE int playNextTracks(const QVariantList &trackIds);
     void restore(const QList<QueueEntry> &entries, int index, qint64 positionMs,
-                 bool playing = false);
+                 bool playing = false, const QList<int> &order = {});
     Q_INVOKABLE void playAt(int index);
     Q_INVOKABLE void playPause();
+    Q_INVOKABLE void resume();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void next();
@@ -80,12 +89,15 @@ signals:
     void trackStarted(int index);
     void endOfStream();
     void error(const QString &message);
+    void added(int count);
+    void localPlayRequested();
 
 private:
     struct Chain
     {
-        QList<QString> paths;
+        QList<QueueEntry> entries;
         QList<int> order;
+        QList<int> slot;
         bool shuffle = false;
         Queue::Repeat repeat = Queue::Off;
         int last = -1;
@@ -117,10 +129,22 @@ private:
                      const QModelIndex &destination, int row);
     void addHistoryNow();
     void onTransportActiveChanged();
+    int addTracks(const QVariantList &trackIds, bool next);
+    int addEntries(const QList<QueueEntry> &entries, bool next);
+    void playEntries(const QList<QueueEntry> &entries, int start, bool shuffle);
+    bool holdForPhone();
+    void releaseHold();
+    void cancelHold();
+    void resumeNow();
 
     Library *m_library;
     Queue *m_queue;
     BluezModel *m_bluez = nullptr;
+    bool m_transportActive = false;
+    bool m_transportReady = true;
+    bool m_playPending = false;
+    bool m_resumeOnReady = false;
+    QTimer m_holdTimer;
     GstElement *m_playbin = nullptr;
     GstElement *m_eqFilter = nullptr;
     GstElement *m_preamp = nullptr;
@@ -137,6 +161,7 @@ private:
     bool m_prerolled = false;
     bool m_historyCounted = true;
     int m_errorStreak = 0;
+    int m_firstErrorRow = -1;
     bool m_removingCurrent = false;
     int m_removeTarget = -1;
     QMutex m_chainMutex;

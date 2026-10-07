@@ -24,9 +24,11 @@ public:
     bool active() const;
     void setActive(bool active);
 
+    static QString asoundDir();
     static QString hwParamsPath();
     static QString pwDumpPath();
     static QString parse(const QString &text);
+    static QString parseState(const QString &text);
     static int parseGraphRate(const QByteArray &json);
 
     Q_INVOKABLE void refresh();

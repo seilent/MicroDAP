@@ -26,6 +26,7 @@ class BluezModel : public QObject
     Q_PROPERTY(bool pairing READ pairing NOTIFY pairingChanged)
     Q_PROPERTY(int pairingRemaining READ pairingRemaining NOTIFY pairingRemainingChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
+    Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
 
 public:
     static constexpr int transportVolumeMax = 127;
@@ -55,6 +56,7 @@ public:
     int pairingRemaining() const;
     bool active() const;
     void setActive(bool active);
+    bool ready() const;
 
     Q_INVOKABLE virtual void play() = 0;
     Q_INVOKABLE virtual void pause() = 0;
@@ -86,8 +88,10 @@ signals:
     void pairingChanged();
     void pairingRemainingChanged();
     void activeChanged();
+    void readyChanged();
 
 protected:
+    void updateReady(bool ready);
     void updateConnected(bool connected);
     void updateDeviceName(const QString &name);
     void updateTransportActive(bool active);
@@ -125,6 +129,7 @@ private:
     bool m_pairing = false;
     int m_pairingRemaining = 0;
     bool m_active = true;
+    bool m_ready = true;
 };
 
 }

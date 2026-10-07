@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QMutexLocker>
+#include <QRandomGenerator>
 #include <QSocketNotifier>
 
 #include <algorithm>
@@ -16,6 +17,7 @@ namespace casdap {
 namespace {
 
 constexpr int positionIntervalMs = 250;
+constexpr int phoneHoldMs = 1000;
 constexpr qint64 restartThresholdMs = 3000;
 constexpr guint audioOnlyFlags = 0x2;
 constexpr const char *eqDescription =
@@ -80,15 +82,21 @@ Player::Player(Library *library, QObject *parent)
 
     m_positionTimer.setInterval(positionIntervalMs);
     connect(&m_positionTimer, &QTimer::timeout, this, &Player::pollPosition);
+    m_holdTimer.setSingleShot(true);
+    m_holdTimer.setInterval(phoneHoldMs);
+    connect(&m_holdTimer, &QTimer::timeout, this, &Player::releaseHold);
 
     connect(m_queue, &Queue::countChanged, this, &Player::onCountChanged);
-    connect(m_queue, &Queue::indexChanged, this, &Player::syncChain);
+    connect(m_queue, &QAbstractItemModel::modelReset, this, &Player::syncChain);
     connect(m_queue, &Queue::shuffleChanged, this, &Player::syncChain);
     connect(m_queue, &Queue::repeatChanged, this, &Player::syncChain);
+    connect(m_queue, &Queue::orderChanged, this, &Player::syncChain);
     connect(m_queue, &QAbstractItemModel::rowsAboutToBeRemoved, this,
             &Player::onRowsAboutToBeRemoved);
+    connect(m_queue, &QAbstractItemModel::rowsRemoved, this, &Player::syncChain);
     connect(m_queue, &QAbstractItemModel::rowsInserted, this, &Player::onRowsInserted);
     connect(m_queue, &QAbstractItemModel::rowsMoved, this, &Player::onRowsMoved);
+    connect(m_queue, &QAbstractItemModel::modelReset, this, &Player::currentChanged);
     connect(m_queue, &Queue::countChanged, this, &Player::currentChanged);
     connect(m_queue, &Queue::indexChanged, this, &Player::currentChanged);
 }
@@ -234,14 +242,106 @@ void Player::setBluez(BluezModel *bluez)
 {
     if (m_bluez == bluez)
         return;
-    if (m_bluez)
+    if (m_bluez) {
         disconnect(m_bluez, nullptr, this, nullptr);
+        disconnect(this, nullptr, m_bluez, nullptr);
+    }
     m_bluez = bluez;
-    if (!m_bluez)
+    if (!m_bluez) {
+        setTransportActive(false);
+        setTransportReady(true);
         return;
+    }
     connect(m_bluez, &BluezModel::transportActiveChanged, this, &Player::onTransportActiveChanged);
-    connect(m_bluez, &QObject::destroyed, this, [this] { m_bluez = nullptr; });
+    connect(m_bluez, &BluezModel::readyChanged, this,
+            [this] { setTransportReady(m_bluez->ready()); });
+    connect(this, &Player::localPlayRequested, m_bluez, &BluezModel::pause);
+    connect(m_bluez, &QObject::destroyed, this, [this] {
+        m_bluez = nullptr;
+        setTransportActive(false);
+        setTransportReady(true);
+    });
+    setTransportReady(m_bluez->ready());
     onTransportActiveChanged();
+}
+
+bool Player::transportActive() const
+{
+    return m_transportActive;
+}
+
+void Player::setTransportActive(bool active)
+{
+    if (m_transportActive == active)
+        return;
+    m_transportActive = active;
+    if (active)
+        pause();
+    else if (m_playPending)
+        releaseHold();
+}
+
+bool Player::transportReady() const
+{
+    return m_transportReady;
+}
+
+void Player::setTransportReady(bool ready)
+{
+    if (m_transportReady == ready)
+        return;
+    m_transportReady = ready;
+    if (!ready || !m_resumeOnReady)
+        return;
+    m_resumeOnReady = false;
+    if (!m_transportActive && m_status == Paused)
+        resumeNow();
+}
+
+bool Player::playPending() const
+{
+    return m_playPending;
+}
+
+bool Player::holdForPhone()
+{
+    if (!m_transportActive)
+        return false;
+    if (!m_playPending) {
+        m_playPending = true;
+        qInfo() << "casdap player: pausing the phone before local playback";
+        emit localPlayRequested();
+        m_holdTimer.start();
+    }
+    return true;
+}
+
+void Player::releaseHold()
+{
+    if (!m_playPending)
+        return;
+    m_playPending = false;
+    m_holdTimer.stop();
+    if (m_status == Paused)
+        resumeNow();
+}
+
+void Player::cancelHold()
+{
+    m_playPending = false;
+    m_holdTimer.stop();
+    m_resumeOnReady = false;
+}
+
+void Player::resumeNow()
+{
+    if (!m_playbin || m_status != Paused)
+        return;
+    m_resumeOnReady = false;
+    gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+    setStatus(Playing);
+    if (!m_historyCounted)
+        addHistoryNow();
 }
 
 bool Player::positionPollEnabled() const
@@ -265,8 +365,7 @@ void Player::setPositionPollEnabled(bool on)
 
 void Player::onTransportActiveChanged()
 {
-    if (m_bluez && m_bluez->transportActive())
-        pause();
+    setTransportActive(m_bluez && m_bluez->transportActive());
 }
 
 void Player::aboutToFinish(GstElement *element, gpointer data)
@@ -276,11 +375,11 @@ void Player::aboutToFinish(GstElement *element, gpointer data)
     {
         QMutexLocker lock(&self->m_chainMutex);
         Chain &chain = self->m_chain;
-        const int next = Queue::nextOf(chain.last, static_cast<int>(chain.paths.size()),
-                                       chain.order, chain.shuffle, chain.repeat, false);
-        if (next < 0 || next >= chain.paths.size())
+        const int next = Queue::nextOf(chain.last, static_cast<int>(chain.entries.size()), chain.order,
+                                       chain.slot, chain.shuffle, chain.repeat, false);
+        if (next < 0 || next >= chain.entries.size())
             return;
-        path = chain.paths.at(next);
+        path = chain.entries.at(next).path;
         chain.last = next;
         chain.pending.append(next);
     }
@@ -293,22 +392,23 @@ void Player::aboutToFinish(GstElement *element, gpointer data)
 
 void Player::syncChain()
 {
-    QMutexLocker lock(&m_chainMutex);
-    m_chain.paths.clear();
-    const QList<QueueEntry> entries = m_queue->entries();
-    m_chain.paths.reserve(entries.size());
-    for (const QueueEntry &entry : entries)
-        m_chain.paths.append(entry.path);
-    m_chain.order = m_queue->order();
-    m_chain.shuffle = m_queue->shuffle();
-    m_chain.repeat = m_queue->repeat();
-    if (m_chain.pending.isEmpty())
-        m_chain.last = m_queue->currentIndex();
+    QList<QueueEntry> entries = m_queue->entries();
+    QList<int> order = m_queue->order();
+    QList<int> slot = m_queue->slotIndex();
+    {
+        QMutexLocker lock(&m_chainMutex);
+        m_chain.entries.swap(entries);
+        m_chain.order.swap(order);
+        m_chain.slot.swap(slot);
+        m_chain.shuffle = m_queue->shuffle();
+        m_chain.repeat = m_queue->repeat();
+        if (m_chain.pending.isEmpty())
+            m_chain.last = m_queue->currentIndex();
+    }
 }
 
 void Player::onCountChanged()
 {
-    syncChain();
     if (!m_removingCurrent)
         return;
     m_removingCurrent = false;
@@ -349,9 +449,10 @@ void Player::onRowsAboutToBeRemoved(const QModelIndex &, int first, int last)
     m_removeTarget = -1;
     const int count = m_queue->count();
     const QList<int> order = m_queue->order();
+    const QList<int> slot = m_queue->slotIndex();
     int row = current;
     for (int i = 0; i <= count; ++i) {
-        row = Queue::nextOf(row, count, order, m_queue->shuffle(), m_queue->repeat(), true);
+        row = Queue::nextOf(row, count, order, slot, m_queue->shuffle(), m_queue->repeat(), true);
         if (row < 0 || row < first || row > last)
             break;
     }
@@ -364,13 +465,16 @@ void Player::onRowsAboutToBeRemoved(const QModelIndex &, int first, int last)
 void Player::onRowsInserted(const QModelIndex &, int first, int last)
 {
     const int n = last - first + 1;
-    QMutexLocker lock(&m_chainMutex);
-    for (int &row : m_chain.pending) {
-        if (row >= first)
-            row += n;
+    {
+        QMutexLocker lock(&m_chainMutex);
+        for (int &row : m_chain.pending) {
+            if (row >= first)
+                row += n;
+        }
+        if (m_chain.last >= first)
+            m_chain.last += n;
     }
-    if (m_chain.last >= first)
-        m_chain.last += n;
+    syncChain();
 }
 
 void Player::onRowsMoved(const QModelIndex &, int start, int end, const QModelIndex &, int row)
@@ -425,6 +529,8 @@ void Player::startAt(int index, GstState target)
         m_chain.last = index;
         m_chain.pending = {index};
     }
+    if (target == GST_STATE_PLAYING && holdForPhone())
+        target = GST_STATE_PAUSED;
     m_historyCounted = true;
     setPosition(0);
     setUri(m_queue->entry(index).path);
@@ -435,8 +541,51 @@ void Player::startAt(int index, GstState target)
 
 void Player::play(const QList<QueueEntry> &entries, int start)
 {
-    m_queue->set(entries, start);
+    playEntries(entries, start, m_queue->shuffle());
+}
+
+void Player::playEntries(const QList<QueueEntry> &entries, int start, bool shuffle)
+{
+    m_errorStreak = 0;
+    m_firstErrorRow = -1;
+    m_queue->set(entries, start, {}, shuffle);
     startAt(m_queue->currentIndex(), GST_STATE_PLAYING);
+}
+
+int Player::playSource(const QString &kind, qint64 id, const QString &mode, qint64 startId)
+{
+    if (!m_library)
+        return 0;
+    const bool add = mode == QLatin1String("add");
+    const bool next = mode == QLatin1String("next");
+    const bool shuffle = mode == QLatin1String("shuffle");
+    if (!add && !next && !shuffle && mode != QLatin1String("play")) {
+        qWarning() << "casdap player: unknown source mode" << mode;
+        return 0;
+    }
+    const QList<QueueEntry> entries = kind == QLatin1String("song")
+                                          ? m_library->queueEntries({QVariant(id)})
+                                          : m_library->entriesFor(kind, id);
+    if (entries.isEmpty())
+        return 0;
+    if (add || next)
+        return addEntries(entries, next);
+    const int n = static_cast<int>(entries.size());
+    if (shuffle) {
+        playEntries(entries, QRandomGenerator::global()->bounded(n), true);
+        return n;
+    }
+    int start = 0;
+    if (startId >= 0) {
+        for (int i = 0; i < n; ++i) {
+            if (entries.at(i).id == startId) {
+                start = i;
+                break;
+            }
+        }
+    }
+    playEntries(entries, start, m_queue->shuffle());
+    return n;
 }
 
 void Player::playTracks(const QVariantList &trackIds, int start)
@@ -449,12 +598,53 @@ void Player::playTracks(const QVariantList &trackIds, int start)
     play(entries, std::max(0, std::min(static_cast<int>(entries.size()) - 1, start)));
 }
 
-void Player::restore(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing)
+int Player::enqueueTracks(const QVariantList &trackIds)
 {
-    m_queue->set(entries, index);
+    return addTracks(trackIds, false);
+}
+
+int Player::playNextTracks(const QVariantList &trackIds)
+{
+    return addTracks(trackIds, true);
+}
+
+int Player::addTracks(const QVariantList &trackIds, bool next)
+{
+    if (!m_library)
+        return 0;
+    return addEntries(m_library->queueEntries(trackIds), next);
+}
+
+int Player::addEntries(const QList<QueueEntry> &entries, bool next)
+{
+    if (entries.isEmpty())
+        return 0;
+    const int count = static_cast<int>(entries.size());
+    if (m_queue->count() == 0 || m_status == Stopped) {
+        m_errorStreak = 0;
+        m_firstErrorRow = -1;
+        m_queue->set(entries, 0);
+        startAt(0, GST_STATE_PAUSED);
+    } else if (next) {
+        m_queue->playNext(entries);
+    } else {
+        m_queue->enqueue(entries);
+    }
+    emit added(count);
+    return count;
+}
+
+void Player::restore(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing,
+                     const QList<int> &order)
+{
+    m_errorStreak = 0;
+    m_firstErrorRow = -1;
+    m_queue->set(entries, index, order);
     if (m_queue->count() == 0)
         return;
-    startAt(m_queue->currentIndex(), playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+    const bool resume = playing && m_transportReady && !m_transportActive;
+    startAt(m_queue->currentIndex(), resume ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+    m_resumeOnReady = playing && !m_transportReady;
     if (positionMs > 0) {
         m_pendingSeek = positionMs;
         setPosition(positionMs);
@@ -468,17 +658,22 @@ void Player::playAt(int index)
 
 void Player::playPause()
 {
+    if (m_status == Playing)
+        pause();
+    else
+        resume();
+}
+
+void Player::resume()
+{
     if (!m_playbin)
         return;
     switch (m_status) {
     case Playing:
-        pause();
         break;
     case Paused:
-        gst_element_set_state(m_playbin, GST_STATE_PLAYING);
-        setStatus(Playing);
-        if (!m_historyCounted)
-            addHistoryNow();
+        if (!holdForPhone())
+            resumeNow();
         break;
     case Stopped:
         if (m_queue->count() > 0)
@@ -489,6 +684,7 @@ void Player::playPause()
 
 void Player::pause()
 {
+    cancelHold();
     if (!m_playbin || m_status != Playing)
         return;
     pollPosition();
@@ -498,6 +694,7 @@ void Player::pause()
 
 void Player::stop()
 {
+    cancelHold();
     setNull();
     setStatus(Stopped);
     setPosition(0);
@@ -650,6 +847,7 @@ void Player::handleStreamStart()
     if (index >= 0 && index < m_queue->count())
         m_queue->setCurrentIndex(index);
     m_errorStreak = 0;
+    m_firstErrorRow = -1;
     m_historyCounted = false;
     setPosition(0);
     updateDuration();
@@ -692,12 +890,27 @@ void Player::handleError(GstMessage *message)
 
     ++m_errorStreak;
     const int current = m_queue->currentIndex();
+    if (m_errorStreak == 1)
+        m_firstErrorRow = current;
     const int index = m_queue->nextIndex(true);
-    if (index < 0 || index == current || m_errorStreak >= m_queue->count()) {
+    const bool exhausted = m_errorStreak >= m_queue->count() || index == current
+                           || (index >= 0 && index == m_firstErrorRow);
+    if (index < 0 && !exhausted) {
+        m_errorStreak = 0;
+        m_firstErrorRow = -1;
         stop();
         return;
     }
-    startAt(index, GST_STATE_PLAYING);
+    if (exhausted) {
+        qWarning() << "casdap: no playable track";
+        const int first = m_firstErrorRow;
+        m_errorStreak = 0;
+        m_firstErrorRow = -1;
+        stop();
+        m_queue->setCurrentIndex(first);
+        return;
+    }
+    startAt(index, m_status == Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
 }
 
 void Player::pollBus()

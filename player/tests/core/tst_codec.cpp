@@ -184,16 +184,24 @@ void CodecTest::transportActiveDefers()
     QVERIFY(!QFile::exists(m_log));
 
     bluez.setTransportActive(false);
-    QTest::qWait(100);
-    QVERIFY(fragment.pending());
-    QVERIFY(!QFile::exists(m_log));
-
-    QVERIFY(fragment.apply(QStringLiteral("aac")));
+    QVERIFY(fragment.restarting());
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
     QVERIFY(finished.at(0).at(0).toBool());
     QVERIFY(!fragment.pending());
     QCOMPARE(pending.count(), 2);
     QCOMPARE(readFile(m_log), QStringLiteral("systemctl --user restart wireplumber\n"));
+
+    bluez.setTransportActive(true);
+    bluez.setTransportActive(false);
+    QTest::qWait(100);
+    QCOMPARE(finished.count(), 1);
+
+    QVERIFY(fragment.apply(QStringLiteral("aac")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
+    QVERIFY(finished.at(1).at(0).toBool());
+    QVERIFY(!fragment.pending());
+    QCOMPARE(pending.count(), 2);
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 2);
 }
 
 void CodecTest::restartFailure()

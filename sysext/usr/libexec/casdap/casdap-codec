@@ -1,0 +1,43 @@
+#!/usr/bin/bash
+set -eu
+
+config="${XDG_CONFIG_HOME:-${HOME}/.config}"
+conf_dir="${CASDAP_WP_CONF_DIR:-${config}/wireplumber/wireplumber.conf.d}"
+settings="${CASDAP_SETTINGS_FILE:-${config}/casdap/settings.ini}"
+systemctl_bin="${CASDAP_SYSTEMCTL_BIN:-systemctl}"
+fragment="${conf_dir}/50-casdap-codec.conf"
+
+log() { logger -t casdap-codec -- "$*" 2>/dev/null || true; }
+
+setting() {
+    local line value=
+    if [[ -r "${settings}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line%$'\r'}"
+            [[ "${line}" == "$1="* ]] || continue
+            value="${line#*=}"
+        done < "${settings}"
+    fi
+    printf '%s\n' "${value:-$2}"
+}
+
+clear_fragment() {
+    [[ -e "${fragment}" ]] || return 0
+    rm -f -- "${fragment}"
+    log "fragment removed ${fragment}"
+    if [[ "$(setting keepPhoneInGameMode false)" == true ]]; then
+        log "phone kept, wireplumber restart skipped"
+        return 0
+    fi
+    if ! "${systemctl_bin}" --user restart wireplumber; then
+        log "wireplumber restart failed"
+        return 1
+    fi
+}
+
+[[ $# -eq 1 ]] || exit 1
+
+case "$1" in
+    clear) clear_fragment ;;
+    *) exit 1 ;;
+esac

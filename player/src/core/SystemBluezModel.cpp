@@ -109,6 +109,7 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
             &SystemBluezModel::onAgentUnregistered);
 
     if (m_bluez.isConnected()) {
+        updateReady(false);
         if (!m_bluez.connect(bluezService(), QStringLiteral("/"), objectManagerInterface(),
                              QStringLiteral("InterfacesAdded"), this,
                              SLOT(onInterfacesAdded(QDBusMessage)))) {
@@ -212,6 +213,7 @@ void SystemBluezModel::refresh()
             qInfo() << "casdap bluez: GetManagedObjects failed" << reply.errorMessage();
             m_objects.clear();
             apply();
+            updateReady(true);
             return;
         }
         const ManagedObjectList objects = qdbus_cast<ManagedObjectList>(reply.arguments().value(0));
@@ -219,6 +221,7 @@ void SystemBluezModel::refresh()
         for (auto it = objects.cbegin(); it != objects.cend(); ++it)
             m_objects.insert(it.key().path(), it.value());
         apply();
+        updateReady(true);
     });
 }
 
