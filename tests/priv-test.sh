@@ -324,6 +324,7 @@ rgb_get="armada-rgb[get]"
 rgb_off="armada-rgb[off]"
 rgb_apply="armada-rgb[apply]"
 steam_config='{"version":1,"enabled":true,"linkBrightness":false,"brightness":40,"maxBrightness":50,"color":"00FF00","saturation":100}'
+half_config='{"version":1,"enabled":false,"linkBrightness":true,"brightness":30,"maxBrightness":60,"color":"FFFFFF","saturation":50}'
 
 hue_call() {
     printf 'armada-rgb[set][--enabled][%s][--link-brightness][%s][--max-brightness][%s][--color][%s][--saturation][%s][--brightness][%s]' \
@@ -354,6 +355,7 @@ done
 for (( hue = 0; hue <= 350; hue += 10 )); do
     case_name="rgb-hue-${hue} argv"
     reset
+    rgb_config "${half_config}"
     rgb_answer false true 30 60 50
     run "rgb-hue-${hue}"
     [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
@@ -364,11 +366,24 @@ done
 
 case_name="rgb-hue-200 with Armada lights off"
 reset
-rgb_config "${steam_config}"
+rgb_config "${half_config}"
 rgb_answer false false 12 0 50
 run rgb-hue-200
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "${rgb_get}" "$(hue_call 00AAFF false false 0 50 12)"
+
+case_name="rgb-hue-200 saturation from the save"
+reset
+rgb_config "${half_config}"
+mkdir -p "${T}/run"
+printf '%s\n' "${steam_config}" > "${CASDAP_RGB_BEFORE_FILE}"
+rgb_answer true true 30 60 40
+run rgb-color-200-2
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_get}" "$(hue_call 66CCFF true true 60 60 30)"
+: > "${STATE}"
+run rgb-color-200-2
+expect_calls "${rgb_get}" "$(hue_call 66CCFF true true 60 60 30)"
 
 case_name="rgb-hue-350 with maxBrightness 0 and linked brightness"
 reset
@@ -568,11 +583,71 @@ expect_calls "${rgb_get}" "$(hue_call AA00FF true true 60 100 30)" "${rgb_off}" 
 [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
 expect_no_rgb_files
 
+for quad in "0 1 FF9999 40" "30 3 FF9933 80" "120 3 33FF33 80" "200 2 66CCFF 60" "280 4 AA00FF 100" "350 4 FF002B 100"; do
+    read -r hue level hex sat <<< "${quad}"
+    case_name="rgb-color-${hue}-${level}"
+    reset
+    rgb_config "${steam_config}"
+    run "rgb-color-${hue}-${level}"
+    [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+    expect_calls "${rgb_get}" "$(hue_call "${hex}" true true 60 "${sat}" 30)"
+    [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
+    [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config rewritten by the word"
+    expect_untouched_sysfs
+done
+
+declare -A seen=()
+for (( hue = 0; hue <= 350; hue += 10 )); do
+    reset
+    rgb_config "${half_config}"
+    rgb_answer false true 30 60 50
+    run "rgb-hue-${hue}"
+    alias_calls=$(cat "${STATE}")
+    for pair in "1 20" "2 30" "3 40" "4 50"; do
+        read -r level sat <<< "${pair}"
+        case_name="rgb-color-${hue}-${level} argv"
+        reset
+        rgb_config "${half_config}"
+        rgb_answer false true 30 60 50
+        run "rgb-color-${hue}-${level}"
+        [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+        calls=$(cat "${STATE}")
+        if [[ "${calls}" =~ ^armada-rgb\[get\]$'\n'armada-rgb\[set\]\[--enabled\]\[false\]\[--link-brightness\]\[true\]\[--max-brightness\]\[60\]\[--color\]\[([0-9A-F]{6})\]\[--saturation\]\[${sat}\]\[--brightness\]\[30\]$ ]]; then
+            seen[${BASH_REMATCH[1]}]=1
+        else
+            fail "${case_name}: calls were:"$'\n'"${calls}"
+        fi
+        if [[ "${level}" == 4 && "${calls}" != "${alias_calls}" ]]; then
+            fail "${case_name}: differs from rgb-hue-${hue}"
+        fi
+    done
+done
+[[ "${#seen[@]}" == 144 ]] || fail "rgb-color words: ${#seen[@]} distinct colors, expected 144"
+
+case_name="rgb-color-200-2 with Armada lights off"
+reset
+rgb_config "${steam_config}"
+rgb_answer false false 12 0 50
+run rgb-color-200-2
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_get}" "$(hue_call 66CCFF false false 0 60 12)"
+
+case_name="rgb-color-120-1 with a failing set"
+reset
+rgb_config "${steam_config}"
+echo set > "${RGB_FAIL}"
+run rgb-color-120-1
+[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+
 for verb in bogus "" "cores-offline;id" "bt-class-headphones;id" "backlight-off --help" "cpu-dap;id" cpu "cpu-restore " CPU-DAP \
     hp-gain hp-gain-8 hp-gain-medium hp-amp hp-amp-cls_h_ulp spk-gain spk-gain-120 spk-gain-0 "spk-gain-102 " \
     rgb rgb-accent rgb-accent-red rgb-accent-pink rgb-accent-FA2A55 "rgb-restore;id" RGB-OFF "rgb-sleep " \
     rgb-hue rgb-hue- rgb-hue-5 rgb-hue-35 rgb-hue-360 rgb-hue-1000 rgb-hue-010 rgb-hue-00 rgb-hue-abc rgb-hue--10 \
-    "rgb-hue-10;id" "rgb-hue-10 " "rgb-hue-10"$'\n' RGB-HUE-10; do
+    "rgb-hue-10;id" "rgb-hue-10 " "rgb-hue-10"$'\n' RGB-HUE-10 \
+    rgb-color rgb-color- rgb-color-200 rgb-color-200- rgb-color-200-0 rgb-color-200-5 rgb-color-355-2 rgb-color-360-1 \
+    rgb-color-5-1 rgb-color-010-2 rgb-color-200-02 rgb-color-200-1-1 rgb-color--10-1 rgb-color-abc-1 rgb-color-200-a \
+    "rgb-color-200-2;id" "rgb-color-200-2 " "rgb-color-200-2"$'\n' RGB-COLOR-200-2; do
     case_name="verb '${verb}'"
     reset
     rgb_config "${steam_config}"

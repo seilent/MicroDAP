@@ -14,7 +14,9 @@ class AccentControl : public QObject
     Q_PROPERTY(int sliderHue READ sliderHue WRITE setSliderHue NOTIFY sliderHueChanged)
     Q_PROPERTY(bool fromArt READ fromArt WRITE setFromArt NOTIFY fromArtChanged)
     Q_PROPERTY(int artHue READ artHue NOTIFY artHueChanged)
+    Q_PROPERTY(int artLevel READ artLevel NOTIFY artHueChanged)
     Q_PROPERTY(int hue READ hue NOTIFY hueChanged)
+    Q_PROPERTY(int level READ level NOTIFY hueChanged)
     Q_PROPERTY(QColor color READ color NOTIFY hueChanged)
     Q_PROPERTY(QColor brightColor READ brightColor NOTIFY hueChanged)
     Q_PROPERTY(QString artPath READ artPath NOTIFY artPathChanged)
@@ -24,6 +26,8 @@ public:
     static constexpr double accentValue = 0.98;
     static constexpr double minLuminance = 0.149;
     static constexpr double brightScale = 0.84;
+    static constexpr double maxSaturation = 0.83;
+    static constexpr double minSaturation = 0.40;
 
     explicit AccentControl(QObject *parent = nullptr);
 
@@ -32,13 +36,18 @@ public:
     static double luminance(const QColor &color);
     static QColor accentFor(int hue);
     static QColor brightFor(int hue);
+    static QColor artAccentFor(int hue, const QColor &tone);
+    static QColor artBrightFor(int hue, const QColor &tone);
 
     int sliderHue() const;
     void setSliderHue(int hue);
     bool fromArt() const;
     void setFromArt(bool on);
     int artHue() const;
+    int artLevel() const;
+    QColor artTone() const;
     int hue() const;
+    int level() const;
     QColor color() const;
     QColor brightColor() const;
     QString artPath() const;
@@ -61,16 +70,20 @@ signals:
 
 private:
     void refresh();
-    void setArtHue(int hue);
+    void setArt(const ArtPick &pick);
     void updateHue();
-    void onFound(const QString &path, int hue);
-    void logArt(const QString &path, int hue);
+    void onFound(const QString &path, int hue, int level, const QColor &color);
+    void logArt(const QString &path, const ArtPick &pick);
 
     ArtColor m_art;
     int m_sliderHue = 350;
     bool m_fromArt = false;
     int m_artHue = -1;
+    int m_artLevel = 0;
+    QColor m_artTone;
     int m_hue = 350;
+    int m_level = 0;
+    QColor m_tone;
     QString m_artPath;
     QString m_loggedPath;
     bool m_phoneActive = false;

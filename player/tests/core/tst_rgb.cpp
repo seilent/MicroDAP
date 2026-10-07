@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -50,6 +51,8 @@ private slots:
     void initTestCase();
     void init();
     void words();
+    void artColorWords();
+    void artWordHeldWhileOff();
     void restoreThenHueAtStart();
     void offAndArmada();
     void hueDebounced();
@@ -141,6 +144,96 @@ void RgbTest::words()
     QCOMPARE(RgbControl::hueWord(360), QStringLiteral("rgb-hue-0"));
     QCOMPARE(RgbControl::hueWord(-10), QStringLiteral("rgb-hue-350"));
     QCOMPARE(RgbControl::unitFor(QStringLiteral("rgb-off")), QStringLiteral("casdap-priv@rgb-off.service"));
+    QCOMPARE(RgbControl::colorWord(0, 1), QStringLiteral("rgb-color-0-1"));
+    QCOMPARE(RgbControl::colorWord(200, 4), QStringLiteral("rgb-color-200-4"));
+    QCOMPARE(RgbControl::colorWord(355, 2), QStringLiteral("rgb-color-0-2"));
+    QCOMPARE(RgbControl::colorWord(344, 3), QStringLiteral("rgb-color-340-3"));
+    QCOMPARE(RgbControl::colorWord(200, 0), QStringLiteral("rgb-hue-200"));
+    QCOMPARE(RgbControl::colorWord(200, 5), QStringLiteral("rgb-hue-200"));
+    QSet<QString> all;
+    for (int hue = 0; hue < 360; hue += 10) {
+        for (int level = 1; level <= RgbControl::levels; ++level)
+            all.insert(RgbControl::colorWord(hue, level));
+    }
+    QCOMPARE(all.size(), 144);
+}
+
+void RgbTest::artColorWords()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    QSignalSpy levelSpy(&control, &RgbControl::levelChanged);
+    control.start(QStringLiteral("accent"), 200, 2);
+    QCOMPARE(control.level(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-color-200-2"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QCOMPARE(control.sentWord(), QStringLiteral("rgb-color-200-2"));
+    QCOMPARE(control.sentHue(), 200);
+    QFile::remove(m_log);
+
+    control.setColor(200, 2);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
+    QCOMPARE(applied.count(), 2);
+
+    control.setColor(200, 1);
+    control.setColor(30, 3);
+    control.setColor(200, 4);
+    QTest::qWait(RgbControl::hueDelayMs / 2);
+    QCOMPARE(applied.count(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-color-200-4"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+
+    control.setHue(200);
+    QCOMPARE(control.level(), 0);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 3);
+
+    control.setColor(200, 1);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-color-200-1"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    control.setHue(200);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
+    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("rgb-hue-200"));
+    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-color-200-4")), unit(QStringLiteral("rgb-color-200-1")),
+                                    unit(QStringLiteral("rgb-hue-200"))}));
+    QVERIFY(levelSpy.count() >= 5);
+}
+
+void RgbTest::artWordHeldWhileOff()
+{
+    RgbControl control;
+    QSignalSpy applied(&control, &RgbControl::applied);
+    startAccent(control, applied, 350);
+
+    control.setScreenOff(true);
+    control.setColor(120, 3);
+    QTest::qWait(RgbControl::hueDelayMs + 300);
+    QCOMPARE(applied.count(), 2);
+    control.setScreenOff(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-color-120-3"));
+
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    control.setSaver(true);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
+    control.setColor(60, 1);
+    control.setSaver(false);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
+    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-sleep"));
+    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("rgb-wake"));
+    QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("rgb-color-60-1"));
+
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QVERIFY(writeFile(m_systemctlExit, QStringLiteral("1\n")));
+    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: \"rgb-color-60-2\" failed");
+    control.setColor(60, 2);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
+    QVERIFY(!applied.at(6).at(1).toBool());
+    QCOMPARE(control.sentWord(), QString());
+    QCOMPARE(control.sentHue(), -1);
 }
 
 void RgbTest::restoreThenHueAtStart()

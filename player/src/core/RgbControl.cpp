@@ -23,14 +23,35 @@ QString huePrefix()
     return QStringLiteral("rgb-hue-");
 }
 
+QString colorPrefix()
+{
+    return QStringLiteral("rgb-color-");
+}
+
 bool isHueWord(const QString &word)
 {
     return word.startsWith(huePrefix());
 }
 
+bool isColorWord(const QString &word)
+{
+    return isHueWord(word) || word.startsWith(colorPrefix());
+}
+
+QString canonical(const QString &word)
+{
+    if (isHueWord(word))
+        return colorPrefix() + word.mid(huePrefix().size()) + QStringLiteral("-4");
+    return word;
+}
+
 int wordHue(const QString &word)
 {
-    return isHueWord(word) ? word.mid(huePrefix().size()).toInt() : -1;
+    if (isHueWord(word))
+        return word.mid(huePrefix().size()).toInt();
+    if (word.startsWith(colorPrefix()))
+        return word.mid(colorPrefix().size()).section(QLatin1Char('-'), 0, 0).toInt();
+    return -1;
 }
 
 QString sleepWord()
@@ -80,6 +101,13 @@ QString RgbControl::hueWord(int hue)
     return huePrefix() + QString::number(Settings::normalizeHue(hue));
 }
 
+QString RgbControl::colorWord(int hue, int level)
+{
+    if (level < 1 || level > levels)
+        return hueWord(hue);
+    return colorPrefix() + QStringLiteral("%1-%2").arg(Settings::normalizeHue(hue)).arg(level);
+}
+
 QString RgbControl::unitFor(const QString &word)
 {
     return QStringLiteral("casdap-priv@") + word + QStringLiteral(".service");
@@ -110,6 +138,11 @@ int RgbControl::hue() const
     return m_hue;
 }
 
+int RgbControl::level() const
+{
+    return m_level;
+}
+
 bool RgbControl::screenOff() const
 {
     return m_screenOff;
@@ -122,7 +155,12 @@ bool RgbControl::saver() const
 
 int RgbControl::sentHue() const
 {
-    return m_sentHue;
+    return wordHue(m_sentWord);
+}
+
+QString RgbControl::sentWord() const
+{
+    return m_sentWord;
 }
 
 bool RgbControl::ready() const
@@ -130,7 +168,7 @@ bool RgbControl::ready() const
     return m_probed && m_supported;
 }
 
-void RgbControl::start(const QString &mode, int hue)
+void RgbControl::start(const QString &mode, int hue, int level)
 {
     const QString m = mode.toLower();
     if (!Settings::rgbModes().contains(m))
@@ -143,6 +181,11 @@ void RgbControl::start(const QString &mode, int hue)
     if (m_hue != h) {
         m_hue = h;
         emit hueChanged();
+    }
+    const int l = level >= 1 && level <= levels ? level : 0;
+    if (m_level != l) {
+        m_level = l;
+        emit levelChanged();
     }
     probe();
 }
@@ -164,11 +207,23 @@ void RgbControl::setMode(const QString &mode)
 
 void RgbControl::setHue(int hue)
 {
+    setColor(hue, 0);
+}
+
+void RgbControl::setColor(int hue, int level)
+{
     const int h = Settings::normalizeHue(hue);
-    if (m_hue == h)
+    const int l = level >= 1 && level <= levels ? level : 0;
+    if (m_hue == h && m_level == l)
         return;
+    const bool hueMoved = m_hue != h;
+    const bool levelMoved = m_level != l;
     m_hue = h;
-    emit hueChanged();
+    m_level = l;
+    if (hueMoved)
+        emit hueChanged();
+    if (levelMoved)
+        emit levelChanged();
     if (ready() && m_mode == QLatin1StringView("accent"))
         m_hueTimer.start();
 }
@@ -182,7 +237,7 @@ void RgbControl::setScreenOff(bool off)
     if (off) {
         m_asleep = false;
         m_hueTimer.stop();
-        m_words.removeIf(isHueWord);
+        m_words.removeIf(isColorWord);
         updateBusy();
         return;
     }
@@ -202,7 +257,7 @@ void RgbControl::setSaver(bool on)
     emit saverChanged();
     if (on) {
         m_hueTimer.stop();
-        m_words.removeIf(isHueWord);
+        m_words.removeIf(isColorWord);
         if (!m_screenOff)
             sleepLights();
         updateBusy();
@@ -270,7 +325,7 @@ void RgbControl::applyMode()
     if (m_mode == QLatin1StringView("accent")) {
         queueHue();
     } else {
-        m_words.removeIf(isHueWord);
+        m_words.removeIf(isColorWord);
         startWords({m_mode == QLatin1StringView("off") ? QStringLiteral("rgb-off") : QStringLiteral("rgb-restore")});
     }
     if (m_mode == QLatin1StringView("off")) {
@@ -291,17 +346,18 @@ void RgbControl::queueHue()
 {
     if (!ready() || m_screenOff || m_saver || m_mode != QLatin1StringView("accent"))
         return;
-    m_words.removeIf(isHueWord);
-    int tail = m_sentHue;
+    m_words.removeIf(isColorWord);
+    QString tail = m_sentWord;
     for (const QString &word : std::as_const(m_words)) {
         if (!keepsHue(word))
-            tail = wordHue(word);
+            tail.clear();
     }
-    if (tail == m_hue) {
+    const QString word = colorWord(m_hue, m_level);
+    if (canonical(tail) == canonical(word)) {
         updateBusy();
         return;
     }
-    startWords({hueWord(m_hue)});
+    startWords({word});
 }
 
 void RgbControl::startWords(const QStringList &words)
@@ -320,7 +376,7 @@ void RgbControl::nextWord()
     }
     const QString word = m_words.takeFirst();
     if (!keepsHue(word))
-        m_sentHue = wordHue(word);
+        m_sentWord = isColorWord(word) ? word : QString();
     qInfo() << "casdap rgb: start" << unitFor(word);
     auto *process = new QProcess(this);
     m_word = process;
@@ -330,8 +386,8 @@ void RgbControl::nextWord()
         process->deleteLater();
         if (!ok) {
             qWarning() << "casdap rgb:" << word << "failed";
-            if (isHueWord(word) && m_sentHue == wordHue(word))
-                m_sentHue = -1;
+            if (isColorWord(word) && m_sentWord == word)
+                m_sentWord.clear();
         }
         qInfo() << "casdap rgb: applied" << word << ok;
         emit applied(word, ok);

@@ -6,6 +6,7 @@
 #include <QtMath>
 
 #include <cmath>
+#include <utility>
 
 namespace casdap {
 
@@ -22,6 +23,25 @@ double linear(int c)
     return v <= 0.04045 ? v / 12.92 : qPow((v + 0.055) / 1.055, 2.4);
 }
 
+bool lit(int hue, int saturation, int value)
+{
+    return AccentControl::luminance(AccentControl::hsv(hue, saturation / 100.0, value / 100.0))
+           >= AccentControl::minLuminance;
+}
+
+std::pair<int, int> fitArt(int hue, const QColor &tone)
+{
+    const int top = qRound(AccentControl::accentValue * 100);
+    const int least = qRound(AccentControl::minSaturation * 100);
+    int s = qBound(0, qRound(tone.hsvSaturationF() * 100), 100);
+    int v = qBound(0, qRound(tone.valueF() * 100), top);
+    while (v < top && !lit(hue, s, v))
+        ++v;
+    while (s > least && !lit(hue, s, v))
+        --s;
+    return {s, v};
+}
+
 }
 
 AccentControl::AccentControl(QObject *parent)
@@ -32,7 +52,7 @@ AccentControl::AccentControl(QObject *parent)
 
 QColor AccentControl::hsv(int hue, double saturation, double value)
 {
-    const double h = Settings::normalizeHue(hue) / 60.0;
+    const double h = (((hue % 360) + 360) % 360) / 60.0;
     const int k = int(h) % 6;
     const double f = h - std::floor(h);
     const double p = value * (1.0 - saturation);
@@ -80,22 +100,37 @@ double AccentControl::luminance(const QColor &color)
 
 double AccentControl::saturationFor(int hue)
 {
-    for (int step = 83; step >= 40; --step) {
+    const int h = Settings::normalizeHue(hue);
+    for (int step = qRound(maxSaturation * 100); step >= qRound(minSaturation * 100); --step) {
         const double s = step / 100.0;
-        if (luminance(hsv(hue, s, accentValue)) >= minLuminance)
+        if (luminance(hsv(h, s, accentValue)) >= minLuminance)
             return s;
     }
-    return 0.40;
+    return minSaturation;
 }
 
 QColor AccentControl::accentFor(int hue)
 {
-    return hsv(hue, saturationFor(hue), accentValue);
+    const int h = Settings::normalizeHue(hue);
+    return hsv(h, saturationFor(h), accentValue);
 }
 
 QColor AccentControl::brightFor(int hue)
 {
-    return hsv(hue, brightScale * saturationFor(hue), 1.0);
+    const int h = Settings::normalizeHue(hue);
+    return hsv(h, brightScale * saturationFor(h), 1.0);
+}
+
+QColor AccentControl::artAccentFor(int hue, const QColor &tone)
+{
+    const auto [s, v] = fitArt(hue, tone);
+    return hsv(hue, s / 100.0, v / 100.0);
+}
+
+QColor AccentControl::artBrightFor(int hue, const QColor &tone)
+{
+    const int s = fitArt(hue, tone).first;
+    return hsv(hue, brightScale * s / 100.0, 1.0);
 }
 
 int AccentControl::sliderHue() const
@@ -132,19 +167,34 @@ int AccentControl::artHue() const
     return m_artHue;
 }
 
+int AccentControl::artLevel() const
+{
+    return m_artLevel;
+}
+
+QColor AccentControl::artTone() const
+{
+    return m_artTone;
+}
+
 int AccentControl::hue() const
 {
     return m_hue;
 }
 
+int AccentControl::level() const
+{
+    return m_level;
+}
+
 QColor AccentControl::color() const
 {
-    return accentFor(m_hue);
+    return m_level > 0 ? artAccentFor(m_hue, m_tone) : accentFor(m_hue);
 }
 
 QColor AccentControl::brightColor() const
 {
-    return brightFor(m_hue);
+    return m_level > 0 ? artBrightFor(m_hue, m_tone) : brightFor(m_hue);
 }
 
 QString AccentControl::artPath() const
@@ -198,42 +248,51 @@ void AccentControl::clearCache()
 void AccentControl::refresh()
 {
     if (!m_fromArt || m_phoneActive || m_artPath.isEmpty()) {
-        setArtHue(-1);
+        setArt(ArtPick());
         return;
     }
     if (m_art.contains(m_artPath)) {
-        const int hue = m_art.cachedHue(m_artPath);
-        logArt(m_artPath, hue);
-        setArtHue(hue);
+        const ArtPick pick = m_art.cached(m_artPath);
+        logArt(m_artPath, pick);
+        setArt(pick);
         return;
     }
     m_art.request(m_artPath);
 }
 
-void AccentControl::onFound(const QString &path, int hue)
+void AccentControl::onFound(const QString &path, int hue, int level, const QColor &color)
 {
     if (path != m_artPath || !m_fromArt || m_phoneActive)
         return;
-    logArt(path, hue);
-    setArtHue(hue);
+    ArtPick pick;
+    pick.hue = hue;
+    pick.level = level;
+    pick.color = color;
+    logArt(path, pick);
+    setArt(pick);
 }
 
-void AccentControl::logArt(const QString &path, int hue)
+void AccentControl::logArt(const QString &path, const ArtPick &pick)
 {
     if (path == m_loggedPath)
         return;
     m_loggedPath = path;
-    if (hue >= 0)
-        qInfo().noquote() << QStringLiteral("casdap accent: art hue %1 for %2").arg(hue).arg(path);
+    if (pick.valid())
+        qInfo().noquote() << QStringLiteral("casdap accent: art hue %1 s %2 for %3").arg(pick.hue).arg(pick.level).arg(path);
     else
         qInfo().noquote() << QStringLiteral("casdap accent: no art hue for %1").arg(path);
 }
 
-void AccentControl::setArtHue(int hue)
+void AccentControl::setArt(const ArtPick &pick)
 {
-    if (m_artHue == hue)
+    const int hue = pick.valid() ? pick.hue : -1;
+    const int level = pick.valid() ? pick.level : 0;
+    const QColor tone = pick.valid() ? pick.color : QColor();
+    if (m_artHue == hue && m_artLevel == level && m_artTone == tone)
         return;
     m_artHue = hue;
+    m_artLevel = level;
+    m_artTone = tone;
     emit artHueChanged();
     updateHue();
 }
@@ -242,11 +301,16 @@ void AccentControl::updateHue()
 {
     const bool art = m_fromArt && m_artHue >= 0;
     const int value = art ? m_artHue : m_sliderHue;
-    if (m_hue == value)
+    const int level = art ? m_artLevel : 0;
+    const QColor tone = art ? m_artTone : QColor();
+    if (m_hue == value && m_level == level && m_tone == tone)
         return;
     m_hue = value;
-    qInfo().noquote() << QStringLiteral("casdap accent: hue %1 (%2)")
+    m_level = level;
+    m_tone = tone;
+    qInfo().noquote() << QStringLiteral("casdap accent: hue %1 s %2 (%3)")
                              .arg(value)
+                             .arg(art ? level : 4)
                              .arg(art ? QStringLiteral("art") : QStringLiteral("slider"));
     emit hueChanged();
 }
