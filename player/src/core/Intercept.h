@@ -4,6 +4,7 @@
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QDBusServiceWatcher>
+#include <QHash>
 #include <QMap>
 #include <QObject>
 #include <QSet>
@@ -62,6 +63,8 @@ private:
     bool m_everShown = false;
     QSet<QString> m_devices;
     QSet<QString> m_targets;
+    QSet<QString> m_inFlight;
+    QHash<QString, uint> m_pending;
     quint64 m_generation = 0;
 };
 

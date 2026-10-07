@@ -14,11 +14,15 @@ cat > "${T}/bin/evtest" <<'EOF'
 #!/usr/bin/bash
 script="${STATE}/script-$(basename "$1")"
 [[ -f "${script}" ]] || exec sleep 10
-ev() { echo "Event: time 0.0, type 1 (EV_KEY), code $1 ($2), value $3"; }
+ev() { echo "Event: time $(date +%s.%6N), type 1 (EV_KEY), code $1 ($2), value $3"; }
 while read -r step; do
     case "${step}" in
         press) ev 183 KEY_F13 1 ;;
         release) ev 183 KEY_F13 0 ;;
+        stale-release)
+            t=$(date +%s.%6N)
+            echo "Event: time $(( ${t%.*} - 1 )).${t#*.}, type 1 (EV_KEY), code 183 (KEY_F13), value 0"
+            ;;
         repeat) ev 183 KEY_F13 2 ;;
         up) ev 115 KEY_VOLUMEUP 1 ;;
         up-repeat) ev 115 KEY_VOLUMEUP 2 ;;
@@ -67,6 +71,9 @@ cat > "${T}/bin/busctl" <<'EOF'
 echo "busctl $*" >> "${STATE}/calls"
 case "$*" in
     *ToggleOverlay|*ShowSwitchPrompt)
+        if [[ -s "${STATE}/busctl-sleep" ]]; then
+            sleep "$(cat "${STATE}/busctl-sleep")"
+        fi
         if [[ -s "${STATE}/busctl-stderr" ]]; then
             cat "${STATE}/busctl-stderr" >&2
             exit 1
@@ -98,6 +105,7 @@ chmod 0755 "${T}"/bin/*
 export PATH="${T}/bin:${PATH}"
 export CASDAP_HOTKEYD_LONG_MS=200
 export CASDAP_HOTKEYD_CONFIRM_MS=1000
+export CASDAP_HOTKEYD_TAP_MAX_AGE_MS=600
 export CASDAP_HOTKEYD_DEVICE_WAIT_SEC=0
 export CASDAP_HOTKEYD_DEVICE_NAME=casdap-test-node
 export CASDAP_HOTKEYD_VOLUME_NAMES=casdap-test-volup:casdap-test-voldown
@@ -121,6 +129,7 @@ run_case() {
     echo "${OVERLAY:-inactive}" > "${STATE}/overlay"
     echo "${INTERCEPT:-0}" > "${STATE}/intercept"
     printf '%s' "${BUSCTL_ERR:-}" > "${STATE}/busctl-stderr"
+    printf '%s' "${BUSCTL_SLEEP:-}" > "${STATE}/busctl-sleep"
     [[ -z "$5" ]] || printf '%s\n' "$5" | tr ';' '\n' > "${STATE}/script-event0"
     [[ -z "${7:-}" ]] || printf '%s\n' "$7" | tr ';' '\n' > "${STATE}/script-event1"
     [[ "${8:-0}" == 0 ]] || : > "${STATE}/muted"
@@ -189,19 +198,42 @@ expect_no_call "systemctl start"
 expect_no_call "restart"
 expect_log "overlay player starting"
 
-OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=3 run_case "tap in game with a hung overlay holding the pad" game 0 0 "press;sleep 0.05;release"
+OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=3 run_case "tap in game with a hung overlay, single timeout" game 0 0 "press;sleep 0.05;release"
 expect_call "${toggle}"
+expect_no_call "${intercept}"
+expect_no_call "${restart}"
+expect_calls 1
+expect_log "overlay timeout, waiting for the next tap"
+
+OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=3 run_case "tap in game with a hung overlay holding the pad" game 0 0 "press;sleep 0.05;release;sleep 0.5;press;sleep 0.05;release"
+expect_call_count "${toggle}" 2
 expect_call "${intercept}"
 expect_call "${restart}"
-expect_calls 3
+expect_calls 4
 expect_no_call "systemctl start"
+expect_log "overlay timeout 2 in a row, pad held"
 
-OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=0 run_case "tap in game with a hung overlay, pad free" game 0 0 "press;sleep 0.05;release"
-expect_call "${toggle}"
+OVERLAY=active BUSCTL_ERR="Call failed: Connection timed out" INTERCEPT=0 run_case "tap in game with a hung overlay, pad free" game 0 0 "press;sleep 0.05;release;sleep 0.5;press;sleep 0.05;release"
+expect_call_count "${toggle}" 2
 expect_call "${intercept}"
 expect_no_call "${restart}"
+expect_calls 3
+expect_log "overlay timeout 2 in a row, pad free"
+
+OVERLAY=active BUSCTL_SLEEP=0.6 run_case "tap during a slow toggle is dropped" game 0 0 "press;sleep 0.05;release;sleep 0.15;press;sleep 0.05;release"
+expect_call_count "${toggle}" 1
+expect_calls 1
+expect_log "tap during a toggle, dropped"
+expect_log "ToggleOverlay rc=0 in"
+
+OVERLAY=active run_case "stale tap is dropped" game 0 0 "press;sleep 0.05;stale-release"
+expect_no_call "${toggle}"
+expect_calls 0
+expect_log "ms old, dropped"
+
+OVERLAY=active run_case "fresh taps toggle each time" game 0 0 "press;sleep 0.05;release;sleep 0.3;press;sleep 0.05;release"
+expect_call_count "${toggle}" 2
 expect_calls 2
-expect_log "overlay timeout, pad free"
 
 OVERLAY=active run_case "hold in game with background player" game 0 0 "press;sleep 0.4;release"
 expect_call "${switch}"

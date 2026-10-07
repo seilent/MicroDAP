@@ -32,6 +32,7 @@
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QImage>
+#include <QQuickGraphicsConfiguration>
 #include <QQuickWindow>
 #include <QTimer>
 #include <QQmlApplicationEngine>
@@ -337,6 +338,17 @@ int main(int argc, char *argv[])
     if (!engine.rootObjects().isEmpty()) {
         auto *root = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
         if (overlayMode) {
+            if (auto *quick = qobject_cast<QQuickWindow *>(root)) {
+                const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
+                                         + QStringLiteral("/casdap");
+                if (QDir().mkpath(cacheDir)) {
+                    const QString cacheFile = cacheDir + QStringLiteral("/overlay-pipeline.bin");
+                    QQuickGraphicsConfiguration config = quick->graphicsConfiguration();
+                    config.setPipelineCacheLoadFile(cacheFile);
+                    config.setPipelineCacheSaveFile(cacheFile);
+                    quick->setGraphicsConfiguration(config);
+                }
+            }
             overlay->setWindow(root, casdap::setOverlayAtoms);
             auto *toast = qobject_cast<QWindow *>(qvariant_cast<QObject *>(root->property("toastWindow")));
             if (toast)

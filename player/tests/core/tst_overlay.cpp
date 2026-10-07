@@ -95,6 +95,7 @@ private slots:
     void showRecreatesWindow();
     void toggleDuringShowFade();
     void toggleDuringHideFade();
+    void showDuringRelease();
     void showDuringShowFadeNoOp();
     void screenOffIgnored();
     void powerMenuIgnored();
@@ -552,6 +553,43 @@ void OverlayTest::toggleDuringHideFade()
     QCOMPARE(m_overlay->mapCount(), maps);
     QCOMPARE(mappedSpy.count(), 0);
     QVERIFY(m_player->positionPollEnabled());
+}
+
+void OverlayTest::showDuringRelease()
+{
+    settleHidden();
+    m_overlay->show();
+    QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->fading(), fadeTimeoutMs);
+    const int maps = m_overlay->mapCount();
+    auto armed = std::make_shared<bool>(true);
+    auto releasingAtProbe = std::make_shared<bool>(false);
+    const QMetaObject::Connection probe = connect(m_overlay.get(), &OverlayBridge::fadingChanged, this,
+                                                 [this, armed, releasingAtProbe] {
+        if (!*armed || m_overlay->fading() || m_overlay->shown())
+            return;
+        *armed = false;
+        *releasingAtProbe = m_overlay->releasing();
+        m_overlay->show();
+    }, Qt::QueuedConnection);
+    QSignalSpy mappedSpy(m_overlay.get(), &OverlayBridge::mappedChanged);
+
+    m_overlay->hide();
+    QTRY_VERIFY_WITH_TIMEOUT(!*armed, fadeTimeoutMs);
+    disconnect(probe);
+    QVERIFY(*releasingAtProbe);
+    QVERIFY(m_overlay->shown());
+    QVERIFY(!m_overlay->releasing());
+    QVERIFY(m_overlay->mapped());
+    QVERIFY(m_window->handle());
+    QVERIFY(m_window->isVisible());
+    QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
+    QTest::qWait(OverlayBridge::ReleaseFrameMs * 2);
+    QVERIFY(m_overlay->mapped());
+    QVERIFY(m_window->handle());
+    QCOMPARE(mappedSpy.count(), 0);
+    QCOMPARE(m_overlay->mapCount(), maps);
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
 }
 
 void OverlayTest::showDuringShowFadeNoOp()

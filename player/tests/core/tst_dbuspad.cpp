@@ -1,6 +1,7 @@
 #include "DbusPad.h"
 #include "Intercept.h"
 
+#include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
@@ -24,6 +25,7 @@ constexpr int firstLateMs = 100;
 constexpr int gapSlackMs = 10;
 constexpr int meanToleranceMs = 25;
 constexpr int repeatCount = 6;
+constexpr int writeDelayMs = 200;
 
 QString controlService()
 {
@@ -81,6 +83,7 @@ private slots:
     void pocketControls();
     void screenOff();
     void hideWritesZero();
+    void serializedWrites();
     void targetsComeAndGo();
     void destructorWritesZero();
     void hideThenDestroy();
@@ -88,6 +91,7 @@ private slots:
 private:
     QDBusMessage control(const QString &method, const QList<QVariant> &arguments = {});
     int mode(const QString &path);
+    QList<uint> writes(const QString &path);
     void emitEvent(const QString &target, const QString &name, double value);
     bool startFake();
 
@@ -109,6 +113,14 @@ int DbusPadTest::mode(const QString &path)
     if (reply.type() == QDBusMessage::ErrorMessage)
         return -1;
     return reply.arguments().value(0).toInt();
+}
+
+QList<uint> DbusPadTest::writes(const QString &path)
+{
+    const QDBusMessage reply = control(QStringLiteral("Writes"), {path});
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return {};
+    return qdbus_cast<QList<uint>>(reply.arguments().value(0));
 }
 
 void DbusPadTest::emitEvent(const QString &target, const QString &name, double value)
@@ -436,6 +448,36 @@ void DbusPadTest::hideWritesZero()
     m_pad->setShown(false);
     QTest::qWait(quietMs);
     QCOMPARE(mode(devicePath(0)), 0);
+}
+
+void DbusPadTest::serializedWrites()
+{
+    QVERIFY(!m_pad->shown());
+    QTest::qWait(quietMs);
+    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("SetDelay"), {QVariant::fromValue(uint(writeDelayMs))}).type(),
+             QDBusMessage::ReplyMessage);
+    auto restore = qScopeGuard([this] { control(QStringLiteral("SetDelay"), {QVariant::fromValue(0u)}); });
+
+    m_pad->setShown(true);
+    m_pad->setShown(false);
+    m_pad->setShown(true);
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
+    QTest::qWait(writeDelayMs + quietMs);
+    const QList<uint> shown{3};
+    QCOMPARE(writes(devicePath(0)), shown);
+    QCOMPARE(writes(devicePath(1)), shown);
+    QCOMPARE(writes(devicePath(2)), shown);
+    QCOMPARE(mode(devicePath(1)), 3);
+
+    m_pad->setShown(false);
+    m_pad->setShown(true);
+    m_pad->setShown(false);
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QTest::qWait(writeDelayMs + quietMs);
+    const QList<uint> hidden{3, 0};
+    QCOMPARE(writes(devicePath(0)), hidden);
+    QCOMPARE(mode(devicePath(1)), 0);
 }
 
 void DbusPadTest::targetsComeAndGo()

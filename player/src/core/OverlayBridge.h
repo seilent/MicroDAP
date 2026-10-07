@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QEasingCurve>
+#include <QElapsedTimer>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -31,6 +32,7 @@ public:
     static constexpr int ShowMs = 200;
     static constexpr int HideMs = 150;
     static constexpr int WatchdogMs = 7000;
+    static constexpr int ReleaseFrameMs = 100;
 
     using WindowPrepare = std::function<void(QWindow *)>;
 
@@ -55,6 +57,7 @@ public:
     qreal opacity() const;
     bool fading() const;
     bool sleeping() const;
+    bool releasing() const;
     int mapCount() const;
     int toastMapCount() const;
     bool watchdogActive() const;
@@ -73,7 +76,12 @@ signals:
     void fadingChanged();
     void sleepingChanged();
 
+private slots:
+    void onFrameSwapped();
+
 private:
+    enum class Phase { Hidden, Showing, Shown, Hiding, Releasing };
+
     void fadeTo(qreal to, int ms, QEasingCurve::Type curve);
     void onFadeFinished();
     void onFadeState();
@@ -82,7 +90,11 @@ private:
     void setMapped(bool mapped);
     void setSleeping(bool sleeping);
     void mapWindow();
+    void beginRelease();
+    void finishRelease();
+    void saveHidden();
     void destroyWindow();
+    void step(const char *name) const;
     void notifyReady();
     void ping();
 
@@ -96,6 +108,13 @@ private:
     SleepInhibitor *m_sleep;
     QVariantAnimation m_fade;
     QTimer m_watchdog;
+    QTimer m_release;
+    QElapsedTimer m_clock;
+    Phase m_phase = Phase::Hidden;
+    quint64 m_releaseGeneration = 0;
+    bool m_releaseArmed = false;
+    bool m_frames = false;
+    bool m_firstFrame = false;
     bool m_ready = false;
     bool m_shown = false;
     bool m_mapped = false;

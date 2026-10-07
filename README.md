@@ -487,10 +487,19 @@ created unmapped with `STEAM_OVERLAY` 1 and `GAMESCOPE_NO_FOCUS` 1 and the windo
 fullscreen before the first map; gamescope draws it as its global overlay and keeps focus and game
 audio with the game. `STEAM_GAME` and the baselayer appid are never set. `ShowOverlay` flips `OverlayShown` and
 emits `PropertiesChanged`, writes `InterceptMode` 3, maps and fades in over 200 ms; `HideOverlay`
-flips it back, writes 0, fades out over 150 ms, unmaps and destroys the X window (gamescope keeps an
+flips it back, writes 0 and fades out over 150 ms. After the fade it waits for the next swapped frame
+(at most `ReleaseFrameMs`, 100 ms), then unmaps and destroys the X window back to back (gamescope keeps an
 unmapped window registered as its overlay and composites a blank frame over Steam; a destroyed one is
-gone). The QML root and its page stack stay alive; the next `ShowOverlay` creates the window again
-with the same atoms and state before mapping. `ToggleOverlay` during a fade reverses it from
+gone) and saves `state.json` on a zero timer after the destroy. A show during that wait keeps the window
+and fades in again. The QML root and its page stack stay alive; the next `ShowOverlay` creates the window again
+with the same atoms and state before mapping. The overlay window has swap interval 0, the atoms are
+interned once per process, and the scene graph pipeline cache is
+`$XDG_CACHE_HOME/casdap/overlay-pipeline.bin` (loaded at init, saved at each destroy). `InterceptMode`
+goes out one write per device at a time: a write asked for while one is in flight waits and only the
+newest one is sent, none when it equals the one in flight. The journal carries one
+`casdap overlay: <step> after <n> ms` line per step from the request: `created`, `mapped`, `first frame`,
+`fade done` on a show, `fade done`, `last frame` (or `no frame`), `unmapped`, `destroyed`, `saved` on a
+hide. `ToggleOverlay` during a fade reverses it from
 the current opacity without a second map or destroy; `Show` during a show fade and `Hide` during a hide fade do
 nothing. `SetScreenOff` and `ShowPowerMenu` are logged and ignored in this mode. While hidden the
 4 Hz position poll is off (`position` is read from `playbin` for each save), `StatusModel` and the
@@ -656,10 +665,14 @@ While a title runs the first hold is ignored and a
 second hold within 3 s switches. Tap in game mode runs `systemctl --user is-active
 casdap-overlay.service`; `active` means a background player exists and the tap calls
 `busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay`,
-anything else logs `no background player`. `Call failed: The name is not activatable` (the unit is
-still starting) logs `overlay player starting`; `Call failed: Connection timed out` runs
-`casdap-intercept get` and restarts `casdap-overlay.service` when it prints `3`, else logs `overlay
-timeout, pad free`. hotkeyd never starts the unit. Hold in casdap calls `busctl --user call
+anything else logs `no background player`. The tap takes its time from the `evtest` event line: a tap
+whose release came before the last `ToggleOverlay` call returned logs `tap during a toggle, dropped`, one
+older than `CASDAP_HOTKEYD_TAP_MAX_AGE_MS` (default 300) logs `tap <n> ms old, dropped`, and each call
+logs `ToggleOverlay rc=<rc> in <n> ms`. `Call failed: The name is not activatable` (the unit is
+still starting) logs `overlay player starting`; a first `Call failed: Connection timed out` logs `overlay
+timeout, waiting for the next tap`, a second in a row runs `casdap-intercept get` and restarts
+`casdap-overlay.service` when it prints `3`, else logs `pad free`; any other result resets the count.
+hotkeyd never starts the unit. Hold in casdap calls `busctl --user call
 org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt` (the player opens the switch
 prompt, a second hold closes it); `Call failed: The name is not activatable` (no player on the bus) logs
 `no player, switching back` and starts `casdap-switch-back.service`, any other failure is logged. With the

@@ -3,6 +3,7 @@ set -uo pipefail
 
 LONG_MS="${CASDAP_HOTKEYD_LONG_MS:-1000}"
 CONFIRM_MS="${CASDAP_HOTKEYD_CONFIRM_MS:-3000}"
+TAP_MAX_AGE_MS="${CASDAP_HOTKEYD_TAP_MAX_AGE_MS:-300}"
 DEVICE_WAIT_SEC="${CASDAP_HOTKEYD_DEVICE_WAIT_SEC:-15}"
 DEVICE_NAME="${CASDAP_HOTKEYD_DEVICE_NAME:-InputPlumber Keyboard}"
 VOLUME_NAMES="${CASDAP_HOTKEYD_VOLUME_NAMES-gpio-keys:pm8941_resin}"
@@ -17,6 +18,13 @@ PATH="${PATH}:/usr/libexec/casdap"
 log() { logger -t casdap-hotkeyd -- "$*"; }
 
 now_ms() { date +%s%3N; }
+
+event_ms() {
+    local re='time ([0-9]+)\.([0-9]+),' usec
+    [[ "$1" =~ ${re} ]] || return 0
+    usec="${BASH_REMATCH[2]}000000"
+    printf '%d\n' $(( BASH_REMATCH[1] * 1000 + 10#${usec:0:3} ))
+}
 
 run() {
     if [[ "${DRY_RUN}" == 1 ]]; then
@@ -88,31 +96,64 @@ plasma_running() { pgrep -x plasmashell >/dev/null 2>&1; }
 last_hold_ms=0
 vol_key=
 vol_session=
+toggle_end_ms=0
+toggle_timeouts=0
 
 toggle_overlay() {
-    local err rc=0
+    local err rc=0 start
+    start=$(now_ms)
     if [[ "${DRY_RUN}" == 1 ]]; then
         run busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay
+        toggle_end_ms=$(now_ms)
         return 0
     fi
     err=$(busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay 2>&1 >/dev/null) || rc=$?
+    toggle_end_ms=$(now_ms)
+    log "ToggleOverlay rc=${rc} in $((toggle_end_ms - start)) ms"
+    case "${err}" in
+        *"Connection timed out"*) ;;
+        *) toggle_timeouts=0 ;;
+    esac
     (( rc == 0 )) && return 0
     case "${err}" in
         *"The name is not activatable"*)
             log "overlay player starting"
             ;;
         *"Connection timed out"*)
-            if [[ "$(casdap-intercept get 2>/dev/null)" == 3 ]]; then
-                log "overlay timeout, pad held, restarting casdap-overlay.service"
+            toggle_timeouts=$((toggle_timeouts + 1))
+            if (( toggle_timeouts < 2 )); then
+                log "overlay timeout, waiting for the next tap"
+            elif [[ "$(casdap-intercept get 2>/dev/null)" == 3 ]]; then
+                log "overlay timeout ${toggle_timeouts} in a row, pad held, restarting casdap-overlay.service"
+                toggle_timeouts=0
                 run systemctl --user restart casdap-overlay.service
             else
-                log "overlay timeout, pad free"
+                log "overlay timeout ${toggle_timeouts} in a row, pad free"
             fi
             ;;
         *)
             log "failed: ToggleOverlay (rc=${rc}) ${err}"
             ;;
     esac
+}
+
+tap_overlay() {
+    local tap_ms=$1 age
+    if [[ -n "${tap_ms}" ]]; then
+        age=$(( $(now_ms) - tap_ms ))
+        if (( age >= 0 && age < 60000 )); then
+            if (( tap_ms <= toggle_end_ms )); then
+                log "tap during a toggle, dropped"
+                return 0
+            fi
+            if (( age > TAP_MAX_AGE_MS )); then
+                log "tap ${age} ms old, dropped"
+                return 0
+            fi
+            log "tap ${age} ms old"
+        fi
+    fi
+    toggle_overlay
 }
 
 show_switch_prompt() {
@@ -139,7 +180,7 @@ on_tap() {
         casdap) run busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause ;;
         game)
             if [[ "$(systemctl --user is-active casdap-overlay.service 2>/dev/null)" == active ]]; then
-                toggle_overlay
+                tap_overlay "${2:-}"
             else
                 log "no background player"
             fi
@@ -266,7 +307,7 @@ main() {
                 ;;
             *"(${KEY}), value 0"*)
                 case "${state}" in
-                    held) on_tap "${session}" ;;
+                    held) on_tap "${session}" "$(event_ms "${line}")" ;;
                 esac
                 state=idle
                 ;;

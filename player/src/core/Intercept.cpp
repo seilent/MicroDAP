@@ -289,12 +289,28 @@ void Intercept::write(const QString &path, uint mode, bool retry)
         qWarning() << "casdap intercept: bus not connected, skipping" << path << mode;
         return;
     }
+    if (m_inFlight.contains(path)) {
+        m_pending.insert(path, mode);
+        return;
+    }
+    m_inFlight.insert(path);
     auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(setModeCall(path, mode)), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
             [this, path, mode, retry](QDBusPendingCallWatcher *finished) {
         finished->deleteLater();
+        m_inFlight.remove(path);
         const QDBusMessage reply = finished->reply();
-        if (reply.type() != QDBusMessage::ErrorMessage)
+        const bool failed = reply.type() == QDBusMessage::ErrorMessage;
+        const bool queued = m_pending.contains(path);
+        const uint next = m_pending.take(path);
+        if (queued && m_devices.contains(path)) {
+            if (failed)
+                qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
+            if (failed || next != mode)
+                write(path, next);
+            return;
+        }
+        if (!failed)
             return;
         if (mode == ModeNone && !retry) {
             qWarning() << "casdap intercept: intercept release failed" << path << reply.errorMessage();

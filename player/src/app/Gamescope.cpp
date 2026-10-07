@@ -1,6 +1,9 @@
 #include "Gamescope.h"
 
+#include <QByteArray>
 #include <QGuiApplication>
+#include <QHash>
+#include <QSurfaceFormat>
 #include <QTextStream>
 #include <QWindow>
 
@@ -15,6 +18,11 @@ namespace {
 
 xcb_atom_t atom(xcb_connection_t *connection, const char *name)
 {
+    static QHash<QByteArray, xcb_atom_t> cache;
+    const QByteArray key(name);
+    const auto found = cache.constFind(key);
+    if (found != cache.cend())
+        return found.value();
     const xcb_intern_atom_cookie_t cookie
         = xcb_intern_atom(connection, 0, static_cast<uint16_t>(std::strlen(name)), name);
     xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(connection, cookie, nullptr);
@@ -22,6 +30,8 @@ xcb_atom_t atom(xcb_connection_t *connection, const char *name)
         return XCB_ATOM_NONE;
     const xcb_atom_t result = reply->atom;
     std::free(reply);
+    if (result != XCB_ATOM_NONE)
+        cache.insert(key, result);
     return result;
 }
 
@@ -42,8 +52,14 @@ bool applyOverlayAtoms(QWindow *window, bool fullscreen)
         QTextStream(stderr) << "casdap-player: overlay mode needs the xcb platform\n";
         return false;
     }
-    if (!window->handle())
+    if (!window->handle()) {
+        if (fullscreen) {
+            QSurfaceFormat format = window->requestedFormat();
+            format.setSwapInterval(0);
+            window->setFormat(format);
+        }
         window->create();
+    }
     if (fullscreen)
         window->setWindowState(Qt::WindowFullScreen);
     xcb_connection_t *connection = x11->connection();

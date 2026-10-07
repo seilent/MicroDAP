@@ -43,12 +43,23 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     connect(&m_watchdog, &QTimer::timeout, this, &OverlayBridge::ping);
     if (!notifySocket().isEmpty())
         m_watchdog.start();
+
+    m_clock.start();
+    m_release.setSingleShot(true);
+    m_release.setInterval(ReleaseFrameMs);
+    connect(&m_release, &QTimer::timeout, this, [this] {
+        if (m_phase != Phase::Releasing)
+            return;
+        step("no frame");
+        finishRelease();
+    });
 }
 
 OverlayBridge::~OverlayBridge()
 {
     m_fade.stop();
     m_watchdog.stop();
+    m_release.stop();
     if (m_pad)
         m_pad->setShown(false);
 }
@@ -99,7 +110,12 @@ QWindow *OverlayBridge::window() const
 
 void OverlayBridge::setWindow(QWindow *window, WindowPrepare prepare)
 {
+    if (m_window && m_frames)
+        disconnect(m_window.data(), SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
     m_window = window;
+    m_frames = m_window && m_window->metaObject()->indexOfSignal("frameSwapped()") >= 0;
+    if (m_frames)
+        connect(m_window.data(), SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
     m_prepare = prepare ? std::move(prepare) : WindowPrepare([](QWindow *target) { target->create(); });
     if (m_window && !m_window->handle())
         m_prepare(m_window);
@@ -168,6 +184,11 @@ bool OverlayBridge::sleeping() const
     return m_sleeping;
 }
 
+bool OverlayBridge::releasing() const
+{
+    return m_phase == Phase::Releasing;
+}
+
 int OverlayBridge::mapCount() const
 {
     return m_mapCount;
@@ -187,8 +208,12 @@ void OverlayBridge::show()
 {
     if (m_shown)
         return;
+    m_clock.start();
+    m_release.stop();
+    m_releaseArmed = false;
+    m_phase = Phase::Showing;
     m_shown = true;
-    qInfo() << "casdap overlay: shown";
+    qInfo() << "casdap overlay: show requested";
     emit shownChanged();
     if (m_pad)
         m_pad->setShown(true);
@@ -203,8 +228,10 @@ void OverlayBridge::hide()
 {
     if (!m_shown)
         return;
+    m_clock.start();
+    m_phase = Phase::Hiding;
     m_shown = false;
-    qInfo() << "casdap overlay: hidden";
+    qInfo() << "casdap overlay: hide requested";
     emit shownChanged();
     if (m_pad)
         m_pad->setShown(false);
@@ -265,14 +292,69 @@ void OverlayBridge::fadeTo(qreal to, int ms, QEasingCurve::Type curve)
 void OverlayBridge::onFadeFinished()
 {
     setOpacity(m_fade.endValue().toReal());
-    if (m_shown || m_opacity > 0.0)
+    step("fade done");
+    if (m_shown) {
+        m_phase = Phase::Shown;
         return;
+    }
+    if (m_opacity > 0.0)
+        return;
+    beginRelease();
+}
+
+void OverlayBridge::onFrameSwapped()
+{
+    if (m_firstFrame) {
+        m_firstFrame = false;
+        step("first frame");
+    }
+    if (m_phase != Phase::Releasing || !m_releaseArmed)
+        return;
+    m_releaseArmed = false;
+    const quint64 generation = m_releaseGeneration;
+    QMetaObject::invokeMethod(this, [this, generation] {
+        if (m_phase != Phase::Releasing || generation != m_releaseGeneration)
+            return;
+        step("last frame");
+        finishRelease();
+    }, Qt::QueuedConnection);
+}
+
+void OverlayBridge::beginRelease()
+{
+    if (!m_window || !m_window->handle() || !m_window->isVisible() || !m_frames) {
+        finishRelease();
+        return;
+    }
+    m_phase = Phase::Releasing;
+    m_releaseArmed = false;
+    const quint64 generation = ++m_releaseGeneration;
+    QMetaObject::invokeMethod(this, [this, generation] {
+        if (m_phase == Phase::Releasing && generation == m_releaseGeneration)
+            m_releaseArmed = true;
+    }, Qt::QueuedConnection);
+    m_release.start();
+    QMetaObject::invokeMethod(m_window.data(), "update", Qt::DirectConnection);
+}
+
+void OverlayBridge::finishRelease()
+{
+    m_release.stop();
+    m_releaseArmed = false;
+    m_phase = Phase::Hidden;
     setMapped(false);
     destroyWindow();
     if (m_player)
         m_player->setPositionPollEnabled(false);
-    if (m_state)
+    QTimer::singleShot(0, this, &OverlayBridge::saveHidden);
+}
+
+void OverlayBridge::saveHidden()
+{
+    if (m_state) {
         m_state->save(false);
+        step("saved");
+    }
     if (m_sleeping)
         m_sleep->release();
 }
@@ -337,9 +419,15 @@ void OverlayBridge::mapWindow()
 {
     if (!m_window)
         return;
-    if (!m_window->handle())
+    if (!m_window->handle()) {
         m_prepare(m_window);
+        step("created");
+    }
+    if (m_window->isVisible())
+        return;
+    m_firstFrame = m_frames;
     m_window->setVisible(true);
+    step("mapped");
 }
 
 void OverlayBridge::destroyWindow()
@@ -347,7 +435,14 @@ void OverlayBridge::destroyWindow()
     if (!m_window || !m_window->handle())
         return;
     m_window->setVisible(false);
+    step("unmapped");
     m_window->destroy();
+    step("destroyed");
+}
+
+void OverlayBridge::step(const char *name) const
+{
+    qInfo().nospace() << "casdap overlay: " << name << " after " << m_clock.elapsed() << " ms";
 }
 
 void OverlayBridge::notifyReady()

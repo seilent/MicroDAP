@@ -34,9 +34,11 @@ class UnknownObject(dbus.DBusException):
 
 
 class CompositeDevice(dbus.service.Object):
-    def __init__(self, bus, path):
+    def __init__(self, bus, path, fake):
         super().__init__(bus, path)
         self.path = path
+        self.fake = fake
+        self.writes = []
         self.props = {
             'Name': dbus.String('Fake Composite'),
             'InterceptMode': dbus.UInt32(0),
@@ -58,15 +60,20 @@ class CompositeDevice(dbus.service.Object):
             raise InvalidArgs(interface)
         return dbus.Dictionary(self.props, signature='sv')
 
-    @dbus.service.method(PROPERTIES, in_signature='ssv', out_signature='')
-    def Set(self, interface, name, value):
+    @dbus.service.method(PROPERTIES, in_signature='ssv', out_signature='', async_callbacks=('reply', 'error'))
+    def Set(self, interface, name, value, reply, error):
         if interface != COMPOSITE or name != 'InterceptMode':
             raise InvalidArgs(f'{interface}.{name}')
         if not isinstance(value, dbus.UInt32):
             raise InvalidArgs(f'{name}: {type(value).__name__}')
         self.props[name] = dbus.UInt32(value)
+        self.writes.append(int(value))
         self.PropertiesChanged(COMPOSITE, dbus.Dictionary({name: self.props[name]}, signature='sv'),
                                dbus.Array([], signature='s'))
+        if self.fake.delay_ms > 0:
+            GLib.timeout_add(self.fake.delay_ms, lambda: reply() or False)
+        else:
+            reply()
 
     @dbus.service.signal(PROPERTIES, signature='sa{sv}as')
     def PropertiesChanged(self, interface, changed, invalidated):
@@ -133,6 +140,23 @@ class Control(dbus.service.Object):
             raise UnknownObject(str(path))
         return obj.props['InterceptMode']
 
+    @dbus.service.method(CONTROL, in_signature='s', out_signature='au')
+    def Writes(self, path):
+        obj = self.fake.objects.get(str(path))
+        if not isinstance(obj, CompositeDevice):
+            raise UnknownObject(str(path))
+        return dbus.Array([dbus.UInt32(v) for v in obj.writes], signature='u')
+
+    @dbus.service.method(CONTROL, in_signature='', out_signature='')
+    def ClearWrites(self):
+        for obj in self.fake.objects.values():
+            if isinstance(obj, CompositeDevice):
+                obj.writes = []
+
+    @dbus.service.method(CONTROL, in_signature='u', out_signature='')
+    def SetDelay(self, ms):
+        self.fake.delay_ms = int(ms)
+
     @dbus.service.method(CONTROL, in_signature='', out_signature='as')
     def Devices(self):
         return dbus.Array([dbus.String(p) for p, o in self.fake.objects.items() if isinstance(o, CompositeDevice)],
@@ -167,6 +191,7 @@ class Fake:
         self.bus = bus
         self.objects = {}
         self.next_device = 0
+        self.delay_ms = 0
         self.root = Root(bus, self)
         self.control = Control(bus, self, loop)
         self.add_device(announce=False)
@@ -178,7 +203,7 @@ class Fake:
     def add_device(self, announce=True):
         path = f'{ROOT}/CompositeDevice{self.next_device}'
         self.next_device += 1
-        device = CompositeDevice(self.bus, path)
+        device = CompositeDevice(self.bus, path, self)
         self.objects[path] = device
         if announce:
             self.root.InterfacesAdded(dbus.ObjectPath(path), device.interfaces())
