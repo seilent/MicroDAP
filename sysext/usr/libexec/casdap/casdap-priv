@@ -135,28 +135,54 @@ rgb_save() {
     mv "${tmp}" "${rgb_before}"
 }
 
-rgb_accent() {
-    local out line brightness= max=
+hue_hex() {
+    local h=$1 k f up down
+    k=$(( h / 60 ))
+    f=$(( h % 60 ))
+    up=$(( (255 * f + 30) / 60 ))
+    down=$(( (255 * (60 - f) + 30) / 60 ))
+    case "${k}" in
+        0) printf '%02X%02X%02X' 255 "${up}" 0 ;;
+        1) printf '%02X%02X%02X' "${down}" 255 0 ;;
+        2) printf '%02X%02X%02X' 0 255 "${up}" ;;
+        3) printf '%02X%02X%02X' 0 "${down}" 255 ;;
+        4) printf '%02X%02X%02X' "${up}" 0 255 ;;
+        5) printf '%02X%02X%02X' 255 0 "${down}" ;;
+    esac
+}
+
+rgb_hue() {
+    local out line hex enabled= link= brightness= max= saturation=
+    hex=$(hue_hex "$1")
     rgb_save
     if ! out=$("${rgb}" get); then
         echo "casdap-priv: armada-rgb get failed" >&2
         exit 1
     fi
     while IFS= read -r line; do
-        [[ "${line}" =~ ^[[:space:]]*\"([A-Za-z]+)\":[[:space:]]*([0-9]+) ]] || continue
+        [[ "${line}" =~ ^[[:space:]]*\"([A-Za-z]+)\":[[:space:]]*(true|false|[0-9]+) ]] || continue
         case "${BASH_REMATCH[1]}" in
-            brightness)    brightness=${BASH_REMATCH[2]} ;;
-            maxBrightness) max=${BASH_REMATCH[2]} ;;
+            enabled)        enabled=${BASH_REMATCH[2]} ;;
+            linkBrightness) link=${BASH_REMATCH[2]} ;;
+            brightness)     brightness=${BASH_REMATCH[2]} ;;
+            maxBrightness)  max=${BASH_REMATCH[2]} ;;
+            saturation)     saturation=${BASH_REMATCH[2]} ;;
         esac
     done <<< "${out}"
-    if [[ -z "${brightness}" || -z "${max}" ]]; then
-        echo "casdap-priv: armada-rgb get gave no brightness" >&2
+    if [[ "${enabled}" != true && "${enabled}" != false ]] || [[ "${link}" != true && "${link}" != false ]] \
+        || [[ ! "${brightness}" =~ ^[0-9]+$ || ! "${max}" =~ ^[0-9]+$ || ! "${saturation}" =~ ^[0-9]+$ ]]; then
+        echo "casdap-priv: armada-rgb get lacks a key" >&2
         exit 1
     fi
-    if (( max == 0 )); then
-        max=50
-    fi
-    rgb_run set --enabled true --link-brightness true --color "$1" --brightness "${brightness}" --max-brightness "${max}"
+    rgb_run set --enabled "${enabled}" --link-brightness "${link}" --max-brightness "${max}" --color "${hex}" \
+        --saturation "${saturation}" --brightness "${brightness}"
+}
+
+hue_word() {
+    local n=${1#rgb-hue-}
+    [[ "${n}" =~ ^(0|[1-9][0-9]{1,2})$ ]] || exit 1
+    (( n % 10 == 0 && n <= 350 )) || exit 1
+    rgb_hue "${n}"
 }
 
 rgb_off() {
@@ -203,11 +229,7 @@ case "$1" in
     spk-gain-102)        spk_gain 102 ;;
     spk-gain-105)        spk_gain 105 ;;
     spk-gain-108)        spk_gain 108 ;;
-    rgb-accent-pink)     rgb_accent FA2A55 ;;
-    rgb-accent-orange)   rgb_accent F09609 ;;
-    rgb-accent-cyan)     rgb_accent 1BA1E2 ;;
-    rgb-accent-lime)     rgb_accent 339933 ;;
-    rgb-accent-purple)   rgb_accent A200FF ;;
+    rgb-hue-*)           hue_word "$1" ;;
     rgb-off)             rgb_off ;;
     rgb-sleep)           rgb_run sleep ;;
     rgb-wake)            rgb_run wake ;;

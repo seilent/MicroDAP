@@ -320,22 +320,29 @@ run spk-gain-102
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
 expect_calls "amixer[-D][hw:0][cset][name=WSA_RX0 Digital Volume][102]" "amixer[-D][hw:0][cset][name=WSA_RX1 Digital Volume][102]"
 
-accent_set="armada-rgb[set][--enabled][true][--link-brightness][true][--color]"
 rgb_get="armada-rgb[get]"
 rgb_off="armada-rgb[off]"
 rgb_apply="armada-rgb[apply]"
 steam_config='{"version":1,"enabled":true,"linkBrightness":false,"brightness":40,"maxBrightness":50,"color":"00FF00","saturation":100}'
 
-accent_call() { printf '%s[%s][--brightness][%s][--max-brightness][%s]' "${accent_set}" "$1" "$2" "$3"; }
+hue_call() {
+    printf 'armada-rgb[set][--enabled][%s][--link-brightness][%s][--max-brightness][%s][--color][%s][--saturation][%s][--brightness][%s]' \
+        "$2" "$3" "$4" "$1" "$5" "$6"
+}
 
-for pair in "pink FA2A55" "orange F09609" "cyan 1BA1E2" "lime 339933" "purple A200FF"; do
-    read -r name hex <<< "${pair}"
-    case_name="rgb-accent-${name}"
+rgb_answer() {
+    printf '{\n  "version": 1,\n  "enabled": %s,\n  "linkBrightness": %s,\n  "brightness": %s,\n  "maxBrightness": %s,\n  "color": "FFFFFF",\n  "saturation": %s\n}\n' \
+        "$1" "$2" "$3" "$4" "$5" > "${RGB_GET}"
+}
+
+for pair in "0 FF0000" "20 FF5500" "120 00FF00" "200 00AAFF" "280 AA00FF" "350 FF002B"; do
+    read -r hue hex <<< "${pair}"
+    case_name="rgb-hue-${hue}"
     reset
     rgb_config "${steam_config}"
-    run "rgb-accent-${name}"
+    run "rgb-hue-${hue}"
     [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-    expect_calls "${rgb_get}" "$(accent_call "${hex}" 30 60)"
+    expect_calls "${rgb_get}" "$(hue_call "${hex}" true true 60 100 30)"
     [[ -f "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
     [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
     [[ ! -e "${CASDAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
@@ -344,58 +351,81 @@ for pair in "pink FA2A55" "orange F09609" "cyan 1BA1E2" "lime 339933" "purple A2
     [[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "${case_name} wrote the cpu save file"
 done
 
-case_name="rgb-accent-cyan with a save present"
+for (( hue = 0; hue <= 350; hue += 10 )); do
+    case_name="rgb-hue-${hue} argv"
+    reset
+    rgb_answer false true 30 60 50
+    run "rgb-hue-${hue}"
+    [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+    calls=$(cat "${STATE}")
+    [[ "${calls}" =~ ^armada-rgb\[get\]$'\n'armada-rgb\[set\]\[--enabled\]\[false\]\[--link-brightness\]\[true\]\[--max-brightness\]\[60\]\[--color\]\[([0-9A-F]{6})\]\[--saturation\]\[50\]\[--brightness\]\[30\]$ ]] \
+        || fail "${case_name}: calls were:"$'\n'"${calls}"
+done
+
+case_name="rgb-hue-200 with Armada lights off"
+reset
+rgb_config "${steam_config}"
+rgb_answer false false 12 0 50
+run rgb-hue-200
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_get}" "$(hue_call 00AAFF false false 0 50 12)"
+
+case_name="rgb-hue-350 with maxBrightness 0 and linked brightness"
+reset
+rgb_config "${steam_config}"
+rgb_answer true true 0 0 100
+run rgb-hue-350
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_calls "${rgb_get}" "$(hue_call FF002B true true 0 100 0)"
+
+case_name="rgb-hue-200 with a save present"
 reset
 rgb_config "${steam_config}"
 mkdir -p "${T}/run"
 echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
-run rgb-accent-cyan
+run rgb-hue-200
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
-expect_calls "${rgb_get}" "$(accent_call 1BA1E2 30 60)"
+expect_calls "${rgb_get}" "$(hue_call 00AAFF true true 60 100 30)"
 
-case_name="rgb-accent-lime without a config"
+case_name="rgb-hue-120 without a config"
 reset
-run rgb-accent-lime
+run rgb-hue-120
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 [[ -f "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
 [[ ! -s "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
 [[ ! -e "${CASDAP_RGB_CONFIG}" ]] || fail "${case_name}: config created by the word"
-expect_calls "${rgb_get}" "$(accent_call 339933 30 60)"
+expect_calls "${rgb_get}" "$(hue_call 00FF00 true true 60 100 30)"
 
-case_name="rgb-accent-pink with maxBrightness 0"
-reset
-rgb_config "${steam_config}"
-printf '{\n  "version": 1,\n  "enabled": false,\n  "linkBrightness": false,\n  "brightness": 0,\n  "maxBrightness": 0,\n  "color": "FFFFFF",\n  "saturation": 100\n}\n' > "${RGB_GET}"
-run rgb-accent-pink
-[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-expect_calls "${rgb_get}" "$(accent_call FA2A55 0 50)"
-
-case_name="rgb-accent-cyan with a failing set"
+case_name="rgb-hue-200 with a failing set"
 reset
 rgb_config "${steam_config}"
 echo set > "${RGB_FAIL}"
-run rgb-accent-cyan
+run rgb-hue-200
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
 [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
-expect_calls "${rgb_get}" "$(accent_call 1BA1E2 30 60)"
+expect_calls "${rgb_get}" "$(hue_call 00AAFF true true 60 100 30)"
 
-case_name="rgb-accent-cyan with a failing get"
+case_name="rgb-hue-200 with a failing get"
 reset
 rgb_config "${steam_config}"
 echo get > "${RGB_FAIL}"
-run rgb-accent-cyan
+run rgb-hue-200
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
 [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
 expect_calls "${rgb_get}"
 
-case_name="rgb-accent-cyan with a get lacking brightness"
-reset
-rgb_config "${steam_config}"
-printf '{\n  "version": 1\n}\n' > "${RGB_GET}"
-run rgb-accent-cyan
-[[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
-expect_calls "${rgb_get}"
+for key in enabled linkBrightness brightness maxBrightness saturation; do
+    case_name="rgb-hue-200 with a get lacking ${key}"
+    reset
+    rgb_config "${steam_config}"
+    rgb_answer true true 30 60 100
+    grep -v "\"${key}\"" "${RGB_GET}" > "${RGB_GET}.tmp"
+    mv "${RGB_GET}.tmp" "${RGB_GET}"
+    run rgb-hue-200
+    [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
+    expect_calls "${rgb_get}"
+done
 
 case_name="rgb-off"
 reset
@@ -527,20 +557,22 @@ run rgb-restore
 expect_calls "${rgb_apply}"
 expect_no_rgb_files
 
-case_name="rgb-accent then rgb-restore"
+case_name="rgb-hue then rgb-restore"
 reset
 rgb_config "${steam_config}"
-run rgb-accent-purple
+run rgb-hue-280
 run rgb-off
 run rgb-restore
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-expect_calls "${rgb_get}" "$(accent_call A200FF 30 60)" "${rgb_off}" "${rgb_apply}"
+expect_calls "${rgb_get}" "$(hue_call AA00FF true true 60 100 30)" "${rgb_off}" "${rgb_apply}"
 [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
 expect_no_rgb_files
 
 for verb in bogus "" "cores-offline;id" "bt-class-headphones;id" "backlight-off --help" "cpu-dap;id" cpu "cpu-restore " CPU-DAP \
     hp-gain hp-gain-8 hp-gain-medium hp-amp hp-amp-cls_h_ulp spk-gain spk-gain-120 spk-gain-0 "spk-gain-102 " \
-    rgb rgb-accent rgb-accent-red rgb-accent-FA2A55 "rgb-restore;id" RGB-OFF "rgb-sleep "; do
+    rgb rgb-accent rgb-accent-red rgb-accent-pink rgb-accent-FA2A55 "rgb-restore;id" RGB-OFF "rgb-sleep " \
+    rgb-hue rgb-hue- rgb-hue-5 rgb-hue-35 rgb-hue-360 rgb-hue-1000 rgb-hue-010 rgb-hue-00 rgb-hue-abc rgb-hue--10 \
+    "rgb-hue-10;id" "rgb-hue-10 " "rgb-hue-10"$'\n' RGB-HUE-10; do
     case_name="verb '${verb}'"
     reset
     rgb_config "${steam_config}"
