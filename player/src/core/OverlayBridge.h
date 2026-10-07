@@ -5,7 +5,9 @@
 #include <QElapsedTimer>
 #include <QObject>
 #include <QPointer>
+#include <QProcess>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantAnimation>
 #include <QWindow>
@@ -33,6 +35,8 @@ public:
     static constexpr int HideMs = 150;
     static constexpr int WatchdogMs = 7000;
     static constexpr int ReleaseFrameMs = 100;
+    static constexpr int CloseTimeoutMs = 2500;
+    static constexpr int CloseKillWaitMs = 200;
 
     using WindowPrepare = std::function<void(QWindow *)>;
 
@@ -41,6 +45,8 @@ public:
 
     static QByteArray notifySocket();
     static bool notify(const QByteArray &state);
+    static QString btBin();
+    static QString codecBin();
 
     DbusPad *pad() const;
     Player *player() const;
@@ -75,6 +81,7 @@ signals:
     void opacityChanged();
     void fadingChanged();
     void sleepingChanged();
+    void closed();
 
 private slots:
     void onFrameSwapped();
@@ -97,6 +104,9 @@ private:
     void step(const char *name) const;
     void notifyReady();
     void ping();
+    void runCloseStep();
+    void dropCloseProcess();
+    void finishClose();
 
     DbusPad *m_pad;
     Player *m_player;
@@ -109,9 +119,14 @@ private:
     QVariantAnimation m_fade;
     QTimer m_watchdog;
     QTimer m_release;
+    QTimer m_closeTimer;
+    QPointer<QProcess> m_closeProcess;
     QElapsedTimer m_clock;
     Phase m_phase = Phase::Hidden;
     quint64 m_releaseGeneration = 0;
+    int m_closeStep = 0;
+    bool m_closing = false;
+    bool m_closeDone = false;
     bool m_releaseArmed = false;
     bool m_frames = false;
     bool m_firstFrame = false;

@@ -20,9 +20,18 @@ cat > "${T}/bin/logger" <<'EOF'
 exit 0
 EOF
 chmod +x "${T}/bin/systemctl" "${T}/bin/logger"
+cat > "${T}/casdap-keep" <<EOF
+#!/usr/bin/bash
+exec bash "${repo}/sysext/usr/libexec/casdap/casdap-keep" "\$@"
+EOF
+chmod +x "${T}/casdap-keep"
 export PATH="${T}/bin:${PATH}"
 export CASDAP_WP_CONF_DIR="${T}/wp"
-export CASDAP_SETTINGS_FILE="${T}/settings.ini"
+export CASDAP_KEEP_BIN="${T}/casdap-keep"
+export CASDAP_KEEP_FILE="${T}/keep"
+export CASDAP_BOOT_ID_FILE="${T}/boot_id"
+boot_id=0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10
+printf '%s\n' "${boot_id}" > "${CASDAP_BOOT_ID_FILE}"
 fragment="${CASDAP_WP_CONF_DIR}/50-casdap-codec.conf"
 
 failures=0
@@ -39,7 +48,7 @@ write_fragment() {
     printf 'monitor.bluez.properties = {\n    bluez5.codecs = [ sbc aac ]\n}\n' > "${fragment}"
 }
 
-rm -f "${CASDAP_SETTINGS_FILE}"
+rm -f "${CASDAP_KEEP_FILE}"
 write_fragment
 run clear
 [[ "${rc}" == 0 ]] || fail "clear exit ${rc}"
@@ -50,19 +59,28 @@ run clear
 [[ "${rc}" == 0 ]] || fail "clear with no file exit ${rc}"
 [[ ! -s "${log}" ]] || fail "clear with no file called '$(cat "${log}")'"
 
-printf '[General]\nkeepPhoneInGameMode=true\n' > "${CASDAP_SETTINGS_FILE}"
+printf '%s\n' "${boot_id}" > "${CASDAP_KEEP_FILE}"
 write_fragment
 run clear
-[[ "${rc}" == 0 ]] || fail "clear with the phone kept exit ${rc}"
-[[ ! -e "${fragment}" ]] || fail "clear with the phone kept left the fragment"
-[[ ! -s "${log}" ]] || fail "clear with the phone kept called '$(cat "${log}")'"
+[[ "${rc}" == 0 ]] || fail "clear with the keep marker exit ${rc}"
+[[ -e "${fragment}" ]] || fail "clear with the keep marker removed the fragment"
+[[ ! -s "${log}" ]] || fail "clear with the keep marker called '$(cat "${log}")'"
 
-printf '[General]\r\nkeepPhoneInGameMode=false\r\n' > "${CASDAP_SETTINGS_FILE}"
+printf '00000000-0000-0000-0000-000000000000\n' > "${CASDAP_KEEP_FILE}"
 write_fragment
 run clear
-[[ "$(cat "${log}")" == "systemctl --user restart wireplumber" ]] || fail "keep false calls '$(cat "${log}")'"
+[[ ! -e "${fragment}" ]] || fail "stale marker left the fragment"
+[[ "$(cat "${log}")" == "systemctl --user restart wireplumber" ]] || fail "stale marker calls '$(cat "${log}")'"
 
-rm -f "${CASDAP_SETTINGS_FILE}"
+printf '%s\n' "${boot_id}" > "${CASDAP_KEEP_FILE}"
+write_fragment
+export CASDAP_KEEP_BIN="${T}/missing/casdap-keep"
+run clear
+export CASDAP_KEEP_BIN="${T}/casdap-keep"
+[[ ! -e "${fragment}" ]] || fail "missing casdap-keep left the fragment"
+[[ "$(cat "${log}")" == "systemctl --user restart wireplumber" ]] || fail "missing casdap-keep calls '$(cat "${log}")'"
+
+rm -f "${CASDAP_KEEP_FILE}"
 write_fragment
 export CASDAP_STUB_RC=1
 run clear
@@ -79,7 +97,7 @@ run
 run clear clear
 [[ "${rc}" == 1 ]] || fail "two args exit ${rc}, expected 1"
 
-grep -qx 'ExecStopPost=/usr/libexec/casdap/casdap-codec clear' "${dropin}" || fail "drop in lacks the ExecStopPost line"
+grep -qx 'ExecStopPost=-/usr/libexec/casdap/casdap-codec clear' "${dropin}" || fail "drop in lacks the ExecStopPost line"
 grep -qx 'Wants=casdap-bt.service' "${dropin}" || fail "drop in lacks Wants=casdap-bt.service"
 
 if (( failures )); then

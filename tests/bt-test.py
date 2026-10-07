@@ -15,7 +15,9 @@ from gi.repository import GLib
 ADDRESS = os.environ['DBUS_SESSION_BUS_ADDRESS']
 CASDAP_BT = os.environ['CASDAP_BT']
 LOG = os.environ['CASDAP_BT_LOG']
-SETTINGS = os.path.join(os.path.dirname(LOG), 'settings.ini')
+KEEP_FILE = os.environ['CASDAP_KEEP_FILE']
+BOOT_ID_FILE = os.environ['CASDAP_BOOT_ID_FILE']
+BOOT_ID = '0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10'
 
 BLUEZ = 'org.bluez'
 OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager'
@@ -478,26 +480,49 @@ class Driver:
     def test_print_keep(self, env):
         cases = (
             (None, 'drop'),
-            ('[General]\nkeepPhoneInGameMode=true\n', 'keep'),
-            ('[General]\nkeepPhoneInGameMode=false\n', 'drop'),
-            ('[General]\nscale=1.1\n', 'drop'),
-            ('[General]\nkeepPhoneInGameMode=maybe\n', 'drop'),
+            (BOOT_ID + '\n', 'keep'),
+            ('  ' + BOOT_ID + '  \n', 'keep'),
+            ('00000000-0000-0000-0000-000000000000\n', 'drop'),
+            ('', 'drop'),
         )
         for content, expected in cases:
-            if content is None:
-                if os.path.exists(SETTINGS):
-                    os.remove(SETTINGS)
-            else:
-                write_settings(content)
+            write_marker(content)
             result = subprocess.run([sys.executable, CASDAP_BT, '--print-keep'], env=env,
                                     capture_output=True, text=True)
             self.check(result.returncode == 0, f'--print-keep exit {result.returncode} for {content!r}')
             self.check(result.stdout.strip() == expected,
                        f'--print-keep printed {result.stdout.strip()!r} for {content!r}')
+        write_marker(BOOT_ID + '\n')
+        missing = dict(env, CASDAP_KEEP_BIN=os.path.join(os.path.dirname(LOG), 'missing', 'casdap-keep'))
+        result = subprocess.run([sys.executable, CASDAP_BT, '--print-keep'], env=missing,
+                                capture_output=True, text=True)
+        self.check(result.returncode == 0, f'--print-keep without casdap-keep exit {result.returncode}')
+        self.check(result.stdout.strip() == 'drop',
+                   f'--print-keep without casdap-keep printed {result.stdout.strip()!r}')
+
+    def test_disconnect_sources(self, env):
+        phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
+        speaker = ADAPTER_PATH + '/dev_10_00_00_00_00_09'
+        write_marker(BOOT_ID + '\n')
+        self.check(bool(self.fake.devices[phone].props['Connected']) is True, 'phone not connected before the one shot')
+        self.fake.disconnected.clear()
+        for label, expected in (('first', [phone]), ('second', [phone])):
+            with open(LOG, 'a') as log:
+                code = subprocess.run([sys.executable, CASDAP_BT, '--disconnect-sources'], env=env,
+                                      stdout=log, stderr=log, timeout=10).returncode
+            self.check(code == 0, f'--disconnect-sources {label} exit {code}')
+            self.check(self.fake.disconnected == expected, f'--disconnect-sources {label} {self.fake.disconnected}')
+        self.check(bool(self.fake.devices[phone].props['Connected']) is False, 'phone connected after the one shot')
+        self.check(bool(self.fake.devices[speaker].props['Connected']) is True, 'non source device disconnected')
+        self.check(not self.bus.name_has_owner(SERVICE), f'--disconnect-sources took {SERVICE}')
 
 
-def write_settings(content):
-    with open(SETTINGS, 'w') as f:
+def write_marker(content):
+    if content is None:
+        if os.path.exists(KEEP_FILE):
+            os.remove(KEEP_FILE)
+        return
+    with open(KEEP_FILE, 'w') as f:
         f.write(content)
 
 
@@ -528,9 +553,10 @@ def main():
     threading.Thread(target=loop.run, daemon=True).start()
 
     driver = Driver(fake)
-    env = dict(os.environ, CASDAP_BT_SYSTEM_BUS=ADDRESS, CASDAP_SETTINGS_FILE=SETTINGS)
-    if os.path.exists(SETTINGS):
-        os.remove(SETTINGS)
+    env = dict(os.environ, CASDAP_BT_SYSTEM_BUS=ADDRESS)
+    with open(BOOT_ID_FILE, 'w') as f:
+        f.write(BOOT_ID + '\n')
+    write_marker(None)
     open(LOG, 'w').close()
     proc = launch(fake, driver, env)
     if proc is None:
@@ -545,12 +571,13 @@ def main():
         driver.test_gate()
         driver.test_paired_closes()
         driver.test_sigterm(proc)
-        write_settings('[General]\nkeepPhoneInGameMode=true\n')
+        write_marker(BOOT_ID + '\n')
         proc = launch(fake, driver, env)
         if proc is None:
             return 1
         driver.test_sigterm_keep(proc)
         driver.test_print_keep(env)
+        driver.test_disconnect_sources(env)
     finally:
         if proc is not None and proc.poll() is None:
             proc.kill()
@@ -566,6 +593,8 @@ def main():
                  'no disconnected on exit line')
     driver.check(f'keeping {ADAPTER_PATH}/dev_10_00_00_00_00_06 connected' in text,
                  'no keeping connected line')
+    driver.check(f'disconnected {ADAPTER_PATH}/dev_10_00_00_00_00_06 on close' in text,
+                 'no disconnected on close line')
     if driver.failures:
         sys.stderr.write(text)
         print(f'bt-test: {driver.failures} failure(s)', file=sys.stderr)

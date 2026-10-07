@@ -57,6 +57,9 @@ case "$*" in
         if [[ "$*" == *casdap-priv@cpu-* ]]; then
             { [[ -e "${CASDAP_RUNTIME_DIR}/last-ms" ]] && echo 1 || echo 0; } >> "${STATE}/last-at-cpu"
         fi
+        if [[ "$*" == *casdap-priv@rgb-* ]]; then
+            { [[ -e "${CASDAP_RUNTIME_DIR}/last-ms" ]] && echo 1 || echo 0; } >> "${STATE}/last-at-rgb"
+        fi
         [[ -s "${STATE}/fail-unit" && "$*" == *"$(cat "${STATE}/fail-unit")"* ]] && exit 1
         ;;
 esac
@@ -134,11 +137,12 @@ arm_timer="systemd-run --user --unit=casdap-idle --on-active=60 --on-unit-inacti
 begin "screen-off"
 run screen-off
 expect_rc 0
-expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${stop_timer}" "${arm_timer}"
+expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
 expect_marker off
 expect_no_marker wifi
 [[ "$(cat "${STATE}/marker-at-call")" == 1 ]] || fail "off marker written after SetScreenOff"
 [[ "$(cat "${STATE}/last-at-cpu")" == 1 ]] || fail "last-ms written after cpu-off"
+[[ "$(cat "${STATE}/last-at-rgb")" == 0 ]] || fail "last-ms written before rgb-sleep"
 [[ -e "${STATE}/idle-timer" ]] || fail "idle timer not armed"
 [[ "$(cat "${CASDAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${CASDAP_RUNTIME_DIR}/last-ms")'"
 
@@ -192,7 +196,7 @@ begin "screen-off with wifi off"
 printf '[General]\nwifiOffScreenOff=true\nsuspendMinutes=10\n' > "${CASDAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
-expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
+expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
 expect_marker wifi
 
 begin "screen-off twice with wifi off"
@@ -230,14 +234,14 @@ begin "screen-off with rgb accent"
 printf '[General]\nrgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
-expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${stop_timer}" "${arm_timer}"
+expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
 expect_marker off
 
 begin "screen-off with rgb accent and wifi off"
 printf 'rgb=accent\nwifiOffScreenOff=true\n' > "${CASDAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
-expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
+expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
 
 begin "screen-off with rgb accent and a failing rgb-sleep"
 printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
@@ -259,7 +263,7 @@ begin "screen-off with rgb armada"
 printf 'rgb=armada\n' > "${CASDAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
-expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${rgb_sleep}" "${stop_timer}" "${arm_timer}"
+expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
 
 begin "screen-off with a bogus rgb value"
 printf 'rgb=Accent\n' > "${CASDAP_SETTINGS_FILE}"
@@ -278,10 +282,11 @@ marker off
 : > "${CASDAP_CPU_BEFORE_FILE}"
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_dap}"
 expect_no_marker off
 [[ "$(cat "${STATE}/marker-at-call")" == 0 ]] || fail "off marker removed after SetScreenOff"
 [[ "$(cat "${STATE}/last-at-cpu")" == 1 ]] || fail "last-ms written after cpu-dap"
+[[ "$(cat "${STATE}/last-at-rgb")" == 0 ]] || fail "last-ms written before rgb-wake"
 [[ -e "${STATE}/idle-timer" ]] && fail "idle timer left armed" || true
 [[ "$(cat "${CASDAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${CASDAP_RUNTIME_DIR}/last-ms")'"
 
@@ -290,7 +295,7 @@ marker off
 marker wifi
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${wifi_on}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${wifi_on}" "${cpu_dap}"
 expect_no_marker wifi
 expect_no_marker off
 
@@ -298,12 +303,12 @@ begin "screen-on without the marker and a saved floor"
 : > "${CASDAP_CPU_BEFORE_FILE}"
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${cpu_restore}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_restore}" "${cpu_dap}"
 
 begin "screen-on without the marker and no saved floor"
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_dap}"
 
 begin "screen-on twice"
 marker off
@@ -320,14 +325,14 @@ marker wifi
 : > "${CASDAP_CPU_BEFORE_FILE}"
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${stop_timer}" "${wifi_on}" "${cpu_restore}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${rgb_wake}" "${stop_timer}" "${wifi_on}" "${cpu_restore}"
 expect_no_marker off
 expect_no_marker wifi
 
 begin "screen-on while inactive" inactive
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${stop_timer}" "${cpu_restore}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${rgb_wake}" "${stop_timer}" "${cpu_restore}"
 
 begin "screen-on without a player"
 marker off
@@ -343,7 +348,7 @@ printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
 marker off
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_dap}"
 expect_no_marker off
 
 begin "screen-on with rgb accent and the wifi marker"
@@ -352,13 +357,13 @@ marker off
 marker wifi
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${wifi_on}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${wifi_on}" "${cpu_dap}"
 
 begin "screen-on with rgb accent while inactive" inactive
 printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${stop_timer}" "${cpu_restore}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${rgb_wake}" "${stop_timer}" "${cpu_restore}"
 
 begin "screen-on with rgb accent and a failing rgb-wake"
 printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
@@ -384,7 +389,7 @@ printf 'rgb=armada\n' > "${CASDAP_SETTINGS_FILE}"
 marker off
 run screen-on
 expect_rc 0
-expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${cpu_dap}" "${rgb_wake}"
+expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_dap}"
 
 begin "screen-on with a bogus rgb value"
 printf 'rgb=Accent\n' > "${CASDAP_SETTINGS_FILE}"

@@ -53,6 +53,12 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
         step("no frame");
         finishRelease();
     });
+    m_closeTimer.setSingleShot(true);
+    m_closeTimer.setInterval(CloseTimeoutMs);
+    connect(&m_closeTimer, &QTimer::timeout, this, [this] {
+        qWarning() << "casdap overlay: close steps timed out after" << CloseTimeoutMs << "ms";
+        finishClose();
+    });
 }
 
 OverlayBridge::~OverlayBridge()
@@ -60,6 +66,8 @@ OverlayBridge::~OverlayBridge()
     m_fade.stop();
     m_watchdog.stop();
     m_release.stop();
+    m_closeTimer.stop();
+    dropCloseProcess();
     if (m_pad)
         m_pad->setShown(false);
 }
@@ -67,6 +75,16 @@ OverlayBridge::~OverlayBridge()
 QByteArray OverlayBridge::notifySocket()
 {
     return qgetenv("NOTIFY_SOCKET");
+}
+
+QString OverlayBridge::btBin()
+{
+    return qEnvironmentVariable("CASDAP_BT_BIN", QStringLiteral("/usr/libexec/casdap/casdap-bt"));
+}
+
+QString OverlayBridge::codecBin()
+{
+    return qEnvironmentVariable("CASDAP_CODEC_BIN", QStringLiteral("/usr/libexec/casdap/casdap-codec"));
 }
 
 bool OverlayBridge::notify(const QByteArray &state)
@@ -248,11 +266,87 @@ void OverlayBridge::toggle()
 
 void OverlayBridge::closePlayer()
 {
+    if (m_closing) {
+        qInfo() << "casdap overlay: close player already running";
+        return;
+    }
     qInfo() << "casdap overlay: close player";
+    m_closing = true;
     if (m_pad)
         m_pad->setShown(false);
+    hide();
     Keep::clear();
     releaseToast();
+    if (m_state)
+        m_state->save(false);
+    m_closeStep = 0;
+    m_closeTimer.start();
+    runCloseStep();
+}
+
+void OverlayBridge::runCloseStep()
+{
+    if (m_closeDone)
+        return;
+    dropCloseProcess();
+    QString program;
+    QStringList arguments;
+    if (m_closeStep == 0) {
+        program = btBin();
+        arguments = {QStringLiteral("--disconnect-sources")};
+    } else if (m_closeStep == 1) {
+        program = codecBin();
+        arguments = {QStringLiteral("clear")};
+    } else {
+        finishClose();
+        return;
+    }
+    ++m_closeStep;
+    auto *process = new QProcess(this);
+    m_closeProcess = process;
+    process->setProcessChannelMode(QProcess::ForwardedChannels);
+    process->setStandardInputFile(QProcess::nullDevice());
+    connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
+        if (process != m_closeProcess.data())
+            return;
+        if (status != QProcess::NormalExit || code != 0)
+            qWarning().noquote() << "casdap overlay:" << process->program() << "exit"
+                                 << (status == QProcess::NormalExit ? code : -1);
+        QMetaObject::invokeMethod(this, &OverlayBridge::runCloseStep, Qt::QueuedConnection);
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (process != m_closeProcess.data() || error != QProcess::FailedToStart)
+            return;
+        qWarning().noquote() << "casdap overlay: cannot start" << process->program();
+        QMetaObject::invokeMethod(this, &OverlayBridge::runCloseStep, Qt::QueuedConnection);
+    });
+    qInfo().noquote() << "casdap overlay: close" << program << arguments.join(QLatin1Char(' '));
+    process->start(program, arguments);
+}
+
+void OverlayBridge::dropCloseProcess()
+{
+    QProcess *process = m_closeProcess.data();
+    if (!process)
+        return;
+    m_closeProcess = nullptr;
+    process->disconnect(this);
+    if (process->state() != QProcess::NotRunning) {
+        process->kill();
+        process->waitForFinished(CloseKillWaitMs);
+    }
+    process->deleteLater();
+}
+
+void OverlayBridge::finishClose()
+{
+    if (m_closeDone)
+        return;
+    m_closeDone = true;
+    m_closeTimer.stop();
+    dropCloseProcess();
+    qInfo() << "casdap overlay: close player done";
+    emit closed();
     if (m_state) {
         m_state->quit(false);
         return;

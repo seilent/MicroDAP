@@ -86,11 +86,11 @@ screen_off() {
     : > "${runtime}/off"
     set_screen_off true
     run systemctl start casdap-priv@backlight-off.service
-    now_ms > "${runtime}/last-ms"
-    run systemctl start casdap-priv@cpu-off.service
     if lights_on; then
         run systemctl start casdap-priv@rgb-sleep.service
     fi
+    now_ms > "${runtime}/last-ms"
+    run systemctl start casdap-priv@cpu-off.service
     if [[ "$(setting wifiOffScreenOff false)" == true && ! -e "${runtime}/wifi" ]]; then
         if nmcli radio wifi off; then
             : > "${runtime}/wifi"
@@ -112,6 +112,9 @@ screen_on() {
     if [[ "${state}" == active ]]; then
         set_screen_off false
     fi
+    if lights_on; then
+        run systemctl start casdap-priv@rgb-wake.service
+    fi
     now_ms > "${runtime}/last-ms"
     stop_idle
     if [[ -e "${runtime}/wifi" ]]; then
@@ -125,9 +128,6 @@ screen_on() {
         run systemctl start casdap-priv@cpu-dap.service
     else
         run systemctl start casdap-priv@cpu-restore.service
-    fi
-    if lights_on; then
-        run systemctl start casdap-priv@rgb-wake.service
     fi
 }
 

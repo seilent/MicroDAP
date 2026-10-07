@@ -3,32 +3,20 @@ set -eu
 
 config="${XDG_CONFIG_HOME:-${HOME}/.config}"
 conf_dir="${CASDAP_WP_CONF_DIR:-${config}/wireplumber/wireplumber.conf.d}"
-settings="${CASDAP_SETTINGS_FILE:-${config}/casdap/settings.ini}"
+keep_bin="${CASDAP_KEEP_BIN:-/usr/libexec/casdap/casdap-keep}"
 systemctl_bin="${CASDAP_SYSTEMCTL_BIN:-systemctl}"
 fragment="${conf_dir}/50-casdap-codec.conf"
 
 log() { logger -t casdap-codec -- "$*" 2>/dev/null || true; }
 
-setting() {
-    local line value=
-    if [[ -r "${settings}" ]]; then
-        while IFS= read -r line || [[ -n "${line}" ]]; do
-            line="${line%$'\r'}"
-            [[ "${line}" == "$1="* ]] || continue
-            value="${line#*=}"
-        done < "${settings}"
-    fi
-    printf '%s\n' "${value:-$2}"
-}
-
 clear_fragment() {
     [[ -e "${fragment}" ]] || return 0
-    rm -f -- "${fragment}"
-    log "fragment removed ${fragment}"
-    if [[ "$(setting keepPhoneInGameMode false)" == true ]]; then
-        log "phone kept, wireplumber restart skipped"
+    if "${keep_bin}" check >/dev/null 2>&1; then
+        log "phone kept, fragment kept"
         return 0
     fi
+    rm -f -- "${fragment}"
+    log "fragment removed ${fragment}"
     if ! "${systemctl_bin}" --user restart wireplumber; then
         log "wireplumber restart failed"
         return 1

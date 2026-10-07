@@ -74,6 +74,24 @@ QString devicePath(int index)
     return Intercept::rootPath() + QStringLiteral("/CompositeDevice%1").arg(index);
 }
 
+bool writeScript(const QString &path, const QByteArray &body)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    file.write(body);
+    file.close();
+    return file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+}
+
+QString readText(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QString::fromUtf8(file.readAll());
+}
+
 }
 
 class OverlayTest : public QObject
@@ -107,6 +125,7 @@ private slots:
     void prepareForSleepWhileHidden();
     void hideSavesStack();
     void closePlayer();
+    void closePlayerTimeout();
     void hideWithDestroyedWindowNoOp();
 
 private:
@@ -128,6 +147,7 @@ private:
     QProcess m_login1;
     QString m_stateFile;
     QString m_keepFile;
+    QString m_closeLog;
     int m_notifyFd = -1;
     std::unique_ptr<Player> m_player;
     std::unique_ptr<State> m_state;
@@ -289,6 +309,15 @@ void OverlayTest::initTestCase()
     QVERIFY(bootId.open(QIODevice::WriteOnly));
     bootId.write("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n");
     bootId.close();
+    m_closeLog = m_dir.path() + QStringLiteral("/close.log");
+    const QByteArray logLine = QByteArrayLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> '")
+                               + m_closeLog.toUtf8() + QByteArrayLiteral("'\n");
+    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/casdap-bt"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
+    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/casdap-codec"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
+    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/slow-bt"),
+                        QByteArrayLiteral("#!/bin/sh\n") + logLine + QByteArrayLiteral("exec sleep 10\n")));
+    qputenv("CASDAP_BT_BIN", (m_dir.path() + QStringLiteral("/casdap-bt")).toUtf8());
+    qputenv("CASDAP_CODEC_BIN", (m_dir.path() + QStringLiteral("/casdap-codec")).toUtf8());
 
     qputenv("CASDAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
     qputenv("CASDAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
@@ -775,17 +804,42 @@ void OverlayTest::closePlayer()
     QJsonObject before;
     QVERIFY(State::read(m_stateFile, before));
     QCOMPARE(before.value(QStringLiteral("handoff")).toBool(false), true);
+    QFile::remove(m_closeLog);
+    QSignalSpy closed(m_overlay.get(), &OverlayBridge::closed);
 
     m_overlay->closePlayer();
+    QVERIFY(!m_overlay->shown());
     QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
     QCOMPARE(mode(devicePath(1)), 0);
     QVERIFY(!QFile::exists(m_keepFile));
     QJsonObject after;
     QVERIFY(State::read(m_stateFile, after));
     QCOMPARE(after.value(QStringLiteral("handoff")).toBool(true), false);
+    QTRY_COMPARE_WITH_TIMEOUT(closed.count(), 1, OverlayBridge::CloseTimeoutMs + busTimeoutMs);
+    QCOMPARE(readText(m_closeLog), QStringLiteral("casdap-bt --disconnect-sources\ncasdap-codec clear\n"));
+    m_overlay->closePlayer();
     QCoreApplication::processEvents();
+    QCOMPARE(closed.count(), 1);
+    QCOMPARE(readText(m_closeLog), QStringLiteral("casdap-bt --disconnect-sources\ncasdap-codec clear\n"));
     m_overlay->hide();
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
+}
+
+void OverlayTest::closePlayerTimeout()
+{
+    QFile::remove(m_closeLog);
+    qputenv("CASDAP_BT_BIN", (m_dir.path() + QStringLiteral("/slow-bt")).toUtf8());
+    OverlayBridge bridge(nullptr, nullptr);
+    QSignalSpy closed(&bridge, &OverlayBridge::closed);
+    QElapsedTimer timer;
+    timer.start();
+    bridge.closePlayer();
+    QTRY_COMPARE_WITH_TIMEOUT(closed.count(), 1, OverlayBridge::CloseTimeoutMs + busTimeoutMs);
+    const qint64 elapsed = timer.elapsed();
+    qputenv("CASDAP_BT_BIN", (m_dir.path() + QStringLiteral("/casdap-bt")).toUtf8());
+    QVERIFY2(elapsed >= OverlayBridge::CloseTimeoutMs - 100, qPrintable(QString::number(elapsed)));
+    QVERIFY2(elapsed < 3000, qPrintable(QString::number(elapsed)));
+    QCOMPARE(readText(m_closeLog), QStringLiteral("slow-bt --disconnect-sources\n"));
 }
 
 void OverlayTest::hideWithDestroyedWindowNoOp()
