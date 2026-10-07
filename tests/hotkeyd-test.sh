@@ -24,6 +24,7 @@ while read -r step; do
             echo "Event: time $(( ${t%.*} - 1 )).${t#*.}, type 1 (EV_KEY), code 183 (KEY_F13), value 0"
             ;;
         repeat) ev 183 KEY_F13 2 ;;
+        mark*) echo "${step}" >> "${STATE}/system" ;;
         up) ev 115 KEY_VOLUMEUP 1 ;;
         up-repeat) ev 115 KEY_VOLUMEUP 2 ;;
         up-release) ev 115 KEY_VOLUMEUP 0 ;;
@@ -68,6 +69,22 @@ EOF
 
 cat > "${T}/bin/busctl" <<'EOF'
 #!/usr/bin/bash
+if [[ "${1:-}" == --system ]]; then
+    echo "busctl $*" >> "${STATE}/system"
+    case "$*" in
+        *" tree "*)
+            printf '%s\n' /org/shadowblip/InputPlumber /org/shadowblip/InputPlumber/CompositeDevice0 \
+                /org/shadowblip/InputPlumber/CompositeDevice1 /org/shadowblip/InputPlumber/devices/target/dbus0
+            ;;
+        *" Rumble "*)
+            if [[ -e "${STATE}/rumble-fail" ]]; then
+                echo "Call failed: no rumble" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    exit 0
+fi
 echo "busctl $*" >> "${STATE}/calls"
 case "$*" in
     *ToggleOverlay|*ShowSwitchPrompt)
@@ -116,7 +133,7 @@ export CASDAP_SETTINGS_FILE="${T}/settings.ini"
 
 failures=0
 case_name=
-fail() { echo "FAIL ${case_name}: $*" >&2; echo "--- log" >&2; cat "${STATE}/log" >&2; echo "--- calls" >&2; cat "${STATE}/calls" >&2; failures=$((failures + 1)); }
+fail() { echo "FAIL ${case_name}: $*" >&2; echo "--- log" >&2; cat "${STATE}/log" >&2; echo "--- calls" >&2; cat "${STATE}/calls" >&2; echo "--- system" >&2; cat "${STATE}/system" >&2; failures=$((failures + 1)); }
 
 run_case() {
     case_name=$1
@@ -124,6 +141,8 @@ run_case() {
     mkdir -p "${STATE}"
     : > "${STATE}/calls"
     : > "${STATE}/log"
+    : > "${STATE}/system"
+    [[ -z "${RUMBLE_FAIL:-}" ]] || : > "${STATE}/rumble-fail"
     echo "$2" > "${STATE}/session"
     echo "$3" > "${STATE}/title"
     echo "$4" > "${STATE}/plasma"
@@ -145,6 +164,18 @@ expect_calls() { [[ "$(grep -c . "${STATE}/calls" || true)" == "$1" ]] || fail "
 expect_call_count() { [[ "$(grep -cF -- "$1" "${STATE}/calls" || true)" == "$2" ]] || fail "$(grep -cF -- "$1" "${STATE}/calls" || true) of '$1', expected $2"; }
 expect_first_call() { [[ "$(head -n 1 "${STATE}/calls")" == "$1" ]] || fail "first call is not: $1"; }
 expect_last_call() { [[ "$(tail -n 1 "${STATE}/calls")" == "$1" ]] || fail "last call is not: $1"; }
+expect_no_log() { grep -qF -- "$1" "${STATE}/log" && fail "unexpected log: $1" || true; }
+expect_system_count() { [[ "$(grep -cxF -- "$1" "${STATE}/system" || true)" == "$2" ]] || fail "$(grep -cxF -- "$1" "${STATE}/system" || true) of '$1', expected $2"; }
+expect_no_rumble() { grep -qF Rumble "${STATE}/system" && fail "unexpected rumble" || true; }
+expect_no_system() { [[ ! -s "${STATE}/system" ]] || fail "unexpected system bus calls"; }
+expect_system_before() {
+    local a b
+    a=$(grep -nxF -- "$1" "${STATE}/system" | head -n 1 | cut -d: -f1)
+    b=$(grep -nxF -- "$2" "${STATE}/system" | head -n 1 | cut -d: -f1)
+    if [[ -z "${a}" || -z "${b}" ]] || (( a > b )); then
+        fail "'$1' not before '$2'"
+    fi
+}
 
 switch="systemctl start casdap-switch.service"
 back="systemctl start casdap-switch-back.service"
@@ -161,6 +192,9 @@ prompt="busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Playe
 restart="systemctl --user restart casdap-overlay.service"
 intercept="casdap-intercept get"
 screen_on="casdap-power screen-on"
+ff="org.shadowblip.Output.ForceFeedback Rumble d"
+dev0="busctl --system call org.shadowblip.InputPlumber /org/shadowblip/InputPlumber/CompositeDevice0 ${ff}"
+dev1="busctl --system call org.shadowblip.InputPlumber /org/shadowblip/InputPlumber/CompositeDevice1 ${ff}"
 
 run_case "no device" game 0 0 "press"
 [[ "${rc}" == 0 ]] || fail "exit ${rc} without device"
@@ -256,6 +290,7 @@ expect_log "would: ${switch}"
 run_case "hold in game with title, single" game 1 0 "press;sleep 0.4;release"
 expect_calls 0
 expect_log "hold ignored, title running"
+expect_no_rumble
 
 run_case "hold in game with title, confirmed" game 1 0 "press;sleep 0.4;release;sleep 0.2;press;sleep 0.4;release"
 expect_call "${switch}"
@@ -270,9 +305,37 @@ expect_no_call "${back}"
 expect_calls 1
 expect_log "hold in casdap"
 
+run_case "hold buzzes before release" casdap 0 0 "press;sleep 0.8;mark release;release"
+expect_call "${prompt}"
+expect_calls 1
+expect_system_count "${dev0} 0.6" 1
+expect_system_count "${dev0} 0" 1
+expect_system_count "${dev1} 0.6" 1
+expect_system_count "${dev1} 0" 1
+grep -qF "devices/target/dbus0 ${ff}" "${STATE}/system" && fail "rumble on a target path" || true
+expect_system_before "${dev0} 0.6" "${dev0} 0"
+expect_system_before "${dev0} 0" "mark release"
+expect_system_before "${dev1} 0" "mark release"
+
+RUMBLE_FAIL=1 run_case "hold with a failing rumble" casdap 0 0 "press;sleep 0.4;release"
+expect_call "${prompt}"
+expect_calls 1
+expect_system_count "${dev0} 0.6" 1
+expect_no_log "failed"
+
+export CASDAP_HOTKEYD_BUZZ_LEVEL=0.3
+run_case "hold with a buzz level" game 0 0 "press;sleep 0.4;release"
+expect_call "${switch}"
+expect_system_count "${dev0} 0.3" 1
+expect_system_count "${dev0} 0.6" 0
+expect_system_count "${dev0} 0" 1
+unset CASDAP_HOTKEYD_BUZZ_LEVEL
+
 run_case "hold in casdap dry run" casdap 0 0 "press;sleep 0.4;release" 1
 expect_calls 0
 expect_log "would: ${prompt}"
+expect_log "would: buzz 60"
+expect_no_system
 
 BUSCTL_ERR="Call failed: The name is not activatable" run_case "hold in casdap without a player" casdap 0 0 "press;sleep 0.4;release"
 expect_call "${prompt}"
@@ -294,6 +357,7 @@ run_case "tap in casdap" casdap 0 0 "press;sleep 0.05;release"
 expect_call "${playpause}"
 expect_no_call "${prompt}"
 expect_calls 1
+expect_no_rumble
 
 printf '[General]\npocketControls=true\n' > "${CASDAP_SETTINGS_FILE}"
 
@@ -319,6 +383,7 @@ expect_no_call "${prompt}"
 expect_no_call "${back}"
 expect_calls 1
 expect_log "screen off, turning it on"
+expect_system_count "${dev0} 0.6" 1
 
 run_case "hold in casdap while the screen is off dry run" casdap 0 0 "press;sleep 0.4;release" 1
 expect_calls 0
@@ -349,12 +414,23 @@ expect_last_call "${playpause}"
 expect_call "${volup}"
 expect_calls 5
 expect_log "tap, play pause"
+expect_no_rumble
 
 run_case "pocket double tap" casdap 0 0 "press;sleep 0.05;release;sleep 0.05;press;sleep 0.05;release;sleep 0.4"
 expect_call "${next}"
 expect_no_call "${playpause}"
 expect_calls 1
 expect_log "double tap, next"
+expect_system_count "${dev0} 0.6" 2
+expect_system_count "${dev0} 0" 2
+expect_system_count "${dev1} 0.6" 2
+expect_system_count "${dev1} 0" 2
+
+run_case "pocket double tap dry run" casdap 0 0 "press;sleep 0.05;release;sleep 0.05;press;sleep 0.05;release;sleep 0.4" 1
+expect_calls 0
+expect_log "would: ${next}"
+expect_log "would: buzz 40 60 40"
+expect_no_system
 
 run_case "pocket hold" casdap 0 0 "press;sleep 0.4;release"
 expect_call "${previous}"
@@ -362,6 +438,8 @@ expect_no_call "${screen_on}"
 expect_no_call "${prompt}"
 expect_calls 1
 expect_log "hold, previous"
+expect_system_count "${dev0} 0.6" 1
+expect_system_count "${dev1} 0" 1
 
 run_case "pocket taps spaced over the window" casdap 0 0 "press;sleep 0.05;release;sleep 0.4;press;sleep 0.05;release;sleep 0.4"
 expect_call_count "${playpause}" 2
@@ -399,6 +477,7 @@ expect_calls 1
 run_case "hold in other without plasma" other 0 0 "press;sleep 0.4;release"
 expect_calls 0
 expect_log "unknown session"
+expect_no_rumble
 
 run_case "autorepeat does not reclassify" game 0 0 "press;sleep 0.05;repeat;sleep 0.05;repeat;sleep 0.3;release"
 expect_call "${switch}"
