@@ -17,13 +17,16 @@
 
 #include <QCryptographicHash>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QSet>
+#include <QStorageInfo>
+#include <QStringDecoder>
 #include <QTimeZone>
+#include <QUrl>
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
@@ -107,10 +110,7 @@ int bitDepthOf(const TagLib::AudioProperties *audio)
     return 0;
 }
 
-FileStamp stampOf(const QFileInfo &info)
-{
-    return {info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch(), info.size()};
-}
+std::atomic<Scanner::MountCheck> mountCheck{nullptr};
 
 bool cancelled(const std::atomic_bool *cancel)
 {
@@ -155,62 +155,223 @@ bool Scanner::isAudioFile(const QString &path)
     return extensions().contains(QFileInfo(path).suffix().toLower());
 }
 
+bool Scanner::isPlaylistFile(const QString &path)
+{
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    return suffix == QLatin1StringView("m3u") || suffix == QLatin1StringView("m3u8");
+}
+
 QString Scanner::albumKey(const QString &album, const QString &albumArtist)
 {
     return album + QLatin1Char('\n') + albumArtist;
 }
 
+QString Scanner::mediaBase()
+{
+    return qEnvironmentVariable("CASDAP_MEDIA_ROOT", QStringLiteral("/run/media"));
+}
+
+FileStamp Scanner::stampOf(const QFileInfo &info)
+{
+    return {info.lastModified(QTimeZone::UTC).toMSecsSinceEpoch(), info.size()};
+}
+
+bool Scanner::isMountPoint(const QString &dir)
+{
+    if (const MountCheck check = mountCheck.load())
+        return check(dir);
+    const QString path = QDir::cleanPath(dir);
+    if (!QFileInfo(path).isDir())
+        return false;
+    const QStorageInfo storage(path);
+    return storage.isValid() && QDir::cleanPath(storage.rootPath()) == path;
+}
+
+void Scanner::setMountCheck(MountCheck check)
+{
+    mountCheck.store(check);
+}
+
+QString Scanner::decodePlaylist(const QByteArray &bytes, bool utf8Only)
+{
+    QByteArray data = bytes;
+    if (data.startsWith("\xEF\xBB\xBF"))
+        data.remove(0, 3);
+    if (utf8Only)
+        return QString::fromUtf8(data);
+    QStringDecoder decoder(QStringDecoder::Utf8);
+    const QString text = decoder(data);
+    return decoder.hasError() ? QString::fromLatin1(data) : text;
+}
+
+PlaylistFile Scanner::readPlaylist(const QString &path)
+{
+    const QFileInfo info(path);
+    PlaylistFile playlist;
+    playlist.source = info.absoluteFilePath();
+    playlist.name = info.completeBaseName();
+    const FileStamp stamp = stampOf(info);
+    playlist.mtime = stamp.mtime;
+    playlist.size = stamp.size;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        playlist.readable = false;
+        return playlist;
+    }
+    const bool utf8Only = info.suffix().compare(QLatin1StringView("m3u8"), Qt::CaseInsensitive) == 0;
+    const QString text = decodePlaylist(file.readAll(), utf8Only);
+    const QString folder = info.absolutePath();
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    for (const QString &raw : lines) {
+        const QString line = raw.trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
+            continue;
+        QString entry = line;
+        if (entry.startsWith(QLatin1StringView("file:"), Qt::CaseInsensitive))
+            entry = QUrl(entry).toLocalFile();
+        entry.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        if (entry.isEmpty()) {
+            playlist.entries.append(QString());
+            continue;
+        }
+        if (!QDir::isAbsolutePath(entry))
+            entry = folder + QLatin1Char('/') + entry;
+        playlist.entries.append(QDir::cleanPath(entry));
+    }
+    return playlist;
+}
+
+bool Scanner::mounted(const QString &dir)
+{
+    if (const auto it = m_mounts.constFind(dir); it != m_mounts.cend())
+        return *it;
+    const bool mount = isMountPoint(dir);
+    m_mounts.insert(dir, mount);
+    return mount;
+}
+
+bool Scanner::onAbsentMedia(const QString &path)
+{
+    const QString base = rootPrefix(mediaBase());
+    if (!path.startsWith(base))
+        return false;
+    QString dir = QDir::cleanPath(QFileInfo(path).absolutePath());
+    while (dir.startsWith(base)) {
+        if (mounted(dir))
+            return false;
+        const QString parent = QFileInfo(dir).path();
+        if (parent == dir)
+            break;
+        dir = parent;
+    }
+    return true;
+}
+
+bool Scanner::removable(const QString &path, const QStringList &present, const QStringList &absent)
+{
+    const auto under = [&path](const QStringList &prefixes) {
+        return std::any_of(prefixes.cbegin(), prefixes.cend(),
+                           [&path](const QString &prefix) { return path.startsWith(prefix); });
+    };
+    if (under(present))
+        return !onAbsentMedia(path);
+    return !under(absent);
+}
+
 ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot,
-                         const std::atomic_bool *cancel)
+                         const std::atomic_bool *cancel,
+                         const QHash<QString, FileStamp> &playlistStamps)
 {
     m_art.clear();
     m_folderArt.clear();
+    m_mounts.clear();
 
     ScanResult result;
     QSet<QString> seen;
-    QStringList prefixes;
+    QSet<QString> seenPlaylists;
+    QSet<QString> walked;
+    QStringList present;
+    QStringList absent;
     for (const QString &root : roots) {
-        const QFileInfo rootInfo(root);
-        if (!rootInfo.isDir() || !rootInfo.isReadable())
+        if (root.isEmpty())
             continue;
-        prefixes.append(rootPrefix(root));
+        const QFileInfo rootInfo(root);
+        if (!rootInfo.isDir() || !rootInfo.isReadable()) {
+            absent.append(rootPrefix(root));
+            continue;
+        }
+        present.append(rootPrefix(root));
 
-        QDirIterator it(root, QDir::Files | QDir::Readable | QDir::NoDotAndDotDot,
-                        QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            if (cancelled(cancel))
-                return ScanResult();
-            const QFileInfo info = it.nextFileInfo();
-            const QString path = info.absoluteFilePath();
-            if (!isAudioFile(path) || seen.contains(path))
+        QStringList queue{QDir(root).absolutePath()};
+        for (qsizetype next = 0; next < queue.size(); ++next) {
+            const QString dirPath = queue.at(next);
+            if (walked.contains(dirPath))
                 continue;
-            seen.insert(path);
+            walked.insert(dirPath);
+            result.directories.append(dirPath);
 
-            const FileStamp stamp = stampOf(info);
-            const auto known = snapshot.constFind(path);
-            const bool unchanged = known != snapshot.cend() && known->mtime == stamp.mtime
-                                   && known->size == stamp.size;
-            if (unchanged)
-                continue;
+            const QFileInfoList entries = QDir(dirPath).entryInfoList(
+                QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+            for (const QFileInfo &info : entries) {
+                if (cancelled(cancel))
+                    return ScanResult();
+                const QString path = info.absoluteFilePath();
+                if (info.isDir()) {
+                    if (!info.isSymLink() && info.isReadable())
+                        queue.append(path);
+                    continue;
+                }
+                if (isPlaylistFile(path)) {
+                    if (!seenPlaylists.contains(path)) {
+                        seenPlaylists.insert(path);
+                        const FileStamp stamp = stampOf(info);
+                        const auto known = playlistStamps.constFind(path);
+                        if (known != playlistStamps.cend() && known->mtime == stamp.mtime
+                            && known->size == stamp.size)
+                            result.keptPlaylists.append(path);
+                        else
+                            result.playlists.append(readPlaylist(path));
+                    }
+                    continue;
+                }
+                if (!info.isReadable() || !isAudioFile(path) || seen.contains(path))
+                    continue;
+                seen.insert(path);
 
-            TrackInfo track = read(info, stamp);
-            if (known == snapshot.cend())
-                result.added.append(std::move(track));
-            else
-                result.updated.append(std::move(track));
+                const FileStamp stamp = stampOf(info);
+                const auto known = snapshot.constFind(path);
+                const bool unchanged = known != snapshot.cend() && known->mtime == stamp.mtime
+                                       && known->size == stamp.size;
+                if (unchanged)
+                    continue;
+
+                TrackInfo track = read(info, stamp);
+                if (known == snapshot.cend())
+                    result.added.append(std::move(track));
+                else
+                    result.updated.append(std::move(track));
+            }
         }
     }
 
     for (auto it = snapshot.cbegin(); it != snapshot.cend(); ++it) {
-        if (seen.contains(it.key()))
-            continue;
-        for (const QString &prefix : prefixes) {
-            if (it.key().startsWith(prefix)) {
-                result.removed.append(it.key());
-                break;
-            }
-        }
+        if (!seen.contains(it.key()) && removable(it.key(), present, absent))
+            result.removed.append(it.key());
     }
+    for (auto it = playlistStamps.cbegin(); it != playlistStamps.cend(); ++it) {
+        if (!seenPlaylists.contains(it.key()) && removable(it.key(), present, absent))
+            result.removedPlaylists.append(it.key());
+    }
+    if (!result.added.isEmpty()) {
+        for (const QString &source : std::as_const(result.keptPlaylists)) {
+            if (cancelled(cancel))
+                return ScanResult();
+            result.playlists.append(readPlaylist(source));
+        }
+        result.keptPlaylists.clear();
+    }
+    result.complete = true;
     return result;
 }
 

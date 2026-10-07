@@ -43,25 +43,54 @@ struct TrackInfo
     QString artPath;
 };
 
+struct PlaylistFile
+{
+    QString source;
+    QString name;
+    QStringList entries;
+    qint64 mtime = -1;
+    qint64 size = -1;
+    bool readable = true;
+};
+
 struct ScanResult
 {
     QList<TrackInfo> added;
     QList<TrackInfo> updated;
     QStringList removed;
+    QList<PlaylistFile> playlists;
+    QStringList keptPlaylists;
+    QStringList removedPlaylists;
+    QStringList directories;
+    bool complete = false;
 };
 
 class Scanner
 {
 public:
+    using MountCheck = bool (*)(const QString &path);
+
     explicit Scanner(const QString &artDir);
 
     ScanResult scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot,
-                    const std::atomic_bool *cancel = nullptr);
+                    const std::atomic_bool *cancel = nullptr,
+                    const QHash<QString, FileStamp> &playlistStamps = {});
 
     static bool isAudioFile(const QString &path);
+    static bool isPlaylistFile(const QString &path);
     static QString albumKey(const QString &album, const QString &albumArtist);
+    static QString mediaBase();
+    static FileStamp stampOf(const QFileInfo &info);
+    static PlaylistFile readPlaylist(const QString &path);
+    static QString decodePlaylist(const QByteArray &bytes, bool utf8Only);
+    static bool isMountPoint(const QString &dir);
+    static void setMountCheck(MountCheck check);
 
 private:
+    bool removable(const QString &path, const QStringList &present, const QStringList &absent);
+    bool onAbsentMedia(const QString &path);
+    bool mounted(const QString &dir);
+
     TrackInfo read(const QFileInfo &info, const FileStamp &stamp);
     QString resolveArt(TagLib::File *file, const QString &key, const QDir &dir);
     QString writeArt(const QByteArray &data, const QString &mime);
@@ -70,6 +99,7 @@ private:
     QString m_artDir;
     QHash<QString, QString> m_art;
     QHash<QString, QString> m_folderArt;
+    QHash<QString, bool> m_mounts;
 };
 
 }

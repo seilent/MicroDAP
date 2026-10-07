@@ -2,10 +2,12 @@
 
 #include "Queue.h"
 #include "Scanner.h"
+#include "Settings.h"
 
 #include <QDateTime>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QSqlDatabase>
 #include <QStringList>
 #include <QVariant>
@@ -20,6 +22,7 @@ class Library : public QObject
     Q_OBJECT
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
     Q_PROPERTY(QVariantMap counts READ counts NOTIFY countsChanged)
+    Q_PROPERTY(int songCount READ songCount NOTIFY countsChanged)
     Q_PROPERTY(int playlistCount READ playlistCount NOTIFY playlistCountChanged)
 
 public:
@@ -38,32 +41,52 @@ public:
 
     bool scanning() const;
     QVariantMap counts() const;
+    int songCount() const;
     int playlistCount() const;
 
+    void setSettings(Settings *settings);
+    QStringList scannedRoots() const;
+    QStringList scannedDirectories() const;
+
     Q_INVOKABLE void rescan(const QStringList &roots);
+    Q_INVOKABLE void rescanRoots();
     Q_INVOKABLE void addHistory(qint64 trackId,
                                 const QDateTime &playedAt = QDateTime::currentDateTimeUtc());
     Q_INVOKABLE void setRating(qint64 trackId, int rating);
     Q_INVOKABLE int rating(qint64 trackId) const;
     Q_INVOKABLE QVariantList artistAlbums(qint64 artistId) const;
     Q_INVOKABLE QVariantList artistTracks(qint64 artistId) const;
+    Q_INVOKABLE QVariantList artistAlbumRows(qint64 artistId) const;
+    Q_INVOKABLE QVariantList artistTrackRows(qint64 artistId) const;
     Q_INVOKABLE QVariantMap artistInfo(qint64 artistId) const;
     Q_INVOKABLE QVariantMap albumInfo(qint64 albumId) const;
     Q_INVOKABLE QVariantList albumTracks(qint64 albumId) const;
     Q_INVOKABLE QVariantMap playlistInfo(qint64 playlistId) const;
     Q_INVOKABLE QVariantList playlistTracks(qint64 playlistId) const;
+    Q_INVOKABLE QVariantList genreTracks(qint64 genreId) const;
+    Q_INVOKABLE QVariantList allTracks() const;
     Q_INVOKABLE QVariantList trackRows(const QVariantList &trackIds) const;
     QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
+    QList<QueueEntry> entriesFor(const QString &kind, qint64 id) const;
     Q_INVOKABLE bool pin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;
+
+    QHash<QString, FileStamp> snapshot() const;
+    QHash<QString, FileStamp> playlistStamps() const;
+    void finishScan(const ScanResult &result);
+
+    static constexpr int historyKeep = 2000;
+    static constexpr int historyPruneEvery = 100;
+    static constexpr int idChunk = 500;
 
 signals:
     void scanningChanged();
     void countsChanged();
     void playlistCountChanged();
-    void changed();
-    void historyChanged();
+    void tracksChanged();
+    void albumsChanged();
+    void played(qint64 trackId);
     void pinsChanged();
     void playlistsChanged();
     void ratingChanged(qint64 trackId, int rating);
@@ -73,8 +96,11 @@ private:
     void open();
     void setScanning(bool scanning);
     int count(const QString &table) const;
-    QHash<QString, FileStamp> snapshot() const;
-    void finishScan(const ScanResult &result);
+    bool applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed);
+    int removePlaylists(const QStringList &sources);
+    QVariantList songOrder(const QString &where, const QVariantList &binds) const;
+    QList<QueueEntry> entryRows(const QString &sql, const QVariantList &binds) const;
+    QVariantList trackRowsWhere(const QString &sql, qint64 bind) const;
     bool upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums,
                      QHash<QString, qint64> &artists);
     qint64 ensureAlbum(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums);
@@ -82,9 +108,10 @@ private:
     bool linkArtists(qint64 trackId, const QStringList &names, QHash<QString, qint64> &artists);
     QVariantList idColumn(const QString &sql, qint64 bind) const;
     bool removeTrack(const QString &path);
-    bool prune();
+    bool prune(bool albumsAndArtists);
     int prunePins();
     void pruneArt();
+    void endScan();
 
     QString m_dbPath;
     QString m_artDir;
@@ -93,7 +120,12 @@ private:
     std::atomic_bool m_cancel{false};
     bool m_scanning = false;
     bool m_hasPending = false;
+    int m_historyInserts = 0;
     QStringList m_pendingRoots;
+    QStringList m_scanRoots;
+    QStringList m_scannedRoots;
+    QStringList m_scannedDirectories;
+    QPointer<Settings> m_settings;
 };
 
 }

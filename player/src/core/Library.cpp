@@ -11,6 +11,7 @@
 #include <QStandardPaths>
 #include <QThread>
 
+#include <algorithm>
 #include <atomic>
 #include <utility>
 
@@ -20,7 +21,7 @@ namespace {
 
 std::atomic_int connectionCounter{0};
 
-constexpr int schemaVersion = 3;
+constexpr int schemaVersion = 5;
 
 constexpr const char *trackArtistsTable =
     "CREATE TABLE IF NOT EXISTS track_artists("
@@ -32,7 +33,21 @@ constexpr const char *trackArtistsIndex =
 constexpr const char *addSampleRate = "ALTER TABLE tracks ADD COLUMN sample_rate INTEGER";
 constexpr const char *addBitDepth = "ALTER TABLE tracks ADD COLUMN bit_depth INTEGER";
 constexpr const char *markReread = "UPDATE tracks SET mtime = -1";
-constexpr const char *setVersion = "PRAGMA user_version = 3";
+constexpr const char *addPlaylistSource = "ALTER TABLE playlists ADD COLUMN source TEXT";
+constexpr const char *addPlaylistSkipped =
+    "ALTER TABLE playlists ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0";
+constexpr const char *playlistSourceIndex =
+    "CREATE UNIQUE INDEX IF NOT EXISTS playlists_source ON playlists(source)";
+constexpr const char *dropUnsourced = "DELETE FROM playlists WHERE source IS NULL";
+constexpr const char *dropUnsourcedPins =
+    "DELETE FROM pins WHERE kind = 'playlist' AND ref_id NOT IN (SELECT id FROM playlists)";
+constexpr const char *addPlaylistMtime =
+    "ALTER TABLE playlists ADD COLUMN mtime INTEGER NOT NULL DEFAULT -1";
+constexpr const char *addPlaylistSize =
+    "ALTER TABLE playlists ADD COLUMN size INTEGER NOT NULL DEFAULT -1";
+constexpr const char *playlistItemsTrackIndex =
+    "CREATE INDEX IF NOT EXISTS playlist_items_track ON playlist_items(track_id)";
+constexpr const char *setVersion = "PRAGMA user_version = 5";
 
 const char *const schema[] = {
     "CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
@@ -56,12 +71,16 @@ const char *const schema[] = {
     "played_at INTEGER NOT NULL)",
     "CREATE INDEX IF NOT EXISTS history_played ON history(played_at)",
     "CREATE INDEX IF NOT EXISTS history_track ON history(track_id)",
-    "CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+    "source TEXT, skipped INTEGER NOT NULL DEFAULT 0, mtime INTEGER NOT NULL DEFAULT -1, "
+    "size INTEGER NOT NULL DEFAULT -1)",
+    playlistSourceIndex,
     "CREATE TABLE IF NOT EXISTS playlist_items("
     "playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE, "
     "pos INTEGER NOT NULL, "
     "track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, "
     "PRIMARY KEY(playlist_id, pos))",
+    playlistItemsTrackIndex,
     "CREATE TABLE IF NOT EXISTS pins(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, "
     "ref_id INTEGER NOT NULL, pos INTEGER NOT NULL)",
     setVersion,
@@ -73,6 +92,14 @@ const char *const migrateFrom1[] = {
     addSampleRate,
     addBitDepth,
     markReread,
+    addPlaylistSource,
+    addPlaylistSkipped,
+    playlistSourceIndex,
+    dropUnsourced,
+    dropUnsourcedPins,
+    addPlaylistMtime,
+    addPlaylistSize,
+    playlistItemsTrackIndex,
     setVersion,
 };
 
@@ -80,15 +107,102 @@ const char *const migrateFrom2[] = {
     addSampleRate,
     addBitDepth,
     markReread,
+    addPlaylistSource,
+    addPlaylistSkipped,
+    playlistSourceIndex,
+    dropUnsourced,
+    dropUnsourcedPins,
+    addPlaylistMtime,
+    addPlaylistSize,
+    playlistItemsTrackIndex,
     setVersion,
 };
 
-const char *const pruneStatements[] = {
+const char *const migrateFrom3[] = {
+    addPlaylistSource,
+    addPlaylistSkipped,
+    playlistSourceIndex,
+    dropUnsourced,
+    dropUnsourcedPins,
+    addPlaylistMtime,
+    addPlaylistSize,
+    playlistItemsTrackIndex,
+    setVersion,
+};
+
+const char *const migrateFrom4[] = {
+    addPlaylistMtime,
+    addPlaylistSize,
+    playlistItemsTrackIndex,
+    setVersion,
+};
+
+const char *const pruneAlbumsAndArtists[] = {
     "DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)",
     "DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM track_artists)",
+};
+
+const char *const pruneGenres[] = {
     "INSERT OR IGNORE INTO genres(name) SELECT DISTINCT genre FROM tracks WHERE genre <> ''",
     "DELETE FROM genres WHERE name NOT IN (SELECT DISTINCT genre FROM tracks WHERE genre <> '')",
 };
+
+constexpr const char *entryColumns =
+    "SELECT t.id, t.path, t.title, t.artist, a.title, a.art_path, t.duration_ms";
+
+constexpr const char *rowColumns =
+    "SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms, t.sample_rate, t.bit_depth";
+
+QString placeholders(qsizetype count)
+{
+    QString out;
+    out.reserve(count * 3);
+    for (qsizetype i = 0; i < count; ++i)
+        out += i == 0 ? QStringLiteral("?") : QStringLiteral(", ?");
+    return out;
+}
+
+QList<qint64> distinctIds(const QVariantList &ids)
+{
+    QList<qint64> out;
+    QSet<qint64> seen;
+    out.reserve(ids.size());
+    for (const QVariant &id : ids) {
+        const qint64 value = id.toLongLong();
+        if (!seen.contains(value)) {
+            seen.insert(value);
+            out.append(value);
+        }
+    }
+    return out;
+}
+
+QueueEntry entryOf(const QSqlQuery &query)
+{
+    QueueEntry entry;
+    entry.id = query.value(0).toLongLong();
+    entry.path = query.value(1).toString();
+    entry.title = query.value(2).toString();
+    entry.artist = query.value(3).toString();
+    entry.album = query.value(4).toString();
+    entry.artPath = query.value(5).toString();
+    entry.durationMs = query.value(6).toLongLong();
+    return entry;
+}
+
+QVariantMap rowOf(const QSqlQuery &query)
+{
+    QVariantMap row;
+    row.insert(QStringLiteral("id"), query.value(0).toLongLong());
+    row.insert(QStringLiteral("title"), query.value(1).toString());
+    row.insert(QStringLiteral("artist"), query.value(2).toString());
+    row.insert(QStringLiteral("album"), query.value(3).toString());
+    row.insert(QStringLiteral("albumId"), query.value(4).toLongLong());
+    row.insert(QStringLiteral("durationMs"), query.value(5).toLongLong());
+    row.insert(QStringLiteral("sampleRate"), query.value(6).toInt());
+    row.insert(QStringLiteral("bitDepth"), query.value(7).toInt());
+    return row;
+}
 
 QVariant nullable(const QString &value)
 {
@@ -137,6 +251,15 @@ const char *pinTable(const QString &kind)
 }
 
 constexpr const char *pinKinds[] = {"album", "artist", "song", "playlist"};
+
+QString songSortKey(const QString &title)
+{
+    QString key = title.trimmed().toLower();
+    const char16_t first = key.isEmpty() ? u'\0' : key.at(0).unicode();
+    if (first >= u'a' && first <= u'z')
+        return key;
+    return key.prepend(QLatin1Char(' '));
+}
 
 }
 
@@ -204,6 +327,12 @@ void Library::open()
     } else if (current == 2) {
         for (const char *sql : migrateFrom2)
             run(m_db, sql);
+    } else if (current == 3) {
+        for (const char *sql : migrateFrom3)
+            run(m_db, sql);
+    } else if (current == 4) {
+        for (const char *sql : migrateFrom4)
+            run(m_db, sql);
     } else if (current != schemaVersion) {
         qWarning() << "casdap library: unsupported schema version" << current << "in" << m_dbPath;
         m_db.close();
@@ -259,15 +388,61 @@ QVariantMap Library::counts() const
     };
 }
 
+int Library::songCount() const
+{
+    return m_db.isOpen() ? count(QStringLiteral("tracks")) : 0;
+}
+
 int Library::playlistCount() const
 {
     return m_db.isOpen() ? count(QStringLiteral("playlists")) : 0;
+}
+
+void Library::setSettings(Settings *settings)
+{
+    if (m_settings == settings)
+        return;
+    if (m_settings)
+        disconnect(m_settings.data(), nullptr, this, nullptr);
+    m_settings = settings;
+    if (m_settings)
+        connect(m_settings.data(), &Settings::rootsChanged, this, &Library::rescanRoots);
+}
+
+QStringList Library::scannedRoots() const
+{
+    return m_scannedRoots;
+}
+
+QStringList Library::scannedDirectories() const
+{
+    return m_scannedDirectories;
+}
+
+void Library::rescanRoots()
+{
+    if (!m_settings) {
+        qWarning() << "casdap library: rescan without settings";
+        return;
+    }
+    rescan(m_settings->roots());
 }
 
 QHash<QString, FileStamp> Library::snapshot() const
 {
     QHash<QString, FileStamp> map;
     QSqlQuery query(QStringLiteral("SELECT path, mtime, size FROM tracks"), m_db);
+    while (query.next())
+        map.insert(query.value(0).toString(),
+                   {query.value(1).toLongLong(), query.value(2).toLongLong()});
+    return map;
+}
+
+QHash<QString, FileStamp> Library::playlistStamps() const
+{
+    QHash<QString, FileStamp> map;
+    QSqlQuery query(QStringLiteral("SELECT source, mtime, size FROM playlists WHERE source IS NOT NULL"),
+                    m_db);
     while (query.next())
         map.insert(query.value(0).toString(),
                    {query.value(1).toLongLong(), query.value(2).toLongLong()});
@@ -286,13 +461,15 @@ void Library::rescan(const QStringList &roots)
         return;
     }
     setScanning(true);
+    m_scanRoots = roots;
 
     const QHash<QString, FileStamp> snap = snapshot();
+    const QHash<QString, FileStamp> stamps = playlistStamps();
     const QString artDir = m_artDir;
     const std::atomic_bool *cancel = &m_cancel;
-    QThread *thread = QThread::create([this, roots, snap, artDir, cancel] {
+    QThread *thread = QThread::create([this, roots, snap, stamps, artDir, cancel] {
         Scanner scanner(artDir);
-        ScanResult result = scanner.scan(roots, snap, cancel);
+        ScanResult result = scanner.scan(roots, snap, cancel, stamps);
         QMetaObject::invokeMethod(
             this, [this, result = std::move(result)] { finishScan(result); },
             Qt::QueuedConnection);
@@ -302,51 +479,100 @@ void Library::rescan(const QStringList &roots)
     thread->start();
 }
 
-void Library::finishScan(const ScanResult &result)
+void Library::endScan()
 {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    QHash<QString, qint64> albums;
-    QHash<QString, qint64> artists;
-
-    bool ok = m_db.transaction();
-    for (const TrackInfo &track : result.added)
-        ok = ok && upsertTrack(track, now, albums, artists);
-    for (const TrackInfo &track : result.updated)
-        ok = ok && upsertTrack(track, now, albums, artists);
-    for (const QString &path : result.removed)
-        ok = ok && removeTrack(path);
-    ok = ok && prune();
-    const int unpinned = ok ? prunePins() : -1;
-    ok = ok && unpinned >= 0;
-    if (ok)
-        ok = m_db.commit();
-    if (ok) {
-        pruneArt();
-    } else {
-        qWarning() << "casdap library: scan apply failed" << m_db.lastError().text();
-        m_db.rollback();
-    }
-
-    setScanning(false);
-    if (ok) {
-        emit countsChanged();
-        emit changed();
-        emit playlistsChanged();
-        emit playlistCountChanged();
-        if (unpinned > 0)
-            emit pinsChanged();
-        emit scanned(static_cast<int>(result.added.size()),
-                     static_cast<int>(result.updated.size()),
-                     static_cast<int>(result.removed.size()), true);
-    } else {
-        emit scanned(0, 0, 0, false);
-    }
-
     if (m_hasPending) {
         m_hasPending = false;
         const QStringList roots = std::exchange(m_pendingRoots, QStringList());
         rescan(roots);
     }
+}
+
+void Library::finishScan(const ScanResult &result)
+{
+    QList<PlaylistFile> readable;
+    for (const PlaylistFile &playlist : result.playlists) {
+        if (playlist.readable)
+            readable.append(playlist);
+        else
+            qWarning().noquote() << QStringLiteral("casdap: playlist %1: unreadable, kept as is")
+                                        .arg(playlist.source);
+    }
+    const int added = static_cast<int>(result.added.size());
+    const int updated = static_cast<int>(result.updated.size());
+    const int removed = static_cast<int>(result.removed.size());
+    const bool tracksTouched = added + updated + removed > 0;
+
+    if (result.complete) {
+        m_scannedRoots = m_scanRoots;
+        m_scannedDirectories = result.directories;
+    }
+
+    if (result.complete && !tracksTouched && readable.isEmpty() && result.removedPlaylists.isEmpty()) {
+        setScanning(false);
+        emit scanned(0, 0, 0, true);
+        endScan();
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QHash<QString, qint64> albums;
+    QHash<QString, qint64> artists;
+    bool playlistsTouched = false;
+
+    bool ok = result.complete && m_db.transaction();
+    const bool began = ok;
+    for (const TrackInfo &track : result.added)
+        ok = ok && upsertTrack(track, now, albums, artists);
+    for (const TrackInfo &track : result.updated)
+        ok = ok && upsertTrack(track, now, albums, artists);
+    if (ok && removed > 0) {
+        const int itemsBefore = count(QStringLiteral("playlist_items"));
+        for (const QString &path : result.removed)
+            ok = ok && removeTrack(path);
+        if (ok && count(QStringLiteral("playlist_items")) != itemsBefore)
+            playlistsTouched = true;
+    }
+    ok = ok && applyPlaylists(readable, playlistsTouched);
+    if (ok && !result.removedPlaylists.isEmpty()) {
+        const int dropped = removePlaylists(result.removedPlaylists);
+        ok = dropped >= 0;
+        if (dropped > 0)
+            playlistsTouched = true;
+    }
+    if (ok && tracksTouched)
+        ok = prune(updated + removed > 0);
+    const int unpinned = ok ? prunePins() : -1;
+    ok = ok && unpinned >= 0;
+    if (ok)
+        ok = m_db.commit();
+    if (ok) {
+        if (tracksTouched)
+            pruneArt();
+    } else {
+        qWarning() << "casdap library: scan apply failed" << m_db.lastError().text();
+        if (began)
+            m_db.rollback();
+    }
+
+    setScanning(false);
+    if (ok) {
+        if (tracksTouched) {
+            emit countsChanged();
+            emit tracksChanged();
+            emit albumsChanged();
+        }
+        if (playlistsTouched) {
+            emit playlistsChanged();
+            emit playlistCountChanged();
+        }
+        if (unpinned > 0)
+            emit pinsChanged();
+        emit scanned(added, updated, removed, true);
+    } else {
+        emit scanned(0, 0, 0, false);
+    }
+    endScan();
 }
 
 qint64 Library::ensureAlbum(const TrackInfo &track, qint64 now, QHash<QString, qint64> &albums)
@@ -454,14 +680,14 @@ bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qin
     query.addBindValue(track.path);
     query.addBindValue(track.mtime);
     query.addBindValue(track.size);
-    query.addBindValue(track.title);
-    query.addBindValue(track.artist);
-    query.addBindValue(track.albumArtist);
+    query.addBindValue(track.title.isNull() ? QStringLiteral("") : track.title);
+    query.addBindValue(track.artist.isNull() ? QStringLiteral("") : track.artist);
+    query.addBindValue(track.albumArtist.isNull() ? QStringLiteral("") : track.albumArtist);
     query.addBindValue(albumId);
     query.addBindValue(nullable(track.trackNo));
     query.addBindValue(nullable(track.discNo));
     query.addBindValue(nullable(track.year));
-    query.addBindValue(track.genre);
+    query.addBindValue(track.genre.isNull() ? QStringLiteral("") : track.genre);
     query.addBindValue(track.durationMs);
     query.addBindValue(now);
     query.addBindValue(track.sampleRate);
@@ -485,9 +711,144 @@ bool Library::removeTrack(const QString &path)
     return run(query);
 }
 
-bool Library::prune()
+bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed)
 {
-    for (const char *sql : pruneStatements) {
+    if (playlists.isEmpty())
+        return true;
+
+    QHash<QString, qint64> exact;
+    {
+        QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks"), m_db);
+        while (query.next())
+            exact.insert(query.value(1).toString(), query.value(0).toLongLong());
+    }
+    QHash<QString, QList<qint64>> folded;
+    bool foldedBuilt = false;
+
+    QSqlQuery find(m_db);
+    find.prepare(QStringLiteral("SELECT id, name, skipped FROM playlists WHERE source = ?"));
+    QSqlQuery stored(m_db);
+    stored.prepare(QStringLiteral("SELECT track_id FROM playlist_items WHERE playlist_id = ? ORDER BY pos"));
+
+    for (const PlaylistFile &playlist : playlists) {
+        QList<qint64> ids;
+        ids.reserve(playlist.entries.size());
+        int skipped = 0;
+        for (const QString &entry : playlist.entries) {
+            if (const auto hit = exact.constFind(entry); hit != exact.cend()) {
+                ids.append(*hit);
+                continue;
+            }
+            if (!foldedBuilt) {
+                foldedBuilt = true;
+                for (auto it = exact.cbegin(); it != exact.cend(); ++it)
+                    folded[it.key().toCaseFolded()].append(it.value());
+            }
+            const auto candidates = folded.constFind(entry.toCaseFolded());
+            if (candidates != folded.cend() && candidates->size() == 1)
+                ids.append(candidates->constFirst());
+            else
+                ++skipped;
+        }
+
+        find.bindValue(0, playlist.source);
+        if (!run(find))
+            return false;
+        qint64 playlistId = -1;
+        bool rewrite = true;
+        if (find.next()) {
+            playlistId = find.value(0).toLongLong();
+            const bool same = find.value(1).toString() == playlist.name && find.value(2).toInt() == skipped;
+            find.finish();
+
+            QSqlQuery update(m_db);
+            update.prepare(QStringLiteral(
+                "UPDATE playlists SET name = ?, skipped = ?, mtime = ?, size = ? WHERE id = ?"));
+            update.addBindValue(playlist.name);
+            update.addBindValue(skipped);
+            update.addBindValue(playlist.mtime);
+            update.addBindValue(playlist.size);
+            update.addBindValue(playlistId);
+            if (!run(update))
+                return false;
+
+            stored.bindValue(0, playlistId);
+            if (!run(stored))
+                return false;
+            QList<qint64> current;
+            current.reserve(ids.size());
+            while (stored.next())
+                current.append(stored.value(0).toLongLong());
+            stored.finish();
+            rewrite = current != ids;
+            if (!same || rewrite)
+                changed = true;
+        } else {
+            find.finish();
+            QSqlQuery insert(m_db);
+            insert.prepare(QStringLiteral(
+                "INSERT INTO playlists(name, source, skipped, mtime, size) VALUES(?, ?, ?, ?, ?)"));
+            insert.addBindValue(playlist.name);
+            insert.addBindValue(playlist.source);
+            insert.addBindValue(skipped);
+            insert.addBindValue(playlist.mtime);
+            insert.addBindValue(playlist.size);
+            if (!run(insert))
+                return false;
+            playlistId = insert.lastInsertId().toLongLong();
+            changed = true;
+        }
+
+        if (rewrite) {
+            QSqlQuery clear(m_db);
+            clear.prepare(QStringLiteral("DELETE FROM playlist_items WHERE playlist_id = ?"));
+            clear.addBindValue(playlistId);
+            if (!run(clear))
+                return false;
+
+            QSqlQuery insert(m_db);
+            insert.prepare(QStringLiteral(
+                "INSERT INTO playlist_items(playlist_id, pos, track_id) VALUES(?, ?, ?)"));
+            for (qsizetype pos = 0; pos < ids.size(); ++pos) {
+                insert.bindValue(0, playlistId);
+                insert.bindValue(1, static_cast<int>(pos));
+                insert.bindValue(2, ids.at(pos));
+                if (!run(insert))
+                    return false;
+            }
+        }
+
+        if (skipped > 0)
+            qInfo().noquote() << QStringLiteral("casdap: playlist %1: %2 entries not in the library")
+                                     .arg(playlist.name)
+                                     .arg(skipped);
+    }
+    return true;
+}
+
+int Library::removePlaylists(const QStringList &sources)
+{
+    int removed = 0;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM playlists WHERE source = ?"));
+    for (const QString &source : sources) {
+        query.bindValue(0, source);
+        if (!run(query))
+            return -1;
+        removed += qMax(0, query.numRowsAffected());
+    }
+    return removed;
+}
+
+bool Library::prune(bool albumsAndArtists)
+{
+    if (albumsAndArtists) {
+        for (const char *sql : pruneAlbumsAndArtists) {
+            if (!run(m_db, sql))
+                return false;
+        }
+    }
+    for (const char *sql : pruneGenres) {
         if (!run(m_db, sql))
             return false;
     }
@@ -582,8 +943,16 @@ void Library::addHistory(qint64 trackId, const QDateTime &playedAt)
     query.prepare(QStringLiteral("INSERT INTO history(track_id, played_at) VALUES(?, ?)"));
     query.addBindValue(trackId);
     query.addBindValue(playedAt.toMSecsSinceEpoch());
-    if (run(query))
-        emit historyChanged();
+    if (!run(query))
+        return;
+    if (++m_historyInserts % historyPruneEvery == 0) {
+        QSqlQuery prune(m_db);
+        prune.prepare(QStringLiteral("DELETE FROM history WHERE id <= "
+                                     "(SELECT id FROM history ORDER BY id DESC LIMIT 1 OFFSET ?)"));
+        prune.addBindValue(historyKeep);
+        run(prune);
+    }
+    emit played(trackId);
 }
 
 void Library::setRating(qint64 trackId, int rating)
@@ -678,9 +1047,53 @@ QVariantMap Library::albumInfo(qint64 albumId) const
 
 QVariantList Library::albumTracks(qint64 albumId) const
 {
-    return trackRows(idColumn(QStringLiteral("SELECT id FROM tracks WHERE album_id = ? "
-                                             "ORDER BY disc_no, track_no, id"),
-                              albumId));
+    return trackRowsWhere(QStringLiteral(" FROM tracks t JOIN albums a ON a.id = t.album_id "
+                                         "WHERE t.album_id = ? ORDER BY t.disc_no, t.track_no, t.id"),
+                          albumId);
+}
+
+QVariantList Library::artistAlbumRows(qint64 artistId) const
+{
+    QVariantList rows;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT a.id, a.title, a.artist, a.year, a.art_path FROM albums a "
+                                 "WHERE a.id IN (SELECT t.album_id FROM tracks t "
+                                 "JOIN track_artists ta ON ta.track_id = t.id "
+                                 "WHERE ta.artist_id = ?) ORDER BY a.year, a.title, a.id"));
+    query.addBindValue(artistId);
+    if (!query.exec())
+        return rows;
+    while (query.next()) {
+        QVariantMap row;
+        row.insert(QStringLiteral("id"), query.value(0).toLongLong());
+        row.insert(QStringLiteral("title"), query.value(1).toString());
+        row.insert(QStringLiteral("artist"), query.value(2).toString());
+        row.insert(QStringLiteral("year"), query.value(3).isNull() ? 0 : query.value(3).toInt());
+        row.insert(QStringLiteral("artPath"), query.value(4).toString());
+        rows.append(row);
+    }
+    return rows;
+}
+
+QVariantList Library::artistTrackRows(qint64 artistId) const
+{
+    return trackRowsWhere(QStringLiteral(" FROM tracks t JOIN track_artists ta ON ta.track_id = t.id "
+                                         "JOIN albums a ON a.id = t.album_id WHERE ta.artist_id = ? "
+                                         "ORDER BY a.year, a.title, a.id, t.disc_no, t.track_no, t.id"),
+                          artistId);
+}
+
+QVariantList Library::trackRowsWhere(const QString &sql, qint64 bind) const
+{
+    QVariantList rows;
+    QSqlQuery query(m_db);
+    query.prepare(QString::fromLatin1(rowColumns) + sql);
+    query.addBindValue(bind);
+    if (!query.exec())
+        return rows;
+    while (query.next())
+        rows.append(rowOf(query));
+    return rows;
 }
 
 QVariantMap Library::playlistInfo(qint64 playlistId) const
@@ -688,13 +1101,16 @@ QVariantMap Library::playlistInfo(qint64 playlistId) const
     QVariantMap info;
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral("SELECT p.name, (SELECT COUNT(*) FROM playlist_items i "
-                                 "WHERE i.playlist_id = p.id) FROM playlists p WHERE p.id = ?"));
+                                 "WHERE i.playlist_id = p.id), p.skipped, p.source "
+                                 "FROM playlists p WHERE p.id = ?"));
     query.addBindValue(playlistId);
     if (!query.exec() || !query.next())
         return info;
     info.insert(QStringLiteral("id"), playlistId);
     info.insert(QStringLiteral("name"), query.value(0).toString());
     info.insert(QStringLiteral("count"), query.value(1).toInt());
+    info.insert(QStringLiteral("skipped"), query.value(2).toInt());
+    info.insert(QStringLiteral("source"), query.value(3).toString());
     return info;
 }
 
@@ -705,28 +1121,64 @@ QVariantList Library::playlistTracks(qint64 playlistId) const
                     playlistId);
 }
 
+QVariantList Library::songOrder(const QString &where, const QVariantList &binds) const
+{
+    QList<std::pair<QString, qint64>> rows;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT t.id, t.title FROM tracks t "
+                                 "JOIN albums a ON a.id = t.album_id")
+                  + where + QStringLiteral(" ORDER BY t.id"));
+    for (const QVariant &bind : binds)
+        query.addBindValue(bind);
+    QVariantList ids;
+    if (!query.exec())
+        return ids;
+    while (query.next())
+        rows.append({songSortKey(query.value(1).toString()), query.value(0).toLongLong()});
+    std::stable_sort(rows.begin(), rows.end(),
+                     [](const auto &a, const auto &b) { return a.first < b.first; });
+    for (const auto &row : std::as_const(rows))
+        ids.append(row.second);
+    return ids;
+}
+
+QVariantList Library::genreTracks(qint64 genreId) const
+{
+    return songOrder(QStringLiteral(" WHERE t.genre = (SELECT name FROM genres WHERE id = ?)"),
+                     {genreId});
+}
+
+QVariantList Library::allTracks() const
+{
+    return songOrder(QString(), {});
+}
+
 QVariantList Library::trackRows(const QVariantList &trackIds) const
 {
     QVariantList rows;
+    if (trackIds.isEmpty())
+        return rows;
+    const QList<qint64> ids = distinctIds(trackIds);
+    QHash<qint64, QVariantMap> found;
+    found.reserve(ids.size());
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms, "
-                                 "t.sample_rate, t.bit_depth "
-                                 "FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
-    for (const QVariant &id : trackIds) {
-        query.bindValue(0, id.toLongLong());
-        if (!query.exec() || !query.next())
+    for (qsizetype from = 0; from < ids.size(); from += idChunk) {
+        const qsizetype size = qMin<qsizetype>(idChunk, ids.size() - from);
+        query.prepare(QString::fromLatin1(rowColumns)
+                      + QStringLiteral(" FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id IN (%1)")
+                            .arg(placeholders(size)));
+        for (qsizetype i = 0; i < size; ++i)
+            query.bindValue(static_cast<int>(i), ids.at(from + i));
+        if (!query.exec())
             continue;
-        QVariantMap row;
-        row.insert(QStringLiteral("id"), query.value(0).toLongLong());
-        row.insert(QStringLiteral("title"), query.value(1).toString());
-        row.insert(QStringLiteral("artist"), query.value(2).toString());
-        row.insert(QStringLiteral("album"), query.value(3).toString());
-        row.insert(QStringLiteral("albumId"), query.value(4).toLongLong());
-        row.insert(QStringLiteral("durationMs"), query.value(5).toLongLong());
-        row.insert(QStringLiteral("sampleRate"), query.value(6).toInt());
-        row.insert(QStringLiteral("bitDepth"), query.value(7).toInt());
-        rows.append(row);
+        while (query.next())
+            found.insert(query.value(0).toLongLong(), rowOf(query));
         query.finish();
+    }
+    rows.reserve(trackIds.size());
+    for (const QVariant &id : trackIds) {
+        if (const auto hit = found.constFind(id.toLongLong()); hit != found.cend())
+            rows.append(*hit);
     }
     return rows;
 }
@@ -734,26 +1186,89 @@ QVariantList Library::trackRows(const QVariantList &trackIds) const
 QList<QueueEntry> Library::queueEntries(const QVariantList &trackIds) const
 {
     QList<QueueEntry> entries;
+    if (trackIds.isEmpty())
+        return entries;
+    const QList<qint64> ids = distinctIds(trackIds);
+    QHash<qint64, QueueEntry> found;
+    found.reserve(ids.size());
     QSqlQuery query(m_db);
-    query.prepare(QStringLiteral("SELECT t.id, t.path, t.title, t.artist, a.title, a.art_path, "
-                                 "t.duration_ms FROM tracks t JOIN albums a ON a.id = t.album_id "
-                                 "WHERE t.id = ?"));
-    for (const QVariant &id : trackIds) {
-        query.bindValue(0, id.toLongLong());
-        if (!query.exec() || !query.next())
+    for (qsizetype from = 0; from < ids.size(); from += idChunk) {
+        const qsizetype size = qMin<qsizetype>(idChunk, ids.size() - from);
+        query.prepare(QString::fromLatin1(entryColumns)
+                      + QStringLiteral(" FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.id IN (%1)")
+                            .arg(placeholders(size)));
+        for (qsizetype i = 0; i < size; ++i)
+            query.bindValue(static_cast<int>(i), ids.at(from + i));
+        if (!query.exec())
             continue;
-        QueueEntry entry;
-        entry.id = query.value(0).toLongLong();
-        entry.path = query.value(1).toString();
-        entry.title = query.value(2).toString();
-        entry.artist = query.value(3).toString();
-        entry.album = query.value(4).toString();
-        entry.artPath = query.value(5).toString();
-        entry.durationMs = query.value(6).toLongLong();
-        entries.append(entry);
+        while (query.next()) {
+            const QueueEntry entry = entryOf(query);
+            found.insert(entry.id, entry);
+        }
         query.finish();
     }
+    entries.reserve(trackIds.size());
+    for (const QVariant &id : trackIds) {
+        if (const auto hit = found.constFind(id.toLongLong()); hit != found.cend())
+            entries.append(*hit);
+    }
     return entries;
+}
+
+QList<QueueEntry> Library::entryRows(const QString &sql, const QVariantList &binds) const
+{
+    QList<QueueEntry> entries;
+    QSqlQuery query(m_db);
+    query.prepare(QString::fromLatin1(entryColumns) + sql);
+    for (const QVariant &bind : binds)
+        query.addBindValue(bind);
+    if (!query.exec())
+        return entries;
+    while (query.next())
+        entries.append(entryOf(query));
+    return entries;
+}
+
+QList<QueueEntry> Library::entriesFor(const QString &kind, qint64 id) const
+{
+    const QString from = QStringLiteral(" FROM tracks t JOIN albums a ON a.id = t.album_id");
+    if (kind == QLatin1StringView("album"))
+        return entryRows(from + QStringLiteral(" WHERE t.album_id = ? ORDER BY t.disc_no, t.track_no, t.id"),
+                         {id});
+    if (kind == QLatin1StringView("artist"))
+        return entryRows(QStringLiteral(" FROM tracks t JOIN track_artists ta ON ta.track_id = t.id "
+                                        "JOIN albums a ON a.id = t.album_id WHERE ta.artist_id = ? "
+                                        "ORDER BY a.year, a.title, a.id, t.disc_no, t.track_no, t.id"),
+                         {id});
+    if (kind == QLatin1StringView("playlist"))
+        return entryRows(QStringLiteral(" FROM playlist_items i JOIN tracks t ON t.id = i.track_id "
+                                        "JOIN albums a ON a.id = t.album_id WHERE i.playlist_id = ? "
+                                        "ORDER BY i.pos"),
+                         {id});
+    if (kind == QLatin1StringView("song"))
+        return entryRows(from + QStringLiteral(" WHERE t.id = ?"), {id});
+
+    QList<QueueEntry> rows;
+    if (kind == QLatin1StringView("genre"))
+        rows = entryRows(from + QStringLiteral(" WHERE t.genre = (SELECT name FROM genres WHERE id = ?) "
+                                               "ORDER BY t.id"),
+                         {id});
+    else if (kind == QLatin1StringView("all"))
+        rows = entryRows(from + QStringLiteral(" ORDER BY t.id"), {});
+    else
+        return rows;
+
+    QList<std::pair<QString, qsizetype>> keys;
+    keys.reserve(rows.size());
+    for (qsizetype i = 0; i < rows.size(); ++i)
+        keys.append({songSortKey(rows.at(i).title), i});
+    std::stable_sort(keys.begin(), keys.end(),
+                     [](const auto &a, const auto &b) { return a.first < b.first; });
+    QList<QueueEntry> sorted;
+    sorted.reserve(rows.size());
+    for (const auto &key : std::as_const(keys))
+        sorted.append(rows.at(key.second));
+    return sorted;
 }
 
 }

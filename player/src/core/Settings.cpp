@@ -1,5 +1,7 @@
 #include "Settings.h"
 
+#include "Scanner.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -206,14 +208,29 @@ QStringList Settings::defaultRoots()
 QStringList Settings::candidateRoots()
 {
     QStringList out = defaultRoots();
-    const QString base = qEnvironmentVariable("CASDAP_MEDIA_ROOT", QStringLiteral("/run/media"));
-    const QFileInfoList users = QDir(base).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QFileInfo &user : users) {
-        const QFileInfoList mounts = QDir(user.absoluteFilePath()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QFileInfo &mount : mounts) {
-            const QString music = mount.absoluteFilePath() + QStringLiteral("/Music");
-            out.append(QFileInfo::exists(music) ? music : mount.absoluteFilePath());
+    const auto offer = [&out](const QString &mount) {
+        out.append(mount);
+        const QString music = mount + QStringLiteral("/Music");
+        if (QFileInfo(music).isDir())
+            out.append(music);
+    };
+    const QFileInfoList children = QDir(Scanner::mediaBase()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &child : children) {
+        const QString path = child.absoluteFilePath();
+        if (Scanner::isMountPoint(path)) {
+            offer(path);
+            continue;
         }
+        QStringList mounts;
+        const QFileInfoList subs = QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo &sub : subs) {
+            if (Scanner::isMountPoint(sub.absoluteFilePath()))
+                mounts.append(sub.absoluteFilePath());
+        }
+        if (mounts.isEmpty())
+            offer(path);
+        for (const QString &mount : std::as_const(mounts))
+            offer(mount);
     }
     out.removeDuplicates();
     return out;

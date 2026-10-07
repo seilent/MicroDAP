@@ -1,5 +1,7 @@
 #include "Library.h"
+#include "LibraryWatcher.h"
 #include "Models.h"
+#include "Settings.h"
 
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
@@ -11,10 +13,13 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 
 #include <memory>
@@ -142,6 +147,54 @@ bool writeBytes(const QString &path, const QByteArray &data)
     return file.write(data) == data.size();
 }
 
+bool dropPlaylistStamps(QSqlQuery &query)
+{
+    return query.exec(QStringLiteral("DROP INDEX playlist_items_track"))
+           && query.exec(QStringLiteral("ALTER TABLE playlists DROP COLUMN mtime"))
+           && query.exec(QStringLiteral("ALTER TABLE playlists DROP COLUMN size"));
+}
+
+bool dropPlaylistColumns(QSqlQuery &query)
+{
+    return dropPlaylistStamps(query)
+           && query.exec(QStringLiteral("DROP INDEX playlists_source"))
+           && query.exec(QStringLiteral("ALTER TABLE playlists DROP COLUMN skipped"))
+           && query.exec(QStringLiteral("ALTER TABLE playlists DROP COLUMN source"));
+}
+
+QString fakeMount;
+
+bool fakeMountCheck(const QString &dir)
+{
+    return !fakeMount.isEmpty() && QDir::cleanPath(dir) == fakeMount;
+}
+
+QList<qint64> idsOf(const QList<QueueEntry> &entries)
+{
+    QList<qint64> ids;
+    for (const QueueEntry &entry : entries)
+        ids.append(entry.id);
+    return ids;
+}
+
+QList<qint64> idsOf(const QVariantList &values)
+{
+    QList<qint64> ids;
+    for (const QVariant &value : values)
+        ids.append(value.toLongLong());
+    return ids;
+}
+
+qint64 trackId(const QSqlDatabase &db, const QString &path)
+{
+    return scalar(db, QStringLiteral("SELECT id FROM tracks WHERE path = ?"), {path}).toLongLong();
+}
+
+qint64 playlistId(const QSqlDatabase &db, const QString &name)
+{
+    return scalar(db, QStringLiteral("SELECT id FROM playlists WHERE name = ?"), {name}).toLongLong();
+}
+
 }
 
 class LibraryTest : public QObject
@@ -161,6 +214,8 @@ private slots:
     void splitArtists();
     void migrate();
     void history();
+    void historyLimit();
+    void historyPrune();
     void newAlbums();
     void rating();
     void touched();
@@ -171,19 +226,48 @@ private slots:
     void pins();
     void pinsPrune();
     void rateAndDepth();
+    void batchedRows();
+    void entriesFor();
     void migrateFrom2();
     void playlists();
+    void genreTracks();
+    void folderOff();
+    void mediaUnmounted();
+    void mediaMountLayout();
+    void candidateRoots();
+    void playlistFiles();
+    void playlistStamps();
+    void playlistUnreadable();
+    void playlistStable();
+    void migrateFrom3();
+    void migrateFrom4();
+    void rootsChange();
+    void watcherDebounce();
+    void watcherNewDirectory();
+    void watcherLimit();
+    void watcherMissingRoot();
+    void watcherClimbStops();
+    void watcherPoll();
 
 private:
     bool scan(int &added, int &updated, int &removed);
     bool scan(const QStringList &roots, int &added, int &updated, int &removed);
+    bool scanRoots();
     QString firstTrackOf(const QString &album) const;
     QString artPathOf(const QString &album) const;
 
     QTemporaryDir m_dir;
     QString m_music;
     std::unique_ptr<Library> m_library;
+    std::unique_ptr<Settings> m_settings;
 };
+
+bool LibraryTest::scanRoots()
+{
+    QSignalSpy spy(m_library.get(), &Library::scanned);
+    m_library->rescanRoots();
+    return spy.wait(scanTimeoutMs) && spy.takeFirst().at(3).toBool();
+}
 
 bool LibraryTest::scan(int &added, int &updated, int &removed)
 {
@@ -228,10 +312,18 @@ void LibraryTest::initTestCase()
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
     QVERIFY(m_library->isOpen());
-    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 3);
+    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 5);
+    QCOMPARE(scalar(m_library->database(),
+                    QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' "
+                                   "AND name = 'playlist_items_track'"))
+                 .toInt(),
+             1);
 
     QSignalSpy scanningSpy(m_library.get(), &Library::scanningChanged);
-    QSignalSpy changedSpy(m_library.get(), &Library::changed);
+    QSignalSpy tracksSpy(m_library.get(), &Library::tracksChanged);
+    QSignalSpy albumsSpy(m_library.get(), &Library::albumsChanged);
+    QSignalSpy countsSpy(m_library.get(), &Library::countsChanged);
+    QSignalSpy playlistsSpy(m_library.get(), &Library::playlistsChanged);
     int added = 0;
     int updated = 0;
     int removed = 0;
@@ -240,7 +332,10 @@ void LibraryTest::initTestCase()
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 0);
     QCOMPARE(scanningSpy.count(), 2);
-    QCOMPARE(changedSpy.count(), 1);
+    QCOMPARE(tracksSpy.count(), 1);
+    QCOMPARE(albumsSpy.count(), 1);
+    QCOMPARE(countsSpy.count(), 1);
+    QCOMPARE(playlistsSpy.count(), 0);
     QVERIFY(!m_library->scanning());
 }
 
@@ -299,6 +394,13 @@ void LibraryTest::rescanUnchanged()
     const QHash<QString, qint64> before = addedByPath(m_library->database());
     QCOMPARE(before.size(), 8);
 
+    QSignalSpy scanningSpy(m_library.get(), &Library::scanningChanged);
+    QSignalSpy tracksSpy(m_library.get(), &Library::tracksChanged);
+    QSignalSpy albumsSpy(m_library.get(), &Library::albumsChanged);
+    QSignalSpy countsSpy(m_library.get(), &Library::countsChanged);
+    QSignalSpy playlistsSpy(m_library.get(), &Library::playlistsChanged);
+    QSignalSpy playlistCountSpy(m_library.get(), &Library::playlistCountChanged);
+    QSignalSpy pinsSpy(m_library.get(), &Library::pinsChanged);
     int added = 0;
     int updated = 0;
     int removed = 0;
@@ -307,11 +409,19 @@ void LibraryTest::rescanUnchanged()
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 0);
     QCOMPARE(addedByPath(m_library->database()), before);
+    QCOMPARE(scanningSpy.count(), 2);
+    QCOMPARE(tracksSpy.count(), 0);
+    QCOMPARE(albumsSpy.count(), 0);
+    QCOMPARE(countsSpy.count(), 0);
+    QCOMPARE(playlistsSpy.count(), 0);
+    QCOMPARE(playlistCountSpy.count(), 0);
+    QCOMPARE(pinsSpy.count(), 0);
 }
 
 void LibraryTest::songs()
 {
     SongsModel model(m_library.get());
+    model.ensureLoaded();
     QCOMPARE(model.rowCount(), 8);
     const int row = model.indexOf(
         scalar(m_library->database(), QStringLiteral("SELECT id FROM tracks WHERE title = ?"),
@@ -327,6 +437,7 @@ void LibraryTest::songs()
 void LibraryTest::albums()
 {
     AlbumsModel model(m_library.get());
+    model.ensureLoaded();
     QCOMPARE(model.rowCount(), 3);
     QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("アルバム二"));
     QCOMPARE(model.data(model.index(0), LibraryModel::SectionRole).toString(), QStringLiteral("#"));
@@ -338,6 +449,7 @@ void LibraryTest::albums()
 void LibraryTest::genres()
 {
     GenresModel model(m_library.get());
+    model.ensureLoaded();
     QCOMPARE(model.rowCount(), 3);
     const int row = model.indexOf(
         scalar(m_library->database(), QStringLiteral("SELECT id FROM genres WHERE name = ?"),
@@ -353,6 +465,7 @@ void LibraryTest::artists()
 {
     const QSqlDatabase db = m_library->database();
     ArtistsModel model(m_library.get());
+    model.ensureLoaded();
     QCOMPARE(model.rowCount(), 6);
     QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("アーティスト"));
     QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Artist A"));
@@ -456,6 +569,7 @@ void LibraryTest::splitArtists()
     QCOMPARE(removed, 0);
 
     ArtistsModel model(m_library.get());
+    model.ensureLoaded();
     QCOMPARE(model.rowCount(), 8);
     QCOMPARE(rowOf(model, QStringLiteral("Artist A; Artist D")), -1);
     QCOMPARE(rowOf(model, QStringLiteral("Earth")), -1);
@@ -499,6 +613,7 @@ void LibraryTest::migrate()
         QVERIFY(db.open());
         QSqlQuery query(db);
         QVERIFY(query.exec(QStringLiteral("DROP TABLE track_artists")));
+        QVERIFY(dropPlaylistColumns(query));
         QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 1")));
         query.finish();
         db.close();
@@ -508,7 +623,7 @@ void LibraryTest::migrate()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 3);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 5);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 8);
 
@@ -524,6 +639,7 @@ void LibraryTest::migrate()
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 10);
 
     ArtistsModel model(&library);
+    model.ensureLoaded();
     QCOMPARE(model.rowCount(), 6);
     QCOMPARE(subtitleOf(model, QStringLiteral("Artist C")), QStringLiteral("1 album, 1 song"));
 }
@@ -543,6 +659,10 @@ void LibraryTest::history()
     HistoryModel model(m_library.get());
     QCOMPARE(model.mode(), HistoryModel::Recent);
     QCOMPARE(model.rowCount(), 0);
+    QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+    QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy moveSpy(&model, &QAbstractItemModel::rowsMoved);
+    QSignalSpy playedSpy(m_library.get(), &Library::played);
 
     const QDateTime base = QDateTime::currentDateTimeUtc();
     m_library->addHistory(first, base);
@@ -550,11 +670,93 @@ void LibraryTest::history()
     QCOMPARE(model.rowCount(), 2);
     QCOMPARE(model.data(model.index(0), LibraryModel::IdRole).toLongLong(), second);
     QCOMPARE(model.data(model.index(1), LibraryModel::IdRole).toLongLong(), first);
+    QCOMPARE(model.data(model.index(0), LibraryModel::KindRole).toString(), QStringLiteral("song"));
+    QCOMPARE(insertSpy.count(), 2);
 
     m_library->addHistory(first, base.addSecs(2));
     QCOMPARE(model.rowCount(), 2);
     QCOMPARE(model.data(model.index(0), LibraryModel::IdRole).toLongLong(), first);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), 3);
+    QCOMPARE(moveSpy.count(), 1);
+    QCOMPARE(resetSpy.count(), 0);
+    QCOMPARE(playedSpy.count(), 3);
+    QCOMPARE(playedSpy.at(2).at(0).toLongLong(), first);
+
+    HistoryModel reloaded(m_library.get());
+    QCOMPARE(reloaded.rowCount(), 2);
+    QCOMPARE(reloaded.data(reloaded.index(0), LibraryModel::IdRole).toLongLong(), first);
+}
+
+void LibraryTest::historyLimit()
+{
+    const QList<qint64> ids = column(m_library->database(), QStringLiteral("SELECT id FROM tracks ORDER BY id"));
+    QVERIFY(ids.size() >= 4);
+    HistoryModel recent(m_library.get(), HistoryModel::Recent, 2);
+    HistoryModel fresh(m_library.get(), HistoryModel::New, 2);
+    QCOMPARE(recent.limit(), 2);
+    QCOMPARE(recent.rowCount(), 2);
+    QCOMPARE(fresh.rowCount(), 2);
+    QCOMPARE(fresh.data(fresh.index(0), LibraryModel::KindRole).toString(), QStringLiteral("album"));
+    QSignalSpy recentReset(&recent, &QAbstractItemModel::modelReset);
+    QSignalSpy freshReset(&fresh, &QAbstractItemModel::modelReset);
+
+    const QDateTime base = QDateTime::currentDateTimeUtc().addSecs(60);
+    for (int i = 0; i < 4; ++i) {
+        m_library->addHistory(ids.at(i), base.addSecs(i));
+        QCOMPARE(recent.rowCount(), 2);
+        QCOMPARE(recent.data(recent.index(0), LibraryModel::IdRole).toLongLong(), ids.at(i));
+    }
+    QCOMPARE(recent.data(recent.index(1), LibraryModel::IdRole).toLongLong(), ids.at(2));
+    QCOMPARE(recentReset.count(), 0);
+    QCOMPARE(freshReset.count(), 0);
+
+    QSignalSpy limitSpy(&recent, &HistoryModel::limitChanged);
+    recent.setLimit(0);
+    QCOMPARE(limitSpy.count(), 1);
+    QVERIFY(recent.rowCount() >= 4);
+
+    emit m_library->albumsChanged();
+    QCOMPARE(freshReset.count(), 1);
+    QCOMPARE(recentReset.count(), 1);
+    emit m_library->tracksChanged();
+    QCOMPARE(recentReset.count(), 2);
+    QCOMPARE(freshReset.count(), 1);
+
+    QSqlQuery cleanup(m_library->database());
+    cleanup.prepare(QStringLiteral("DELETE FROM history WHERE played_at >= ?"));
+    cleanup.addBindValue(base.toMSecsSinceEpoch());
+    QVERIFY(cleanup.exec());
+    QCOMPARE(scalar(m_library->database(), QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), 3);
+}
+
+void LibraryTest::historyPrune()
+{
+    const QString path = m_dir.path() + QStringLiteral("/history.db");
+    QVERIFY(QFile::copy(m_library->dbPath(), path));
+    Library library(path, m_dir.path() + QStringLiteral("/art"));
+    QVERIFY(library.isOpen());
+    const QSqlDatabase db = library.database();
+    const qint64 id = scalar(db, QStringLiteral("SELECT id FROM tracks ORDER BY id LIMIT 1")).toLongLong();
+    QVERIFY(id > 0);
+    {
+        QSqlQuery query(db);
+        QVERIFY(query.exec(QStringLiteral("DELETE FROM history")));
+        QVERIFY(query.exec(QStringLiteral("BEGIN")));
+        query.prepare(QStringLiteral("INSERT INTO history(track_id, played_at) VALUES(?, ?)"));
+        for (int i = 0; i < 2050; ++i) {
+            query.bindValue(0, id);
+            query.bindValue(1, i);
+            QVERIFY(query.exec());
+        }
+        QVERIFY(query.exec(QStringLiteral("COMMIT")));
+    }
+    for (int i = 0; i < Library::historyPruneEvery - 1; ++i)
+        library.addHistory(id);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history")).toInt(),
+             2050 + Library::historyPruneEvery - 1);
+    library.addHistory(id);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), Library::historyKeep);
+    QVERIFY(scalar(db, QStringLiteral("SELECT MIN(played_at) FROM history")).toLongLong() >= 2050 - 1900);
 }
 
 void LibraryTest::newAlbums()
@@ -665,10 +867,6 @@ void LibraryTest::missingRoot()
     QCOMPARE(added, 0);
     QCOMPARE(updated, 0);
     QCOMPARE(removed, 0);
-    QVERIFY(scan(added, updated, removed));
-    QCOMPARE(added, 0);
-    QCOMPARE(updated, 0);
-    QCOMPARE(removed, 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt(), 8);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE id = ?"), {id}).toInt(), 1);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = ?"), {id}).toInt(), 1);
@@ -755,9 +953,10 @@ void LibraryTest::artContent()
     QCOMPARE(QDir(m_library->artDir()).entryList(QDir::Files).size(), 1);
 
     QVERIFY(QFile::remove(coverPath));
+    QVERIFY(bumpMtime(firstTrackOf(QStringLiteral("アルバム二")), 3600));
     QVERIFY(scan(added, updated, removed));
     QCOMPARE(added, 0);
-    QCOMPARE(updated, 0);
+    QCOMPARE(updated, 1);
     QCOMPARE(removed, 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM albums WHERE title = ? AND art_path IS NULL"),
                     {QStringLiteral("アルバム二")})
@@ -795,6 +994,14 @@ void LibraryTest::pruneArtForeign()
     QVERIFY(scan(added, updated, removed));
     QCOMPARE(added, 0);
     QCOMPARE(updated, 0);
+    QCOMPARE(removed, 0);
+    QVERIFY(QFileInfo::exists(stalePng));
+    QVERIFY(QFileInfo::exists(staleJpg));
+
+    QVERIFY(bumpMtime(firstTrackOf(QStringLiteral("Album One")), 10800));
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added, 0);
+    QCOMPARE(updated, 1);
     QCOMPARE(removed, 0);
 
     QVERIFY(QFileInfo::exists(kept));
@@ -961,6 +1168,92 @@ void LibraryTest::rateAndDepth()
     QCOMPARE(rows.first().toMap().value(QStringLiteral("bitDepth")).toInt(), 8);
 }
 
+void LibraryTest::batchedRows()
+{
+    const QList<qint64> ids = column(m_library->database(), QStringLiteral("SELECT id FROM tracks ORDER BY id"));
+    QVERIFY(ids.size() >= 3);
+    const QVariantList wanted{ids.at(2), ids.at(0), -5, ids.at(2), ids.at(1)};
+    const QVariantList rows = m_library->trackRows(wanted);
+    QCOMPARE(rows.size(), 4);
+    QCOMPARE(rows.at(0).toMap().value(QStringLiteral("id")).toLongLong(), ids.at(2));
+    QCOMPARE(rows.at(1).toMap().value(QStringLiteral("id")).toLongLong(), ids.at(0));
+    QCOMPARE(rows.at(2).toMap().value(QStringLiteral("id")).toLongLong(), ids.at(2));
+    QCOMPARE(rows.at(3).toMap().value(QStringLiteral("id")).toLongLong(), ids.at(1));
+
+    const QList<QueueEntry> entries = m_library->queueEntries(wanted);
+    QCOMPARE(idsOf(entries), (QList<qint64>{ids.at(2), ids.at(0), ids.at(2), ids.at(1)}));
+    QVERIFY(!entries.first().path.isEmpty());
+    QCOMPARE(entries.first().path,
+             scalar(m_library->database(), QStringLiteral("SELECT path FROM tracks WHERE id = ?"), {ids.at(2)})
+                 .toString());
+
+    QVariantList many;
+    for (int i = 0; i < Library::idChunk * 2 + 7; ++i)
+        many.append(ids.at(i % ids.size()));
+    QCOMPARE(m_library->queueEntries(many).size(), many.size());
+    QCOMPARE(m_library->trackRows(many).size(), many.size());
+    QCOMPARE(m_library->trackRows({}).size(), 0);
+}
+
+void LibraryTest::entriesFor()
+{
+    const QSqlDatabase db = m_library->database();
+    const qint64 album = scalar(db, QStringLiteral("SELECT id FROM albums WHERE title = ?"),
+                                {QStringLiteral("Album One")})
+                             .toLongLong();
+    const qint64 artist = scalar(db, QStringLiteral("SELECT id FROM artists WHERE name = ?"),
+                                 {QStringLiteral("Artist A")})
+                              .toLongLong();
+    const qint64 genre = scalar(db, QStringLiteral("SELECT id FROM genres WHERE name = ?"),
+                                {QStringLiteral("Electronic")})
+                             .toLongLong();
+    QVERIFY(album > 0);
+    QVERIFY(artist > 0);
+    QVERIFY(genre > 0);
+
+    QList<qint64> albumIds;
+    for (const QVariant &row : m_library->albumTracks(album))
+        albumIds.append(row.toMap().value(QStringLiteral("id")).toLongLong());
+    QVERIFY(!albumIds.isEmpty());
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("album"), album)), albumIds);
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("artist"), artist)),
+             idsOf(m_library->artistTracks(artist)));
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("genre"), genre)), idsOf(m_library->genreTracks(genre)));
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("all"), -1)), idsOf(m_library->allTracks()));
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("song"), albumIds.first())),
+             QList<qint64>{albumIds.first()});
+    QVERIFY(m_library->entriesFor(QStringLiteral("unknown"), album).isEmpty());
+    QVERIFY(m_library->entriesFor(QStringLiteral("album"), -1).isEmpty());
+
+    const QVariantList albumRows = m_library->artistAlbumRows(artist);
+    const QVariantList albumIdsOfArtist = m_library->artistAlbums(artist);
+    QCOMPARE(albumRows.size(), albumIdsOfArtist.size());
+    for (qsizetype i = 0; i < albumRows.size(); ++i) {
+        const QVariantMap info = m_library->albumInfo(albumIdsOfArtist.at(i).toLongLong());
+        QCOMPARE(albumRows.at(i).toMap(), info);
+    }
+    QCOMPARE(m_library->artistTrackRows(artist), m_library->trackRows(m_library->artistTracks(artist)));
+    QVERIFY(m_library->artistAlbumRows(-1).isEmpty());
+
+    QSqlQuery query(db);
+    QVERIFY(query.exec(QStringLiteral("INSERT INTO playlists(name, source) VALUES('Entries', '/entries.m3u')")));
+    const qint64 playlist = query.lastInsertId().toLongLong();
+    QVERIFY(playlist > 0);
+    const QList<qint64> order{albumIds.last(), albumIds.first(), albumIds.last()};
+    for (qsizetype pos = 0; pos < order.size(); ++pos) {
+        QSqlQuery item(db);
+        item.prepare(QStringLiteral("INSERT INTO playlist_items(playlist_id, pos, track_id) VALUES(?, ?, ?)"));
+        item.addBindValue(playlist);
+        item.addBindValue(static_cast<int>(pos));
+        item.addBindValue(order.at(pos));
+        QVERIFY(item.exec());
+    }
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("playlist"), playlist)), order);
+    QCOMPARE(idsOf(m_library->entriesFor(QStringLiteral("playlist"), playlist)),
+             idsOf(m_library->playlistTracks(playlist)));
+    QVERIFY(query.exec(QStringLiteral("DELETE FROM playlists WHERE source = '/entries.m3u'")));
+}
+
 void LibraryTest::migrateFrom2()
 {
     const QString path = m_dir.path() + QStringLiteral("/migrate2.db");
@@ -973,6 +1266,8 @@ void LibraryTest::migrateFrom2()
         QSqlQuery query(db);
         QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks DROP COLUMN sample_rate")));
         QVERIFY(query.exec(QStringLiteral("ALTER TABLE tracks DROP COLUMN bit_depth")));
+        QVERIFY(dropPlaylistColumns(query));
+        QVERIFY(query.exec(QStringLiteral("INSERT INTO playlists(name) VALUES('Old')")));
         QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 2")));
         query.finish();
         db.close();
@@ -982,7 +1277,12 @@ void LibraryTest::migrateFrom2()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 3);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 5);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE name = 'Old'")).toInt(), 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pragma_table_info('playlists') "
+                                       "WHERE name IN ('source', 'skipped')"))
+                 .toInt(),
+             2);
     const int total = scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks")).toInt();
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), total);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE sample_rate IS NOT NULL")).toInt(), 0);
@@ -1040,6 +1340,607 @@ void LibraryTest::playlists()
     QCOMPARE(tracks.at(0).toLongLong(), ids.at(2).toLongLong());
     QCOMPARE(tracks.at(2).toLongLong(), ids.at(0).toLongLong());
     QCOMPARE(m_library->playlistTracks(9).size(), 0);
+}
+
+void LibraryTest::genreTracks()
+{
+    const QSqlDatabase db = m_library->database();
+    SongsModel songs(m_library.get());
+    songs.ensureLoaded();
+    QVariantList all;
+    for (int row = 0; row < songs.rowCount(); ++row)
+        all.append(songs.data(songs.index(row), LibraryModel::IdRole).toLongLong());
+    QVERIFY(!all.isEmpty());
+    QCOMPARE(m_library->allTracks(), all);
+    QCOMPARE(m_library->songCount(), static_cast<int>(all.size()));
+
+    GenresModel genres(m_library.get());
+    genres.ensureLoaded();
+    QCOMPARE(genres.rowCount(), 3);
+    for (int row = 0; row < genres.rowCount(); ++row) {
+        const qint64 genreId = genres.data(genres.index(row), LibraryModel::IdRole).toLongLong();
+        const QString name = genres.data(genres.index(row), LibraryModel::TitleRole).toString();
+        QVariantList expected;
+        for (const QVariant &id : std::as_const(all)) {
+            if (scalar(db, QStringLiteral("SELECT genre FROM tracks WHERE id = ?"), {id}).toString() == name)
+                expected.append(id);
+        }
+        QVERIFY(!expected.isEmpty());
+        QCOMPARE(m_library->genreTracks(genreId), expected);
+    }
+    QCOMPARE(m_library->genreTracks(-1).size(), 0);
+}
+
+void LibraryTest::folderOff()
+{
+    const QSqlDatabase db = m_library->database();
+    const QString other = m_dir.path() + QStringLiteral("/other");
+    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     other + QStringLiteral("/Single")));
+    const int before = m_library->songCount();
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan({m_music, other}, added, updated, removed));
+    QCOMPARE(added, 1);
+    QCOMPARE(removed, 0);
+    QCOMPARE(m_library->songCount(), before + 1);
+
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added, 0);
+    QCOMPARE(updated, 0);
+    QCOMPARE(removed, 1);
+    QCOMPARE(m_library->songCount(), before);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE path LIKE ?"),
+                    {other + QStringLiteral("/%")})
+                 .toInt(),
+             0);
+    QVERIFY(QDir(other).removeRecursively());
+}
+
+void LibraryTest::mediaUnmounted()
+{
+    const QSqlDatabase db = m_library->database();
+    const QString base = m_dir.path() + QStringLiteral("/media");
+    const QString label = base + QStringLiteral("/armada/CARD");
+    const QString path = label + QStringLiteral("/Single/01 Single.mp3");
+    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     label + QStringLiteral("/Single")));
+    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    const QStringList roots{m_music, base};
+    const int before = m_library->songCount();
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(added, 1);
+    QVERIFY(trackId(db, path) > 0);
+
+    QVERIFY(QFile::remove(path));
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(removed, 0);
+
+    QVERIFY(QDir(label).removeRecursively());
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(added, 0);
+    QCOMPARE(updated, 0);
+    QCOMPARE(removed, 0);
+    QVERIFY(trackId(db, path) > 0);
+    QCOMPARE(m_library->songCount(), before + 1);
+
+    qunsetenv("CASDAP_MEDIA_ROOT");
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(m_library->songCount(), before);
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::mediaMountLayout()
+{
+    const QSqlDatabase db = m_library->database();
+    const QString base = m_dir.path() + QStringLiteral("/devmedia");
+    const QString card = base + QStringLiteral("/mmcblk0p1");
+    const QString music = card + QStringLiteral("/Music");
+    const QString path = music + QStringLiteral("/Single/01 Single.mp3");
+    const QString single = QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single");
+    QVERIFY(copyTree(single, music + QStringLiteral("/Single")));
+    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    fakeMount = card;
+    const QStringList roots{m_music, base};
+    const int before = m_library->songCount();
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(added, 1);
+    QVERIFY(trackId(db, path) > 0);
+
+    QVERIFY(QFile::remove(path));
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(trackId(db, path), 0);
+
+    QVERIFY(copyTree(single, music + QStringLiteral("/Single")));
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(added, 1);
+
+    fakeMount.clear();
+    QVERIFY(QDir(music).removeRecursively());
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(removed, 0);
+    QVERIFY(trackId(db, path) > 0);
+
+    QVERIFY(QDir(card).removeRecursively());
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(removed, 0);
+    QCOMPARE(m_library->songCount(), before + 1);
+
+    fakeMount = card;
+    QVERIFY(QDir().mkpath(card));
+    QVERIFY(scan(roots, added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(m_library->songCount(), before);
+
+    fakeMount.clear();
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("CASDAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::candidateRoots()
+{
+    const QString base = m_dir.path() + QStringLiteral("/candidates");
+    const QString card = base + QStringLiteral("/mmcblk0p1");
+    const QString user = base + QStringLiteral("/armada");
+    const QString label = user + QStringLiteral("/CARD");
+    const QString empty = base + QStringLiteral("/nobody");
+    QVERIFY(QDir().mkpath(card + QStringLiteral("/Music")));
+    QVERIFY(QDir().mkpath(label));
+    QVERIFY(QDir().mkpath(user + QStringLiteral("/stale")));
+    QVERIFY(QDir().mkpath(empty + QStringLiteral("/old")));
+    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck([](const QString &dir) {
+        const QString path = QDir::cleanPath(dir);
+        return path.endsWith(QLatin1StringView("/mmcblk0p1")) || path.endsWith(QLatin1StringView("/CARD"));
+    });
+
+    const QStringList roots = Settings::candidateRoots();
+    QVERIFY(roots.contains(card));
+    QVERIFY(roots.contains(card + QStringLiteral("/Music")));
+    QVERIFY(roots.contains(label));
+    QVERIFY(!roots.contains(label + QStringLiteral("/Music")));
+    QVERIFY(!roots.contains(user));
+    QVERIFY(!roots.contains(user + QStringLiteral("/stale")));
+    QVERIFY(roots.contains(empty));
+    QVERIFY(!roots.contains(empty + QStringLiteral("/old")));
+
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("CASDAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::playlistFiles()
+{
+    QSqlDatabase db = m_library->database();
+    {
+        QSqlQuery query(db);
+        QVERIFY(query.exec(QStringLiteral("DELETE FROM playlists WHERE source IS NULL")));
+    }
+    const QString lists = m_music + QStringLiteral("/Lists");
+    QVERIFY(QDir().mkpath(lists));
+    const QString one = m_music + QStringLiteral("/アルバム二/01 一.flac");
+    const QString ni = m_music + QStringLiteral("/アルバム二/02 二.flac");
+    const QString two = m_music + QStringLiteral("/Album One/02 Two.flac");
+    const QString three = m_music + QStringLiteral("/Album One/03 Three.flac");
+    const QString single = m_music + QStringLiteral("/Single/01 Single.mp3");
+    const QString cafe = lists + QStringLiteral("/Caf") + QChar(0x00E9) + QStringLiteral(".flac");
+    QVERIFY(QFileInfo::exists(two));
+    QVERIFY(QFile::copy(two, cafe));
+    QVERIFY(QFile::copy(two, lists + QStringLiteral("/Dup.flac")));
+    QVERIFY(QFile::copy(two, lists + QStringLiteral("/dup.flac")));
+
+    const QString mix = QStringLiteral("#EXTM3U\r\n#EXTINF:2,アーティスト - 一\r\n../アルバム二/01 一.flac\r\n")
+                        + two + QStringLiteral("\r\n# comment\r\n\r\n")
+                        + QUrl::fromLocalFile(ni).toString(QUrl::FullyEncoded)
+                        + QStringLiteral("\r\n..\\Single\\01 Single.mp3\r\n  nothere.flac  \r\n"
+                                         "../アルバム二/01 一.flac\r\n");
+    QVERIFY(writeBytes(lists + QStringLiteral("/Mix.m3u8"), QByteArrayLiteral("\xEF\xBB\xBF") + mix.toUtf8()));
+    QVERIFY(writeBytes(lists + QStringLiteral("/Latin.m3u"),
+                       QByteArrayLiteral("#EXTM3U\nCaf\xe9.flac\n../album one/03 three.flac\nDUP.flac\n")));
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added, 3);
+    QCOMPARE(removed, 0);
+
+    const qint64 mixId = playlistId(db, QStringLiteral("Mix"));
+    const qint64 latinId = playlistId(db, QStringLiteral("Latin"));
+    QVERIFY(mixId > 0);
+    QVERIFY(latinId > 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT source FROM playlists WHERE id = ?"), {mixId}).toString(),
+             lists + QStringLiteral("/Mix.m3u8"));
+    QCOMPARE(m_library->playlistTracks(mixId),
+             (QVariantList{trackId(db, one), trackId(db, two), trackId(db, ni), trackId(db, single),
+                           trackId(db, one)}));
+    QCOMPARE(m_library->playlistTracks(latinId), (QVariantList{trackId(db, cafe), trackId(db, three)}));
+    QCOMPARE(m_library->playlistInfo(mixId).value(QStringLiteral("skipped")).toInt(), 1);
+    QCOMPARE(m_library->playlistInfo(latinId).value(QStringLiteral("skipped")).toInt(), 1);
+    QCOMPARE(m_library->playlistInfo(mixId).value(QStringLiteral("count")).toInt(), 5);
+    QCOMPARE(m_library->playlistCount(), 2);
+
+    PlaylistsModel model(m_library.get());
+    QCOMPARE(model.rowCount(), 2);
+    QCOMPARE(model.data(model.index(0), LibraryModel::TitleRole).toString(), QStringLiteral("Latin"));
+    QCOMPARE(model.data(model.index(0), LibraryModel::SubtitleRole).toString(), QStringLiteral("2 songs"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::TitleRole).toString(), QStringLiteral("Mix"));
+    QCOMPARE(model.data(model.index(1), LibraryModel::SubtitleRole).toString(), QStringLiteral("5 songs"));
+}
+
+void LibraryTest::playlistStamps()
+{
+    QSqlDatabase db = m_library->database();
+    const QString lists = m_music + QStringLiteral("/Lists");
+    const QString mixPath = lists + QStringLiteral("/Mix.m3u8");
+    const qint64 mixId = playlistId(db, QStringLiteral("Mix"));
+    QVERIFY(mixId > 0);
+    const FileStamp stamp = Scanner::stampOf(QFileInfo(mixPath));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT mtime FROM playlists WHERE id = ?"), {mixId}).toLongLong(),
+             stamp.mtime);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT size FROM playlists WHERE id = ?"), {mixId}).toLongLong(),
+             stamp.size);
+    const QVariantList full = m_library->playlistTracks(mixId);
+    QCOMPARE(full.size(), 5);
+
+    {
+        QSqlQuery query(db);
+        query.prepare(QStringLiteral("DELETE FROM playlist_items WHERE playlist_id = ? AND pos = 4"));
+        query.addBindValue(mixId);
+        QVERIFY(query.exec());
+    }
+    QSignalSpy playlistsSpy(m_library.get(), &Library::playlistsChanged);
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added + updated + removed, 0);
+    QCOMPARE(playlistsSpy.count(), 0);
+    QCOMPARE(m_library->playlistTracks(mixId).size(), 4);
+
+    const QString extra = lists + QStringLiteral("/Extra.mp3");
+    QVERIFY(QFile::copy(m_music + QStringLiteral("/Single/01 Single.mp3"), extra));
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added, 1);
+    QCOMPARE(playlistsSpy.count(), 1);
+    QCOMPARE(m_library->playlistTracks(mixId), full);
+    QCOMPARE(playlistId(db, QStringLiteral("Mix")), mixId);
+
+    QVERIFY(QFile::remove(extra));
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(playlistsSpy.count(), 1);
+    QCOMPARE(m_library->playlistTracks(mixId), full);
+}
+
+void LibraryTest::playlistUnreadable()
+{
+    QSqlDatabase db = m_library->database();
+    const QString latinPath = m_music + QStringLiteral("/Lists/Latin.m3u");
+    const qint64 latinId = playlistId(db, QStringLiteral("Latin"));
+    QVERIFY(latinId > 0);
+    const QVariantList before = m_library->playlistTracks(latinId);
+    QCOMPARE(before.size(), 2);
+    const QFileDevice::Permissions permissions = QFile::permissions(latinPath);
+
+    QVERIFY(bumpMtime(latinPath, 3600));
+    QVERIFY(QFile::setPermissions(latinPath, QFileDevice::Permissions()));
+    {
+        QFile probe(latinPath);
+        if (probe.open(QIODevice::ReadOnly)) {
+            probe.close();
+            QVERIFY(QFile::setPermissions(latinPath, permissions));
+            QSKIP("mode 000 files stay readable for this user");
+        }
+    }
+    QSignalSpy playlistsSpy(m_library.get(), &Library::playlistsChanged);
+    QTest::ignoreMessage(QtWarningMsg,
+                         qPrintable(QStringLiteral("casdap: playlist %1: unreadable, kept as is").arg(latinPath)));
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added + updated + removed, 0);
+    QCOMPARE(playlistsSpy.count(), 0);
+    QCOMPARE(playlistId(db, QStringLiteral("Latin")), latinId);
+    QCOMPARE(m_library->playlistTracks(latinId), before);
+    QCOMPARE(m_library->playlistCount(), 2);
+
+    QVERIFY(QFile::setPermissions(latinPath, permissions));
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(playlistsSpy.count(), 0);
+    QCOMPARE(m_library->playlistTracks(latinId), before);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT mtime FROM playlists WHERE id = ?"), {latinId}).toLongLong(),
+             Scanner::stampOf(QFileInfo(latinPath)).mtime);
+}
+
+void LibraryTest::playlistStable()
+{
+    const QSqlDatabase db = m_library->database();
+    const QString lists = m_music + QStringLiteral("/Lists");
+    const QString two = m_music + QStringLiteral("/Album One/02 Two.flac");
+    const QString single = m_music + QStringLiteral("/Single/01 Single.mp3");
+    const qint64 mixId = playlistId(db, QStringLiteral("Mix"));
+    QVERIFY(mixId > 0);
+    QVERIFY(m_library->pin(QStringLiteral("playlist"), mixId));
+
+    QVERIFY(writeBytes(lists + QStringLiteral("/Mix.m3u8"),
+                       (QStringLiteral("../Single/01 Single.mp3\n") + two + QStringLiteral("\n")).toUtf8()));
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(added + updated + removed, 0);
+    QCOMPARE(playlistId(db, QStringLiteral("Mix")), mixId);
+    QVERIFY(m_library->isPinned(QStringLiteral("playlist"), mixId));
+    QCOMPARE(m_library->playlistTracks(mixId), (QVariantList{trackId(db, single), trackId(db, two)}));
+    QCOMPARE(m_library->playlistInfo(mixId).value(QStringLiteral("skipped")).toInt(), 0);
+
+    QSignalSpy pinsSpy(m_library.get(), &Library::pinsChanged);
+    QVERIFY(QFile::remove(lists + QStringLiteral("/Mix.m3u8")));
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE id = ?"), {mixId}).toInt(), 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ?"), {mixId})
+                 .toInt(),
+             0);
+    QVERIFY(!m_library->isPinned(QStringLiteral("playlist"), mixId));
+    QCOMPARE(pinsSpy.count(), 1);
+    QCOMPARE(m_library->playlistCount(), 1);
+
+    QVERIFY(QDir(lists).removeRecursively());
+    QVERIFY(scan(added, updated, removed));
+    QCOMPARE(removed, 3);
+    QCOMPARE(m_library->playlistCount(), 0);
+}
+
+void LibraryTest::migrateFrom3()
+{
+    const QString path = m_dir.path() + QStringLiteral("/migrate3.db");
+    QVERIFY(QFile::copy(m_library->dbPath(), path));
+    const QString setup = QStringLiteral("migrate3-setup");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), setup);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(dropPlaylistColumns(query));
+        QVERIFY(query.exec(QStringLiteral("INSERT INTO playlists(name) VALUES('Old')")));
+        QVERIFY(query.exec(QStringLiteral("INSERT INTO pins(kind, ref_id, pos) "
+                                          "SELECT 'playlist', id, 99 FROM playlists WHERE name = 'Old'")));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 3")));
+        query.finish();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(setup);
+
+    Library library(path, m_dir.path() + QStringLiteral("/art"));
+    QVERIFY(library.isOpen());
+    const QSqlDatabase db = library.database();
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 5);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pins WHERE kind = 'playlist' AND pos = 99")).toInt(), 0);
+    QSqlQuery query(db);
+    QVERIFY(query.exec(QStringLiteral("INSERT INTO playlists(name, source) VALUES('A', '/a.m3u')")));
+    QVERIFY(!query.exec(QStringLiteral("INSERT INTO playlists(name, source) VALUES('B', '/a.m3u')")));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT skipped FROM playlists WHERE name = 'A'")).toInt(), 0);
+}
+
+void LibraryTest::migrateFrom4()
+{
+    const QString path = m_dir.path() + QStringLiteral("/migrate4.db");
+    QVERIFY(QFile::copy(m_library->dbPath(), path));
+    const QString setup = QStringLiteral("migrate4-setup");
+    int playlists = 0;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), setup);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(dropPlaylistStamps(query));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 4")));
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM playlists")) && query.next());
+        playlists = query.value(0).toInt();
+        query.finish();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(setup);
+
+    Library library(path, m_dir.path() + QStringLiteral("/art"));
+    QVERIFY(library.isOpen());
+    const QSqlDatabase db = library.database();
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 5);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), playlists);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE mtime = -1 AND size = -1")).toInt(),
+             playlists);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' "
+                                       "AND name = 'playlist_items_track'"))
+                 .toInt(),
+             1);
+    QCOMPARE(library.playlistStamps().size(), playlists);
+}
+
+void LibraryTest::rootsChange()
+{
+    m_settings = std::make_unique<Settings>(m_dir.path() + QStringLiteral("/settings.ini"));
+    m_settings->setRoots({m_music});
+    m_library->setSettings(m_settings.get());
+    const QString other = m_dir.path() + QStringLiteral("/roots");
+    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     other + QStringLiteral("/Single")));
+    const int before = m_library->songCount();
+
+    QSignalSpy spy(m_library.get(), &Library::scanned);
+    m_settings->setRoots({m_music, other});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QCOMPARE(spy.takeFirst().at(0).toInt(), 1);
+    QCOMPARE(m_library->songCount(), before + 1);
+    QCOMPARE(m_library->scannedRoots(), (QStringList{m_music, other}));
+
+    m_settings->setRoots({m_music});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QCOMPARE(spy.takeFirst().at(2).toInt(), 1);
+    QCOMPARE(m_library->songCount(), before);
+    QCOMPARE(m_library->scannedRoots(), QStringList{m_music});
+    QVERIFY(QDir(other).removeRecursively());
+}
+
+void LibraryTest::watcherDebounce()
+{
+    const QSqlDatabase db = m_library->database();
+    LibraryWatcher watcher(m_library.get());
+    QCOMPARE(watcher.debounceMs(), 5000);
+    QCOMPARE(watcher.limit(), 4096);
+    QVERIFY(scanRoots());
+    const QString album = m_music + QStringLiteral("/Album One");
+    QVERIFY(watcher.watched().contains(m_music));
+    QVERIFY(watcher.watched().contains(album));
+
+    QSignalSpy triggered(&watcher, &LibraryWatcher::triggered);
+    QSignalSpy scanned(m_library.get(), &Library::scanned);
+    QElapsedTimer sinceLast;
+    for (int i = 0; i < 19; ++i) {
+        QVERIFY(writeBytes(album + QStringLiteral("/note%1.txt").arg(i), QByteArrayLiteral("x")));
+        sinceLast.start();
+        QTest::qWait(100);
+    }
+    const QString copy = album + QStringLiteral("/05 Burst.flac");
+    QVERIFY(QFile::copy(album + QStringLiteral("/02 Two.flac"), copy));
+    QCOMPARE(triggered.count(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(triggered.count(), 1, 10000);
+    QVERIFY(sinceLast.elapsed() >= 4900);
+    QTRY_COMPARE_WITH_TIMEOUT(scanned.count(), 1, scanTimeoutMs);
+    QVERIFY(trackId(db, copy) > 0);
+    QCOMPARE(triggered.count(), 1);
+
+    for (int i = 0; i < 19; ++i)
+        QVERIFY(QFile::remove(album + QStringLiteral("/note%1.txt").arg(i)));
+    QVERIFY(QFile::remove(copy));
+    QVERIFY(scanRoots());
+    QCOMPARE(trackId(db, copy), 0);
+}
+
+void LibraryTest::watcherNewDirectory()
+{
+    LibraryWatcher watcher(m_library.get());
+    watcher.setDebounceMs(600000);
+    const QString fresh = m_music + QStringLiteral("/Fresh");
+    QVERIFY(QDir().mkpath(fresh));
+    QVERIFY(scanRoots());
+    QVERIFY(watcher.watched().contains(fresh));
+
+    QVERIFY(QDir(fresh).removeRecursively());
+    QVERIFY(scanRoots());
+    QVERIFY(!watcher.watched().contains(fresh));
+    QVERIFY(watcher.watched().contains(m_music));
+}
+
+void LibraryTest::watcherLimit()
+{
+    LibraryWatcher watcher(m_library.get());
+    watcher.setDebounceMs(600000);
+    watcher.setLimit(8);
+    const QString deep = m_music + QStringLiteral("/Deep");
+    for (int i = 0; i < 10; ++i)
+        QVERIFY(QDir().mkpath(deep + QStringLiteral("/d%1").arg(i)));
+
+    QTest::ignoreMessage(QtWarningMsg, "casdap: watch limit 8 reached");
+    QVERIFY(scanRoots());
+    QCOMPARE(watcher.watched().size(), 8);
+    QVERIFY(watcher.watched().contains(m_music));
+
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("watch limit")));
+    QVERIFY(scanRoots());
+    QCOMPARE(watcher.watched().size(), 8);
+
+    QVERIFY(QDir(deep).removeRecursively());
+    QVERIFY(scanRoots());
+    QVERIFY(watcher.watched().size() < 8);
+}
+
+void LibraryTest::watcherMissingRoot()
+{
+    LibraryWatcher watcher(m_library.get());
+    watcher.setDebounceMs(500);
+    const QString mnt = m_dir.path() + QStringLiteral("/mnt");
+    const QString card = mnt + QStringLiteral("/card/Music");
+    QVERIFY(QDir().mkpath(mnt));
+    QCOMPARE(LibraryWatcher::nearestExisting(card), mnt);
+
+    QSignalSpy spy(m_library.get(), &Library::scanned);
+    m_settings->setRoots({m_music, card});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QVERIFY(watcher.watched().contains(mnt));
+    const int before = m_library->songCount();
+
+    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     card + QStringLiteral("/Single")));
+    QTRY_COMPARE_WITH_TIMEOUT(m_library->songCount(), before + 1, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(watcher.watched().contains(card), 10000);
+    QVERIFY(!watcher.watched().contains(mnt));
+
+    m_settings->setRoots({m_music});
+    QTRY_VERIFY_WITH_TIMEOUT(!m_library->scanning() && m_library->songCount() == before, scanTimeoutMs);
+    QVERIFY(QDir(mnt).removeRecursively());
+}
+
+void LibraryTest::watcherClimbStops()
+{
+    const QString base = m_dir.path() + QStringLiteral("/climb");
+    const QString root = base + QStringLiteral("/mmcblk0p1/Music");
+    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    QCOMPARE(LibraryWatcher::nearestExisting(root), QString());
+    QVERIFY(QDir().mkpath(base));
+    QCOMPARE(LibraryWatcher::nearestExisting(root), base);
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/mmcblk0p1")));
+    QCOMPARE(LibraryWatcher::nearestExisting(root), base + QStringLiteral("/mmcblk0p1"));
+    qunsetenv("CASDAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::watcherPoll()
+{
+    const QString base = m_dir.path() + QStringLiteral("/pollmedia");
+    const QString root = base + QStringLiteral("/mmcblk0p1/Music");
+    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    LibraryWatcher watcher(m_library.get());
+    watcher.setDebounceMs(600000);
+    watcher.setPollMs(200);
+    QCOMPARE(LibraryWatcher::defaultPollMs, 5000);
+
+    QSignalSpy spy(m_library.get(), &Library::scanned);
+    m_settings->setRoots({m_music, root});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QCOMPARE(watcher.missing(), QStringList{root});
+    QVERIFY(!watcher.watched().contains(base));
+    const int before = m_library->songCount();
+
+    QSignalSpy triggered(&watcher, &LibraryWatcher::triggered);
+    const QString stage = m_dir.path() + QStringLiteral("/pollstage");
+    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     stage + QStringLiteral("/mmcblk0p1/Music/Single")));
+    QVERIFY(QDir().rename(stage, base));
+    QTRY_VERIFY_WITH_TIMEOUT(triggered.count() >= 1, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(m_library->songCount(), before + 1, scanTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(watcher.missing().isEmpty(), scanTimeoutMs);
+
+    m_settings->setRoots({m_music});
+    QTRY_VERIFY_WITH_TIMEOUT(!m_library->scanning() && m_library->songCount() == before, scanTimeoutMs);
+    qunsetenv("CASDAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)
