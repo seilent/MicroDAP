@@ -1286,6 +1286,12 @@ void PlayerTest::playSource()
              albumSize);
     QCOMPARE(player.queue()->count(), albumSize);
     QCOMPARE(player.current().value(QStringLiteral("id")).toLongLong(), m_tracks.at(1).id);
+    const QString art = scalar(m_library->database(), QStringLiteral("SELECT art_path FROM albums WHERE id = ?"),
+                               {albumId})
+                            .toString();
+    QVERIFY(!art.isEmpty());
+    QCOMPARE(player.current().value(QStringLiteral("artPath")).toString(), art);
+    QCOMPARE(m_tracks.at(1).artPath, art);
     QCOMPARE(player.status(), Player::Playing);
     QCOMPARE(added.count(), 0);
 

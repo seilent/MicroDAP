@@ -163,7 +163,13 @@ model over the lazy `Artists`, `Albums`, `Songs`, `Genres` context models: `Arti
 `Ui.gridCols`). A source model loads nothing until `ensureLoaded()`; a hub model holds 0 rows until `active`, which
 the hub sets the first time a pivot is shown (the start pivot at creation, a switched to pivot before the T5 out
 phase), and the pane binds its model from then on; a source reset while a pane is unbound changes nothing on screen.
-The `section` letter (`#`, a..z) groups the rows. Artists, songs and genres get a divider row per letter (ROW_HEIGHT, the 20 u Regular letter at
+The `section` letter (`#`, a..z, the kana rows あ か さ た な は ま や ら わ, 漢) groups the rows. `sectionKey`
+(`src/core/SectionKey.cpp`) gives every model, `Library.allTracks()`, `genreTracks(id)` and `entriesFor` `all` and
+`genre` the letter and the sort key of a name (the artists drop a leading `the `): a..z by the first character;
+after NFKC, a leading kana goes to its row (katakana read as hiragana, small, voiced and semi voiced kana as the base,
+ヴ as う, ゐ ゑ を ん as わ, ー, ゝ ゞ ヽ ヾ and the voicing marks skipped), a leading Han ideograph to 漢, anything else
+to `#`; groups sort in that order, Latin by the lower case name, kana by the folded hiragana (ties by the unfolded
+one), 漢 by code point, equal keys by id. Artists, songs and genres get a divider row per letter (ROW_HEIGHT, the 20 u Regular letter at
 HUB_EDGE on the LETTER_TILE baseline inset), skipped by focus (`isFocusable`, `nearestFocusable`); albums are rows of
 `Ui.gridCols` cells (3 portrait, 6 at W 483, `cells(row)`) with a `LetterTile` cell before each letter group and a `Tile` per album, one
 `Loader` per cell choosing the two; the cell
@@ -190,9 +196,12 @@ delegate reused while T5, T2a or F12 runs takes the running entrance.
 `screenOff` or `animated` false lands the pivot, settles the rows and dismisses the letter.
 
 `JumpGrid` (`screens/JumpGrid.qml`) is the letter grid hosted by the hub: `exit` top left in the 7 u overlay
-label role, the 27 `LetterTile` cells (`#` first, then a..z) in `Ui.jumpCols` columns (5 portrait, 9 landscape)
-with the JUMP_GRID tile and 8 u gap from EDGE, the first row starting after `Ui.jumpExitCells` (2) empty slots
-so `exit` sits in the first slot, the block centered vertically (`Ui.jumpTop`). `open(letters, letter)` takes
+label role, the 38 `LetterTile` cells (`#`, a..z, あ か さ た な は ま や ら わ, 漢; kana and 漢 through the fontconfig
+fallback) in `Ui.jumpCols` columns (5 portrait, 9 landscape)
+with the JUMP_GRID tile (`Ui.jumpTile`, the smaller of the width fit and the height fit of `Ui.jumpRows` rows, 8
+and 5) and 8 u gap from EDGE, the first row starting after `Ui.jumpExitCells` (2) empty slots
+so `exit` sits in the first slot, the block centered vertically with its top at least EDGE (`Ui.jumpTop`; 49 u tiles
+from y 16 at 640x960, 42.7 u from y 37.3 at 960x640). `open(letters, letter)` takes
 the letters that have rows and the hub's focused letter; a letter without rows draws at 0.4 and is skipped;
 left/right step to the next letter with rows, up/down the next in the same column. A emits `jumpTo(letter)`
 and closes, B, Back/View and Start close with the hub focus unchanged. `screenOff` lands the swivel.
@@ -683,7 +692,13 @@ in `CASDAP_SETTINGS_FILE` (read at each press) the guide button is the transport
 opens a 350 ms window (`CASDAP_HOTKEYD_DOUBLE_MS`) in which a second tap sends `Next` for both, else `PlayPause`
 goes out when the window ends; a hold inside the window sends the pending `PlayPause` first. The window runs on a
 read timeout, so volume keys keep flowing. In Plasma a hold switches; in any other session it
-logs. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
+logs. Every hold that acts (switch, switch prompt, screen on, `Previous`) buzzes the pad for 60 ms the
+moment the 1 s threshold passes, while the button is still down; the first hold while a title runs and a
+hold in an unknown session do not. A pocket double tap buzzes 40 ms, 60 ms off, 40 ms as it sends `Next`;
+taps never buzz. The buzz runs `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`,
+on every `/org/shadowblip/InputPlumber/CompositeDevice<N>` in a background subshell, a failed call is
+skipped silently; `CASDAP_HOTKEYD_BUZZ_LEVEL` (default 0.6), `CASDAP_HOTKEYD_BUZZ_MS` (60) and
+`CASDAP_HOTKEYD_BUZZ_DOUBLE_MS` (`40 60 40`, on and off in turn) override it, dry run logs `would: buzz <ms>`. In casdap the volume keys (`KEY_VOLUMEUP` on `gpio-keys`, `KEY_VOLUMEDOWN` on `pm8941_resin`,
 list override `CASDAP_HOTKEYD_VOLUME_NAMES=a:b`, read with their own `evtest` streams) step
 `wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@` per press and autorepeat by the `volumeStep` key of
 `CASDAP_SETTINGS_FILE` (default `~/.config/casdap/settings.ini`, read at each press; 2, 5 or 10, anything
@@ -853,11 +868,15 @@ Unsupported, nothing runs and the settings RGB row reads `UNSUPPORTED`.
 not -1, else `sliderHue`. `artHue` is -1 while `fromArt` is false, while `Player.current` has no `artPath` and
 while `BluezModel.transportActive`. `color` is `hsv(hue, s, 0.98)` with `s` the largest of 0.83, 0.82, ... 0.40
 whose WCAG luminance is at least 0.149 (`#FA2A4D` at 350), channels `round(255 c)`; `brightColor` is
-`hsv(hue, 0.84 s, 1.0)` (`#FF4D6B` at 350). The art hue (`ArtColor`) reads the file with `QImageReader` scaled
-to 32 x 32 on a one thread pool; a pixel with HSV saturation at least 0.35 and value at least 0.25 adds `s * v` to
-bin `round(h * 36) % 36` (hue `10 * bin`), the top bin wins with a tie to the lower bin, and fewer than 52
-qualifying pixels or an unreadable file is -1. Results are cached by path (512 entries, cleared when full and on
-`Library.albumsChanged`); a result for a path that is no longer the current one is cached and not applied.
+`hsv(hue, 0.84 s, 1.0)` (`#FF4D6B` at 350). The art hue (`ArtColor`) reads the file (a path or a `file://` url)
+with `QImageReader` scaled to 32 x 32 on a one thread pool; a pixel with HSV saturation at least 0.25 and value at
+least 0.20 adds `s * v` to bin `round(h * 36) % 36` (hue `10 * bin`), the top bin wins with a tie to the lower bin,
+and fewer than 21 qualifying pixels (2 percent) or an unreadable file is -1. A new art path keeps the previous
+`artHue` until its result arrives. Results are cached by path (512 entries, cleared when full and on
+`Library.albumsChanged`); a result for a path that is no longer the current one is cached and not applied. The
+journal gets `casdap accent: art hue <h> for <path>` or `casdap accent: no art hue for <path>` when a result is
+applied for a path other than the last logged one, and `casdap accent: hue <h> (art|slider)` on every change of
+`hue`.
 
 aptX: `build/aptx.sh <cache> <dist>` downloads `libfreeaptx` (RPM Fusion free releases/44) and
 `pipewire-codec-aptx-1.6.7-1.fc44` (updates/44), both aarch64 and sha256 pinned, extracts

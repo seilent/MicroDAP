@@ -16,16 +16,17 @@ class ArtColor : public QObject
 public:
     static constexpr int side = 32;
     static constexpr int bins = 36;
-    static constexpr int minPixels = 52;
+    static constexpr int minPixels = 21;
     static constexpr int cacheLimit = 512;
-    static constexpr double minSaturation = 0.35;
-    static constexpr double minValue = 0.25;
+    static constexpr double minSaturation = 0.25;
+    static constexpr double minValue = 0.20;
 
     explicit ArtColor(QObject *parent = nullptr);
     ~ArtColor() override;
 
     static int hueOf(const QImage &image);
     static int hueOfFile(const QString &path);
+    static QString localPath(const QString &path);
 
     bool contains(const QString &path) const;
     int cachedHue(const QString &path) const;

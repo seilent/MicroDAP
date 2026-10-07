@@ -64,6 +64,7 @@ private:
     void setArtHue(int hue);
     void updateHue();
     void onFound(const QString &path, int hue);
+    void logArt(const QString &path, int hue);
 
     ArtColor m_art;
     int m_sliderHue = 350;
@@ -71,6 +72,7 @@ private:
     int m_artHue = -1;
     int m_hue = 350;
     QString m_artPath;
+    QString m_loggedPath;
     bool m_phoneActive = false;
 };
 

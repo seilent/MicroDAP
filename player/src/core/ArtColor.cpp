@@ -4,6 +4,7 @@
 #include <QImageReader>
 #include <QMetaObject>
 #include <QSize>
+#include <QUrl>
 
 #include <array>
 
@@ -54,9 +55,20 @@ int ArtColor::hueOf(const QImage &image)
     return top * 10;
 }
 
+QString ArtColor::localPath(const QString &path)
+{
+    if (!path.startsWith(QLatin1StringView("file:"), Qt::CaseInsensitive))
+        return path;
+    const QUrl url(path);
+    return url.isLocalFile() ? url.toLocalFile() : QString();
+}
+
 int ArtColor::hueOfFile(const QString &path)
 {
-    QImageReader reader(path);
+    const QString file = localPath(path);
+    if (file.isEmpty())
+        return -1;
+    QImageReader reader(file);
     reader.setScaledSize(QSize(side, side));
     const QImage image = reader.read();
     if (image.isNull())

@@ -1,5 +1,6 @@
 #include "AccentControl.h"
 #include "ArtColor.h"
+#include "Queue.h"
 #include "Settings.h"
 
 #include <QColor>
@@ -8,6 +9,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUrl>
 
 using namespace casdap;
 
@@ -42,6 +44,9 @@ private slots:
     void solidCyan();
     void grey();
     void dark();
+    void softCovers();
+    void fileUrl();
+    void trackSequence();
     void spotThreshold();
     void dominantHue();
     void tieGoesLow();
@@ -98,11 +103,87 @@ void ArtColorTest::dark()
     QCOMPARE(ArtColor::hueOf(solid(QColor(40, 0, 0))), -1);
 }
 
+void ArtColorTest::softCovers()
+{
+    QCOMPARE(ArtColor::hueOf(solid(QColor::fromHsv(330, 77, 230))), 330);
+    QCOMPARE(ArtColor::hueOf(solid(QColor::fromHsv(210, 153, 56))), 210);
+    QCOMPARE(ArtColor::hueOf(solid(QColor::fromHsv(330, 60, 230))), -1);
+    QCOMPARE(ArtColor::hueOf(solid(QColor::fromHsv(210, 153, 46))), -1);
+}
+
+void ArtColorTest::fileUrl()
+{
+    const QString path = save(QStringLiteral("url cyan.png"), solid(QColor(0x1B, 0xA1, 0xE2)));
+    QVERIFY(!path.isEmpty());
+    const QString url = QUrl::fromLocalFile(path).toString();
+    QVERIFY(url.startsWith(QLatin1StringView("file://")));
+    QCOMPARE(ArtColor::localPath(url), path);
+    QCOMPARE(ArtColor::localPath(path), path);
+    QCOMPARE(ArtColor::hueOfFile(url), 200);
+    QCOMPARE(ArtColor::hueOfFile(path), 200);
+
+    AccentControl accent;
+    accent.setFromArt(true);
+    accent.setArtPath(url);
+    QTRY_COMPARE_WITH_TIMEOUT(accent.hue(), 200, waitMs);
+}
+
+void ArtColorTest::trackSequence()
+{
+    const QString red = save(QStringLiteral("track-red.png"), solid(QColor(255, 0, 0)));
+    const QString blue = save(QStringLiteral("track-blue.png"), solid(QColor(0, 0, 255)));
+    QVERIFY(!red.isEmpty());
+    QVERIFY(!blue.isEmpty());
+
+    QList<QueueEntry> entries;
+    for (const QString &art : {red, blue, QString()}) {
+        QueueEntry entry;
+        entry.id = entries.size() + 1;
+        entry.path = QStringLiteral("/nonexistent/t%1.flac").arg(entry.id);
+        entry.title = QStringLiteral("t%1").arg(entry.id);
+        entry.artPath = art;
+        entries.append(entry);
+    }
+
+    Queue queue;
+    AccentControl accent;
+    accent.setSliderHue(280);
+    accent.setFromArt(true);
+    auto follow = [&queue, &accent] {
+        accent.setArtPath(queue.get(queue.currentIndex()).value(QStringLiteral("artPath")).toString());
+    };
+    connect(&queue, &Queue::indexChanged, &accent, follow);
+    connect(&queue, &QAbstractItemModel::modelReset, &accent, follow);
+    QSignalSpy hueSpy(&accent, &AccentControl::hueChanged);
+
+    queue.set(entries, 0);
+    QCOMPARE(accent.artPath(), red);
+    QTRY_COMPARE_WITH_TIMEOUT(accent.hue(), 0, waitMs);
+    QCOMPARE(accent.artHue(), 0);
+    QCOMPARE(accent.color(), AccentControl::accentFor(0));
+
+    queue.setCurrentIndex(1);
+    QCOMPARE(accent.artPath(), blue);
+    QTRY_COMPARE_WITH_TIMEOUT(accent.hue(), 240, waitMs);
+    QCOMPARE(accent.color(), AccentControl::accentFor(240));
+
+    queue.setCurrentIndex(2);
+    QCOMPARE(accent.artPath(), QString());
+    QCOMPARE(accent.artHue(), -1);
+    QCOMPARE(accent.hue(), 280);
+
+    queue.setCurrentIndex(0);
+    QCOMPARE(accent.hue(), 0);
+    queue.setCurrentIndex(1);
+    QCOMPARE(accent.hue(), 240);
+    QCOMPARE(hueSpy.count(), 5);
+}
+
 void ArtColorTest::spotThreshold()
 {
     const QColor gray(128, 128, 128);
     const QColor red(255, 0, 0);
-    QCOMPARE(ArtColor::hueOf(mixed(gray, red, 41)), -1);
+    QCOMPARE(ArtColor::hueOf(mixed(gray, red, 10)), -1);
     QCOMPARE(ArtColor::hueOf(mixed(gray, red, ArtColor::minPixels - 1)), -1);
     QCOMPARE(ArtColor::hueOf(mixed(gray, red, ArtColor::minPixels)), 0);
     QCOMPARE(ArtColor::hueOf(mixed(gray, red, 103)), 0);

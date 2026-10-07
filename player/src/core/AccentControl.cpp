@@ -2,6 +2,7 @@
 
 #include "Settings.h"
 
+#include <QDebug>
 #include <QtMath>
 
 #include <cmath>
@@ -201,7 +202,9 @@ void AccentControl::refresh()
         return;
     }
     if (m_art.contains(m_artPath)) {
-        setArtHue(m_art.cachedHue(m_artPath));
+        const int hue = m_art.cachedHue(m_artPath);
+        logArt(m_artPath, hue);
+        setArtHue(hue);
         return;
     }
     m_art.request(m_artPath);
@@ -211,7 +214,19 @@ void AccentControl::onFound(const QString &path, int hue)
 {
     if (path != m_artPath || !m_fromArt || m_phoneActive)
         return;
+    logArt(path, hue);
     setArtHue(hue);
+}
+
+void AccentControl::logArt(const QString &path, int hue)
+{
+    if (path == m_loggedPath)
+        return;
+    m_loggedPath = path;
+    if (hue >= 0)
+        qInfo().noquote() << QStringLiteral("casdap accent: art hue %1 for %2").arg(hue).arg(path);
+    else
+        qInfo().noquote() << QStringLiteral("casdap accent: no art hue for %1").arg(path);
 }
 
 void AccentControl::setArtHue(int hue)
@@ -225,10 +240,14 @@ void AccentControl::setArtHue(int hue)
 
 void AccentControl::updateHue()
 {
-    const int value = m_fromArt && m_artHue >= 0 ? m_artHue : m_sliderHue;
+    const bool art = m_fromArt && m_artHue >= 0;
+    const int value = art ? m_artHue : m_sliderHue;
     if (m_hue == value)
         return;
     m_hue = value;
+    qInfo().noquote() << QStringLiteral("casdap accent: hue %1 (%2)")
+                             .arg(value)
+                             .arg(art ? QStringLiteral("art") : QStringLiteral("slider"));
     emit hueChanged();
 }
 
