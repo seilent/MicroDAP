@@ -17,13 +17,25 @@ script="${STATE}/script-$(basename "$1")"
 ev() { echo "Event: time $(date +%s.%6N), type 1 (EV_KEY), code $1 ($2), value $3"; }
 while read -r step; do
     case "${step}" in
-        press) ev 183 KEY_F13 1 ;;
+        press)
+            t=$(date +%s.%6N)
+            echo "Event: time ${t}, type 1 (EV_KEY), code 183 (KEY_F13), value 1"
+            echo $(( ${t%.*} * 1000 + 10#${t#*.} / 1000 )) >> "${STATE}/pressed"
+            ;;
         release) ev 183 KEY_F13 0 ;;
         stale-release)
             t=$(date +%s.%6N)
             echo "Event: time $(( ${t%.*} - 1 )).${t#*.}, type 1 (EV_KEY), code 183 (KEY_F13), value 0"
             ;;
         repeat) ev 183 KEY_F13 2 ;;
+        chord)
+            cp "${CASDAP_GUIDE_DIR}/down" "${CASDAP_GUIDE_DIR}/chord"
+            cat "${CASDAP_GUIDE_DIR}/down" >> "${STATE}/chords"
+            ;;
+        chord-old) echo $(( $(cat "${CASDAP_GUIDE_DIR}/down") - 1000 )) > "${CASDAP_GUIDE_DIR}/chord" ;;
+        peek) cat "${CASDAP_GUIDE_DIR}/down" >> "${STATE}/peeks" ;;
+        no-chord) rm -f "${CASDAP_GUIDE_DIR}/chord" ;;
+        end) exit 0 ;;
         mark*) echo "${step}" >> "${STATE}/system" ;;
         up) ev 115 KEY_VOLUMEUP 1 ;;
         up-repeat) ev 115 KEY_VOLUMEUP 2 ;;
@@ -102,6 +114,7 @@ EOF
 cat > "${T}/bin/wpctl" <<'EOF'
 #!/usr/bin/bash
 echo "wpctl $*" >> "${STATE}/calls"
+[[ "$1" == set-volume && -s "${STATE}/wpctl-sleep" ]] && sleep "$(cat "${STATE}/wpctl-sleep")"
 [[ "$*" == "set-mute @DEFAULT_AUDIO_SINK@ 0" ]] && rm -f "${STATE}/muted"
 if [[ "$1" == get-volume ]]; then
     if [[ -e "${STATE}/muted" ]]; then
@@ -121,6 +134,10 @@ EOF
 chmod 0755 "${T}"/bin/*
 export PATH="${T}/bin:${PATH}"
 export CASDAP_HOTKEYD_LONG_MS=200
+export CASDAP_HOTKEYD_POCKET_LONG_MS=100
+export CASDAP_HOTKEYD_CHORD_MS=100
+export CASDAP_HOTKEYD_CHORD_GRACE_MS=40
+export CASDAP_GUIDE_DIR="${T}/guide"
 export CASDAP_HOTKEYD_CONFIRM_MS=1000
 export CASDAP_HOTKEYD_TAP_MAX_AGE_MS=600
 export CASDAP_HOTKEYD_DOUBLE_MS=250
@@ -133,11 +150,11 @@ export CASDAP_SETTINGS_FILE="${T}/settings.ini"
 
 failures=0
 case_name=
-fail() { echo "FAIL ${case_name}: $*" >&2; echo "--- log" >&2; cat "${STATE}/log" >&2; echo "--- calls" >&2; cat "${STATE}/calls" >&2; echo "--- system" >&2; cat "${STATE}/system" >&2; failures=$((failures + 1)); }
+fail() { echo "FAIL ${case_name}: $*" >&2; echo "--- log" >&2; cat "${STATE}/log" >&2; echo "--- calls" >&2; cat "${STATE}/calls" >&2; echo "--- system" >&2; cat "${STATE}/system" >&2; echo "--- stderr" >&2; cat "${STATE}/stderr" >&2; failures=$((failures + 1)); }
 
 run_case() {
     case_name=$1
-    rm -rf "${STATE}"
+    rm -rf "${STATE}" "${CASDAP_GUIDE_DIR}"
     mkdir -p "${STATE}"
     : > "${STATE}/calls"
     : > "${STATE}/log"
@@ -150,11 +167,12 @@ run_case() {
     echo "${INTERCEPT:-0}" > "${STATE}/intercept"
     printf '%s' "${BUSCTL_ERR:-}" > "${STATE}/busctl-stderr"
     printf '%s' "${BUSCTL_SLEEP:-}" > "${STATE}/busctl-sleep"
+    printf '%s' "${WPCTL_SLEEP:-}" > "${STATE}/wpctl-sleep"
     [[ -z "$5" ]] || printf '%s\n' "$5" | tr ';' '\n' > "${STATE}/script-event0"
     [[ -z "${7:-}" ]] || printf '%s\n' "$7" | tr ';' '\n' > "${STATE}/script-event1"
     [[ "${8:-0}" == 0 ]] || : > "${STATE}/muted"
     rc=0
-    CASDAP_HOTKEYD_DRY_RUN="${6:-0}" "${daemon}" || rc=$?
+    CASDAP_HOTKEYD_DRY_RUN="${6:-0}" "${daemon}" 2> "${STATE}/stderr" || rc=$?
 }
 
 expect_call() { grep -qF -- "$1" "${STATE}/calls" || fail "missing call: $1"; }
@@ -167,6 +185,8 @@ expect_last_call() { [[ "$(tail -n 1 "${STATE}/calls")" == "$1" ]] || fail "last
 expect_no_log() { grep -qF -- "$1" "${STATE}/log" && fail "unexpected log: $1" || true; }
 expect_system_count() { [[ "$(grep -cxF -- "$1" "${STATE}/system" || true)" == "$2" ]] || fail "$(grep -cxF -- "$1" "${STATE}/system" || true) of '$1', expected $2"; }
 expect_no_rumble() { grep -qF Rumble "${STATE}/system" && fail "unexpected rumble" || true; }
+expect_guide() { [[ "$(cat "${CASDAP_GUIDE_DIR}/$1" 2>/dev/null)" == "$2" ]] || fail "$1 reads '$(cat "${CASDAP_GUIDE_DIR}/$1" 2>/dev/null)', expected '$2'"; }
+expect_no_stderr() { [[ ! -s "${STATE}/stderr" ]] || fail "stderr: $(cat "${STATE}/stderr")"; }
 expect_no_system() { [[ ! -s "${STATE}/system" ]] || fail "unexpected system bus calls"; }
 expect_system_before() {
     local a b
@@ -179,9 +199,9 @@ expect_system_before() {
 
 switch="systemctl start casdap-switch.service"
 back="systemctl start casdap-switch-back.service"
-playpause="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause"
-next="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Next"
-previous="busctl --user call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Previous"
+playpause="busctl --user --timeout=2 call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player PlayPause"
+next="busctl --user --timeout=2 call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Next"
+previous="busctl --user --timeout=2 call org.mpris.MediaPlayer2.casdap /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Previous"
 volup="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"
 voldown="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%-"
 getvol="wpctl get-volume @DEFAULT_AUDIO_SINK@"
@@ -370,6 +390,100 @@ expect_call "${prompt}"
 expect_no_call "${previous}"
 expect_calls 1
 
+run_case "start writes the guide files" game 0 0 "end"
+expect_guide down 0
+expect_guide chord 0
+
+run_case "press writes the event time to down" game 0 0 "press;sleep 0.05;peek;release;sleep 0.05;peek"
+[[ -s "${STATE}/pressed" && "$(head -n 1 "${STATE}/peeks")" == "$(cat "${STATE}/pressed")" ]] || fail "down $(head -n 1 "${STATE}/peeks"), press $(cat "${STATE}/pressed")"
+[[ "$(tail -n 1 "${STATE}/peeks")" == 0 ]] || fail "down not zeroed after the release"
+
+run_case "release after the window writes 0" casdap 0 0 "press;sleep 0.15;release;sleep 0.05;peek"
+expect_call "${playpause}"
+[[ "$(cat "${STATE}/peeks")" == 0 ]] || fail "down reads $(cat "${STATE}/peeks")"
+expect_guide down 0
+
+run_case "chord drops the tap" casdap 0 0 "press;sleep 0.05;chord;release"
+expect_no_call "${playpause}"
+expect_calls 0
+expect_log "chord, tap dropped"
+expect_no_log "tap, play pause"
+expect_guide down 0
+
+run_case "chord drops the hold" casdap 0 0 "press;sleep 0.05;chord;sleep 0.25;release;sleep 0.05;press;sleep 0.05;release"
+expect_no_call "${prompt}"
+expect_no_rumble
+expect_log "chord, hold dropped"
+expect_guide down 0
+expect_no_log "hold in casdap"
+expect_call_count "${playpause}" 1
+expect_calls 1
+
+run_case "an old chord acts" casdap 0 0 "press;sleep 0.05;chord-old;release"
+expect_call_count "${playpause}" 1
+expect_no_log "chord, tap dropped"
+
+run_case "chord inside the grace drops the tap" casdap 0 0 "press;sleep 0.05;release;sleep 0.02;chord"
+expect_no_call "${playpause}"
+expect_log "chord, tap dropped"
+[[ -s "${STATE}/chords" && "$(cat "${STATE}/chords")" != 0 ]] || fail "down read $(cat "${STATE}/chords") at the chord"
+
+run_case "chord after the grace acts" casdap 0 0 "press;sleep 0.05;release;sleep 0.1;chord"
+expect_call_count "${playpause}" 1
+expect_log "tap, play pause"
+[[ "$(cat "${STATE}/chords")" == 0 ]] || fail "down read $(cat "${STATE}/chords") after the grace"
+
+run_case "release after the chord window acts at once" casdap 0 0 "press;sleep 0.15;release;sleep 0.02;chord"
+expect_call_count "${playpause}" 1
+expect_no_log "chord, tap dropped"
+
+run_case "new press resolves a due tap first" casdap 0 0 "press;sleep 0.05;release;sleep 0.01;press;sleep 0.3;release"
+expect_first_call "${playpause}"
+expect_last_call "${prompt}"
+expect_call_count "${playpause}" 1
+expect_calls 2
+
+CASDAP_HOTKEYD_CHORD_GRACE_MS=150 run_case "volume key during a due tap" casdap 0 0 "press;sleep 0.05;release" 0 "sleep 0.06;up;up-release"
+expect_call "${volup}"
+expect_call "${emit}"
+expect_call_count "${playpause}" 1
+expect_calls 5
+
+run_case "stream end with a due tap" casdap 0 0 "press;sleep 0.05;release;end"
+[[ "${rc}" == 1 ]] || fail "exit ${rc} after stream end, expected 1"
+expect_call_count "${playpause}" 1
+expect_log "event stream ended"
+
+run_case "missing chord file" casdap 0 0 "press;sleep 0.05;no-chord;release"
+expect_call_count "${playpause}" 1
+expect_no_stderr
+
+run_case "screen on 150 ms press is a tap" casdap 0 0 "press;sleep 0.15;release"
+expect_call_count "${playpause}" 1
+expect_no_call "${prompt}"
+expect_calls 1
+
+run_case "screen on 300 ms press shows the prompt" casdap 0 0 "press;sleep 0.3;release"
+expect_call "${prompt}"
+expect_guide down 0
+expect_no_call "${playpause}"
+expect_calls 1
+
+OVERLAY=active run_case "game mode ignores a chord" game 0 0 "press;sleep 0.05;chord;release"
+expect_call "${toggle}"
+expect_calls 1
+expect_no_log "chord,"
+
+WPCTL_SLEEP=0.3 run_case "press queued behind a slow wpctl is a tap" casdap 0 0 "sleep 0.02;press;sleep 0.05;release" 0 "up;up-release"
+expect_call_count "${playpause}" 1
+expect_no_call "${prompt}"
+expect_no_log "hold in"
+expect_calls 5
+
+run_case "tap logs play pause" casdap 0 0 "press;sleep 0.05;release"
+expect_log "tap, play pause"
+expect_no_stderr
+
 mkdir -p "${CASDAP_RUNTIME_DIR}"
 : > "${CASDAP_RUNTIME_DIR}/off"
 
@@ -443,6 +557,22 @@ expect_first_call "${playpause}"
 expect_last_call "${previous}"
 expect_no_call "${next}"
 expect_calls 2
+
+run_case "pocket 150 ms hold" casdap 0 0 "press;sleep 0.15;release"
+expect_call "${previous}"
+expect_guide down 0
+expect_no_call "${playpause}"
+expect_calls 1
+expect_system_count "${dev0} 1.0" 1
+
+run_case "pocket 50 ms press is a tap" casdap 0 0 "press;sleep 0.05;release;sleep 0.4"
+expect_call "${playpause}"
+expect_no_call "${previous}"
+expect_calls 1
+
+run_case "pocket ignores a chord" casdap 0 0 "press;sleep 0.03;chord;release;sleep 0.4"
+expect_call "${playpause}"
+expect_no_log "chord,"
 
 rm -f "${CASDAP_RUNTIME_DIR}/off"
 
@@ -555,6 +685,17 @@ expect_call "${playpause}"
 expect_call "${volup}"
 expect_call "${emit}"
 expect_calls 5
+
+case_name="now_ms under a comma locale"
+mkdir -p "${T}/loc"
+if localedef -i de_DE -f UTF-8 "${T}/loc/de_DE.UTF-8" >/dev/null 2>&1; then
+    a=$(date +%s%3N)
+    b=$(LOCPATH="${T}/loc" LC_ALL=de_DE.UTF-8 bash -c 'source "$1"; now_ms' _ "${daemon}")
+    c=$(date +%s%3N)
+    [[ "${b}" =~ ^[0-9]+$ ]] && (( a <= b && b <= c )) || { echo "FAIL ${case_name}: ${a} ${b} ${c}" >&2; failures=$((failures + 1)); }
+else
+    echo "skip: ${case_name}, localedef failed"
+fi
 
 if (( failures )); then
     echo "hotkeyd-test: ${failures} failure(s)" >&2

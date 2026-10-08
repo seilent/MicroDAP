@@ -728,15 +728,22 @@ hotkeyd never starts the unit. Hold in casdap calls `busctl --user call
 org.casdap.Player /org/casdap/Player org.casdap.Player ShowSwitchPrompt` (the player opens the switch
 prompt, a second hold closes it); `Call failed: The name is not activatable` (no player on the bus) logs
 `no player, switching back` and starts `casdap-switch-back.service`, any other failure is logged. Tap in
-casdap sends `PlayPause` to `org.mpris.MediaPlayer2.casdap` at once. With the screen off
+casdap logs `tap, play pause` and sends `PlayPause` to `org.mpris.MediaPlayer2.casdap` (`busctl --user --timeout=2
+call`, also for `Next` and `Previous`). Guide chord: at start hotkeyd creates `CASDAP_GUIDE_DIR` (default
+`$XDG_RUNTIME_DIR/casdap-guide`) and writes `0` to `down` and `chord`; every guide press writes its evdev event
+time (ms since the epoch) to `down`, and `0` goes back when the press resolves. The player writes the `down` value
+it took for a rotate chord to `chord`. With the screen on in casdap a release under `CASDAP_HOTKEYD_CHORD_MS`
+(500) after its press waits `CASDAP_HOTKEYD_CHORD_GRACE_MS` (40) more, a later one resolves at once; a `chord`
+equal to the press time then logs `chord, tap dropped` and sends nothing. A hold whose press time is in `chord`
+logs `chord, hold dropped`, no tick, no switch prompt. Pocket and game mode never read `chord`. With the screen off
 (`$CASDAP_RUNTIME_DIR/off`, default `$XDG_RUNTIME_DIR/casdap-power/off`) the guide button is the transport: a
-hold sends `Previous`, a tap
+hold of 500 ms (`CASDAP_HOTKEYD_POCKET_LONG_MS`) sends `Previous`, a tap
 opens a 350 ms window (`CASDAP_HOTKEYD_DOUBLE_MS`) in which a second tap sends `Next` for both, else `PlayPause`
 goes out when the window ends; a hold inside the window sends the pending `PlayPause` first. The power key wakes
 the screen. The window runs on a
 read timeout, so volume keys keep flowing. In Plasma a hold switches; in any other session it
 logs. Every hold that acts (switch, switch prompt, `Previous`) ticks the pad for 15 ms at level 1.0 the
-moment the 1 s threshold passes, while the button is still down; the first hold while a title runs and a
+moment the hold threshold (1 s, 500 ms with the screen off) passes, while the button is still down; the first hold while a title runs and a
 hold in an unknown session do not. A pocket double tap ticks 15 ms, 50 ms off, 15 ms as it sends `Next`;
 taps never tick. The tick runs `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`,
 on every `/org/shadowblip/InputPlumber/CompositeDevice<N>` in a background subshell, a failed call is
