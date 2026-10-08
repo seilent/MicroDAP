@@ -80,7 +80,14 @@ on the same router: arrows, Return A, Escape or Backspace B, X, Y, Q and E for L
 PageDown for LT and RT, Space Start, Tab Back/View; key autorepeat counts only for directions. Pad directions
 remap on press with `Ui.padDirection` (up, right, down, left turned by `Ui.padTurn`, `(L - turn) mod 4` while
 orientation applies, else 0); the press keeps its mapped name for its repeats and release; two held directions that map to one name press
-and release it once. Keys are not
+and release it once. Rotate chord: while orientation applies and the screen is on, a raw direction press first asks
+`Guide.take()` (true when the Guide press is at most 500 ms old); on true the router emits `rotate(raw)` instead of
+dispatching, drops that direction's repeats and release, and drops every other direction pressed while it is held,
+so one press rotates once. Main's `rotateBy(raw)`: right turns 90 clockwise, left 90 counterclockwise, down 180,
+up nothing; an open settings edit on ORIENTATION reverts and any other confirms, then `Settings.orientation` takes
+the new value from the saved one and T18 runs; the saver, sheets and dialogs stay open and the chord counts as
+input for the saver and screen off timers. `Guide` null, the screen off, the overlay or an external output give
+no chord. Keys are not
 remapped.
 `Page` is the screen base: one `focusIndex`, A emits `activated(index)`, B pops, up/down and LT/RT go
 to its `FocusList` when set. `FocusList` keeps the focused row inside `[CONTENT_TOP, H - ROW_HEIGHT]`

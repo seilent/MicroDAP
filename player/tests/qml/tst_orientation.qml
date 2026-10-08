@@ -30,6 +30,18 @@ TestCase {
     }
 
     QtObject {
+        id: fakeGuide
+
+        property bool give: true
+        property int takes: 0
+
+        function take() {
+            fakeGuide.takes++
+            return fakeGuide.give
+        }
+    }
+
+    QtObject {
         id: fakeOutputs
 
         property bool internal: true
@@ -133,6 +145,25 @@ TestCase {
     }
 
     SignalSpy {
+        id: rotateSpy
+
+        target: main.router
+        signalName: "rotate"
+    }
+
+    Component {
+        id: overlayMainComponent
+
+        Main {
+            overlay: true
+            overlayMapped: true
+            settings: fakeSettings
+            shotWidth: 640
+            shotHeight: 960
+        }
+    }
+
+    SignalSpy {
         id: routedSpy
 
         target: main.router
@@ -151,6 +182,10 @@ TestCase {
 
     function init() {
         main.router.pad = fakePad
+        main.router.guide = null
+        main.router.chordHeld = ({})
+        fakeGuide.give = true
+        fakeGuide.takes = 0
         fakeOutputs.internal = true
         main.outputs = fakeOutputs
         fakePower.screenOff = false
@@ -169,12 +204,21 @@ TestCase {
         main.router.heldCount = ({})
         appliedSpy.clear()
         routedSpy.clear()
+        rotateSpy.clear()
         compare(Ui.turn, 0)
         compare(Ui.orientationActive, true)
     }
 
     function cleanup() {
         main.pageStack.animate = true
+        if (main.saver.shown) {
+            main.saver.hide()
+            main.saver.land()
+        }
+        if (main.switchPrompt.shown) {
+            main.switchPrompt.close()
+            main.switchPrompt.complete()
+        }
     }
 
     function push(name, repeat) {
@@ -292,6 +336,182 @@ TestCase {
         fakePad.released(fakePad.code("right"))
         compare(page.pressedNames, ["right", "right"])
         compare(page.releasedNames, ["right", "right"])
+    }
+
+    function test_chord_rotates_once() {
+        main.router.guide = fakeGuide
+        const page = main.pageStack.push(listPage, {})
+        tc.push("right")
+        compare(fakeGuide.takes, 1)
+        compare(rotateSpy.count, 1)
+        compare(rotateSpy.signalArguments[0][0], "right")
+        compare(routedSpy.count, 0)
+        compare(page.pressedNames, [])
+        fakePad.action(fakePad.code("right"), true)
+        fakePad.action(fakePad.code("right"), true)
+        compare(routedSpy.count, 0)
+        tc.settle()
+        compare(main.turnFor(fakeSettings.orientation), 1)
+        compare(Ui.turn, 1)
+        fakePad.released(fakePad.code("right"))
+        compare(page.releasedNames, [])
+        compare(main.router.chordHeld["right"], undefined)
+        compare(fakeGuide.takes, 1)
+    }
+
+    function test_chord_second_direction_dropped() {
+        main.router.guide = fakeGuide
+        tc.push("right")
+        compare(rotateSpy.count, 1)
+        tc.push("down")
+        compare(rotateSpy.count, 1)
+        compare(routedSpy.count, 0)
+        compare(fakeGuide.takes, 1)
+        fakePad.released(fakePad.code("down"))
+        fakePad.released(fakePad.code("right"))
+        compare(Object.keys(main.router.chordHeld).length, 0)
+        tc.settle()
+        compare(Ui.turn, 1)
+        fakeGuide.give = false
+        tc.push("down")
+        compare(rotateSpy.count, 1)
+        compare(routedSpy.count, 1)
+        fakePad.released(fakePad.code("down"))
+    }
+
+    function test_chord_take_false_dispatches() {
+        main.router.guide = fakeGuide
+        fakeGuide.give = false
+        tc.push("right")
+        compare(fakeGuide.takes, 1)
+        compare(rotateSpy.count, 0)
+        compare(routedSpy.count, 1)
+        compare(tc.lastRouted(), Ui.padDirection("right"))
+        fakePad.released(fakePad.code("right"))
+        compare(fakeSettings.orientation, "portrait")
+    }
+
+    function test_chord_ignores_non_directions() {
+        main.router.guide = fakeGuide
+        tc.push("a")
+        compare(fakeGuide.takes, 0)
+        compare(rotateSpy.count, 0)
+        fakePad.released(fakePad.code("a"))
+    }
+
+    function test_no_chord_without_guide() {
+        tc.push("right")
+        compare(rotateSpy.count, 0)
+        compare(routedSpy.count, 1)
+        fakePad.released(fakePad.code("right"))
+    }
+
+    function test_no_chord_screen_off() {
+        main.router.guide = fakeGuide
+        fakePower.screenOff = true
+        compare(main.router.rotating, false)
+        tc.push("right")
+        compare(fakeGuide.takes, 0)
+        compare(rotateSpy.count, 0)
+        fakePad.released(fakePad.code("right"))
+        fakePower.screenOff = false
+    }
+
+    function test_no_chord_external_output() {
+        main.router.guide = fakeGuide
+        fakeOutputs.internal = false
+        tc.settle()
+        compare(main.router.rotating, false)
+        tc.push("right")
+        compare(fakeGuide.takes, 0)
+        compare(rotateSpy.count, 0)
+        compare(tc.lastRouted(), "right")
+        fakePad.released(fakePad.code("right"))
+    }
+
+    function test_no_chord_overlay() {
+        const overlay = createTemporaryObject(overlayMainComponent, tc)
+        verify(overlay !== null)
+        compare(Ui.orientationActive, false)
+        overlay.router.pad = fakePad
+        overlay.router.guide = fakeGuide
+        compare(overlay.router.rotating, false)
+        tc.push("right")
+        compare(fakeGuide.takes, 0)
+        fakePad.released(fakePad.code("right"))
+        overlay.destroy()
+        wait(0)
+        main.syncSurface()
+        compare(Ui.orientationActive, true)
+    }
+
+    function test_rotateBy_data() {
+        return [
+            { tag: "portrait right", from: "portrait", raw: "right", to: "landscape", turn: 1 },
+            { tag: "portrait left", from: "portrait", raw: "left", to: "landscape-flipped", turn: 3 },
+            { tag: "portrait down", from: "portrait", raw: "down", to: "portrait-flipped", turn: 2 },
+            { tag: "portrait up", from: "portrait", raw: "up", to: "portrait", turn: 0 },
+            { tag: "portrait-flipped right", from: "portrait-flipped", raw: "right", to: "landscape-flipped", turn: 3 },
+            { tag: "portrait-flipped left", from: "portrait-flipped", raw: "left", to: "landscape", turn: 1 },
+            { tag: "portrait-flipped down", from: "portrait-flipped", raw: "down", to: "portrait", turn: 0 },
+            { tag: "portrait-flipped up", from: "portrait-flipped", raw: "up", to: "portrait-flipped", turn: 2 },
+            { tag: "landscape right", from: "landscape", raw: "right", to: "portrait-flipped", turn: 2 },
+            { tag: "landscape left", from: "landscape", raw: "left", to: "portrait", turn: 0 },
+            { tag: "landscape down", from: "landscape", raw: "down", to: "landscape-flipped", turn: 3 },
+            { tag: "landscape up", from: "landscape", raw: "up", to: "landscape", turn: 1 },
+            { tag: "landscape-flipped right", from: "landscape-flipped", raw: "right", to: "portrait", turn: 0 },
+            { tag: "landscape-flipped left", from: "landscape-flipped", raw: "left", to: "portrait-flipped", turn: 2 },
+            { tag: "landscape-flipped down", from: "landscape-flipped", raw: "down", to: "landscape", turn: 1 },
+            { tag: "landscape-flipped up", from: "landscape-flipped", raw: "up", to: "landscape-flipped", turn: 3 }
+        ]
+    }
+
+    function test_rotateBy(data) {
+        if (Ui.landscapeTurn !== 1)
+            skip("table for L 1")
+        tc.setOrientation(data.from)
+        main.rotateBy(data.raw)
+        tc.settle()
+        compare(fakeSettings.orientation, data.to)
+        compare(Ui.turn, data.turn)
+    }
+
+    function test_rotateBy_twice_before_sync() {
+        tc.setOrientation("portrait")
+        main.rotateBy("right")
+        main.rotateBy("right")
+        tc.settle()
+        compare(fakeSettings.orientation, "portrait-flipped")
+        compare(Ui.turn, 2)
+    }
+
+    function test_chord_keeps_saver_sheet_prompt() {
+        main.router.guide = fakeGuide
+        main.navigate("settings")
+        const page = main.pageStack.currentItem
+        page.completeAll()
+        page.sheet.title = "close player"
+        page.sheet.items = ["close player"]
+        page.sheet.open()
+        page.sheet.complete()
+        main.switchPrompt.show(false)
+        main.switchPrompt.complete()
+        main.saver.show()
+        main.saver.land()
+        tc.push("right")
+        compare(rotateSpy.count, 1)
+        tc.settle()
+        compare(Ui.turn, 1)
+        compare(main.saver.shown, true)
+        compare(main.switchPrompt.shown, true)
+        compare(page.sheet.shown, true)
+        fakePad.released(fakePad.code("right"))
+        main.saver.hide()
+        main.saver.land()
+        main.switchPrompt.close()
+        main.switchPrompt.complete()
+        page.sheet.close()
+        page.sheet.complete()
     }
 
     function test_hub_pivot_pan_lands() {

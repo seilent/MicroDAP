@@ -180,6 +180,12 @@ TestCase {
     }
 
     Component {
+        id: spyComponent
+
+        SignalSpy {}
+    }
+
+    Component {
         id: blankComponent
 
         Page {}
@@ -1221,6 +1227,38 @@ TestCase {
         fakeOutputs.internal = true
         tryCompare(Ui, "orientationActive", true, 1000)
         compare(tc.rowOf(m.page, "orientation").value, "portrait")
+    }
+
+    function test_chord_reverts_orientation_edit() {
+        const m = tc.openInMain()
+        const page = m.page
+        const spy = createTemporaryObject(spyComponent, tc, { target: m.main, signalName: "orientationApplied" })
+        page.focusIndex = page.indexOfKey("orientation")
+        page.handleAction("a", false)
+        page.handleAction("right", false)
+        page.handleAction("right", false)
+        compare(tc.rowOf(page, "orientation").value, "landscape")
+        m.main.rotateBy("down")
+        compare(page.editing, false)
+        compare(fakeSettings.orientation, "portrait-flipped")
+        tryCompare(Ui, "turn", 2, 1000)
+        wait(0)
+        compare(spy.count, 1)
+        compare(tc.rowOf(page, "orientation").value, "portrait flipped")
+    }
+
+    function test_chord_confirms_saver_edit() {
+        const m = tc.openInMain()
+        const page = m.page
+        page.focusIndex = page.indexOfKey("saver")
+        page.handleAction("a", false)
+        page.handleAction("right", false)
+        compare(fakeSettings.saverSeconds, 60)
+        m.main.rotateBy("right")
+        compare(page.editing, false)
+        compare(fakeSettings.saverSeconds, 60)
+        tryCompare(Ui, "turn", 1, 1000)
+        compare(fakeSettings.saverSeconds, 60)
     }
 
     function test_scale_kept_in_landscape() {

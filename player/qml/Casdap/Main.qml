@@ -189,6 +189,20 @@ Window {
         root.surfaceSynced = true
     }
 
+    function rotateBy(raw: string): void {
+        root.touch()
+        const delta = raw === "right" ? 1 : raw === "left" ? 3 : raw === "down" ? 2 : 0
+        if (delta === 0)
+            return
+        const top = pages.currentItem
+        if (top !== null && top.objectName === "settings" && typeof top.revertOrConfirmForRotation === "function")
+            top.revertOrConfirmForRotation()
+        const turn = (root.turnFor(root.savedOrientation) + delta) % 4
+        const name = root.orientations.find((value) => root.turnFor(value) === turn)
+        if (root.settings !== null && root.settings.orientation !== undefined && name !== undefined)
+            root.settings.orientation = name
+    }
+
     function applyOrientation(turn: int, active: bool): void {
         pages.eachPage((page) => {
             if (typeof page.revertOrConfirmForRotation === "function")
@@ -721,8 +735,10 @@ Window {
             modal: powerMenu.shown ? powerMenu : switchPrompt
             saver: saver
             pad: typeof Pad === "undefined" ? null : Pad
+            guide: typeof Guide === "undefined" ? null : Guide
             screenOff: root.off
             onNowPlaying: root.openNowPlaying()
+            onRotate: (raw) => root.rotateBy(raw)
         }
 
         SwitchPrompt {

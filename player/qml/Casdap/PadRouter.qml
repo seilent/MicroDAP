@@ -6,6 +6,7 @@ Item {
 
     property PageStack stack: null
     property QtObject pad: null
+    property QtObject guide: null
     property Item modal: null
     property Item saver: null
     property bool screenOff: false
@@ -13,6 +14,7 @@ Item {
     readonly property bool locked: router.stack !== null && router.stack.inputLocked
     readonly property bool modalUp: router.modal !== null && router.modal.shown === true
     readonly property bool saverUp: router.saver !== null && router.saver.shown === true
+    readonly property bool rotating: Ui.orientationActive && !router.screenOff
     readonly property var keyMap: ({
         [Qt.Key_Up]: "up",
         [Qt.Key_Down]: "down",
@@ -34,12 +36,14 @@ Item {
     readonly property var directions: ["up", "down", "left", "right"]
     property var held: ({})
     property var heldCount: ({})
+    property var chordHeld: ({})
 
     signal routed(string name, bool repeat, bool handled)
     signal dropped(string name, bool repeat)
     signal nowPlaying()
     signal view(string name)
     signal unhandled(string name, bool repeat)
+    signal rotate(string raw)
 
     focus: true
     activeFocusOnTab: false
@@ -47,6 +51,20 @@ Item {
     function keyName(key: int): string {
         const name = router.keyMap[key]
         return name === undefined ? "" : name
+    }
+
+    function chord(raw: string): bool {
+        if (router.directions.indexOf(raw) < 0)
+            return false
+        if (Object.keys(router.chordHeld).length > 0) {
+            router.chordHeld[raw] = true
+            return true
+        }
+        if (!router.rotating || router.guide === null || typeof router.guide.take !== "function" || !router.guide.take())
+            return false
+        router.chordHeld[raw] = true
+        router.rotate(raw)
+        return true
     }
 
     function heldName(raw: string): string {
@@ -117,11 +135,16 @@ Item {
         ignoreUnknownSignals: true
 
         function onAction(action, repeat) {
-            router.dispatch(router.heldName(router.pad.actionName(action)), repeat)
+            const raw = router.pad.actionName(action)
+            if (router.chordHeld[raw] === true)
+                return
+            router.dispatch(router.heldName(raw), repeat)
         }
 
         function onPressed(action) {
             const raw = router.pad.actionName(action)
+            if (router.chord(raw))
+                return
             if (router.held[raw] !== undefined)
                 return
             const name = Ui.padDirection(raw)
@@ -134,6 +157,10 @@ Item {
 
         function onReleased(action) {
             const raw = router.pad.actionName(action)
+            if (router.chordHeld[raw] === true) {
+                delete router.chordHeld[raw]
+                return
+            }
             const name = router.heldName(raw)
             if (router.held[raw] === undefined) {
                 router.release(name)
