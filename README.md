@@ -7,8 +7,8 @@ Status: prototype, runs on an AYANEO Pocket MICRO 2. The session, the switch uni
 mapping, the hold daemon, the pad target, the boot guard, the Bluetooth receiver with codec choice and
 aptX, the in game overlay, the power key daemon with the screen off state and the CPU floor, USB DAC
 output and the player (home, hub, artist and album detail, now playing, queue, playlists, history, jump
-grid, settings, saver, power menu) are written. Open: the session in native portrait, the power
-measurement run and the release image.
+grid, settings, saver, power menu) are written. The session runs native portrait with runtime orientation.
+Open: the power measurement run and the release image.
 
 ## Layout
 
@@ -522,8 +522,9 @@ and pushed only from main. `build/cache` is kept in `actions/cache`. `dist/` is 
 ## Session
 
 `casdap.desktop` runs `gamescope-session-plus casdap`. `sessions.d/casdap` sets
-`CLIENTCMD=/usr/bin/casdap-player`; `/etc/gamescope-session-plus/sessions.d/casdap` (runtime, not
-shipped) overrides it, for example `export CLIENTCMD=konsole`. gamescope runs with `--steam` and shows
+`CLIENTCMD=/usr/bin/casdap-player` and `ORIENTATION=normal`, so gamescope keeps the panel's native 640 x 960
+portrait and the player turns its own view (Player UI); `/etc/gamescope-session-plus/sessions.d/casdap` (runtime, not
+shipped) overrides them, for example `export CLIENTCMD=konsole`. gamescope runs with `--steam` and shows
 only a window whose `STEAM_GAME` matches the root `GAMESCOPECTRL_BASELAYER_APPID`; with no Steam in the
 session the player sets both to `CASDAP_GAMESCOPE_APPID` (`0x43415344`, exported by `sessions.d/casdap`)
 on its own X window at start. A client without them stays invisible. Five sessions shorter than 60 s in a
