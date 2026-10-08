@@ -251,6 +251,13 @@ Item {
         d.finish()
     }
 
+    function eachPage(fn: var): void {
+        for (const holder of root.pages) {
+            if (holder.content !== null && holder.content !== undefined)
+                fn(holder.content)
+        }
+    }
+
     function serialize(): var {
         const out = []
         for (const holder of root.pages) {

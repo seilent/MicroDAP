@@ -133,6 +133,10 @@ Page {
         panAnim.start()
     }
 
+    function keepFocusVisible(): void {
+        quickplay.keepFocusVisible()
+    }
+
     function completeAll() {
         if (panAnim.running)
             panAnim.complete()

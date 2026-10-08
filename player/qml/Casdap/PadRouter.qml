@@ -32,6 +32,8 @@ Item {
         [Qt.Key_Tab]: "back"
     })
     readonly property var directions: ["up", "down", "left", "right"]
+    property var held: ({})
+    property var heldCount: ({})
 
     signal routed(string name, bool repeat, bool handled)
     signal dropped(string name, bool repeat)
@@ -45,6 +47,11 @@ Item {
     function keyName(key: int): string {
         const name = router.keyMap[key]
         return name === undefined ? "" : name
+    }
+
+    function heldName(raw: string): string {
+        const name = router.held[raw]
+        return name === undefined ? Ui.padDirection(raw) : name
     }
 
     function page(): Item {
@@ -110,15 +117,36 @@ Item {
         ignoreUnknownSignals: true
 
         function onAction(action, repeat) {
-            router.dispatch(router.pad.actionName(action), repeat)
+            router.dispatch(router.heldName(router.pad.actionName(action)), repeat)
         }
 
         function onPressed(action) {
-            router.press(router.pad.actionName(action))
+            const raw = router.pad.actionName(action)
+            if (router.held[raw] !== undefined)
+                return
+            const name = Ui.padDirection(raw)
+            const count = router.heldCount[name] === undefined ? 0 : router.heldCount[name]
+            router.held[raw] = name
+            router.heldCount[name] = count + 1
+            if (count === 0)
+                router.press(name)
         }
 
         function onReleased(action) {
-            router.release(router.pad.actionName(action))
+            const raw = router.pad.actionName(action)
+            const name = router.heldName(raw)
+            if (router.held[raw] === undefined) {
+                router.release(name)
+                return
+            }
+            delete router.held[raw]
+            const count = router.heldCount[name] - 1
+            if (count > 0) {
+                router.heldCount[name] = count
+                return
+            }
+            delete router.heldCount[name]
+            router.release(name)
         }
     }
 

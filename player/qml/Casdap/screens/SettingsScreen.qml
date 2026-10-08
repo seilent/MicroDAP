@@ -23,6 +23,7 @@ Page {
     property bool editing: false
     property string editKey: ""
     property var editOriginal: null
+    property string orientationDraft: ""
     property int eqRevision: 0
     property var folders: []
     property var shownValues: ({})
@@ -42,11 +43,12 @@ Page {
     readonly property var screenOffSteps: [0, 60, 120, 300, 600, 1800]
     readonly property var suspendSteps: [0, 5, 10, 30, 60]
     readonly property var scaleSteps: page.buildScaleSteps()
+    readonly property var orientations: ["portrait", "portrait-flipped", "landscape", "landscape-flipped"]
     readonly property var editKeys: ({
         output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
         codec: "btCodec", accent: "accentHue", accentArt: "accentFromArt", scale: "scale", saver: "saverSeconds",
         rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds", suspend: "suspendMinutes",
-        wifi: "wifiOffScreenOff"
+        wifi: "wifiOffScreenOff", orientation: "orientation"
     })
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
@@ -59,6 +61,11 @@ Page {
     readonly property bool rgbSupported: !page.overlay && page.rgbControl !== null && page.rgbControl.supported === true
     readonly property string rgbValue: page.rgbSupported ? page.rgb : "unsupported"
     readonly property bool overlayToasts: page.settings !== null && page.settings.overlayToasts === true
+    readonly property string orientation: page.settings !== null && page.orientations.indexOf(String(page.settings.orientation)) >= 0
+        ? String(page.settings.orientation) : "portrait"
+    readonly property string orientationValue: !Ui.orientationActive ? "external display"
+        : (page.editing && page.editKey === "orientation" ? page.orientationDraft : page.orientation).replace("-", " ")
+    readonly property real savedScale: page.settings !== null && page.settings.scale !== undefined ? Number(page.settings.scale) : 1.0
     readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
     readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
     readonly property int graphRate: page.audioInfo !== null && page.audioInfo.graphRate !== undefined ? Number(page.audioInfo.graphRate) : 0
@@ -203,7 +210,8 @@ Page {
         out.push(page.label("display"))
         out.push(page.row("accent", "accent", "", false))
         out.push(page.row("accentArt", "accent from art", page.accentFromArt ? "on" : "off", false))
-        out.push(page.row("orientation", "orientation", Ui.landscape ? "landscape" : "portrait", true))
+        if (!page.overlay)
+            out.push(page.row("orientation", "orientation", page.orientationValue, !Ui.orientationActive))
         out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
         if (!page.overlay)
@@ -368,8 +376,9 @@ Page {
     }
 
     function applyScale(s: real) {
+        if (s === Math.round(Ui.userScale * 10) / 10)
+            return
         const index = page.focusIndex
-        Ui.userScale = s
         page.set("scale", s)
         page.focusIndex = index
         page.completeScroll()
@@ -432,6 +441,9 @@ Page {
         case "wifi":
             page.set("wifiOffScreenOff", !page.wifiOffScreenOff)
             return true
+        case "orientation":
+            page.orientationDraft = page.cycle(page.orientations, page.orientationDraft, delta)
+            return true
         default:
             return false
         }
@@ -461,7 +473,7 @@ Page {
         case "accentArt":
             return page.accentFromArt
         case "scale":
-            return Math.round(Ui.userScale * 10) / 10
+            return page.savedScale
         case "saver":
             return page.saverSeconds
         case "rgb":
@@ -474,6 +486,8 @@ Page {
             return page.suspendMinutes
         case "wifi":
             return page.wifiOffScreenOff
+        case "orientation":
+            return page.orientation
         default:
             return undefined
         }
@@ -481,6 +495,7 @@ Page {
 
     function beginEdit(key: string): void {
         page.editOriginal = page.currentOf(key)
+        page.orientationDraft = page.orientation
         page.editKey = key
         page.editing = true
     }
@@ -498,9 +513,26 @@ Page {
         const original = page.editOriginal
         if (key === "scale")
             page.applyScale(Number(original))
-        else
+        else if (key !== "orientation")
             page.set(page.settingOf(key), original)
         page.confirmEdit()
+    }
+
+    function applyEdit(): void {
+        const key = page.editKey
+        const draft = page.orientationDraft
+        page.confirmEdit()
+        if (key === "orientation")
+            page.set("orientation", draft)
+    }
+
+    function revertOrConfirmForRotation(): void {
+        if (!page.editing)
+            return
+        if (page.editKey === "orientation")
+            page.cancelEdit()
+        else
+            page.confirmEdit()
     }
 
     function handleEdit(name: string, repeat: bool): bool {
@@ -513,7 +545,7 @@ Page {
             return true
         case "a":
             if (!repeat)
-                page.confirmEdit()
+                page.applyEdit()
             return true
         case "b":
             if (!repeat)
@@ -604,6 +636,11 @@ Page {
             return
         const target = page.nearestFocusable(Math.min(page.focusIndex, page.rows.length - 1), 1)
         page.focusIndex = target < 0 ? page.nearestFocusable(page.rows.length - 1, -1) : target
+    }
+
+    function keepFocusVisible(): void {
+        page.completeScroll()
+        flick.contentY = page.visibleY(page.focusIndex, flick.contentY)
     }
 
     function completeAll() {

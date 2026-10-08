@@ -564,6 +564,11 @@ Page {
         hub.afterRebuild()
     }
 
+    function keepFocusVisible(): void {
+        for (const pane of hub.panes)
+            pane.keepFocusVisible()
+    }
+
     function completeAll(): void {
         hub.landPivot()
         for (const pane of hub.panes)

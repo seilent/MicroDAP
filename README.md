@@ -38,8 +38,21 @@ Type roles are objects (`size`, `style`, `caps`, `alpha`, `tracking`), `font(rol
 Semilight both at weight 50). The five Selawik TTFs load through `FontLoader` from `CASDAP_FONT_DIR`
 (default `/usr/share/fonts/casdap`, read by the `Env` singleton, which also reports `version` and the
 build manifest head as `manifest`); `fontsReady` reports all five.
-`Main.qml` writes `Ui.windowW` and `Ui.windowH` on every resize, so a new surface size reflows
-without restart. `Motion` (singleton) holds the curves (`expOut6`, `expIn6`, `expIn1`, `expIn15` as
+`Ui.setSurface(w, h)` takes the window size; `Ui.turn` is the content turn in quarter turns clockwise
+and `windowW`/`windowH` are read only, the surface swapped at an odd turn, so every token follows a
+rotation. `Main.qml` draws everything but the toast window inside `rotor` (`Ui.windowW` x `Ui.windowH`,
+centered at a rounded offset, `rotation: Ui.turn * 90`). `syncSurface()` runs one `Qt.callLater` after a
+resize, a change of `Settings.orientation` or of `Outputs.internal`, and directly in `Component.onCompleted`.
+Orientation applies (`Ui.orientationActive`) in DAP mode while the window is taller than wide and
+`Outputs.internal` is true (a null `Outputs` counts as internal); the turn is then 0 for `portrait`, 2 for
+`portrait-flipped`, `Env.landscapeTurn` (L, 1, `CASDAP_LANDSCAPE_TURN=3` gives 3) for `landscape` and L + 2 for
+`landscape-flipped`, else 0. A change of the turn or of `orientationActive` runs T18 once: an ORIENTATION edit
+reverts and any other settings edit confirms, the page turn and every page's `completeAll()` (through
+`PageStack.eachPage`), the overlay layer, the switch prompt, the power menu and the saver land, the turn
+changes, then every page's `keepFocusVisible()` brings its focused row inside; Main emits
+`orientationApplied(turn)`. `Ui.userScale` is a `Binding` to `Settings.scale` clamped to `[sMin, sMax]`, so a
+saved 1.1 shows 1.0 in landscape and 1.1 again in portrait. The first `frameSwapped` logs
+`casdap: first frame turn <n>`. The wake from screen off calls `Outputs.refresh()`. `Motion` (singleton) holds the curves (`expOut6`, `expIn6`, `expIn1`, `expIn15` as
 functions on a linear 0..1 progress, `decel` and `strip` as `Easing.BezierSpline` arrays, Qt stand
 ins for the shell curves) and every duration. `Turnstile` applies the `Matrix4x4` page rotation about
 a hinge with perspective `d = 2.3 * width` px. `PageStack` runs the exit animation (250 ms, expIn6)
@@ -64,7 +77,11 @@ lb rb lt rt start back`) and hands each to the top page of the `PageStack` throu
 `handleAction(name, repeat)`, dropping it while a transition runs. Unhandled `start` emits
 `nowPlaying()`, unhandled `back` emits `view()`; with the screen off every action is dropped. Keyboard fallback
 on the same router: arrows, Return A, Escape or Backspace B, X, Y, Q and E for LB and RB, PageUp and
-PageDown for LT and RT, Space Start, Tab Back/View; key autorepeat counts only for directions.
+PageDown for LT and RT, Space Start, Tab Back/View; key autorepeat counts only for directions. Pad directions
+remap on press with `Ui.padDirection` (up, right, down, left turned by `Ui.padTurn`, `(L - turn) mod 4` while
+orientation applies, else 0); the press keeps its mapped name for its repeats and release; two held directions that map to one name press
+and release it once. Keys are not
+remapped.
 `Page` is the screen base: one `focusIndex`, A emits `activated(index)`, B pops, up/down and LT/RT go
 to its `FocusList` when set. `FocusList` keeps the focused row inside `[CONTENT_TOP, H - ROW_HEIGHT]`
 with a 100 ms easeIn `contentY` tween per step; LT/RT move one page of whole rows in 500 ms easeIn.
@@ -264,8 +281,12 @@ overrides the base) plus `Settings.roots`, path as written in 11 u Light with `O
 `Settings.accentHue` 10 degrees, wrapping 350 to 0 and 0 to 350, held directions repeat; the swatch shows the slider
 hue also while the art holds the accent), `ACCENT FROM ART` (`ON`, `OFF` on `Settings.accentFromArt`; left and
 right toggle),
-`ORIENTATION` (read only, the current orientation), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps; `Ui.userScale` and
-`Settings.scale` follow live, focus and the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
+`ORIENTATION` (`PORTRAIT`, `PORTRAIT FLIPPED`, `LANDSCAPE`, `LANDSCAPE FLIPPED` on `Settings.orientation`; in
+edit mode left/right step only the value text, A writes it and T18 turns the view, B and any other close of
+the edit leave it unchanged; `EXTERNAL DISPLAY` read only while orientation does not apply; absent in overlay
+mode), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps, shows the effective `Ui.userScale`; a step writes
+`Settings.scale` only when it differs from the effective value, B restores the saved `Settings.scale`; focus and
+the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
 `Settings.saverSeconds`), `RGB` (`ACCENT`, `OFF`, `ARMADA` on `Settings.rgb`; reads `UNSUPPORTED` and A enters no
 edit mode while `RgbControl.supported` is false; absent in overlay mode), `TOASTS IN GAME` (`ON`, `OFF`
 on `Settings.overlayToasts`). POWER: `SCREEN OFF AFTER`
@@ -278,16 +299,16 @@ read only lines in the value role: `ARMADA <IMAGE_VERSION>` and `IMAGE <digest>`
 `key=value` head of `/usr/share/casdap/build-manifest`, `CASDAP_MANIFEST_FILE` overrides), `DRIFT N FILES`
 while `PowerBridge.driftPaths` is not empty, `TRACK 44100 HZ 16 BIT` from `Player.current.sampleRate` and
 `bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. Value rows (OUTPUT, HEADPHONE GAIN, HEADPHONE AMP,
-SPEAKER DIGITAL GAIN, VOLUME STEP, BLUETOOTH CODEC, ACCENT, ACCENT FROM ART, SCALE, SAVER, RGB, TOASTS IN GAME,
-SCREEN OFF AFTER, SUSPEND AFTER, WI-FI WHEN OFF) change only in edit mode: A enters it (`editing`, `editKey`; the
+SPEAKER DIGITAL GAIN, VOLUME STEP, BLUETOOTH CODEC, ACCENT, ACCENT FROM ART, ORIENTATION, SCALE, SAVER, RGB, TOASTS
+IN GAME, SCREEN OFF AFTER, SUSPEND AFTER, WI-FI WHEN OFF) change only in edit mode: A enters it (`editing`, `editKey`; the
 value text turns `Ui.accent`, the title stays), left/right step the value live (lists stop at their ends), A
-confirms, B writes back the value the row had when edit mode began and leaves edit mode without popping; up,
+confirms, B writes back the value the row had when edit mode began (ORIENTATION as above) and leaves edit mode without popping; up,
 down, LT, RT, LB, RB, X, Y, Start and Back/View are taken and do nothing while editing; leaving the page, the
 screen turning off or the overlay hiding confirms. Outside edit mode left/right do nothing on every row. The
 other rows keep A as their action, read only rows take A and do nothing. A changed value text runs F7 (opacity 1
 to 0.2 over 200, swap, 0.2 to 1 over 200).
 The sub rows opened by LIBRARY FOLDERS and ABOUT arrive with F12 from the row under the opener.
-LT/RT page by the content height. B pops. Main applies `Settings.scale` to `Ui` at start and binds `Ui.accent` and
+LT/RT page by the content height. B pops. Main binds `Ui.userScale` to `Settings.scale` (clamped) and `Ui.accent` and
 `Ui.accentBright` to `Accent.color` and `Accent.brightColor` (without `Accent`, `Ui.accentForHue` and
 `Ui.brightForHue` of `Settings.accentHue`, else hue 350).
 
@@ -438,7 +459,11 @@ long without a routed action, playing or not and with a dialog up; OFF (0) never
 arms, a tracked switch (`PowerBridge.switching`) cancels it, every routed action and `screenOff` false
 restart it.
 
-Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg] [--overlay]`,
+Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg] [--overlay]
+[--orientation portrait|portrait-flipped|landscape|landscape-flipped]` (a portrait `--size` renders the rotor at
+that turn; `--state orientation` focuses the ORIENTATION row on `settings`, `--state orientation-edit` also opens
+its edit and steps right, `orientation-edit-end` steps to LANDSCAPE FLIPPED, `orientation-external` gives Main an
+`Outputs` that reads not internal),
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),

@@ -133,6 +133,10 @@ Page {
             page.sheetAction(action, "playlist", r.id)
     }
 
+    function keepFocusVisible(): void {
+        listView.keepFocusVisible()
+    }
+
     function completeAll() {
         listView.settle()
         listView.completeScroll()

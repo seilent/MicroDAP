@@ -14,6 +14,7 @@ struct ScreenshotOptions
     QString state;
     QString library;
     QString pivot;
+    QString orientation;
     bool overlay = false;
 };
 

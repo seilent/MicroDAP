@@ -138,8 +138,7 @@ TestCase {
 
     function init() {
         Ui.userScale = 1.0
-        Ui.windowW = 640
-        Ui.windowH = 960
+        Ui.setSurface(640, 960)
         pages.clear()
         pages.animate = false
         fill(history, "History", 6)
@@ -771,8 +770,7 @@ TestCase {
     }
 
     function test_landscape() {
-        Ui.windowW = 960
-        Ui.windowH = 640
+        Ui.setSurface(960, 640)
         const page = pages.push(homeComponent, { animated: false })
         compare(Ui.landscape, true)
         compare(page.menuPanel.x, Ui.px(240))

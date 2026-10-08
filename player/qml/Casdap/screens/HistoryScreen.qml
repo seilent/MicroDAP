@@ -184,6 +184,11 @@ Page {
         return true
     }
 
+    function keepFocusVisible(): void {
+        for (const pane of page.panes)
+            pane.keepFocusVisible()
+    }
+
     function completeAll(): void {
         page.landPivot()
         for (const pane of page.panes)

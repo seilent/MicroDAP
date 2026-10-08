@@ -313,6 +313,10 @@ Item {
         Qt.callLater(qp.settleScroll)
     }
 
+    function keepFocusVisible(): void {
+        qp.ensureVisible(0)
+    }
+
     function completeAll() {
         if (scrollAnim.running)
             scrollAnim.complete()

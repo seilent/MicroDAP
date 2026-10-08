@@ -57,4 +57,9 @@ QVariantMap Env::manifest() const
     return readManifest(path.isEmpty() ? defaultManifestFile() : path);
 }
 
+int Env::landscapeTurn() const
+{
+    return qEnvironmentVariable("CASDAP_LANDSCAPE_TURN") == QLatin1StringView("3") ? 3 : 1;
+}
+
 }

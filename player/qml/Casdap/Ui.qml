@@ -4,9 +4,26 @@ import QtQuick
 QtObject {
     id: ui
 
-    property real windowW: 640
-    property real windowH: 960
+    property real surfaceW: 640
+    property real surfaceH: 960
+    property int turn: 0
+    property bool orientationActive: false
+    property int landscapeTurn: Env.landscapeTurn
+    readonly property real windowW: ui.turn % 2 === 1 ? ui.surfaceH : ui.surfaceW
+    readonly property real windowH: ui.turn % 2 === 1 ? ui.surfaceW : ui.surfaceH
     property real userScale: 1.0
+    readonly property var padDirections: ["up", "right", "down", "left"]
+    readonly property int padTurn: ui.orientationActive ? ((ui.landscapeTurn - ui.turn) % 4 + 4) % 4 : 0
+
+    function setSurface(w: real, h: real): void {
+        ui.surfaceW = w
+        ui.surfaceH = h
+    }
+
+    function padDirection(name: string): string {
+        const d = ui.padDirections.indexOf(name)
+        return d < 0 ? name : ui.padDirections[(d + ui.padTurn) % 4]
+    }
 
     readonly property bool landscape: ui.windowW > ui.windowH
     readonly property real baseU: ui.landscape

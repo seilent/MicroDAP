@@ -118,8 +118,7 @@ TestCase {
 
     function init() {
         Ui.userScale = 1.0
-        Ui.windowW = 640
-        Ui.windowH = 960
+        Ui.setSurface(640, 960)
         pages.clear()
         pages.animate = false
         fake.reset()
@@ -473,8 +472,7 @@ TestCase {
     }
 
     function test_landscape() {
-        Ui.windowW = 1920
-        Ui.windowH = 1080
+        Ui.setSurface(1920, 1080)
         fake.activate()
         pages.push(baseComponent)
         const page = pages.push(bluetoothComponent, { animated: false })

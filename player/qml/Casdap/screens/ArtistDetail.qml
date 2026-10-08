@@ -298,6 +298,11 @@ Page {
         return true
     }
 
+    function keepFocusVisible(): void {
+        for (const pane of page.panes)
+            pane.keepFocusVisible()
+    }
+
     function completeAll() {
         page.landPivot()
         for (const pane of page.panes)

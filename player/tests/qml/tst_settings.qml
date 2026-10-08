@@ -46,6 +46,13 @@ TestCase {
         property int screenOffSeconds: 300
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
+        property string orientation: "portrait"
+    }
+
+    QtObject {
+        id: fakeOutputs
+
+        property bool internal: true
     }
 
     QtObject {
@@ -161,6 +168,18 @@ TestCase {
     }
 
     Component {
+        id: mainComponent
+
+        Main {
+            settings: fakeSettings
+            outputs: fakeOutputs
+            shotWidth: 640
+            shotHeight: 960
+            visibility: Window.Windowed
+        }
+    }
+
+    Component {
         id: blankComponent
 
         Page {}
@@ -176,15 +195,16 @@ TestCase {
     readonly property var overlayKeys: [
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
-        "label-display", "accent", "accentArt", "orientation", "scale", "saver", "toasts",
+        "label-display", "accent", "accentArt", "scale", "saver", "toasts",
         "label-power", "screenOff", "suspend", "wifi", "closePlayer",
         "about"
     ]
 
     function setWindow(w, h) {
         Ui.userScale = 1.0
-        Ui.windowW = w
-        Ui.windowH = h
+        Ui.setSurface(w, h)
+        Ui.turn = 0
+        Ui.orientationActive = h > w
         pages.width = w
         pages.height = h
         router.width = w
@@ -211,6 +231,8 @@ TestCase {
         fakeSettings.screenOffSeconds = 300
         fakeSettings.suspendMinutes = 10
         fakeSettings.wifiOffScreenOff = false
+        fakeSettings.orientation = "portrait"
+        fakeOutputs.internal = true
         fakeLibrary.scanning = false
         fakeLibrary.songCount = 9
         fakeLibrary.rescans = 0
@@ -530,7 +552,7 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(page.aboutOpen, true)
         compare(page.editing, false)
-        for (const key of ["rate", "replaygain", "orientation"]) {
+        for (const key of ["rate", "replaygain"]) {
             tc.focusKey(page, key)
             verify(router.dispatch("a", false))
             compare(page.editing, false)
@@ -1071,28 +1093,173 @@ TestCase {
         tc.confirm(page)
     }
 
-    function test_orientation_read_only() {
+    function test_orientation_edit() {
         const page = open()
-        tc.focusKey(page, "orientation")
         compare(tc.rowOf(page, "orientation").value, "portrait")
-        compare(router.dispatch("right", false), false)
-        compare(router.dispatch("left", false), false)
+        compare(tc.rowOf(page, "orientation").readOnly, false)
+        tc.edit(page, "orientation")
+        const row = tc.itemOf(page, "orientation")
+        verify(Qt.colorEqual(row.valueItem.color, Ui.accent))
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "orientation").value, "portrait flipped")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "orientation").value, "landscape")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "orientation").value, "landscape flipped")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "orientation").value, "landscape flipped")
+        compare(fakeSettings.orientation, "portrait")
+        compare(Ui.turn, 0)
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.orientation, "portrait")
+        compare(tc.rowOf(page, "orientation").value, "portrait")
+        compare(pages.depth, 2)
+        tc.edit(page, "orientation")
+        verify(router.dispatch("right", false))
+        verify(router.dispatch("right", false))
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "orientation").value, "portrait flipped")
+        compare(fakeSettings.orientation, "portrait")
+        tc.confirm(page)
+        compare(fakeSettings.orientation, "portrait-flipped")
+        compare(tc.rowOf(page, "orientation").value, "portrait flipped")
+        tc.edit(page, "orientation")
+        verify(router.dispatch("left", false))
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "orientation").value, "portrait")
+        tc.confirm(page)
+        compare(fakeSettings.orientation, "portrait")
+    }
+
+    function test_orientation_edit_dropped_on_leave() {
+        const page = open()
+        tc.edit(page, "orientation")
+        router.dispatch("right", false)
+        page.confirmEdit()
+        compare(page.editing, false)
+        compare(fakeSettings.orientation, "portrait")
+        compare(tc.rowOf(page, "orientation").value, "portrait")
+    }
+
+    function test_orientation_rotation_revert_or_confirm() {
+        const page = open()
+        tc.edit(page, "orientation")
+        router.dispatch("right", false)
+        page.revertOrConfirmForRotation()
+        compare(page.editing, false)
+        compare(fakeSettings.orientation, "portrait")
+        tc.edit(page, "saver")
+        router.dispatch("right", false)
+        page.revertOrConfirmForRotation()
+        compare(page.editing, false)
+        compare(fakeSettings.saverSeconds, 60)
+    }
+
+    function test_orientation_external_surface() {
+        tc.setWindow(960, 640)
+        const page = open()
+        compare(tc.rowOf(page, "orientation").value, "external display")
+        compare(tc.rowOf(page, "orientation").readOnly, true)
+        tc.focusKey(page, "orientation")
         verify(router.dispatch("a", false))
         compare(page.editing, false)
-        compare(tc.rowOf(page, "orientation").value, "portrait")
-        tc.setWindow(1920, 1080)
+        compare(router.dispatch("right", false), false)
+        compare(fakeSettings.orientation, "portrait")
+    }
+
+    function test_orientation_absent_in_overlay() {
+        const page = open({ overlay: true, bridge: fakeBridge })
+        compare(page.indexOfKey("orientation"), -1)
+    }
+
+    function openInMain() {
+        const main = createTemporaryObject(mainComponent, tc)
+        verify(main !== null)
+        main.pageStack.animate = false
+        main.restoreStack([])
+        main.navigate("settings")
+        const page = main.pageStack.currentItem
+        compare(page.objectName, "settings")
+        page.completeAll()
+        return { main: main, page: page }
+    }
+
+    function test_orientation_applies_in_main() {
+        const m = tc.openInMain()
+        const page = m.page
+        compare(Ui.orientationActive, true)
+        page.focusIndex = page.indexOfKey("orientation")
+        verify(page.handleAction("a", false))
+        compare(page.editing, true)
+        page.handleAction("right", false)
+        page.handleAction("right", false)
+        compare(Ui.turn, 0)
+        page.handleAction("a", false)
+        compare(fakeSettings.orientation, "landscape")
+        tryCompare(Ui, "turn", Ui.landscapeTurn, 1000)
+        compare(m.main.pageStack.currentItem, page)
         compare(tc.rowOf(page, "orientation").value, "landscape")
-        compare(page.flick.y, Ui.px(98))
+        page.focusIndex = page.indexOfKey("orientation")
+        page.handleAction("a", false)
+        page.handleAction("left", false)
+        page.handleAction("b", false)
+        wait(0)
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(fakeSettings.orientation, "landscape")
+    }
+
+    function test_orientation_external_output_in_main() {
+        const m = tc.openInMain()
+        fakeOutputs.internal = false
+        tryCompare(Ui, "orientationActive", false, 1000)
+        compare(tc.rowOf(m.page, "orientation").value, "external display")
+        compare(tc.rowOf(m.page, "orientation").readOnly, true)
+        m.page.focusIndex = m.page.indexOfKey("orientation")
+        m.page.handleAction("a", false)
+        compare(m.page.editing, false)
+        fakeOutputs.internal = true
+        tryCompare(Ui, "orientationActive", true, 1000)
+        compare(tc.rowOf(m.page, "orientation").value, "portrait")
+    }
+
+    function test_scale_kept_in_landscape() {
+        fakeSettings.scale = 1.1
+        const m = tc.openInMain()
+        const page = m.page
+        compare(Ui.userScale, 1.1)
+        fakeSettings.orientation = "landscape"
+        tryCompare(Ui, "turn", Ui.landscapeTurn, 1000)
+        compare(Ui.userScale, 1.0)
+        compare(tc.rowOf(page, "scale").value, "1.0")
+        page.focusIndex = page.indexOfKey("scale")
+        page.handleAction("a", false)
+        compare(page.editing, true)
+        compare(page.editOriginal, 1.1)
+        page.handleAction("b", false)
+        compare(fakeSettings.scale, 1.1)
+        page.handleAction("a", false)
+        page.handleAction("right", false)
+        page.handleAction("a", false)
+        compare(page.editing, false)
+        compare(fakeSettings.scale, 1.1)
+        compare(Ui.userScale, 1.0)
+        fakeSettings.orientation = "portrait"
+        tryCompare(Ui, "turn", 0, 1000)
+        compare(Ui.userScale, 1.1)
     }
 
     function test_scale_live_focus_kept() {
-        const page = open()
+        const m = tc.openInMain()
+        const page = m.page
         compare(Ui.sMax, 1.1)
         compare(JSON.stringify(page.scaleSteps), JSON.stringify([0.8, 0.9, 1.0, 1.1]))
         const scale = tc.keyIndex(page, "scale")
         compare(page.rows[scale].value, "1.0")
-        tc.edit(page, "scale")
-        verify(router.dispatch("right", false))
+        page.focusIndex = scale
+        verify(page.handleAction("a", false))
+        compare(page.editing, true)
+        verify(page.handleAction("right", false))
         compare(Ui.userScale, 1.1)
         compare(fakeSettings.scale, 1.1)
         compare(page.focusIndex, scale)
@@ -1103,24 +1270,25 @@ TestCase {
         const top = page.rowTopOf(scale) - page.flick.contentY
         verify(top >= 0)
         verify(top + Ui.px(43) <= page.flick.height + 0.01)
-        verify(router.dispatch("right", false))
+        verify(page.handleAction("right", false))
         compare(Ui.userScale, 1.1)
-        router.dispatch("left", false)
-        router.dispatch("left", false)
-        router.dispatch("left", false)
+        page.handleAction("left", false)
+        page.handleAction("left", false)
+        page.handleAction("left", false)
         compare(Ui.userScale, 0.8)
-        compare(router.dispatch("left", false), true)
+        compare(page.handleAction("left", false), true)
         compare(Ui.userScale, 0.8)
         compare(page.focusIndex, scale)
-        verify(router.dispatch("b", false))
+        verify(page.handleAction("b", false))
         compare(page.editing, false)
         compare(Ui.userScale, 1.0)
         compare(fakeSettings.scale, 1.0)
         compare(page.focusIndex, scale)
-        compare(pages.depth, 2)
-        tc.edit(page, "scale")
-        router.dispatch("left", false)
-        tc.confirm(page)
+        compare(m.main.pageStack.depth, 2)
+        verify(page.handleAction("a", false))
+        page.handleAction("left", false)
+        verify(page.handleAction("a", false))
+        compare(page.editing, false)
         compare(Ui.userScale, 0.9)
         compare(fakeSettings.scale, 0.9)
     }

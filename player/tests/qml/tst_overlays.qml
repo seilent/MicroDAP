@@ -78,8 +78,7 @@ TestCase {
 
     function init() {
         Ui.userScale = 1.0
-        Ui.windowW = 640
-        Ui.windowH = 960
+        Ui.setSurface(640, 960)
         status.width = 640
         status.clock = ""
         status.playing = false
@@ -205,8 +204,7 @@ TestCase {
     }
 
     function check_status_row(w, h) {
-        Ui.windowW = w
-        Ui.windowH = h
+        Ui.setSurface(w, h)
         status.width = w
         status.clock = "7:13"
         status.playing = true
@@ -501,8 +499,7 @@ TestCase {
     }
 
     function check_overlay_row(w, h) {
-        Ui.windowW = w
-        Ui.windowH = h
+        Ui.setSurface(w, h)
         overlay.width = w
         overlay.height = h
         overlay.show(13)

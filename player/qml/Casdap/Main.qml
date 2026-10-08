@@ -11,6 +11,8 @@ Window {
     property bool shotOverlay: false
     property int shotWidth: Screen.width
     property int shotHeight: Screen.height
+    property string shotOrientation: "portrait"
+    property string shotState: "browse"
 
     readonly property var bluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var historyRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
@@ -31,6 +33,12 @@ Window {
     property var codecFragment: root.screenshot || typeof CodecFragment === "undefined" ? null : CodecFragment
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var accentControl: root.screenshot || typeof Accent === "undefined" ? null : Accent
+    property var outputs: root.shotState === "orientation-external" ? externalShotOutputs
+        : typeof Outputs === "undefined" ? null : Outputs
+    readonly property bool internalOutput: root.outputs === null || root.outputs.internal !== false
+    readonly property var orientations: ["portrait", "portrait-flipped", "landscape", "landscape-flipped"]
+    readonly property string savedOrientation: root.settings !== null && root.orientations.indexOf(String(root.settings.orientation)) >= 0
+        ? String(root.settings.orientation) : root.orientations.indexOf(root.shotOrientation) >= 0 ? root.shotOrientation : "portrait"
     readonly property int sliderHue: root.settings !== null && root.settings.accentHue !== undefined
         ? Ui.hueOnGrid(Number(root.settings.accentHue)) : Ui.accentHueDefault
     readonly property int accentHue: root.accentControl !== null && root.accentControl.hue !== undefined
@@ -64,6 +72,8 @@ Window {
     property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
     property real overlayFade: root.bridge !== null ? root.bridge.opacity : 1
     property bool restoring: false
+    property bool surfaceSynced: false
+    property bool firstFrameLogged: false
     property bool blackFrame: false
     property bool pendingHide: false
     property bool rootHidden: false
@@ -76,6 +86,7 @@ Window {
         && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown
     readonly property bool screenOffArmed: !root.overlay && !root.off && !root.screenshot && root.power !== null
         && root.screenOffSeconds > 0 && !root.switching
+    property alias rotor: rotor
     property alias pageStack: pages
     property alias overlayLayer: overlays
     property alias background: bg
@@ -89,6 +100,7 @@ Window {
     property alias hiddenToast: hiddenToast
 
     signal hideOverlayRequested()
+    signal orientationApplied(int turn)
 
     width: shotWidth
     height: shotHeight
@@ -96,8 +108,10 @@ Window {
     visibility: screenshot ? Window.Windowed : root.overlay ? Window.AutomaticVisibility : Window.FullScreen
     color: root.blackFrame ? Ui.black : Ui.bg
 
-    onWidthChanged: Ui.windowW = root.width
-    onHeightChanged: Ui.windowH = root.height
+    onWidthChanged: Qt.callLater(root.syncSurface)
+    onHeightChanged: Qt.callLater(root.syncSurface)
+    onSavedOrientationChanged: Qt.callLater(root.syncSurface)
+    onInternalOutputChanged: Qt.callLater(root.syncSurface)
     onHiddenChanged: {
         if (!root.hidden)
             return
@@ -119,11 +133,17 @@ Window {
             root.blackFrame = true
             return
         }
+        if (root.outputs !== null && typeof root.outputs.refresh === "function")
+            root.outputs.refresh()
         root.pendingHide = false
         root.blackFrame = false
         root.rootHidden = false
     }
     onFrameSwapped: {
+        if (!root.firstFrameLogged) {
+            root.firstFrameLogged = true
+            console.info("casdap: first frame turn " + Ui.turn)
+        }
         if (!root.pendingHide)
             return
         root.pendingHide = false
@@ -134,10 +154,8 @@ Window {
     onSaverArmedChanged: root.armSaver()
     onScreenOffArmedChanged: root.armScreenOff()
     Component.onCompleted: {
-        Ui.windowW = root.width
-        Ui.windowH = root.height
+        root.syncSurface()
         root.bindAccent()
-        root.applySettings()
         root.lastToastId = root.trackId(root.current)
         if (!root.screenshot)
             root.restoreStack(root.stateStore !== null && typeof root.stateStore.stack === "function" ? root.stateStore.stack() : [])
@@ -145,11 +163,54 @@ Window {
         root.armScreenOff()
     }
 
-    function applySettings() {
-        if (root.settings === null)
+    function turnFor(name: string): int {
+        switch (name) {
+        case "portrait-flipped":
+            return 2
+        case "landscape":
+            return Ui.landscapeTurn
+        case "landscape-flipped":
+            return (Ui.landscapeTurn + 2) % 4
+        default:
+            return 0
+        }
+    }
+
+    function syncSurface(): void {
+        const active = !root.overlay && !root.shotOverlay && root.height > root.width && root.internalOutput
+        const turn = active ? root.turnFor(root.savedOrientation) : 0
+        if (root.surfaceSynced && (turn !== Ui.turn || active !== Ui.orientationActive)) {
+            root.applyOrientation(turn, active)
             return
-        if (root.settings.scale !== undefined)
-            Ui.userScale = Math.max(Ui.sMin, Math.min(Ui.sMax, Number(root.settings.scale)))
+        }
+        Ui.setSurface(root.width, root.height)
+        Ui.turn = turn
+        Ui.orientationActive = active
+        root.surfaceSynced = true
+    }
+
+    function applyOrientation(turn: int, active: bool): void {
+        pages.eachPage((page) => {
+            if (typeof page.revertOrConfirmForRotation === "function")
+                page.revertOrConfirmForRotation()
+        })
+        pages.completeAll()
+        pages.eachPage((page) => {
+            if (typeof page.completeAll === "function")
+                page.completeAll()
+        })
+        overlays.completeAll()
+        switchPrompt.complete()
+        powerMenu.complete()
+        saver.land()
+        Ui.turn = turn
+        Ui.orientationActive = active
+        Ui.setSurface(root.width, root.height)
+        pages.eachPage((page) => {
+            if (typeof page.keepFocusVisible === "function")
+                page.keepFocusVisible()
+        })
+        root.orientationApplied(turn)
     }
 
     function bindAccent(): void {
@@ -580,10 +641,24 @@ Window {
     }
 
     Binding {
+        target: Ui
+        property: "userScale"
+        value: root.settings !== null && root.settings.scale !== undefined
+            ? Math.max(Ui.sMin, Math.min(Ui.sMax, Number(root.settings.scale))) : Ui.userScale
+        when: root.settings !== null && root.settings.scale !== undefined
+    }
+
+    Binding {
         target: root.albumsGrid
         property: "columns"
         value: Ui.gridCols
         when: root.albumsGrid !== null
+    }
+
+    QtObject {
+        id: externalShotOutputs
+
+        readonly property bool internal: false
     }
 
     Timer {
@@ -602,84 +677,121 @@ Window {
         onTriggered: root.requestScreenOff()
     }
 
-    Rectangle {
-        id: bg
+    Item {
+        id: rotor
 
-        anchors.fill: parent
-        color: root.blackFrame ? Ui.black : Ui.bg
-    }
+        width: Ui.windowW
+        height: Ui.windowH
+        x: Math.round((root.width - rotor.width) / 2)
+        y: Math.round((root.height - rotor.height) / 2)
+        rotation: Ui.turn * 90
 
-    PageStack {
-        id: pages
+        Rectangle {
+            id: bg
 
-        anchors.fill: parent
-        visible: !root.screenshot && !root.hidden && !root.rootHidden
-        opacity: 1 - saver.progress
-        dialogFade: Math.max(switchPrompt.scrim.opacity, powerMenu.scrim.opacity)
-    }
-
-    Saver {
-        id: saver
-
-        anchors.fill: parent
-        screenOff: root.off
-        title: root.field("title")
-        artist: root.field("artist")
-        album: root.field("album")
-        artPath: root.field("artPath")
-    }
-
-    PadRouter {
-        id: router
-
-        anchors.fill: parent
-        stack: pages
-        modal: powerMenu.shown ? powerMenu : switchPrompt
-        saver: saver
-        pad: typeof Pad === "undefined" ? null : Pad
-        screenOff: root.off
-        onNowPlaying: root.openNowPlaying()
-    }
-
-    SwitchPrompt {
-        id: switchPrompt
-
-        anchors.fill: parent
-        screenOff: root.off
-        onClosePlayer: {
-            if (root.power !== null)
-                root.power.closeAndSwitch()
+            anchors.fill: parent
+            color: root.blackFrame ? Ui.black : Ui.bg
         }
-        onKeepInBackground: {
-            if (root.power !== null)
-                root.power.keepInBackground()
+
+        PageStack {
+            id: pages
+
+            anchors.fill: parent
+            visible: !root.screenshot && !root.hidden && !root.rootHidden
+            opacity: 1 - saver.progress
+            dialogFade: Math.max(switchPrompt.scrim.opacity, powerMenu.scrim.opacity)
         }
-    }
 
-    PowerMenu {
-        id: powerMenu
+        Saver {
+            id: saver
 
-        anchors.fill: parent
-        screenOff: root.off
-        onVerb: (word) => {
-            if (root.power !== null && typeof root.power.runVerb === "function")
-                root.power.runVerb(word)
-            else
-                console.info("casdap: power menu " + word)
+            anchors.fill: parent
+            screenOff: root.off
+            title: root.field("title")
+            artist: root.field("artist")
+            album: root.field("album")
+            artPath: root.field("artPath")
         }
-        onGameMode: root.showSwitchPrompt()
-    }
 
-    OverlayLayer {
-        id: overlays
+        PadRouter {
+            id: router
 
-        anchors.fill: parent
-        visible: !root.screenshot && !root.hidden && !root.rootHidden
-        power: root.power
-        bluez: root.screenshot ? null : root.bluez
-        player: root.player
-        screenOff: root.off
-        topScreen: root.topScreen
+            anchors.fill: parent
+            stack: pages
+            modal: powerMenu.shown ? powerMenu : switchPrompt
+            saver: saver
+            pad: typeof Pad === "undefined" ? null : Pad
+            screenOff: root.off
+            onNowPlaying: root.openNowPlaying()
+        }
+
+        SwitchPrompt {
+            id: switchPrompt
+
+            anchors.fill: parent
+            screenOff: root.off
+            onClosePlayer: {
+                if (root.power !== null)
+                    root.power.closeAndSwitch()
+            }
+            onKeepInBackground: {
+                if (root.power !== null)
+                    root.power.keepInBackground()
+            }
+        }
+
+        PowerMenu {
+            id: powerMenu
+
+            anchors.fill: parent
+            screenOff: root.off
+            onVerb: (word) => {
+                if (root.power !== null && typeof root.power.runVerb === "function")
+                    root.power.runVerb(word)
+                else
+                    console.info("casdap: power menu " + word)
+            }
+            onGameMode: root.showSwitchPrompt()
+        }
+
+        OverlayLayer {
+            id: overlays
+
+            anchors.fill: parent
+            visible: !root.screenshot && !root.hidden && !root.rootHidden
+            power: root.power
+            bluez: root.screenshot ? null : root.bluez
+            player: root.player
+            screenOff: root.off
+            topScreen: root.topScreen
+        }
+
+        Loader {
+            anchors.fill: parent
+            sourceComponent: root.shotScreen === "specimen" ? specimenComponent
+                : root.shotScreen === "motion" ? motionComponent
+                : root.shotScreen === "components" ? componentsComponent
+                : root.shotScreen === "overlays" ? overlaysComponent
+                : root.shotScreen === "volume" ? volumeComponent
+                : root.shotScreen === "home" ? homeShotComponent
+                : root.shotScreen === "quickplay" ? quickplayShotComponent
+                : root.shotScreen === "bluetooth" ? bluetoothShotComponent
+                : root.shotScreen === "prompt" ? promptShotComponent
+                : root.shotScreen === "power" ? powerShotComponent
+                : root.shotScreen === "saver" ? saverShotComponent
+                : root.shotScreen === "saver-dim" ? saverDimShotComponent
+                : root.shotScreen === "hub" ? hubShotComponent
+                : root.shotScreen === "nowplaying" ? nowPlayingShotComponent
+                : root.shotScreen === "queue" ? queueShotComponent
+                : root.shotScreen === "artist" ? artistShotComponent
+                : root.shotScreen === "album" ? albumShotComponent
+                : root.shotScreen === "settings" ? settingsShotComponent
+                : root.shotScreen === "jump" ? jumpShotComponent
+                : root.shotScreen === "playlists" ? playlistsShotComponent
+                : root.shotScreen === "history" ? historyShotComponent
+                : root.shotScreen === "eq" ? eqShotComponent
+                : null
+        }
     }
 
     Window {
@@ -886,33 +998,6 @@ Window {
         }
     }
 
-    Loader {
-        anchors.fill: parent
-        sourceComponent: root.shotScreen === "specimen" ? specimenComponent
-            : root.shotScreen === "motion" ? motionComponent
-            : root.shotScreen === "components" ? componentsComponent
-            : root.shotScreen === "overlays" ? overlaysComponent
-            : root.shotScreen === "volume" ? volumeComponent
-            : root.shotScreen === "home" ? homeShotComponent
-            : root.shotScreen === "quickplay" ? quickplayShotComponent
-            : root.shotScreen === "bluetooth" ? bluetoothShotComponent
-            : root.shotScreen === "prompt" ? promptShotComponent
-            : root.shotScreen === "power" ? powerShotComponent
-            : root.shotScreen === "saver" ? saverShotComponent
-            : root.shotScreen === "saver-dim" ? saverDimShotComponent
-            : root.shotScreen === "hub" ? hubShotComponent
-            : root.shotScreen === "nowplaying" ? nowPlayingShotComponent
-            : root.shotScreen === "queue" ? queueShotComponent
-            : root.shotScreen === "artist" ? artistShotComponent
-            : root.shotScreen === "album" ? albumShotComponent
-            : root.shotScreen === "settings" ? settingsShotComponent
-            : root.shotScreen === "jump" ? jumpShotComponent
-            : root.shotScreen === "playlists" ? playlistsShotComponent
-            : root.shotScreen === "history" ? historyShotComponent
-            : root.shotScreen === "eq" ? eqShotComponent
-            : null
-    }
-
     Component {
         id: eqShotComponent
         EqShot {}
@@ -922,6 +1007,8 @@ Window {
         id: settingsShotComponent
         SettingsShot {
             overlay: root.shotOverlay
+            orientation: root.savedOrientation
+            fixture: root.shotState
         }
     }
 

@@ -96,6 +96,10 @@ ListView {
         list.contentY = list.visibleY(list.focusIndex, list.contentY)
     }
 
+    function keepFocusVisible() {
+        list.snapTo(list.focusIndex)
+    }
+
     function completeScroll() {
         if (!scrollAnimation.running)
             return

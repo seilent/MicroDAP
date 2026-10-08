@@ -126,6 +126,21 @@ const QStringList &states()
         QStringLiteral("volume"),
         QStringLiteral("power"),
         QStringLiteral("jump"),
+        QStringLiteral("orientation"),
+        QStringLiteral("orientation-edit"),
+        QStringLiteral("orientation-edit-end"),
+        QStringLiteral("orientation-external"),
+    };
+    return names;
+}
+
+const QStringList &orientations()
+{
+    static const QStringList names{
+        QStringLiteral("portrait"),
+        QStringLiteral("portrait-flipped"),
+        QStringLiteral("landscape"),
+        QStringLiteral("landscape-flipped"),
     };
     return names;
 }
@@ -189,6 +204,13 @@ int screenshot(const ScreenshotOptions &options)
     if (!pivots().contains(pivot)) {
         fail(QStringLiteral("unknown pivot %1, expected one of %2")
                  .arg(pivot, pivots().join(QLatin1Char(' '))));
+        return 2;
+    }
+
+    const QString orientation = options.orientation.isEmpty() ? QStringLiteral("portrait") : options.orientation;
+    if (!orientations().contains(orientation)) {
+        fail(QStringLiteral("unknown orientation %1, expected one of %2")
+                 .arg(orientation, orientations().join(QLatin1Char(' '))));
         return 2;
     }
 
@@ -298,6 +320,8 @@ int screenshot(const ScreenshotOptions &options)
         {QStringLiteral("shotOverlay"), options.overlay},
         {QStringLiteral("shotWidth"), width},
         {QStringLiteral("shotHeight"), height},
+        {QStringLiteral("shotOrientation"), orientation},
+        {QStringLiteral("shotState"), state},
     });
     engine.loadFromModule("Casdap", "Main");
 

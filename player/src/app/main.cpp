@@ -118,10 +118,13 @@ int main(int argc, char *argv[])
     const QCommandLineOption pivotOption(QStringLiteral("pivot"),
                                          QStringLiteral("Hub pivot for --screenshot hub: artists, albums, songs, genres, playlists."),
                                          QStringLiteral("name"), QStringLiteral("albums"));
+    const QCommandLineOption orientationOption(QStringLiteral("orientation"),
+                                               QStringLiteral("Orientation for --screenshot: portrait, portrait-flipped, landscape, landscape-flipped."),
+                                               QStringLiteral("value"), QStringLiteral("portrait"));
     const QCommandLineOption overlayOption(QStringLiteral("overlay"),
                                            QStringLiteral("Run as the game mode overlay: hidden window, pad from InputPlumber."));
     parser.addOptions({versionOption, screenshotOption, sizeOption, outOption, angleOption, scanOnlyOption,
-                       bluezOption, stateOption, libraryOption, pivotOption, overlayOption});
+                       bluezOption, stateOption, libraryOption, pivotOption, orientationOption, overlayOption});
     parser.addPositionalArgument(QStringLiteral("dir"),
                                  QStringLiteral("Directory for --scan-only, default ~/Music."),
                                  QStringLiteral("[dir]"));
@@ -143,6 +146,7 @@ int main(int argc, char *argv[])
         options.state = parser.value(stateOption);
         options.library = parser.value(libraryOption);
         options.pivot = parser.value(pivotOption);
+        options.orientation = parser.value(orientationOption);
         options.overlay = parser.isSet(overlayOption);
         return casdap::screenshot(options);
     }

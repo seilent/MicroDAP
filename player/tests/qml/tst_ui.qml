@@ -9,12 +9,90 @@ TestCase {
 
     function setWindow(w, h, s) {
         Ui.userScale = s
-        Ui.windowW = w
-        Ui.windowH = h
+        Ui.setSurface(w, h)
     }
 
     function init() {
+        Ui.turn = 0
+        Ui.orientationActive = false
+        Ui.landscapeTurn = 1
         setWindow(640, 960, 1.0)
+    }
+
+    function cleanup() {
+        Ui.turn = 0
+        Ui.orientationActive = false
+        Ui.landscapeTurn = Env.landscapeTurn
+    }
+
+    function test_turn_surface() {
+        Ui.setSurface(640, 960)
+        Ui.turn = 1
+        compare(Ui.surfaceW, 640)
+        compare(Ui.surfaceH, 960)
+        compare(Ui.windowW, 960)
+        compare(Ui.windowH, 640)
+        compare(Ui.landscape, true)
+        fuzzyCompare(Ui.u, 2.0, 1e-9)
+        fuzzyCompare(Ui.sMax, 1.0, 1e-9)
+        Ui.turn = 3
+        compare(Ui.windowW, 960)
+        compare(Ui.landscape, true)
+        Ui.turn = 2
+        compare(Ui.windowW, 640)
+        compare(Ui.windowH, 960)
+        compare(Ui.landscape, false)
+        fuzzyCompare(Ui.sMax, 1.1, 1e-9)
+    }
+
+    function test_landscape_turn_default() {
+        compare(Env.landscapeTurn, 1)
+    }
+
+    function test_padDirection_data() {
+        return [
+            { tag: "L1 portrait", l: 1, t: 0, map: ["right", "down", "left", "up"] },
+            { tag: "L1 landscape", l: 1, t: 1, map: ["up", "right", "down", "left"] },
+            { tag: "L1 portrait flipped", l: 1, t: 2, map: ["left", "up", "right", "down"] },
+            { tag: "L1 landscape flipped", l: 1, t: 3, map: ["down", "left", "up", "right"] },
+            { tag: "L3 portrait", l: 3, t: 0, map: ["left", "up", "right", "down"] },
+            { tag: "L3 landscape", l: 3, t: 3, map: ["up", "right", "down", "left"] },
+            { tag: "L3 portrait flipped", l: 3, t: 2, map: ["right", "down", "left", "up"] },
+            { tag: "L3 landscape flipped", l: 3, t: 1, map: ["down", "left", "up", "right"] }
+        ]
+    }
+
+    function test_padDirection(data) {
+        Ui.landscapeTurn = data.l
+        Ui.turn = data.t
+        Ui.orientationActive = true
+        compare(Ui.padTurn, ((data.l - data.t) % 4 + 4) % 4)
+        compare(Ui.padDirection("up"), data.map[0])
+        compare(Ui.padDirection("right"), data.map[1])
+        compare(Ui.padDirection("down"), data.map[2])
+        compare(Ui.padDirection("left"), data.map[3])
+        compare(Ui.padDirection("a"), "a")
+        compare(Ui.padDirection("lb"), "lb")
+    }
+
+    function test_padDirection_inactive() {
+        Ui.landscapeTurn = 1
+        Ui.turn = 2
+        Ui.orientationActive = false
+        compare(Ui.padTurn, 0)
+        compare(Ui.padDirection("up"), "up")
+        compare(Ui.padDirection("left"), "left")
+    }
+
+    function test_windowW_read_only() {
+        let threw = false
+        try {
+            Ui.windowW = 100
+        } catch (e) {
+            threw = true
+        }
+        verify(threw)
+        compare(Ui.windowW, 640)
     }
 
     function test_u_data() {

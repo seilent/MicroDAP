@@ -151,8 +151,7 @@ TestCase {
 
     function setWindow(w, h) {
         Ui.userScale = 1.0
-        Ui.windowW = w
-        Ui.windowH = h
+        Ui.setSurface(w, h)
         pages.width = w
         pages.height = h
         router.width = w

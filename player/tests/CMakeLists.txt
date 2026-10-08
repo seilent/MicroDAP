@@ -13,9 +13,13 @@ set_tests_properties(screenshot-blank PROPERTIES FIXTURES_SETUP shot-blank)
 casdap_test_env(screenshot-blank)
 
 qt_add_executable(tst_shot core/tst_shot.cpp)
-target_compile_definitions(tst_shot PRIVATE CASDAP_SHOT_PNG="${shots}/blank-640x960.png")
+target_compile_definitions(tst_shot PRIVATE
+    CASDAP_SHOT_PNG="${shots}/blank-640x960.png"
+    CASDAP_SHOT_UPRIGHT="${shots}/settings-960x640.png"
+    CASDAP_SHOT_TURNED="${shots}/settings-landscape-640x960.png"
+)
 target_link_libraries(tst_shot PRIVATE Qt6::Gui Qt6::Test)
-add_test(NAME screenshot-check COMMAND tst_shot)
+add_test(NAME screenshot-check COMMAND tst_shot blank)
 set_tests_properties(screenshot-check PROPERTIES FIXTURES_REQUIRED shot-blank)
 casdap_test_env(screenshot-check)
 
@@ -382,6 +386,24 @@ foreach(screen IN ITEMS home settings)
     casdap_test_env(screenshot-${screen}-overlay-landscape)
     set_property(TEST screenshot-${screen}-overlay-landscape APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
 endforeach()
+
+add_test(NAME screenshot-settings-upright
+    COMMAND casdap-player --screenshot settings --size 960x640 --out ${shots}/settings-960x640.png
+)
+set_tests_properties(screenshot-settings-upright PROPERTIES FIXTURES_SETUP shot-orientation)
+casdap_test_env(screenshot-settings-upright)
+set_property(TEST screenshot-settings-upright APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-settings-turned
+    COMMAND casdap-player --screenshot settings --size 640x960 --orientation landscape --out ${shots}/settings-landscape-640x960.png
+)
+set_tests_properties(screenshot-settings-turned PROPERTIES FIXTURES_SETUP shot-orientation)
+casdap_test_env(screenshot-settings-turned)
+set_property(TEST screenshot-settings-turned APPEND PROPERTY ENVIRONMENT "CASDAP_FONT_DIR=${CASDAP_TEST_FONT_DIR}")
+
+add_test(NAME screenshot-orientation COMMAND tst_shot orientation)
+set_tests_properties(screenshot-orientation PROPERTIES FIXTURES_REQUIRED shot-orientation)
+casdap_test_env(screenshot-orientation)
 
 add_test(NAME screenshot-jump-portrait
     COMMAND casdap-player --screenshot jump --pivot artists --size 640x960 --out ${shots}/jump-640x960.png

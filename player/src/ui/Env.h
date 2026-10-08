@@ -15,6 +15,7 @@ class Env : public QObject
     Q_PROPERTY(QString fontDir READ fontDir CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QVariantMap manifest READ manifest CONSTANT)
+    Q_PROPERTY(int landscapeTurn READ landscapeTurn CONSTANT)
 
 public:
     explicit Env(QObject *parent = nullptr);
@@ -25,6 +26,7 @@ public:
     QString fontDir() const;
     QString version() const;
     QVariantMap manifest() const;
+    int landscapeTurn() const;
 };
 
 }

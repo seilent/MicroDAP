@@ -5,10 +5,25 @@ Item {
     id: root
 
     property bool overlay: false
+    property string orientation: "portrait"
+    property string fixture: "browse"
 
     Rectangle {
         anchors.fill: parent
         color: Ui.bg
+    }
+
+    function applyFixture(): void {
+        const index = screen.indexOfKey("orientation")
+        if (index < 0 || !root.fixture.startsWith("orientation"))
+            return
+        screen.focusIndex = index
+        if (root.fixture === "orientation-edit" || root.fixture === "orientation-edit-end") {
+            screen.activate()
+            for (let i = 0; i < (root.fixture === "orientation-edit" ? 1 : 3); i++)
+                screen.step(1)
+        }
+        screen.keepFocusVisible()
     }
 
     QtObject {
@@ -30,6 +45,7 @@ Item {
         property int screenOffSeconds: 300
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
+        property string orientation: root.orientation
     }
 
     QtObject {
@@ -92,6 +108,9 @@ Item {
         eq: sampleEq
         folders: ["/home/armada/Music", "/run/media/armada/SD"]
 
-        Component.onCompleted: screen.completeAll()
+        Component.onCompleted: {
+            screen.completeAll()
+            Qt.callLater(root.applyFixture)
+        }
     }
 }

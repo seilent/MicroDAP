@@ -287,6 +287,11 @@ Page {
         return true
     }
 
+    function keepFocusVisible(): void {
+        page.activePane.completeScroll()
+        page.activePane.contentY = page.activePane.visibleY(page.focusIndex, page.activePane.contentY)
+    }
+
     function completeAll(): void {
         page.landPivot()
         for (const pane of page.panes) {

@@ -178,6 +178,10 @@ Page {
         return true
     }
 
+    function keepFocusVisible(): void {
+        trackList.keepFocusVisible()
+    }
+
     function completeAll(): void {
         trackList.settle()
         trackList.completeScroll()

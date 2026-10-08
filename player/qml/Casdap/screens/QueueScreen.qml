@@ -233,6 +233,10 @@ Page {
         return true
     }
 
+    function keepFocusVisible(): void {
+        queueList.keepFocusVisible()
+    }
+
     function completeAll(): void {
         queueList.settle()
         queueList.completeScroll()

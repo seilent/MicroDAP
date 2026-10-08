@@ -102,8 +102,7 @@ TestCase {
 
     function init() {
         Ui.userScale = 1.0
-        Ui.windowW = 640
-        Ui.windowH = 960
+        Ui.setSurface(640, 960)
         pages.clear()
         pages.animate = true
         router.screenOff = false
