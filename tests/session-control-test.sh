@@ -6,6 +6,7 @@ repo=$(dirname "${here}")
 base_root="${CASDAP_BASE_ROOT:-/}"
 base="${base_root%/}/usr/libexec/armada/session-control"
 [[ -r "${base}" ]] || { echo "base session-control not found at ${base} (set CASDAP_BASE_ROOT)" >&2; exit 1; }
+export ARMADA_PLASMA_SESSION_LIB="${base_root%/}/usr/lib/armada/plasma-session-lib"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT

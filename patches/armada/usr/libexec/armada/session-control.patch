@@ -42,7 +42,7 @@
      local qdbus=
  
      [[ -S "${bus}" ]] || return 1
-@@ -28,11 +56,59 @@
+@@ -28,11 +55,59 @@
      [[ -n "${qdbus}" ]] || return 1
  
      sudo -Eu "${user}" env \
@@ -100,10 +100,10 @@
 +    as_user systemctl --user stop gamescope-session-plus@casdap.service
 +}
 +
+ source "${ARMADA_PLASMA_SESSION_LIB:-/usr/lib/armada/plasma-session-lib}"
+ 
  desktop_session=armada-plasma.desktop
- if [[ -r "${STEAMOS_MANAGER_STATE}" ]]; then
-     state_session=$(sed -n 's/^desktop_session[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "${STEAMOS_MANAGER_STATE}")
-@@ -42,19 +118,31 @@
+@@ -43,19 +118,31 @@
  case "${1:-}" in
      switch-desktop|default-desktop)   session=$desktop_session ;;
      switch-gamemode|default-gamemode) session=gamescope-session-steam.desktop ;;
