@@ -69,7 +69,7 @@ Item {
 
     function heldName(raw: string): string {
         const name = router.held[raw]
-        return name === undefined ? Ui.padDirection(raw) : name
+        return name === undefined ? Ui.padButton(raw) : name
     }
 
     function page(): Item {
@@ -147,7 +147,7 @@ Item {
                 return
             if (router.held[raw] !== undefined)
                 return
-            const name = Ui.padDirection(raw)
+            const name = Ui.padButton(raw)
             const count = router.heldCount[name] === undefined ? 0 : router.heldCount[name]
             router.held[raw] = name
             router.heldCount[name] = count + 1

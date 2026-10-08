@@ -1357,7 +1357,7 @@ TestCase {
         page.handleAction("right", false)
         page.handleAction("right", false)
         compare(tc.rowOf(page, "orientation").value, "landscape")
-        m.main.rotateBy("down")
+        m.main.rotateBy("right")
         compare(page.editing, false)
         compare(fakeSettings.orientation, "portrait-flipped")
         tryCompare(Ui, "turn", 2, 1000)
@@ -1373,10 +1373,10 @@ TestCase {
         page.handleAction("a", false)
         page.handleAction("right", false)
         compare(fakeSettings.saverSeconds, 60)
-        m.main.rotateBy("right")
+        m.main.rotateBy("up")
         compare(page.editing, false)
         compare(fakeSettings.saverSeconds, 60)
-        tryCompare(Ui, "turn", 1, 1000)
+        tryCompare(Ui, "turn", Ui.landscapeTurn, 1000)
         compare(fakeSettings.saverSeconds, 60)
     }
 

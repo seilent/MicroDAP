@@ -14,7 +14,7 @@ TestCase {
     QtObject {
         id: fakePad
 
-        readonly property var names: ["up", "down", "left", "right", "a", "b"]
+        readonly property var names: ["up", "down", "left", "right", "a", "b", "x", "y"]
 
         signal action(int action, bool repeat)
         signal pressed(int action)
@@ -306,10 +306,10 @@ TestCase {
 
     function test_remap_data() {
         return [
-            { tag: "portrait", value: "portrait", map: ["right", "down", "left", "up"] },
-            { tag: "landscape", value: "landscape", map: ["up", "right", "down", "left"] },
-            { tag: "portrait-flipped", value: "portrait-flipped", map: ["left", "up", "right", "down"] },
-            { tag: "landscape-flipped", value: "landscape-flipped", map: ["down", "left", "up", "right"] }
+            { tag: "portrait", value: "portrait", map: ["right", "down", "left", "up"], faces: ["b", "a", "x", "y"] },
+            { tag: "landscape", value: "landscape", map: ["up", "right", "down", "left"], faces: ["y", "b", "a", "x"] },
+            { tag: "portrait-flipped", value: "portrait-flipped", map: ["left", "up", "right", "down"], faces: ["x", "y", "b", "a"] },
+            { tag: "landscape-flipped", value: "landscape-flipped", map: ["down", "left", "up", "right"], faces: ["a", "x", "y", "b"] }
         ]
     }
 
@@ -323,9 +323,12 @@ TestCase {
             compare(tc.lastRouted(), data.map[i])
             fakePad.released(fakePad.code(raws[i]))
         }
-        tc.push("a")
-        compare(tc.lastRouted(), "a")
-        fakePad.released(fakePad.code("a"))
+        const faces = ["y", "b", "a", "x"]
+        for (let i = 0; i < 4; i++) {
+            tc.push(faces[i])
+            compare(tc.lastRouted(), data.faces[i])
+            fakePad.released(fakePad.code(faces[i]))
+        }
     }
 
     function test_remap_off_when_inactive() {
@@ -350,6 +353,27 @@ TestCase {
         tc.push("up")
         compare(tc.lastRouted(), "up")
         fakePad.released(fakePad.code("up"))
+    }
+
+    function test_face_repeat_and_release_keep_pressed_name() {
+        if (Ui.landscapeTurn !== 1)
+            skip("table for L 1")
+        const page = main.pageStack.push(listPage, {})
+        tc.push("b")
+        compare(tc.lastRouted(), "a")
+        compare(page.pressedNames, ["a"])
+        tc.setOrientation("landscape")
+        fakePad.action(fakePad.code("b"), true)
+        compare(tc.lastRouted(), "a")
+        compare(main.router.heldName("b"), "a")
+        fakePad.released(fakePad.code("b"))
+        compare(page.releasedNames, ["a"])
+        compare(main.router.held["b"], undefined)
+        compare(main.router.heldCount["a"], undefined)
+        tc.push("x")
+        compare(tc.lastRouted(), "x")
+        fakePad.released(fakePad.code("x"))
+        compare(page.releasedNames, ["a", "x"])
     }
 
     function test_two_raws_one_name_release_once() {
@@ -378,37 +402,37 @@ TestCase {
     function test_chord_rotates_once() {
         main.router.guide = fakeGuide
         const page = main.pageStack.push(listPage, {})
-        tc.push("right")
+        tc.push("up")
         compare(fakeGuide.takes, 1)
         compare(rotateSpy.count, 1)
-        compare(rotateSpy.signalArguments[0][0], "right")
+        compare(rotateSpy.signalArguments[0][0], "up")
         compare(routedSpy.count, 0)
         compare(page.pressedNames, [])
-        fakePad.action(fakePad.code("right"), true)
-        fakePad.action(fakePad.code("right"), true)
+        fakePad.action(fakePad.code("up"), true)
+        fakePad.action(fakePad.code("up"), true)
         compare(routedSpy.count, 0)
         tc.settle()
-        compare(main.turnFor(fakeSettings.orientation), 1)
-        compare(Ui.turn, 1)
-        fakePad.released(fakePad.code("right"))
+        compare(fakeSettings.orientation, "landscape")
+        compare(Ui.turn, Ui.landscapeTurn)
+        fakePad.released(fakePad.code("up"))
         compare(page.releasedNames, [])
-        compare(main.router.chordHeld["right"], undefined)
+        compare(main.router.chordHeld["up"], undefined)
         compare(fakeGuide.takes, 1)
     }
 
     function test_chord_second_direction_dropped() {
         main.router.guide = fakeGuide
-        tc.push("right")
+        tc.push("up")
         compare(rotateSpy.count, 1)
         tc.push("down")
         compare(rotateSpy.count, 1)
         compare(routedSpy.count, 0)
         compare(fakeGuide.takes, 1)
         fakePad.released(fakePad.code("down"))
-        fakePad.released(fakePad.code("right"))
+        fakePad.released(fakePad.code("up"))
         compare(Object.keys(main.router.chordHeld).length, 0)
         tc.settle()
-        compare(Ui.turn, 1)
+        compare(Ui.turn, Ui.landscapeTurn)
         fakeGuide.give = false
         tc.push("down")
         compare(rotateSpy.count, 1)
@@ -417,15 +441,41 @@ TestCase {
     }
 
     function test_chord_take_false_dispatches() {
+        if (Ui.landscapeTurn !== 1)
+            skip("portrait at L 1")
         main.router.guide = fakeGuide
         fakeGuide.give = false
         tc.push("right")
         compare(fakeGuide.takes, 1)
         compare(rotateSpy.count, 0)
         compare(routedSpy.count, 1)
-        compare(tc.lastRouted(), Ui.padDirection("right"))
+        compare(tc.lastRouted(), "down")
         fakePad.released(fakePad.code("right"))
         compare(fakeSettings.orientation, "portrait")
+    }
+
+    function test_chord_current_orientation_changes_nothing() {
+        main.router.guide = fakeGuide
+        tc.setOrientation("landscape")
+        appliedSpy.clear()
+        main.navigate("settings")
+        const page = main.pageStack.currentItem
+        page.completeAll()
+        page.focusIndex = page.indexOfKey("saver")
+        page.handleAction("a", false)
+        page.handleAction("right", false)
+        compare(page.editing, true)
+        tc.push("up")
+        compare(rotateSpy.count, 1)
+        compare(routedSpy.count, 0)
+        fakePad.released(fakePad.code("up"))
+        tc.settle()
+        compare(fakeSettings.orientation, "landscape")
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(appliedSpy.count, 0)
+        compare(page.editing, true)
+        page.handleAction("b", false)
+        compare(fakeSettings.saverSeconds, 30)
     }
 
     function test_chord_ignores_non_directions() {
@@ -484,22 +534,22 @@ TestCase {
 
     function test_rotateBy_data() {
         return [
-            { tag: "portrait right", from: "portrait", raw: "right", to: "landscape", turn: 1 },
-            { tag: "portrait left", from: "portrait", raw: "left", to: "landscape-flipped", turn: 3 },
-            { tag: "portrait down", from: "portrait", raw: "down", to: "portrait-flipped", turn: 2 },
-            { tag: "portrait up", from: "portrait", raw: "up", to: "portrait", turn: 0 },
-            { tag: "portrait-flipped right", from: "portrait-flipped", raw: "right", to: "landscape-flipped", turn: 3 },
-            { tag: "portrait-flipped left", from: "portrait-flipped", raw: "left", to: "landscape", turn: 1 },
-            { tag: "portrait-flipped down", from: "portrait-flipped", raw: "down", to: "portrait", turn: 0 },
-            { tag: "portrait-flipped up", from: "portrait-flipped", raw: "up", to: "portrait-flipped", turn: 2 },
-            { tag: "landscape right", from: "landscape", raw: "right", to: "portrait-flipped", turn: 2 },
-            { tag: "landscape left", from: "landscape", raw: "left", to: "portrait", turn: 0 },
-            { tag: "landscape down", from: "landscape", raw: "down", to: "landscape-flipped", turn: 3 },
+            { tag: "portrait up", from: "portrait", raw: "up", to: "landscape", turn: 1 },
+            { tag: "portrait right", from: "portrait", raw: "right", to: "portrait-flipped", turn: 2 },
+            { tag: "portrait down", from: "portrait", raw: "down", to: "landscape-flipped", turn: 3 },
+            { tag: "portrait left", from: "portrait", raw: "left", to: "portrait", turn: 0 },
+            { tag: "portrait-flipped up", from: "portrait-flipped", raw: "up", to: "landscape", turn: 1 },
+            { tag: "portrait-flipped right", from: "portrait-flipped", raw: "right", to: "portrait-flipped", turn: 2 },
+            { tag: "portrait-flipped down", from: "portrait-flipped", raw: "down", to: "landscape-flipped", turn: 3 },
+            { tag: "portrait-flipped left", from: "portrait-flipped", raw: "left", to: "portrait", turn: 0 },
             { tag: "landscape up", from: "landscape", raw: "up", to: "landscape", turn: 1 },
-            { tag: "landscape-flipped right", from: "landscape-flipped", raw: "right", to: "portrait", turn: 0 },
-            { tag: "landscape-flipped left", from: "landscape-flipped", raw: "left", to: "portrait-flipped", turn: 2 },
-            { tag: "landscape-flipped down", from: "landscape-flipped", raw: "down", to: "landscape", turn: 1 },
-            { tag: "landscape-flipped up", from: "landscape-flipped", raw: "up", to: "landscape-flipped", turn: 3 }
+            { tag: "landscape right", from: "landscape", raw: "right", to: "portrait-flipped", turn: 2 },
+            { tag: "landscape down", from: "landscape", raw: "down", to: "landscape-flipped", turn: 3 },
+            { tag: "landscape left", from: "landscape", raw: "left", to: "portrait", turn: 0 },
+            { tag: "landscape-flipped up", from: "landscape-flipped", raw: "up", to: "landscape", turn: 1 },
+            { tag: "landscape-flipped right", from: "landscape-flipped", raw: "right", to: "portrait-flipped", turn: 2 },
+            { tag: "landscape-flipped down", from: "landscape-flipped", raw: "down", to: "landscape-flipped", turn: 3 },
+            { tag: "landscape-flipped left", from: "landscape-flipped", raw: "left", to: "portrait", turn: 0 }
         ]
     }
 
@@ -507,15 +557,19 @@ TestCase {
         if (Ui.landscapeTurn !== 1)
             skip("table for L 1")
         tc.setOrientation(data.from)
+        appliedSpy.clear()
         main.rotateBy(data.raw)
         tc.settle()
         compare(fakeSettings.orientation, data.to)
         compare(Ui.turn, data.turn)
+        compare(appliedSpy.count, data.from === data.to ? 0 : 1)
     }
 
     function test_rotateBy_twice_before_sync() {
-        tc.setOrientation("portrait")
-        main.rotateBy("right")
+        if (Ui.landscapeTurn !== 1)
+            skip("table for L 1")
+        tc.setOrientation("landscape")
+        main.rotateBy("left")
         main.rotateBy("right")
         tc.settle()
         compare(fakeSettings.orientation, "portrait-flipped")
@@ -535,14 +589,14 @@ TestCase {
         main.switchPrompt.complete()
         main.saver.show()
         main.saver.land()
-        tc.push("right")
+        tc.push("up")
         compare(rotateSpy.count, 1)
         tc.settle()
-        compare(Ui.turn, 1)
+        compare(Ui.turn, Ui.landscapeTurn)
         compare(main.saver.shown, true)
         compare(main.switchPrompt.shown, true)
         compare(page.sheet.shown, true)
-        fakePad.released(fakePad.code("right"))
+        fakePad.released(fakePad.code("up"))
         main.saver.hide()
         main.saver.land()
         main.switchPrompt.close()
@@ -750,13 +804,26 @@ TestCase {
         compare(fakeSettings.orientation, "portrait")
     }
 
+    function test_auto_chord_current_turn_no_pin() {
+        main.router.guide = fakeGuide
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        appliedSpy.clear()
+        tc.push("up")
+        fakePad.released(fakePad.code("up"))
+        tc.settle()
+        compare(rotateSpy.count, 1)
+        compare(main.pinnedTurn, -1)
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(appliedSpy.count, 0)
+    }
+
     function test_auto_off_chord_writes_orientation() {
         main.router.guide = fakeGuide
         main.sensor = fakeSensor
         tc.settle()
         compare(main.autoFollow, false)
-        tc.push("right")
-        fakePad.released(fakePad.code("right"))
+        tc.push("up")
+        fakePad.released(fakePad.code("up"))
         tc.settle()
         compare(main.pinnedTurn, -1)
         compare(fakeSettings.orientation, "landscape")

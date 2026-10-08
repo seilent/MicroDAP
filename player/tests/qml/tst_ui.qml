@@ -49,39 +49,45 @@ TestCase {
         compare(Env.landscapeTurn, 1)
     }
 
-    function test_padDirection_data() {
+    function test_padButton_data() {
         return [
-            { tag: "L1 portrait", l: 1, t: 0, map: ["right", "down", "left", "up"] },
-            { tag: "L1 landscape", l: 1, t: 1, map: ["up", "right", "down", "left"] },
-            { tag: "L1 portrait flipped", l: 1, t: 2, map: ["left", "up", "right", "down"] },
-            { tag: "L1 landscape flipped", l: 1, t: 3, map: ["down", "left", "up", "right"] },
-            { tag: "L3 portrait", l: 3, t: 0, map: ["left", "up", "right", "down"] },
-            { tag: "L3 landscape", l: 3, t: 3, map: ["up", "right", "down", "left"] },
-            { tag: "L3 portrait flipped", l: 3, t: 2, map: ["right", "down", "left", "up"] },
-            { tag: "L3 landscape flipped", l: 3, t: 1, map: ["down", "left", "up", "right"] }
+            { tag: "L1 portrait", l: 1, t: 0, map: ["right", "down", "left", "up"], faces: ["b", "a", "x", "y"] },
+            { tag: "L1 landscape", l: 1, t: 1, map: ["up", "right", "down", "left"], faces: ["y", "b", "a", "x"] },
+            { tag: "L1 portrait flipped", l: 1, t: 2, map: ["left", "up", "right", "down"], faces: ["x", "y", "b", "a"] },
+            { tag: "L1 landscape flipped", l: 1, t: 3, map: ["down", "left", "up", "right"], faces: ["a", "x", "y", "b"] },
+            { tag: "L3 portrait", l: 3, t: 0, map: ["left", "up", "right", "down"], faces: ["x", "y", "b", "a"] },
+            { tag: "L3 landscape", l: 3, t: 3, map: ["up", "right", "down", "left"], faces: ["y", "b", "a", "x"] },
+            { tag: "L3 portrait flipped", l: 3, t: 2, map: ["right", "down", "left", "up"], faces: ["b", "a", "x", "y"] },
+            { tag: "L3 landscape flipped", l: 3, t: 1, map: ["down", "left", "up", "right"], faces: ["a", "x", "y", "b"] }
         ]
     }
 
-    function test_padDirection(data) {
+    function test_padButton(data) {
         Ui.landscapeTurn = data.l
         Ui.turn = data.t
         Ui.orientationActive = true
         compare(Ui.padTurn, ((data.l - data.t) % 4 + 4) % 4)
-        compare(Ui.padDirection("up"), data.map[0])
-        compare(Ui.padDirection("right"), data.map[1])
-        compare(Ui.padDirection("down"), data.map[2])
-        compare(Ui.padDirection("left"), data.map[3])
-        compare(Ui.padDirection("a"), "a")
-        compare(Ui.padDirection("lb"), "lb")
+        compare(Ui.padButton("up"), data.map[0])
+        compare(Ui.padButton("right"), data.map[1])
+        compare(Ui.padButton("down"), data.map[2])
+        compare(Ui.padButton("left"), data.map[3])
+        compare(Ui.padButton("y"), data.faces[0])
+        compare(Ui.padButton("b"), data.faces[1])
+        compare(Ui.padButton("a"), data.faces[2])
+        compare(Ui.padButton("x"), data.faces[3])
+        for (const name of ["lb", "rb", "lt", "rt", "start", "back"])
+            compare(Ui.padButton(name), name)
     }
 
-    function test_padDirection_inactive() {
+    function test_padButton_inactive() {
         Ui.landscapeTurn = 1
         Ui.turn = 2
         Ui.orientationActive = false
         compare(Ui.padTurn, 0)
-        compare(Ui.padDirection("up"), "up")
-        compare(Ui.padDirection("left"), "left")
+        compare(Ui.padButton("up"), "up")
+        compare(Ui.padButton("left"), "left")
+        compare(Ui.padButton("a"), "a")
+        compare(Ui.padButton("y"), "y")
     }
 
     function test_windowW_read_only() {

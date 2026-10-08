@@ -242,18 +242,20 @@ Window {
 
     function rotateBy(raw: string): void {
         root.touch()
-        const delta = raw === "right" ? 1 : raw === "left" ? 3 : raw === "down" ? 2 : 0
-        if (delta === 0)
+        const d = Ui.padDirections.indexOf(raw)
+        if (d < 0)
+            return
+        const turn = (Ui.landscapeTurn + d) % 4
+        if (turn === root.requestedTurn())
             return
         const top = pages.currentItem
         if (top !== null && top.objectName === "settings" && typeof top.revertOrConfirmForRotation === "function")
             top.revertOrConfirmForRotation()
         if (root.autoFollow) {
-            root.pinnedTurn = (root.requestedTurn() + delta) % 4
+            root.pinnedTurn = turn
             root.pinnedRaw = String(root.sensor.settledRaw)
             return
         }
-        const turn = (root.turnFor(root.savedOrientation) + delta) % 4
         const name = root.orientations.find((value) => root.turnFor(value) === turn)
         if (root.settings !== null && root.settings.orientation !== undefined && name !== undefined)
             root.settings.orientation = name

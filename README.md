@@ -84,15 +84,18 @@ lb rb lt rt start back`) and hands each to the top page of the `PageStack` throu
 `nowPlaying()`, unhandled `back` emits `view()`; with the screen off every action is dropped. Keyboard fallback
 on the same router: arrows, Return A, Escape or Backspace B, X, Y, Q and E for LB and RB, PageUp and
 PageDown for LT and RT, Space Start, Tab Back/View; key autorepeat counts only for directions. Pad directions
-remap on press with `Ui.padDirection` (up, right, down, left turned by `Ui.padTurn`, `(L - turn) mod 4` while
-orientation applies, else 0); the press keeps its mapped name for its repeats and release; two held directions that map to one name press
-and release it once. Rotate chord: while orientation applies and the screen is on, a raw direction press first asks
+and face buttons remap on press with `Ui.padButton` (up, right, down, left and Y, B, A, X clockwise, turned by
+`Ui.padTurn`, `(L - turn) mod 4` while orientation applies, else 0), so A is the button at the screen's south, B east,
+X west and Y north; LB, RB, LT, RT, Start and Back keep their meaning. The press keeps its mapped name for its
+repeats and release; two held buttons that map to one name press and release it once. Rotate chord: while orientation applies and the screen is on, a raw direction press first asks
 `Guide.take()` (true when the Guide press is at most 500 ms old); on true the router emits `rotate(raw)` instead of
 dispatching, drops that direction's repeats and release, and drops every other direction pressed while it is held,
-so one press rotates once. Main's `rotateBy(raw)`: right turns 90 clockwise, left 90 counterclockwise, down 180,
-up nothing; an open settings edit on ORIENTATION or AUTO ROTATE reverts and any other confirms, then
-`Settings.orientation` takes the new value from the saved one and T18 runs (with auto rotate on and supported the
-chord pins the requested turn plus the rotation instead and remembers `Sensor.settledRaw`; the pin is not saved); the saver, sheets and dialogs stay open and the chord counts as
+so one press rotates once. Main's `rotateBy(raw)` is absolute: the raw direction pointing to the sky as the device
+is held picks the orientation with that edge up, turn `(L + d) mod 4` for d up 0, right 1, down 2, left 3 (for L 1 up
+LANDSCAPE, right PORTRAIT FLIPPED, down LANDSCAPE FLIPPED, left PORTRAIT); a chord for the requested turn changes
+nothing. Otherwise an open settings edit on ORIENTATION or AUTO ROTATE reverts and any other confirms, then
+`Settings.orientation` takes the target and T18 runs (with auto rotate on and supported the chord pins the target
+turn instead and remembers `Sensor.settledRaw`; the pin is not saved); the saver, sheets and dialogs stay open and the chord counts as
 input for the saver and screen off timers. `Guide` null, the screen off, the overlay or an external output give
 no chord. Keys are not
 remapped.

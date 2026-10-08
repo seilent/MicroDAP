@@ -13,6 +13,7 @@ QtObject {
     readonly property real windowH: ui.turn % 2 === 1 ? ui.surfaceW : ui.surfaceH
     property real userScale: 1.0
     readonly property var padDirections: ["up", "right", "down", "left"]
+    readonly property var padFaces: ["y", "b", "a", "x"]
     readonly property int padTurn: ui.orientationActive ? ((ui.landscapeTurn - ui.turn) % 4 + 4) % 4 : 0
 
     function setSurface(w: real, h: real): void {
@@ -20,9 +21,12 @@ QtObject {
         ui.surfaceH = h
     }
 
-    function padDirection(name: string): string {
+    function padButton(name: string): string {
         const d = ui.padDirections.indexOf(name)
-        return d < 0 ? name : ui.padDirections[(d + ui.padTurn) % 4]
+        if (d >= 0)
+            return ui.padDirections[(d + ui.padTurn) % 4]
+        const f = ui.padFaces.indexOf(name)
+        return f < 0 ? name : ui.padFaces[(f + ui.padTurn) % 4]
     }
 
     readonly property bool landscape: ui.windowW > ui.windowH
