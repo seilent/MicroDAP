@@ -97,6 +97,11 @@ QString keyRgb()
     return QStringLiteral("rgb");
 }
 
+QString keyOrientation()
+{
+    return QStringLiteral("orientation");
+}
+
 QString keyEqHeadphones()
 {
     return QStringLiteral("eqHeadphones");
@@ -206,6 +211,12 @@ QStringList Settings::rgbModes()
     return {QStringLiteral("accent"), QStringLiteral("off"), QStringLiteral("armada")};
 }
 
+QStringList Settings::orientations()
+{
+    return {QStringLiteral("portrait"), QStringLiteral("portrait-flipped"), QStringLiteral("landscape"),
+            QStringLiteral("landscape-flipped")};
+}
+
 QStringList Settings::defaultRoots()
 {
     return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
@@ -285,6 +296,8 @@ void Settings::load()
     m_volumeStep = volumeSteps().contains(volumeStep) ? volumeStep : 5;
     const QString rgb = m_settings.value(keyRgb()).toString().toLower();
     m_rgb = rgbModes().contains(rgb) ? rgb : QStringLiteral("armada");
+    const QString orientation = m_settings.value(keyOrientation()).toString();
+    m_orientation = orientations().contains(orientation) ? orientation : orientations().first();
     m_eqHeadphones = normalizeEq(m_settings.value(keyEqHeadphones()).toString());
     m_eqUsb = normalizeEq(m_settings.value(keyEqUsb()).toString());
     m_eqSpeaker = normalizeEq(m_settings.value(keyEqSpeaker()).toString());
@@ -548,6 +561,20 @@ void Settings::setRgb(const QString &mode)
     m_rgb = value;
     store(keyRgb(), m_rgb);
     emit rgbChanged();
+}
+
+QString Settings::orientation() const
+{
+    return m_orientation;
+}
+
+void Settings::setOrientation(const QString &orientation)
+{
+    if (!orientations().contains(orientation) || m_orientation == orientation)
+        return;
+    m_orientation = orientation;
+    store(keyOrientation(), m_orientation);
+    emit orientationChanged();
 }
 
 QString Settings::normalizeEq(const QString &key)

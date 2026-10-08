@@ -91,6 +91,7 @@ private slots:
     void switchStalls();
     void drift();
     void settingsPersist();
+    void settingsOrientation();
     void statusSysfs();
     void clockFormat();
 
@@ -786,6 +787,32 @@ void PowerTest::settingsPersist()
     QVERIFY(again.accentFromArt());
     QCOMPARE(again.scale(), 1.1);
     QCOMPARE(again.saverSeconds(), 45);
+}
+
+void PowerTest::settingsOrientation()
+{
+    const QString path = m_dir.path() + QStringLiteral("/orientation.ini");
+    QCOMPARE(Settings::orientations(),
+             QStringList({QStringLiteral("portrait"), QStringLiteral("portrait-flipped"),
+                          QStringLiteral("landscape"), QStringLiteral("landscape-flipped")}));
+    for (const QString &value : Settings::orientations()) {
+        {
+            Settings settings(path);
+            QSignalSpy spy(&settings, &Settings::orientationChanged);
+            settings.setOrientation(value);
+            settings.setOrientation(QStringLiteral("sideways"));
+            QCOMPARE(settings.orientation(), value);
+            QCOMPARE(spy.count(), value == QStringLiteral("portrait") ? 0 : 1);
+            settings.setOrientation(value);
+            QCOMPARE(spy.count(), value == QStringLiteral("portrait") ? 0 : 1);
+        }
+        Settings again(path);
+        QCOMPARE(again.orientation(), value);
+        again.setOrientation(QStringLiteral("portrait"));
+    }
+    QVERIFY(writeFile(path, QStringLiteral("[General]\norientation=sideways\n")));
+    Settings bogus(path);
+    QCOMPARE(bogus.orientation(), QStringLiteral("portrait"));
 }
 
 void PowerTest::statusSysfs()

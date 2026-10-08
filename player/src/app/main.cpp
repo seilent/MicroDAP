@@ -4,6 +4,7 @@
 #include "DbusPad.h"
 #include "Eq.h"
 #include "Gamescope.h"
+#include "GuideChord.h"
 #include "HubModels.h"
 #include "Intercept.h"
 #include "Keep.h"
@@ -12,6 +13,7 @@
 #include "Models.h"
 #include "Mpris.h"
 #include "OutputControl.h"
+#include "OutputWatch.h"
 #include "OverlayBridge.h"
 #include "Pad.h"
 #include "Player.h"
@@ -292,6 +294,15 @@ int main(int argc, char *argv[])
     }
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, pad.get(),
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
+    std::unique_ptr<casdap::GuideChord> guide;
+    std::unique_ptr<casdap::OutputWatch> outputs;
+    if (!overlayMode) {
+        guide = std::make_unique<casdap::GuideChord>();
+        outputs = std::make_unique<casdap::OutputWatch>();
+        outputs->setScreenOff(power.screenOff());
+        QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, outputs.get(),
+                         [&power, watch = outputs.get()] { watch->setScreenOff(power.screenOff()); });
+    }
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("Library"), &library);
@@ -329,6 +340,10 @@ int main(int argc, char *argv[])
                                              static_cast<QObject *>(bluez.get()));
     if (overlay)
         engine.rootContext()->setContextProperty(QStringLiteral("OverlayBridge"), overlay.get());
+    if (guide)
+        engine.rootContext()->setContextProperty(QStringLiteral("Guide"), guide.get());
+    if (outputs)
+        engine.rootContext()->setContextProperty(QStringLiteral("Outputs"), outputs.get());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");
