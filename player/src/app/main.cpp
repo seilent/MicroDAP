@@ -20,6 +20,7 @@
 #include "PowerBridge.h"
 #include "RgbControl.h"
 #include "Screenshot.h"
+#include "SensorRotation.h"
 #include "Settings.h"
 #include "State.h"
 #include "StatusModel.h"
@@ -300,8 +301,10 @@ int main(int argc, char *argv[])
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
     std::unique_ptr<casdap::GuideChord> guide;
     std::unique_ptr<casdap::OutputWatch> outputs;
+    std::unique_ptr<casdap::SensorRotation> sensor;
     if (!overlayMode) {
         guide = std::make_unique<casdap::GuideChord>();
+        sensor = std::make_unique<casdap::SensorRotation>();
         outputs = std::make_unique<casdap::OutputWatch>();
         outputs->setScreenOff(power.screenOff());
         QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, outputs.get(),
@@ -348,6 +351,8 @@ int main(int argc, char *argv[])
         engine.rootContext()->setContextProperty(QStringLiteral("Guide"), guide.get());
     if (outputs)
         engine.rootContext()->setContextProperty(QStringLiteral("Outputs"), outputs.get());
+    if (sensor)
+        engine.rootContext()->setContextProperty(QStringLiteral("Sensor"), sensor.get());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");

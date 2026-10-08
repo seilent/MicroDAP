@@ -36,6 +36,15 @@ Window {
     property var outputs: root.shotState === "orientation-external" ? externalShotOutputs
         : typeof Outputs === "undefined" ? null : Outputs
     readonly property bool internalOutput: root.outputs === null || root.outputs.internal !== false
+    property var sensor: typeof Sensor === "undefined" ? null : Sensor
+    readonly property bool autoRotate: root.settings !== null && root.settings.autoRotate === true
+    readonly property bool autoFollow: root.autoRotate && root.sensor !== null && root.sensor.supported === true
+    readonly property bool sensorWanted: root.autoRotate && Ui.orientationActive && !root.off
+    readonly property bool settingsEditing: pages.currentItem !== null && pages.currentItem.objectName === "settings"
+        && pages.currentItem.editing === true
+    property int sensorTurn: -1
+    property int pinnedTurn: -1
+    property string pinnedRaw: ""
     readonly property var orientations: ["portrait", "portrait-flipped", "landscape", "landscape-flipped"]
     readonly property string savedOrientation: root.settings !== null && root.orientations.indexOf(String(root.settings.orientation)) >= 0
         ? String(root.settings.orientation) : root.orientations.indexOf(root.shotOrientation) >= 0 ? root.shotOrientation : "portrait"
@@ -112,6 +121,23 @@ Window {
     onHeightChanged: Qt.callLater(root.syncSurface)
     onSavedOrientationChanged: Qt.callLater(root.syncSurface)
     onInternalOutputChanged: Qt.callLater(root.syncSurface)
+    onSensorTurnChanged: Qt.callLater(root.syncSurface)
+    onPinnedTurnChanged: Qt.callLater(root.syncSurface)
+    onAutoFollowChanged: {
+        if (!root.autoFollow) {
+            root.sensorTurn = -1
+            root.pinnedTurn = -1
+            root.pinnedRaw = ""
+        }
+        root.takeSensorTurn()
+        Qt.callLater(root.syncSurface)
+    }
+    onSensorWantedChanged: root.syncSensor()
+    onSensorChanged: root.syncSensor()
+    onSettingsEditingChanged: {
+        if (!root.settingsEditing)
+            root.takeSensorTurn()
+    }
     onHiddenChanged: {
         if (!root.hidden)
             return
@@ -155,6 +181,7 @@ Window {
     onScreenOffArmedChanged: root.armScreenOff()
     Component.onCompleted: {
         root.syncSurface()
+        root.syncSensor()
         root.bindAccent()
         root.lastToastId = root.trackId(root.current)
         if (!root.screenshot)
@@ -176,9 +203,33 @@ Window {
         }
     }
 
+    function requestedTurn(): int {
+        if (root.autoFollow && root.pinnedTurn >= 0)
+            return root.pinnedTurn
+        if (root.autoFollow && root.sensorTurn >= 0)
+            return root.sensorTurn
+        return root.turnFor(root.savedOrientation)
+    }
+
+    function syncSensor(): void {
+        if (root.sensor !== null && typeof root.sensor.setWanted === "function")
+            root.sensor.setWanted(root.sensorWanted, root.autoRotate)
+    }
+
+    function takeSensorTurn(): void {
+        const turn = root.autoFollow && root.sensor.turn !== undefined ? Number(root.sensor.turn) : -1
+        if (turn < 0 || root.settingsEditing)
+            return
+        if (root.pinnedTurn >= 0 && String(root.sensor.settledRaw) !== root.pinnedRaw) {
+            root.pinnedTurn = -1
+            root.pinnedRaw = ""
+        }
+        root.sensorTurn = turn
+    }
+
     function syncSurface(): void {
         const active = !root.overlay && !root.shotOverlay && root.height > root.width && root.internalOutput
-        const turn = active ? root.turnFor(root.savedOrientation) : 0
+        const turn = active ? root.requestedTurn() : 0
         if (root.surfaceSynced && (turn !== Ui.turn || active !== Ui.orientationActive)) {
             root.applyOrientation(turn, active)
             return
@@ -197,6 +248,11 @@ Window {
         const top = pages.currentItem
         if (top !== null && top.objectName === "settings" && typeof top.revertOrConfirmForRotation === "function")
             top.revertOrConfirmForRotation()
+        if (root.autoFollow) {
+            root.pinnedTurn = (root.requestedTurn() + delta) % 4
+            root.pinnedRaw = String(root.sensor.settledRaw)
+            return
+        }
         const turn = (root.turnFor(root.savedOrientation) + delta) % 4
         const name = root.orientations.find((value) => root.turnFor(value) === turn)
         if (root.settings !== null && root.settings.orientation !== undefined && name !== undefined)
@@ -623,6 +679,15 @@ Window {
     }
 
     Connections {
+        target: root.sensor
+        ignoreUnknownSignals: true
+
+        function onTurnChanged() {
+            root.takeSensorTurn()
+        }
+    }
+
+    Connections {
         target: pages
 
         function onDepthChanged() {
@@ -967,6 +1032,7 @@ Window {
             rgbControl: root.rgbControl
             bridge: root.bridge
             eq: root.eq
+            sensor: root.sensor
             onPairPhone: root.openPairing()
             onOpenEq: root.navigate("eq")
         }

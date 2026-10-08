@@ -14,6 +14,15 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.fixture.startsWith("auto-rotate")) {
+            screen.focusIndex = screen.indexOfKey(root.fixture === "auto-rotate-below" ? "saver" : "autoRotate")
+            if (root.fixture === "auto-rotate-edit") {
+                screen.activate()
+                screen.step(1)
+            }
+            screen.keepFocusVisible()
+            return
+        }
         const index = screen.indexOfKey("orientation")
         if (index < 0 || !root.fixture.startsWith("orientation"))
             return
@@ -46,6 +55,13 @@ Item {
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
         property string orientation: root.orientation
+        property bool autoRotate: root.fixture === "auto-rotate" || root.fixture === "auto-rotate-below"
+    }
+
+    QtObject {
+        id: sampleSensor
+
+        readonly property bool supported: root.fixture !== "auto-rotate-unsupported"
     }
 
     QtObject {
@@ -106,6 +122,7 @@ Item {
         outputControl: sampleOutput
         rgbControl: sampleRgb
         eq: sampleEq
+        sensor: sampleSensor
         folders: ["/home/armada/Music", "/run/media/armada/SD"]
 
         Component.onCompleted: {

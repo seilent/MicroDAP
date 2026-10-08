@@ -65,6 +65,35 @@ TestCase {
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
         property string orientation: "portrait"
+        property bool autoRotate: false
+    }
+
+    QtObject {
+        id: fakeSensor
+
+        property bool supported: true
+        property int turn: -1
+        property string raw: ""
+        property string settledRaw: ""
+        property var wanted: []
+        property var kept: []
+
+        function setWanted(on, keepTurn) {
+            fakeSensor.wanted = fakeSensor.wanted.concat([on])
+            fakeSensor.kept = fakeSensor.kept.concat([keepTurn === true])
+            if (!on)
+                fakeSensor.turn = -1
+        }
+
+        function arrive(raw) {
+            fakeSensor.raw = raw
+        }
+
+        function report(raw, turn) {
+            fakeSensor.raw = raw
+            fakeSensor.settledRaw = raw
+            fakeSensor.turn = turn
+        }
     }
 
     QtObject {
@@ -190,6 +219,14 @@ TestCase {
         main.outputs = fakeOutputs
         fakePower.screenOff = false
         fakeSettings.scale = 1.0
+        fakeSettings.autoRotate = false
+        main.sensor = null
+        fakeSensor.supported = true
+        fakeSensor.turn = -1
+        fakeSensor.raw = ""
+        fakeSensor.settledRaw = ""
+        fakeSensor.wanted = []
+        fakeSensor.kept = []
         main.shotWidth = 640
         main.shotHeight = 960
         fakeSettings.orientation = "portrait"
@@ -659,6 +696,189 @@ TestCase {
         tc.setOrientation("portrait")
         compare(Ui.userScale, 1.1)
         compare(fakeSettings.scale, 1.1)
+    }
+
+    function autoOn(raw, turn) {
+        main.sensor = fakeSensor
+        fakeSettings.autoRotate = true
+        tc.settle()
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], true)
+        fakeSensor.report(raw, turn)
+        tc.settle()
+    }
+
+    function test_auto_follows_sensor() {
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        compare(main.autoFollow, true)
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(appliedSpy.count, 1)
+        compare(fakeSettings.orientation, "portrait")
+        fakeSensor.report("bottom-up", 2)
+        tc.settle()
+        compare(Ui.turn, 2)
+        compare(fakeSettings.orientation, "portrait")
+    }
+
+    function test_auto_undefined_at_claim_uses_saved() {
+        fakeSettings.orientation = "portrait-flipped"
+        tc.settle()
+        tc.autoOn("undefined", -1)
+        compare(Ui.turn, 2)
+        compare(main.sensorTurn, -1)
+    }
+
+    function test_auto_chord_pins() {
+        main.router.guide = fakeGuide
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        tc.push("down")
+        fakePad.released(fakePad.code("down"))
+        tc.settle()
+        compare(rotateSpy.count, 1)
+        compare(Ui.turn, (Ui.landscapeTurn + 2) % 4)
+        compare(main.pinnedTurn, (Ui.landscapeTurn + 2) % 4)
+        compare(main.pinnedRaw, "left-up")
+        compare(fakeSettings.orientation, "portrait")
+        fakeSensor.report("left-up", -1)
+        fakeSensor.report("left-up", Ui.landscapeTurn)
+        tc.settle()
+        compare(Ui.turn, (Ui.landscapeTurn + 2) % 4)
+        compare(main.pinnedTurn, (Ui.landscapeTurn + 2) % 4)
+        fakeSensor.report("normal", 0)
+        tc.settle()
+        compare(main.pinnedTurn, -1)
+        compare(Ui.turn, 0)
+        compare(fakeSettings.orientation, "portrait")
+    }
+
+    function test_auto_off_chord_writes_orientation() {
+        main.router.guide = fakeGuide
+        main.sensor = fakeSensor
+        tc.settle()
+        compare(main.autoFollow, false)
+        tc.push("right")
+        fakePad.released(fakePad.code("right"))
+        tc.settle()
+        compare(main.pinnedTurn, -1)
+        compare(fakeSettings.orientation, "landscape")
+        compare(Ui.turn, Ui.landscapeTurn)
+    }
+
+    function test_auto_pin_kept_on_unsettled_value_and_edit_close() {
+        main.router.guide = fakeGuide
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        tc.push("down")
+        fakePad.released(fakePad.code("down"))
+        tc.settle()
+        const pinned = (Ui.landscapeTurn + 2) % 4
+        compare(main.pinnedTurn, pinned)
+        fakeSensor.arrive("undefined")
+        main.navigate("settings")
+        const page = main.pageStack.currentItem
+        page.completeAll()
+        page.focusIndex = page.indexOfKey("saver")
+        page.handleAction("a", false)
+        page.handleAction("right", false)
+        page.handleAction("a", false)
+        compare(page.editing, false)
+        tc.settle()
+        compare(main.pinnedTurn, pinned)
+        compare(Ui.turn, pinned)
+        fakeSettings.saverSeconds = 30
+    }
+
+    function test_auto_chord_while_pending_pins_settled_raw() {
+        main.router.guide = fakeGuide
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        fakeSensor.arrive("normal")
+        tc.push("down")
+        fakePad.released(fakePad.code("down"))
+        tc.settle()
+        compare(main.pinnedRaw, "left-up")
+        compare(main.pinnedTurn, (Ui.landscapeTurn + 2) % 4)
+        fakeSensor.report("normal", 0)
+        tc.settle()
+        compare(main.pinnedTurn, -1)
+        compare(Ui.turn, 0)
+    }
+
+    function test_auto_keeps_turn_only_while_on() {
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        fakePower.screenOff = true
+        tc.settle()
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], false)
+        compare(fakeSensor.kept[fakeSensor.kept.length - 1], true)
+        fakePower.screenOff = false
+        tc.settle()
+        fakeSettings.autoRotate = false
+        tc.settle()
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], false)
+        compare(fakeSensor.kept[fakeSensor.kept.length - 1], false)
+    }
+
+    function test_auto_screen_off_keeps_turn() {
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        compare(Ui.turn, Ui.landscapeTurn)
+        appliedSpy.clear()
+        fakePower.screenOff = true
+        tc.settle()
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], false)
+        compare(fakeSensor.turn, -1)
+        compare(Ui.turn, Ui.landscapeTurn)
+        fakePower.screenOff = false
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], true)
+        compare(Ui.turn, Ui.landscapeTurn)
+        tc.settle()
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(appliedSpy.count, 0)
+        fakeSensor.report("left-up", Ui.landscapeTurn)
+        tc.settle()
+        compare(appliedSpy.count, 0)
+        fakeSensor.report("normal", 0)
+        tc.settle()
+        compare(Ui.turn, 0)
+        compare(appliedSpy.count, 1)
+    }
+
+    function test_auto_waits_for_settings_edit() {
+        tc.autoOn("normal", 0)
+        main.navigate("settings")
+        const page = main.pageStack.currentItem
+        page.completeAll()
+        page.focusIndex = page.indexOfKey("saver")
+        page.handleAction("a", false)
+        compare(page.editing, true)
+        fakeSensor.report("left-up", Ui.landscapeTurn)
+        tc.settle()
+        compare(Ui.turn, 0)
+        compare(appliedSpy.count, 0)
+        page.handleAction("right", false)
+        page.handleAction("a", false)
+        compare(page.editing, false)
+        compare(fakeSettings.saverSeconds, 60)
+        tc.settle()
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(appliedSpy.count, 1)
+        fakeSettings.saverSeconds = 30
+    }
+
+    function test_auto_off_uses_saved() {
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        compare(Ui.turn, Ui.landscapeTurn)
+        fakeSettings.autoRotate = false
+        tc.settle()
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], false)
+        compare(Ui.turn, 0)
+        compare(main.sensorTurn, -1)
+    }
+
+    function test_auto_unsupported_uses_saved() {
+        fakeSettings.orientation = "portrait-flipped"
+        tc.settle()
+        tc.autoOn("left-up", Ui.landscapeTurn)
+        compare(Ui.turn, Ui.landscapeTurn)
+        fakeSensor.supported = false
+        tc.settle()
+        compare(Ui.turn, 2)
     }
 
     function test_wake_refreshes_outputs() {

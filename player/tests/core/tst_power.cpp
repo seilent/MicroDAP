@@ -92,6 +92,7 @@ private slots:
     void drift();
     void settingsPersist();
     void settingsOrientation();
+    void settingsAutoRotate();
     void statusSysfs();
     void clockFormat();
 
@@ -813,6 +814,27 @@ void PowerTest::settingsOrientation()
     QVERIFY(writeFile(path, QStringLiteral("[General]\norientation=sideways\n")));
     Settings bogus(path);
     QCOMPARE(bogus.orientation(), QStringLiteral("portrait"));
+}
+
+void PowerTest::settingsAutoRotate()
+{
+    const QString path = m_dir.path() + QStringLiteral("/autorotate.ini");
+    {
+        Settings settings(path);
+        QVERIFY(!settings.autoRotate());
+        QSignalSpy spy(&settings, &Settings::autoRotateChanged);
+        settings.setAutoRotate(true);
+        settings.setAutoRotate(true);
+        QVERIFY(settings.autoRotate());
+        QCOMPARE(spy.count(), 1);
+    }
+    {
+        Settings again(path);
+        QVERIFY(again.autoRotate());
+        again.setAutoRotate(false);
+    }
+    Settings off(path);
+    QVERIFY(!off.autoRotate());
 }
 
 void PowerTest::statusSysfs()

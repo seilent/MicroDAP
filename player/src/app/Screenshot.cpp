@@ -130,6 +130,11 @@ const QStringList &states()
         QStringLiteral("orientation-edit"),
         QStringLiteral("orientation-edit-end"),
         QStringLiteral("orientation-external"),
+        QStringLiteral("auto-rotate"),
+        QStringLiteral("auto-rotate-unsupported"),
+        QStringLiteral("auto-rotate-below"),
+        QStringLiteral("auto-rotate-off"),
+        QStringLiteral("auto-rotate-edit"),
     };
     return names;
 }

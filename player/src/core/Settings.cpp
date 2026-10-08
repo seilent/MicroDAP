@@ -102,6 +102,11 @@ QString keyOrientation()
     return QStringLiteral("orientation");
 }
 
+QString keyAutoRotate()
+{
+    return QStringLiteral("autoRotate");
+}
+
 QString keyEqHeadphones()
 {
     return QStringLiteral("eqHeadphones");
@@ -298,6 +303,7 @@ void Settings::load()
     m_rgb = rgbModes().contains(rgb) ? rgb : QStringLiteral("armada");
     const QString orientation = m_settings.value(keyOrientation()).toString();
     m_orientation = orientations().contains(orientation) ? orientation : orientations().first();
+    m_autoRotate = m_settings.value(keyAutoRotate(), false).toBool();
     m_eqHeadphones = normalizeEq(m_settings.value(keyEqHeadphones()).toString());
     m_eqUsb = normalizeEq(m_settings.value(keyEqUsb()).toString());
     m_eqSpeaker = normalizeEq(m_settings.value(keyEqSpeaker()).toString());
@@ -575,6 +581,20 @@ void Settings::setOrientation(const QString &orientation)
     m_orientation = orientation;
     store(keyOrientation(), m_orientation);
     emit orientationChanged();
+}
+
+bool Settings::autoRotate() const
+{
+    return m_autoRotate;
+}
+
+void Settings::setAutoRotate(bool on)
+{
+    if (m_autoRotate == on)
+        return;
+    m_autoRotate = on;
+    store(keyAutoRotate(), m_autoRotate);
+    emit autoRotateChanged();
 }
 
 QString Settings::normalizeEq(const QString &key)

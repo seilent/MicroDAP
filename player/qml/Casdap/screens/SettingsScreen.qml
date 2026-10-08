@@ -14,6 +14,7 @@ Page {
     property QtObject library: null
     property QtObject rgbControl: null
     property QtObject bridge: null
+    property QtObject sensor: null
     property var eq: null
     property bool overlay: false
     property bool animated: true
@@ -24,6 +25,7 @@ Page {
     property string editKey: ""
     property var editOriginal: null
     property string orientationDraft: ""
+    property bool autoRotateDraft: false
     property int eqRevision: 0
     property var folders: []
     property var shownValues: ({})
@@ -48,7 +50,7 @@ Page {
         output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
         codec: "btCodec", accent: "accentHue", accentArt: "accentFromArt", scale: "scale", saver: "saverSeconds",
         rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds", suspend: "suspendMinutes",
-        wifi: "wifiOffScreenOff", orientation: "orientation"
+        wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate"
     })
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
@@ -63,8 +65,15 @@ Page {
     readonly property bool overlayToasts: page.settings !== null && page.settings.overlayToasts === true
     readonly property string orientation: page.settings !== null && page.orientations.indexOf(String(page.settings.orientation)) >= 0
         ? String(page.settings.orientation) : "portrait"
+    readonly property bool autoRotate: page.settings !== null && page.settings.autoRotate === true
+    readonly property bool sensorSupported: !page.overlay && page.sensor !== null && page.sensor.supported === true
+    readonly property bool autoFollowing: page.autoRotate && page.sensorSupported && Ui.orientationActive
+    readonly property string effectiveOrientation: page.orientations[[0, 2, Ui.landscapeTurn, (Ui.landscapeTurn + 2) % 4].indexOf(Ui.turn)]
     readonly property string orientationValue: !Ui.orientationActive ? "external display"
-        : (page.editing && page.editKey === "orientation" ? page.orientationDraft : page.orientation).replace("-", " ")
+        : (page.autoFollowing ? page.effectiveOrientation
+        : page.editing && page.editKey === "orientation" ? page.orientationDraft : page.orientation).replace("-", " ")
+    readonly property string autoRotateValue: !page.sensorSupported ? "unsupported"
+        : (page.editing && page.editKey === "autoRotate" ? page.autoRotateDraft : page.autoRotate) ? "on" : "off"
     readonly property real savedScale: page.settings !== null && page.settings.scale !== undefined ? Number(page.settings.scale) : 1.0
     readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
     readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
@@ -211,7 +220,9 @@ Page {
         out.push(page.row("accent", "accent", "", false))
         out.push(page.row("accentArt", "accent from art", page.accentFromArt ? "on" : "off", false))
         if (!page.overlay)
-            out.push(page.row("orientation", "orientation", page.orientationValue, !Ui.orientationActive))
+            out.push(page.row("orientation", "orientation", page.orientationValue, !Ui.orientationActive || page.autoFollowing))
+        if (!page.overlay)
+            out.push(page.row("autoRotate", "auto rotate", page.autoRotateValue, !page.sensorSupported))
         out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
         if (!page.overlay)
@@ -444,6 +455,9 @@ Page {
         case "orientation":
             page.orientationDraft = page.cycle(page.orientations, page.orientationDraft, delta)
             return true
+        case "autoRotate":
+            page.autoRotateDraft = !page.autoRotateDraft
+            return true
         default:
             return false
         }
@@ -488,6 +502,8 @@ Page {
             return page.wifiOffScreenOff
         case "orientation":
             return page.orientation
+        case "autoRotate":
+            return page.autoRotate
         default:
             return undefined
         }
@@ -496,6 +512,7 @@ Page {
     function beginEdit(key: string): void {
         page.editOriginal = page.currentOf(key)
         page.orientationDraft = page.orientation
+        page.autoRotateDraft = page.autoRotate
         page.editKey = key
         page.editing = true
     }
@@ -513,7 +530,7 @@ Page {
         const original = page.editOriginal
         if (key === "scale")
             page.applyScale(Number(original))
-        else if (key !== "orientation")
+        else if (key !== "orientation" && key !== "autoRotate")
             page.set(page.settingOf(key), original)
         page.confirmEdit()
     }
@@ -521,15 +538,18 @@ Page {
     function applyEdit(): void {
         const key = page.editKey
         const draft = page.orientationDraft
+        const autoDraft = page.autoRotateDraft
         page.confirmEdit()
         if (key === "orientation")
             page.set("orientation", draft)
+        else if (key === "autoRotate")
+            page.set("autoRotate", autoDraft)
     }
 
     function revertOrConfirmForRotation(): void {
         if (!page.editing)
             return
-        if (page.editKey === "orientation")
+        if (page.editKey === "orientation" || page.editKey === "autoRotate")
             page.cancelEdit()
         else
             page.confirmEdit()

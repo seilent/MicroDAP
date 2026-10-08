@@ -47,6 +47,21 @@ TestCase {
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
         property string orientation: "portrait"
+        property bool autoRotate: false
+    }
+
+    QtObject {
+        id: fakeSensor
+
+        property bool supported: true
+        property int turn: -1
+        property string raw: ""
+        property string settledRaw: ""
+        property var wanted: []
+
+        function setWanted(on) {
+            fakeSensor.wanted = fakeSensor.wanted.concat([on])
+        }
     }
 
     QtObject {
@@ -194,7 +209,7 @@ TestCase {
     readonly property var expectedKeys: [
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
-        "label-display", "accent", "accentArt", "orientation", "scale", "saver", "rgb", "toasts",
+        "label-display", "accent", "accentArt", "orientation", "autoRotate", "scale", "saver", "rgb", "toasts",
         "label-power", "screenOff", "suspend", "wifi",
         "about"
     ]
@@ -238,6 +253,12 @@ TestCase {
         fakeSettings.suspendMinutes = 10
         fakeSettings.wifiOffScreenOff = false
         fakeSettings.orientation = "portrait"
+        fakeSettings.autoRotate = false
+        fakeSensor.supported = true
+        fakeSensor.turn = -1
+        fakeSensor.raw = ""
+        fakeSensor.settledRaw = ""
+        fakeSensor.wanted = []
         fakeOutputs.internal = true
         fakeLibrary.scanning = false
         fakeLibrary.songCount = 9
@@ -1179,8 +1200,8 @@ TestCase {
         compare(page.indexOfKey("orientation"), -1)
     }
 
-    function openInMain() {
-        const main = createTemporaryObject(mainComponent, tc)
+    function openInMain(properties) {
+        const main = createTemporaryObject(mainComponent, tc, properties === undefined ? {} : properties)
         verify(main !== null)
         main.pageStack.animate = false
         main.restoreStack([])
@@ -1227,6 +1248,104 @@ TestCase {
         fakeOutputs.internal = true
         tryCompare(Ui, "orientationActive", true, 1000)
         compare(tc.rowOf(m.page, "orientation").value, "portrait")
+    }
+
+    function test_auto_rotate_unsupported() {
+        const page = open()
+        compare(tc.rowOf(page, "autoRotate").title, "auto rotate")
+        compare(tc.rowOf(page, "autoRotate").value, "unsupported")
+        compare(tc.rowOf(page, "autoRotate").readOnly, true)
+        tc.focusKey(page, "autoRotate")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(router.dispatch("right", false), false)
+        compare(fakeSettings.autoRotate, false)
+        fakeSensor.supported = false
+        const unsupported = open({ sensor: fakeSensor })
+        compare(tc.rowOf(unsupported, "autoRotate").value, "unsupported")
+        compare(tc.rowOf(unsupported, "autoRotate").readOnly, true)
+        tc.focusKey(unsupported, "autoRotate")
+        verify(router.dispatch("a", false))
+        compare(unsupported.editing, false)
+        fakeSensor.supported = true
+        compare(tc.rowOf(unsupported, "autoRotate").value, "off")
+        compare(tc.rowOf(unsupported, "autoRotate").readOnly, false)
+    }
+
+    function test_auto_rotate_edit() {
+        const page = open({ sensor: fakeSensor })
+        compare(tc.keyIndex(page, "autoRotate"), tc.keyIndex(page, "orientation") + 1)
+        compare(tc.rowOf(page, "autoRotate").value, "off")
+        compare(tc.rowOf(page, "autoRotate").readOnly, false)
+        tc.edit(page, "autoRotate")
+        verify(Qt.colorEqual(tc.itemOf(page, "autoRotate").valueItem.color, Ui.accent))
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "autoRotate").value, "on")
+        compare(fakeSettings.autoRotate, false)
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.autoRotate, false)
+        compare(tc.rowOf(page, "autoRotate").value, "off")
+        tc.edit(page, "autoRotate")
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "autoRotate").value, "on")
+        compare(fakeSettings.autoRotate, false)
+        tc.confirm(page)
+        compare(fakeSettings.autoRotate, true)
+        compare(tc.rowOf(page, "autoRotate").value, "on")
+        tc.edit(page, "autoRotate")
+        verify(router.dispatch("right", false))
+        page.revertOrConfirmForRotation()
+        compare(page.editing, false)
+        compare(fakeSettings.autoRotate, true)
+    }
+
+    function test_auto_rotate_orientation_read_only() {
+        fakeSettings.autoRotate = true
+        Ui.turn = Ui.landscapeTurn
+        const page = open({ sensor: fakeSensor })
+        compare(tc.rowOf(page, "orientation").value, "landscape")
+        compare(tc.rowOf(page, "orientation").readOnly, true)
+        tc.focusKey(page, "orientation")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(fakeSettings.orientation, "portrait")
+        Ui.turn = 2
+        compare(tc.rowOf(page, "orientation").value, "portrait flipped")
+        fakeSensor.supported = false
+        compare(tc.rowOf(page, "orientation").value, "portrait")
+        compare(tc.rowOf(page, "orientation").readOnly, false)
+        fakeSensor.supported = true
+        fakeSettings.autoRotate = false
+        compare(tc.rowOf(page, "orientation").value, "portrait")
+        compare(tc.rowOf(page, "orientation").readOnly, false)
+        Ui.turn = 0
+    }
+
+    function test_auto_rotate_absent_in_overlay() {
+        const page = open({ overlay: true, bridge: fakeBridge, sensor: fakeSensor })
+        compare(page.indexOfKey("autoRotate"), -1)
+    }
+
+    function test_auto_rotate_in_main() {
+        const m = tc.openInMain({ sensor: fakeSensor })
+        const page = m.page
+        compare(tc.rowOf(page, "autoRotate").value, "off")
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], false)
+        page.focusIndex = page.indexOfKey("autoRotate")
+        page.handleAction("a", false)
+        page.handleAction("right", false)
+        compare(fakeSettings.autoRotate, false)
+        page.handleAction("a", false)
+        compare(fakeSettings.autoRotate, true)
+        compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], true)
+        fakeSensor.raw = "left-up"
+        fakeSensor.turn = Ui.landscapeTurn
+        tryCompare(Ui, "turn", Ui.landscapeTurn, 1000)
+        compare(fakeSettings.orientation, "portrait")
+        compare(tc.rowOf(page, "orientation").value, "landscape")
+        compare(tc.rowOf(page, "orientation").readOnly, true)
+        compare(m.main.pageStack.currentItem, page)
     }
 
     function test_chord_reverts_orientation_edit() {
