@@ -13,6 +13,12 @@ ListView {
     readonly property bool scrolling: scrollAnimation.running
     readonly property real scrollTarget: scrollAnimation.to
     readonly property int scrollDuration: scrollAnimation.duration
+    readonly property bool touchScroll: true
+    property bool touchScrollEnabled: true
+    property alias touch: touchScroller
+    property var focusable: null
+
+    signal touchFocused(int index)
 
     function focusItem(): Item {
         return list.itemAtIndex(list.focusIndex)
@@ -34,6 +40,14 @@ ListView {
         easing.type: Motion.easeIn
     }
 
+    TouchScroll {
+        id: touchScroller
+
+        flick: list
+        limit: () => list.maxContentY
+        onMoved: list.clampFocusToView()
+    }
+
     function clampIndex(index: int): int {
         return Math.max(0, Math.min(list.count - 1, index))
     }
@@ -52,6 +66,7 @@ ListView {
     }
 
     function scrollTo(y: real, duration: int) {
+        touchScroller.stop()
         const target = Math.max(0, Math.min(list.maxContentY, y))
         scrollAnimation.stop()
         if (target === list.contentY)
@@ -68,6 +83,7 @@ ListView {
     }
 
     function setFocus(index: int, duration: int): bool {
+        touchScroller.stop()
         if (list.count <= 0)
             return false
         list.focusIndex = list.clampIndex(index)
@@ -80,6 +96,7 @@ ListView {
     }
 
     function pageFocus(direction: int): bool {
+        touchScroller.stop()
         if (list.count <= 0)
             return false
         const base = scrollAnimation.running ? scrollAnimation.to : list.contentY
@@ -89,6 +106,7 @@ ListView {
     }
 
     function snapTo(index: int) {
+        touchScroller.stop()
         if (list.count <= 0)
             return
         scrollAnimation.stop()
@@ -101,10 +119,51 @@ ListView {
     }
 
     function completeScroll() {
+        touchScroller.stop()
         if (!scrollAnimation.running)
             return
         scrollAnimation.stop()
         list.contentY = scrollAnimation.to
+    }
+
+    function stopScroll() {
+        scrollAnimation.stop()
+    }
+
+    function accepts(index: int): bool {
+        return list.focusable === null || list.focusable(index)
+    }
+
+    function touchFocus(index: int) {
+        if (list.count <= 0)
+            return
+        list.focusIndex = list.clampIndex(index)
+        list.touchFocused(list.focusIndex)
+    }
+
+    function clampFocusToView() {
+        if (list.count <= 0)
+            return
+        const first = Math.ceil(list.contentY / list.rowPitch - 0.001)
+        const last = Math.min(list.count - 1, Math.floor((list.contentY + list.height) / list.rowPitch + 0.001) - 1)
+        if (last < first || list.focusIndex >= first && list.focusIndex <= last)
+            return
+        let index = -1
+        if (list.focusIndex < first) {
+            for (let i = first; i <= last && index < 0; i++) {
+                if (list.accepts(i))
+                    index = i
+            }
+        } else {
+            for (let i = last; i >= first && index < 0; i--) {
+                if (list.accepts(i))
+                    index = i
+            }
+        }
+        if (index < 0 || index === list.focusIndex)
+            return
+        list.focusIndex = index
+        list.touchFocused(index)
     }
 
     onHeightChanged: list.snapTo(list.focusIndex)

@@ -107,6 +107,11 @@ QString keyAutoRotate()
     return QStringLiteral("autoRotate");
 }
 
+QString keyTouch()
+{
+    return QStringLiteral("touch");
+}
+
 QString keyEqHeadphones()
 {
     return QStringLiteral("eqHeadphones");
@@ -304,6 +309,7 @@ void Settings::load()
     const QString orientation = m_settings.value(keyOrientation()).toString();
     m_orientation = orientations().contains(orientation) ? orientation : orientations().first();
     m_autoRotate = m_settings.value(keyAutoRotate(), false).toBool();
+    m_touch = m_settings.value(keyTouch(), true).toBool();
     m_eqHeadphones = normalizeEq(m_settings.value(keyEqHeadphones()).toString());
     m_eqUsb = normalizeEq(m_settings.value(keyEqUsb()).toString());
     m_eqSpeaker = normalizeEq(m_settings.value(keyEqSpeaker()).toString());
@@ -595,6 +601,20 @@ void Settings::setAutoRotate(bool on)
     m_autoRotate = on;
     store(keyAutoRotate(), m_autoRotate);
     emit autoRotateChanged();
+}
+
+bool Settings::touch() const
+{
+    return m_touch;
+}
+
+void Settings::setTouch(bool on)
+{
+    if (m_touch == on)
+        return;
+    m_touch = on;
+    store(keyTouch(), m_touch);
+    emit touchChanged();
 }
 
 QString Settings::normalizeEq(const QString &key)

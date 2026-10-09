@@ -90,6 +90,7 @@ Window {
     property var lastToastId: null
     property string addSource: ""
     readonly property bool hidden: root.overlay && !root.overlayMapped
+    readonly property bool touchOn: !root.overlay && !root.screenshot && (root.settings === null || root.settings.touch !== false)
     readonly property bool off: root.powerScreenOff || root.hidden
     readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && root.playing
         && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown
@@ -107,6 +108,8 @@ Window {
     property alias screenOffTimer: screenOffTimer
     property alias toastWindow: toastWindow
     property alias hiddenToast: hiddenToast
+    property alias touchLayer: touchLayer
+    property alias cursorBlank: cursorBlank
 
     signal hideOverlayRequested()
     signal orientationApplied(int turn)
@@ -262,6 +265,7 @@ Window {
     }
 
     function applyOrientation(turn: int, active: bool): void {
+        touchLayer.cancel()
         pages.eachPage((page) => {
             if (typeof page.revertOrConfirmForRotation === "function")
                 page.revertOrConfirmForRotation()
@@ -767,6 +771,13 @@ Window {
         y: Math.round((root.height - rotor.height) / 2)
         rotation: Ui.turn * 90
 
+        HoverHandler {
+            id: cursorBlank
+
+            enabled: !root.overlay && !root.screenshot
+            cursorShape: Qt.BlankCursor
+        }
+
         Rectangle {
             id: bg
 
@@ -874,6 +885,16 @@ Window {
                 : root.shotScreen === "history" ? historyShotComponent
                 : root.shotScreen === "eq" ? eqShotComponent
                 : null
+        }
+
+        TouchLayer {
+            id: touchLayer
+
+            anchors.fill: parent
+            router: root.router
+            dialogs: [switchPrompt, powerMenu]
+            enabled: root.touchOn && !root.off
+            onTouched: root.touch()
         }
     }
 

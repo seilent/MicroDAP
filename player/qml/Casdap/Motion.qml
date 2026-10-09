@@ -139,6 +139,11 @@ QtObject {
     readonly property int page: 500
     readonly property int press: 100
     readonly property real pressScale: 0.96
+    readonly property int touchReturnDelay: 200
+    readonly property real flingRetention: 0.95
+    readonly property int flingTick: 16
+    readonly property int flingWindow: 100
+    readonly property int flingMaxStep: 33
     readonly property int toggle: 400
     readonly property real toggleScale: 0.7
     readonly property int toggleSwap: 200

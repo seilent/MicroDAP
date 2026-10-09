@@ -30,6 +30,7 @@ class Settings : public QObject
     Q_PROPERTY(QString rgb READ rgb WRITE setRgb NOTIFY rgbChanged)
     Q_PROPERTY(QString orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
     Q_PROPERTY(bool autoRotate READ autoRotate WRITE setAutoRotate NOTIFY autoRotateChanged)
+    Q_PROPERTY(bool touch READ touch WRITE setTouch NOTIFY touchChanged)
     Q_PROPERTY(QString eqHeadphones READ eqHeadphones WRITE setEqHeadphones NOTIFY eqHeadphonesChanged)
     Q_PROPERTY(QString eqUsb READ eqUsb WRITE setEqUsb NOTIFY eqUsbChanged)
     Q_PROPERTY(QString eqSpeaker READ eqSpeaker WRITE setEqSpeaker NOTIFY eqSpeakerChanged)
@@ -99,6 +100,8 @@ public:
     void setOrientation(const QString &orientation);
     bool autoRotate() const;
     void setAutoRotate(bool on);
+    bool touch() const;
+    void setTouch(bool on);
     QString eqHeadphones() const;
     void setEqHeadphones(const QString &key);
     QString eqUsb() const;
@@ -131,6 +134,7 @@ signals:
     void rgbChanged();
     void orientationChanged();
     void autoRotateChanged();
+    void touchChanged();
     void eqHeadphonesChanged();
     void eqUsbChanged();
     void eqSpeakerChanged();
@@ -161,6 +165,7 @@ private:
     QString m_rgb;
     QString m_orientation;
     bool m_autoRotate = false;
+    bool m_touch = true;
     QString m_eqHeadphones;
     QString m_eqUsb;
     QString m_eqSpeaker;

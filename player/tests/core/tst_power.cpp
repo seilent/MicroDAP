@@ -93,6 +93,7 @@ private slots:
     void settingsPersist();
     void settingsOrientation();
     void settingsAutoRotate();
+    void settingsTouch();
     void statusSysfs();
     void clockFormat();
 
@@ -835,6 +836,27 @@ void PowerTest::settingsAutoRotate()
     }
     Settings off(path);
     QVERIFY(!off.autoRotate());
+}
+
+void PowerTest::settingsTouch()
+{
+    const QString path = m_dir.path() + QStringLiteral("/touch.ini");
+    {
+        Settings settings(path);
+        QVERIFY(settings.touch());
+        QSignalSpy spy(&settings, &Settings::touchChanged);
+        settings.setTouch(false);
+        settings.setTouch(false);
+        QVERIFY(!settings.touch());
+        QCOMPARE(spy.count(), 1);
+    }
+    {
+        Settings again(path);
+        QVERIFY(!again.touch());
+        again.setTouch(true);
+    }
+    Settings on(path);
+    QVERIFY(on.touch());
 }
 
 void PowerTest::statusSysfs()

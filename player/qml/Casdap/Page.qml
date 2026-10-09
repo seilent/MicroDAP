@@ -16,6 +16,7 @@ Item {
     readonly property bool dialogUp: page.dialogFade > 0
     readonly property real focusOpacity: 1 - page.dialogFade
     readonly property bool stackAnimates: page.stack !== null && page.stack.animate === true
+    property string touchKind: "page"
 
     signal action(string name, bool repeat)
     signal activated(int index)
@@ -94,12 +95,43 @@ Item {
             page.pressed = false
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        switch (kind) {
+        case "row":
+            if (page.list === null)
+                return ""
+            page.list.touchFocus(index)
+            return "a"
+        case "back":
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (kind === "row" && page.list !== null)
+            page.list.ensureVisible(Motion.scroll)
+    }
+
     Component.onCompleted: {
         if (page.stack !== null || page.parent === null)
             return
         const owner = page.parent.parent
         if (owner !== null && owner !== undefined && typeof owner.pop === "function" && typeof owner.completeAll === "function")
             page.stack = owner
+    }
+
+    Connections {
+        target: page.list
+
+        function onTouchFocused(index) {
+            if (typeof page.syncFocus === "function")
+                page.syncFocus()
+            else
+                page.focusIndex = index
+        }
     }
 
     Connections {

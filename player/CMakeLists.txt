@@ -113,6 +113,8 @@ set(casdap_qml
     qml/Casdap/FocusBar.qml
     qml/Casdap/FocusList.qml
     qml/Casdap/PressScale.qml
+    qml/Casdap/TouchScroll.qml
+    qml/Casdap/TouchLayer.qml
     qml/Casdap/Specimen.qml
     qml/Casdap/MotionShot.qml
     qml/Casdap/components/Glyph.qml
