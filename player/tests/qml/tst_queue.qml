@@ -160,6 +160,14 @@ TestCase {
         onNowPlaying: counters.nowPlaying++
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     FakeQueue {
         id: fakeQueue
     }
@@ -233,6 +241,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -696,5 +706,52 @@ TestCase {
         fakeQueue.index = 7
         compare(page.countSwapping, false)
         compare(page.countItem.text, "8 of 20")
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function tapHeaderWord(page) {
+        tc.tapAt(page.header, page.header.textX + Ui.px(4), page.header.textBaseline - Ui.px(4))
+    }
+
+    function test_touch_row_plays() {
+        open()
+        tc.tapAt(tc.rowAt(5))
+        compare(tc.list().focusIndex, 5)
+        compare(fakePlayer.calls, ["playAt 5"])
+    }
+
+    function test_touch_drag_then_x_titles_clamped_row() {
+        const page = open()
+        const l = tc.list()
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), l.height + Ui.px(40))
+        const first = Math.ceil(l.contentY / l.rowPitch - 0.001)
+        verify(first > 2)
+        compare(l.focusIndex, first)
+        compare(page.focusIndex, first)
+        verify(router.dispatch("x", false))
+        compare(page.sheet.title, page.focusedRow.title)
+        compare(page.sheet.title, "Song " + (first + 1))
+    }
+
+    function test_touch_header_pops() {
+        const page = open()
+        tc.tapHeaderWord(page)
+        compare(pages.depth, 1)
     }
 }

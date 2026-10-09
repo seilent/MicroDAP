@@ -5,6 +5,7 @@ Item {
     id: root
 
     property string kind: "artist"
+    property string fixture: "browse"
 
     Rectangle {
         anchors.fill: parent
@@ -103,7 +104,10 @@ Item {
             library: sampleLibrary
             player: samplePlayer
 
-            Component.onCompleted: albumPage.completeAll()
+            Component.onCompleted: {
+                albumPage.completeAll()
+                albumPage.pressed = root.fixture === "pressed"
+            }
         }
     }
 

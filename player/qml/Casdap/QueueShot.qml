@@ -4,6 +4,8 @@ import QtQuick
 Item {
     id: root
 
+    property string fixture: "browse"
+
     Rectangle {
         anchors.fill: parent
         color: Ui.bg
@@ -59,6 +61,11 @@ Item {
         }
     }
 
+    function scrollFixture(): void {
+        screen.list.contentY = 1.5 * screen.list.rowPitch
+        screen.list.clampFocusToView()
+    }
+
     QtObject {
         id: samplePlayer
 
@@ -78,6 +85,9 @@ Item {
             screen.list.snapTo(sampleQueue.currentSlot)
             screen.syncFocus()
             screen.completeAll()
+            if (root.fixture === "touch-scrolled")
+                Qt.callLater(root.scrollFixture)
+            screen.pressed = root.fixture === "pressed"
         }
     }
 }

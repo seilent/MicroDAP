@@ -270,12 +270,15 @@ Page {
         width: page.width
         height: page.height - listView.y
         model: page.rows
+        onTouchFocused: page.focusIndex = listView.focusIndex
 
         delegate: ListRow {
             id: row
 
             required property int index
             required property var modelData
+            readonly property string touchKind: "row"
+            readonly property int touchIndex: row.index
             property real enter: page.arriving ? 0 : 1
             property real shift: page.arriving ? Motion.pivotShift : 0
             property int stagger: 0

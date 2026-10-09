@@ -110,6 +110,8 @@ Item {
                 required property var modelData
                 readonly property bool active: label.index === root.activeIndex
                 readonly property var role: label.active ? Ui.pivotActive : Ui.pivotInactive
+                readonly property string touchKind: "pivot"
+                readonly property int touchIndex: label.index
 
                 x: root.positionOf(label.index)
                 y: root.baselineY - label.baselineOffset

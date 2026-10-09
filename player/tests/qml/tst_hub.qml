@@ -27,6 +27,14 @@ TestCase {
         pad: fakePad
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     QtObject {
         id: fakePad
 
@@ -156,6 +164,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -970,5 +980,216 @@ TestCase {
         compare(holder.toAngle, Motion.turnstileInAngle)
         tryCompare(pages, "phase", "idle", 3000)
         compare(pages.depth, 1)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function tapHeaderWord(page) {
+        tc.tapAt(page.header, page.header.textX + Ui.px(4), page.header.textBaseline - Ui.px(4))
+    }
+
+    function test_touch_song_row_plays() {
+        const page = open({ pivotIndex: 2 })
+        tc.tapAt(tc.rowAt(page.songsPane, 1))
+        compare(page.songsPane.focusIndex, 1)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].kind, "song")
+        compare(counters.played[0].id, 1)
+    }
+
+    function test_touch_divider_opens_jump_grid() {
+        const page = open({ pivotIndex: 2 })
+        tc.tapAt(tc.rowAt(page.songsPane, 0))
+        compare(page.jumpGrid.shown, true)
+        compare(counters.jumps, 1)
+    }
+
+    function test_touch_album_cell_opens_album() {
+        const page = open({ pivotIndex: 1 })
+        const row = tc.rowAt(page.albumsPane, 0)
+        tc.tapAt(row.cellAt(1))
+        compare(page.gridCol, 1)
+        compare(counters.opened.length, 1)
+        compare(counters.opened[0].kind, "album")
+        compare(counters.opened[0].id, 1000)
+    }
+
+    function test_touch_letter_tile_opens_jump_grid() {
+        const page = open({ pivotIndex: 1 })
+        tc.tapAt(tc.rowAt(page.albumsPane, 0).cellAt(0))
+        compare(page.gridCol, 0)
+        compare(page.jumpGrid.shown, true)
+    }
+
+    function test_touch_label_switches_on_release() {
+        const page = open({ animated: true })
+        const label = page.strip.labelItem(2)
+        mousePress(label, Ui.px(4), label.height / 2)
+        compare(page.pivotIndex, 0)
+        mouseRelease(label, Ui.px(4), label.height / 2)
+        wait(0)
+        wait(0)
+        compare(page.pivotIndex, 2)
+        compare(page.switching, true)
+        page.completeAll()
+        compare(page.shownPivot, 2)
+    }
+
+    function test_touch_label_past_slop_switches_nothing() {
+        const page = open({ animated: true })
+        const label = page.strip.labelItem(2)
+        mousePress(label, Ui.px(4), label.height / 2)
+        mouseMove(label, Ui.px(34), label.height / 2, -1, Qt.LeftButton)
+        mouseRelease(label, Ui.px(34), label.height / 2)
+        wait(0)
+        wait(0)
+        compare(page.pivotIndex, 0)
+        compare(page.switching, false)
+    }
+
+    function test_touch_active_label_does_nothing() {
+        const page = open({ animated: true })
+        const label = page.strip.labelItem(0)
+        tc.tapAt(label, Ui.px(4), label.height / 2)
+        compare(page.pivotIndex, 0)
+        compare(page.switching, false)
+    }
+
+    function test_touch_header_word_pops() {
+        const page = open()
+        compare(pages.depth, 2)
+        tc.tapHeaderWord(page)
+        compare(pages.depth, 1)
+    }
+
+    function test_touch_right_of_header_word_does_nothing() {
+        const page = open({ pivotIndex: 4 })
+        const end = page.header.childrenRect.x + page.header.childrenRect.width
+        verify(end < page.header.width - Ui.px(10))
+        tc.tapAt(page.header, page.header.width - Ui.px(5), page.header.textBaseline - Ui.px(4))
+        compare(pages.depth, 2)
+    }
+
+    function test_touch_drag_clamps_and_pad_acts() {
+        const page = open({ pivotIndex: 2 })
+        const pane = page.songsPane
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), pane.height + Ui.px(40))
+        verify(pane.contentY > 0)
+        const first = Math.ceil(pane.contentY / pane.rowPitch - 0.001)
+        compare(pane.focusIndex, first)
+        verify(page.focusableAt(2, pane.focusIndex))
+        compare(page.focusIndex, pane.focusIndex)
+        const entry = page.rowEntry(2, pane.focusIndex)
+        compare(entry.kind, "song")
+        compare(page.focusedRow.id, entry.id)
+        verify(router.dispatch("x", false))
+        compare(page.sheet.title, entry.title)
+        router.dispatch("b", false)
+        page.sheet.complete()
+        router.dispatch("a", false)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].id, entry.id)
+    }
+
+    function test_touch_row_after_label_tap_acts_on_new_pivot() {
+        const page = open({ animated: true })
+        const label = page.strip.labelItem(2)
+        tc.tapAt(label, Ui.px(4), label.height / 2)
+        compare(page.pivotIndex, 2)
+        wait(100)
+        const pane = page.songsPane
+        tc.tapAt(page, page.width / 2, pane.y + 1.5 * pane.rowPitch - pane.contentY)
+        compare(page.shownPivot, 2)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].id, 1)
+    }
+
+    function test_touch_during_feather_acts_on_landed_row() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        const pane = page.songsPane
+        pane.feather(1)
+        verify(tc.rowAt(pane, 1).enter < 1)
+        tc.tapAt(page, page.width / 2, pane.y + 1.5 * pane.rowPitch - pane.contentY)
+        compare(tc.rowAt(pane, 1).enter, 1)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].id, 1)
+    }
+
+    function test_touch_drag_from_grid_gutter_scrolls() {
+        const page = open({ pivotIndex: 1 })
+        const x = Ui.px(Ui.hubEdge + Ui.tileS + Ui.gutter / 2)
+        tc.dragUp(page, x, page.height - Ui.px(20), Ui.px(100))
+        verify(page.albumsPane.contentY > 0)
+        compare(counters.opened, [])
+    }
+
+    function openSongSheet() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        page.songsPane.snapTo(1)
+        page.syncFocus()
+        verify(router.dispatch("x", false))
+        page.sheet.complete()
+        compare(page.sheet.shown, true)
+        waitForRendering(page)
+        return page
+    }
+
+    function scrimY(page) {
+        const pane = page.songsPane
+        const y = pane.y + 1.5 * pane.rowPitch
+        verify(y < page.sheet.panel.y)
+        return y
+    }
+
+    function test_touch_sheet_scrim_closes() {
+        const page = tc.openSongSheet()
+        const focus = page.songsPane.focusIndex
+        tc.tapAt(page, page.width / 2, tc.scrimY(page))
+        compare(page.sheet.shown, false)
+        compare(counters.played, [])
+        compare(counters.sheetActions, [])
+        compare(pages.depth, 2)
+        compare(page.pivotIndex, 2)
+        compare(page.songsPane.focusIndex, focus)
+    }
+
+    function test_touch_two_scrim_taps_keep_depth() {
+        const page = tc.openSongSheet()
+        const focus = page.songsPane.focusIndex
+        const y = tc.scrimY(page)
+        tc.tapAt(page, page.width / 2, y)
+        compare(page.sheet.shown, false)
+        verify(page.sheet.animating)
+        tc.tapAt(page, page.width / 2, y)
+        compare(pages.depth, 2)
+        compare(page.sheet.shown, false)
+        compare(counters.played, [])
+        compare(page.pivotIndex, 2)
+        compare(page.songsPane.focusIndex, focus)
+    }
+
+    function test_touch_sheet_item_runs() {
+        const page = tc.openSongSheet()
+        const sheet = page.sheet
+        const n = sheet.items.length
+        tc.tapAt(sheet.panel, sheet.panel.width / 2, sheet.panel.height - sheet.edge - (n - 1 - 0.5) * sheet.pitch)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, sheet.items[1])
+        compare(counters.sheetActions[0].id, 1)
     }
 }

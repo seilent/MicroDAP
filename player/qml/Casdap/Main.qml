@@ -1163,12 +1163,15 @@ Window {
         id: albumShotComponent
         DetailShot {
             kind: "album"
+            fixture: root.shotState
         }
     }
 
     Component {
         id: queueShotComponent
-        QueueShot {}
+        QueueShot {
+            fixture: root.shotState
+        }
     }
 
     Component {
@@ -1180,6 +1183,7 @@ Window {
         id: hubShotComponent
         HubShot {
             pivot: root.shotPivot
+            fixture: root.shotState
         }
     }
 

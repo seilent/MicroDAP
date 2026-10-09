@@ -142,6 +142,16 @@ moves a focus that left the view to the first or last fully visible row its `foc
 emit `touchFocused(index)`. `Page` defaults: `row` focuses the row and returns `a`, `back` and `header` return
 `b`, a row's `touchTap` brings it inside (F2), and `touchFocused` calls the page's `syncFocus()` when it has one,
 else sets `focusIndex`. Main's `cursorBlank` `HoverHandler` on `rotor` sets `Qt.BlankCursor` in DAP mode.
+Targets on the hubs, lists and details: the `CroppedHeader` word (`header`, the band right of it does nothing) and
+`PivotStrip` labels (`pivot`, `touchIndex` the label); `MusicHub` rows (`row`, `divider`) and grid cells (`cell`,
+`letter`, `touchIndex` the row, `touchCol` the cell) focus the row and the column and act as A, a pivot label
+switches with T5 in `touchTap` when it is not the active one, and every `Pane` has `focusable` from
+`focusableAt(pivot, index)`; `ArtistDetail` puts a slot sized `ring` Item inside each `Ring` delegate (ring plus half
+the gap each side, as high as wide) and tags album and song rows; `AlbumDetail` track rows and `backRingClip`
+(`back`); `QueueScreen`, `HistoryScreen` and `PlaylistsScreen` rows. Every list mirrors `touchFocused` into the page
+(`syncFocus()` or `focusIndex`). `Sheet` owns its rows (`item`), panel (`block`) and scrim (`scrim`, B); `JumpGrid`
+owns its letters with rows (`letter`) and EXIT (`exit`), its root is `block`; while either is not `shown` its
+items, scrim, letters and EXIT carry no tag and the root reads `block`, so a tap during the close reaches nothing.
 
 Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
 32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, white only: the
@@ -521,7 +531,10 @@ that turn; `--state orientation` focuses the ORIENTATION row on `settings`, `--s
 its edit and steps right, `orientation-edit-end` steps to LANDSCAPE FLIPPED, `orientation-external` gives Main an
 `Outputs` that reads not internal, `auto-rotate` focuses AUTO ROTATE with it ON, `auto-rotate-unsupported` with a
 sensor that reads unsupported, `auto-rotate-below` focuses SAVER with AUTO ROTATE ON, `auto-rotate-off` focuses
-AUTO ROTATE with it OFF, `auto-rotate-edit` opens its edit and steps to ON; the `settings` sample reads AUTO ROTATE OFF),
+AUTO ROTATE with it OFF, `auto-rotate-edit` opens its edit and steps to ON; the `settings` sample reads AUTO ROTATE OFF;
+`pressed` sets `pressed` on the `hub`, `album` and `queue` page so the focused
+item shows its F3 scale (on `hub` a focused divider or letter tile first moves down or right to a song row or album cell),
+`touch-scrolled` sets the `hub` or `queue` list `contentY` to one and a half rows and runs `clampFocusToView()`),
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),

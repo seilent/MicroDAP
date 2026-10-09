@@ -27,6 +27,14 @@ TestCase {
         pad: null
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     FakeSectioned {
         id: artists
     }
@@ -86,6 +94,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -425,5 +435,65 @@ TestCase {
         page.screenOff = false
         compare(page.jumpGrid.visible, true)
         compare(page.jumpGrid.progress, 1)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function openGrid(page) {
+        page.openJumpGrid()
+        page.jumpGrid.complete()
+        compare(page.jumpGrid.shown, true)
+        return page.jumpGrid
+    }
+
+    function test_touch_letter_jumps_and_closes() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        const grid = tc.openGrid(page)
+        tc.tapAt(grid.cellAt(grid.letters.indexOf("c")))
+        compare(grid.shown, false)
+        compare(page.focusedRow.letter, "c")
+    }
+
+    function test_touch_empty_letter_does_nothing() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        const grid = tc.openGrid(page)
+        const focus = grid.focusIndex
+        tc.tapAt(grid.cellAt(grid.letters.indexOf("z")))
+        compare(grid.shown, true)
+        compare(grid.focusIndex, focus)
+    }
+
+    function test_touch_exit_closes() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        const grid = tc.openGrid(page)
+        const focus = page.songsPane.focusIndex
+        tc.tapAt(grid.exitText)
+        compare(grid.shown, false)
+        compare(page.songsPane.focusIndex, focus)
+    }
+
+    function test_touch_between_cells_reaches_nothing() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        const grid = tc.openGrid(page)
+        const focus = page.songsPane.focusIndex
+        const i = grid.letters.indexOf("c")
+        tc.tapAt(grid, grid.cellX(i) + grid.tile + grid.gap / 2, grid.cellY(i) + grid.tile / 2)
+        compare(grid.shown, true)
+        compare(page.songsPane.focusIndex, focus)
+    }
+
+    function test_touch_letter_during_close_does_nothing() {
+        const page = open({ animated: true, pivotIndex: 2 })
+        const grid = tc.openGrid(page)
+        const focus = page.songsPane.focusIndex
+        grid.close()
+        verify(grid.animating)
+        tc.tapAt(grid.cellAt(grid.letters.indexOf("c")))
+        compare(page.songsPane.focusIndex, focus)
+        compare(grid.shown, false)
     }
 }

@@ -203,6 +203,27 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        switch (kind) {
+        case "row":
+            page.activeList.touchFocus(index)
+            return "a"
+        case "pivot":
+            return "tap"
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (kind === "pivot" && index !== page.pivotIndex)
+            page.switchPivot(index - page.pivotIndex)
+        else if (kind === "row")
+            page.activeList.ensureVisible(Motion.scroll)
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
@@ -353,6 +374,8 @@ Page {
         readonly property var pane: row.ListView.view
         readonly property bool isFocused: row.pane !== null && page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
+        readonly property string touchKind: "row"
+        readonly property int touchIndex: row.index
         property real enter: page.arriving ? 0 : 1
         property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
@@ -451,6 +474,7 @@ Page {
             if (d.ready && page.activeList === pane)
                 page.syncFocus()
         }
+        onTouchFocused: page.syncFocus()
     }
 
     PageSurface {

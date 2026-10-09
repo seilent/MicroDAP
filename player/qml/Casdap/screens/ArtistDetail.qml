@@ -322,6 +322,32 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        switch (kind) {
+        case "ring":
+            page.focusRow = 0
+            page.ringIndex = index
+            return "a"
+        case "row":
+            page.focusRow = 1
+            page.activeList.touchFocus(index)
+            return "a"
+        case "pivot":
+            return "tap"
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (kind === "pivot" && index !== page.pivotIndex)
+            page.switchPivot(index - page.pivotIndex)
+        else if (kind === "row")
+            page.activeList.ensureVisible(Motion.scroll)
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
@@ -440,6 +466,7 @@ Page {
         width: page.width - page.listX
         height: page.height - pane.y
         visible: page.shownPivot === pane.pivot
+        onTouchFocused: page.syncFocus()
     }
 
     component AlbumRow: Item {
@@ -453,6 +480,8 @@ Page {
         readonly property Item ringItem: playRing
         readonly property Item titleItem: titleText
         readonly property Item subItem: subText
+        readonly property string touchKind: "row"
+        readonly property int touchIndex: row.index
         property real enter: page.arriving ? 0 : 1
         property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
@@ -573,6 +602,8 @@ Page {
         readonly property var pane: row.ListView.view
         readonly property bool isFocused: page.focusRow === 1 && page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
+        readonly property string touchKind: "row"
+        readonly property int touchIndex: row.index
         property real enter: page.arriving ? 0 : 1
         property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
@@ -712,6 +743,17 @@ Page {
             focused: ringItem.isFocused
             pressed: ringItem.isFocused && page.pressed
             animated: page.live
+
+            Item {
+                id: ringHit
+
+                readonly property string touchKind: "ring"
+                readonly property int touchIndex: ringItem.index
+
+                anchors.centerIn: parent
+                width: ringItem.width + Ui.px(Ui.detailRingGap)
+                height: ringHit.width
+            }
         }
     }
 

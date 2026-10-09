@@ -18,6 +18,10 @@
 | settings | `auto-rotate-off` | `--size 640x960` | AUTO ROTATE OFF, ORIENTATION editable above it | 2026-10-09 |
 | settings | `auto-rotate-edit` | `--size 640x960` | AUTO ROTATE draft ON in accent | 2026-10-09 |
 | settings | browse | `--size 640x960` | AUTO ROTATE reads OFF | 2026-10-09 |
+| hub | `pressed` | `--pivot songs` and `--pivot albums`, `--size 640x960` and `960x640` | focus on the first song row or album cell, F3 scale inside the slot, a pressed tile's caption not clipped | pending |
+| hub | `touch-scrolled` | `--pivot artists`, `--size 640x960` and `960x640` | focus row fully inside `[CONTENT_TOP, H - ROW_HEIGHT]` | pending |
+| album | `pressed` | `--size 640x960` and `960x640` | focused track row at F3 scale | pending |
+| queue | `touch-scrolled` | `--size 640x960` and `960x640` | focus row fully inside `[CONTENT_TOP, H - ROW_HEIGHT]` | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

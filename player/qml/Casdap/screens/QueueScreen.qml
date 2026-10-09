@@ -356,6 +356,8 @@ Page {
         readonly property bool isFocused: queueList.focusIndex === item.index
         readonly property bool isPlaying: item.isCurrent
         readonly property Item rowItem: listRow
+        readonly property string touchKind: "row"
+        readonly property int touchIndex: item.index
         property real enter: screen.arriving ? 0 : 1
         property real shift: screen.arriving ? Motion.pivotShift : Motion.listChangeShift
         property int stagger: 0
@@ -454,6 +456,7 @@ Page {
             if (d.ready)
                 screen.syncFocus()
         }
+        onTouchFocused: screen.syncFocus()
     }
 
     FocusBar {

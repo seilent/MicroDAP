@@ -35,11 +35,27 @@ Item {
     property alias exitBar: exitBar
     property alias cells: cells
     property alias swivel: swivel
+    readonly property string touchKind: "block"
 
     signal jumpTo(string letter)
     signal closed()
 
     visible: root.progress > 0 && !root.screenOff
+
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (!root.shown)
+            return ""
+        switch (kind) {
+        case "letter":
+            root.focusIndex = index
+            return "a"
+        case "exit":
+            root.focusIndex = root.exitIndex
+            return "a"
+        default:
+            return ""
+        }
+    }
 
     function alphabet(): var {
         const out = ["#"]
@@ -212,6 +228,8 @@ Item {
         Text {
             id: exitText
 
+            readonly property string touchKind: root.shown ? "exit" : ""
+
             x: root.gridX
             y: root.gridY + (root.tile - exitText.height) / 2
             text: "exit"
@@ -241,6 +259,8 @@ Item {
                 required property int index
                 required property var modelData
                 readonly property bool available: root.has(cell.modelData)
+                readonly property string touchKind: root.shown && cell.available ? "letter" : ""
+                readonly property int touchIndex: cell.index
 
                 x: root.cellX(cell.index)
                 y: root.cellY(cell.index)

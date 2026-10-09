@@ -264,6 +264,8 @@ Page {
         readonly property bool isFocused: trackList.focusIndex === row.index
         readonly property bool isPlaying: page.currentId >= 0 && page.currentId === row.modelData.id
         readonly property Item rowItem: listRow
+        readonly property string touchKind: "row"
+        readonly property int touchIndex: row.index
         property real enter: page.arriving ? 0 : 1
         property real shift: page.arriving ? Motion.pivotShift : 0
         property int stagger: 0
@@ -387,6 +389,8 @@ Page {
 
     Item {
         id: backRingClip
+
+        readonly property string touchKind: "back"
 
         width: Ui.px(Ui.backRingX + Ui.backRing)
         height: Ui.px(Ui.backRingY + Ui.backRing)

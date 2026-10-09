@@ -27,6 +27,14 @@ TestCase {
         pad: null
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     ListModel {
         id: playlists
     }
@@ -117,6 +125,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -515,5 +525,82 @@ TestCase {
         fresh.append({ id: 300, title: "Late", subtitle: "", artPath: "", kind: "album" })
         wait(20)
         compare(tc.rowAt(page.recentPane, 0).enter, 1)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function tapHeaderWord(page) {
+        tc.tapAt(page.header, page.header.textX + Ui.px(4), page.header.textBaseline - Ui.px(4))
+    }
+
+    function test_touch_playlists_row_plays() {
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary })
+        tc.tapAt(tc.rowAt(page.listView, 2))
+        compare(page.focusIndex, 2)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].kind, "playlist")
+        compare(fakePlayer.calls[0].id, 2)
+    }
+
+    function test_touch_playlists_drag_then_a() {
+        for (let i = 3; i < 33; i++)
+            playlists.append({ id: i, title: "List " + i, subtitle: "1 song", kind: "playlist" })
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary })
+        const l = page.listView
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), l.height + Ui.px(40))
+        const first = Math.ceil(l.contentY / l.rowPitch - 0.001)
+        verify(first > 0)
+        compare(l.focusIndex, first)
+        compare(page.focusIndex, first)
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].id, page.rows[first].id)
+    }
+
+    function test_touch_history_tap_plays_entry() {
+        const page = open(historyComponent, { player: fakePlayer, library: fakeLibrary })
+        tc.tapAt(tc.rowAt(page.recentPane, 3))
+        compare(page.rowIndex, 3)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].kind, "song")
+        compare(fakePlayer.calls[0].id, 103)
+    }
+
+    function test_touch_history_drag_then_a() {
+        for (let i = 7; i < 40; i++)
+            recent.append({ id: 100 + i, title: "Song " + i, subtitle: "Artist " + i, artPath: "", kind: "song" })
+        const page = open(historyComponent, { player: fakePlayer, library: fakeLibrary })
+        const l = page.recentPane
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), l.height + Ui.px(40))
+        const first = Math.ceil(l.contentY / l.rowPitch - 0.001)
+        verify(first > 0)
+        compare(l.focusIndex, first)
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].id, 100 + first)
+    }
+
+    function test_touch_history_pivot_and_header() {
+        const page = open(historyComponent, { player: fakePlayer, library: fakeLibrary })
+        const label = page.strip.labelItem(1)
+        tc.tapAt(label, Ui.px(4), label.height / 2)
+        compare(page.pivotIndex, 1)
+        tc.tapHeaderWord(page)
+        compare(pages.depth, 1)
     }
 }

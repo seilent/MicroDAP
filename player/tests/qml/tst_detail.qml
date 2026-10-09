@@ -27,6 +27,14 @@ TestCase {
         pad: fakePad
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     QtObject {
         id: fakePad
 
@@ -65,6 +73,7 @@ TestCase {
         id: fakeLibrary
 
         property bool scanning: false
+        property bool many: false
         readonly property var tracks: [
             [1, "This Could Be Our Day", 1, 214000],
             [2, "All That Matters", 1, 241000],
@@ -102,8 +111,15 @@ TestCase {
             return [fakeLibrary.albumInfo(1), fakeLibrary.albumInfo(2)]
         }
 
+        function manyTracks() {
+            const out = []
+            for (let i = 1; i <= 40; i++)
+                out.push([i, "Song " + i, 1, 200000])
+            return out
+        }
+
         function artistTrackRows(id) {
-            return fakeLibrary.tracks.map((t) => fakeLibrary.rowOf(t))
+            return (fakeLibrary.many ? fakeLibrary.manyTracks() : fakeLibrary.tracks).map((t) => fakeLibrary.rowOf(t))
         }
 
         function trackRows(ids) {
@@ -174,6 +190,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -181,6 +199,7 @@ TestCase {
         pages.clear()
         pages.animate = false
         artists.active = false
+        fakeLibrary.many = false
         artists.load([{ id: 7, title: "Addison Road", subtitle: "2 albums, 6 songs", artPath: "", section: "A" }], "artist")
         fakePlayer.calls = []
         fakePlayer.current = { id: 3, title: "Sticking With You", artist: "Addison Road", album: "Addison Road", artPath: "" }
@@ -779,5 +798,91 @@ TestCase {
         compare(first.shift, Motion.listChangeShift)
         tryCompare(first, "enter", 1, 2000)
         compare(tc.rowAt(page.albumsPane, 0).enter, 1)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function test_touch_artist_rings() {
+        const page = openArtist()
+        tc.tapAt(page.ring(0))
+        compare(page.focusRow, 0)
+        compare(page.ringIndex, 0)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].kind, "artist")
+        compare(fakePlayer.calls[0].mode, "play")
+        tc.tapAt(page.ring(1))
+        compare(page.ringIndex, 1)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, "add to queue")
+        compare(counters.sheetActions[0].kind, "artist")
+        tc.tapAt(page.ring(2))
+        compare(page.ringIndex, 2)
+        compare(fakePlayer.calls.length, 2)
+        compare(fakePlayer.calls[1].mode, "shuffle")
+        const ring = page.ring(1)
+        tc.tapAt(ring, ring.width + Ui.px(Ui.detailRingGap) / 2 - 1, ring.height / 2)
+        compare(page.ringIndex, 1)
+        compare(counters.sheetActions.length, 2)
+        compare(counters.sheetActions[1].action, "add to queue")
+        for (let i = 0; i < 3; i++)
+            compare(typeof page.ringRepeater.itemAt(i).swapping, "boolean")
+    }
+
+    function test_touch_artist_album_row_opens_album() {
+        const page = openArtist()
+        tc.tapAt(tc.rowAt(page.albumsPane, 0))
+        compare(counters.opened.length, 1)
+        compare(counters.opened[0].kind, "album")
+        compare(counters.opened[0].id, 1)
+        compare(pages.depth, 3)
+    }
+
+    function test_touch_artist_songs_drag_then_a() {
+        fakeLibrary.many = true
+        const page = openArtist({ pivotIndex: 1 })
+        compare(page.shownPivot, 1)
+        verify(router.dispatch("down", false))
+        compare(page.focusRow, 1)
+        const pane = page.songsPane
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), pane.height + Ui.px(40))
+        verify(pane.contentY > 0)
+        const first = Math.ceil(pane.contentY / pane.rowPitch - 0.001)
+        compare(pane.focusIndex, first)
+        compare(page.focusRow, 1)
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].startId, page.songRows[first].id)
+    }
+
+    function test_touch_album_track_plays_from_row() {
+        const page = openAlbum()
+        tc.tapAt(tc.rowAt(page.trackList, 1))
+        compare(page.trackList.focusIndex, 1)
+        compare(fakePlayer.calls.length, 1)
+        compare(fakePlayer.calls[0].kind, "album")
+        compare(fakePlayer.calls[0].id, 1)
+        compare(fakePlayer.calls[0].startId, 2)
+    }
+
+    function test_touch_back_ring_pops() {
+        const page = openAlbum()
+        compare(pages.depth, 2)
+        tc.tapAt(page.backRing)
+        compare(pages.depth, 1)
     }
 }

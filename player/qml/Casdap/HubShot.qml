@@ -6,6 +6,7 @@ Item {
 
     property string pivot: "albums"
     property bool jump: false
+    property string fixture: "browse"
 
     readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists"]
     readonly property var contextArtists: typeof Artists === "undefined" ? null : Artists
@@ -23,6 +24,11 @@ Item {
             hubModel.source = sample
     }
 
+    function scrollFixture(): void {
+        hub.activeList.contentY = 1.5 * hub.activeList.rowPitch
+        hub.activeList.clampFocusToView()
+    }
+
     Component.onCompleted: {
         sampleArtists.fill()
         sampleAlbums.fill()
@@ -38,6 +44,15 @@ Item {
         if (root.jump) {
             hub.openJumpGrid()
             hub.completeAll()
+        }
+        if (root.fixture === "touch-scrolled")
+            Qt.callLater(root.scrollFixture)
+        if (root.fixture === "pressed") {
+            const entry = hub.focusedEntry()
+            if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
+                hub.handleAction(hub.grid ? "right" : "down", false)
+            hub.completeAll()
+            hub.pressed = true
         }
     }
 

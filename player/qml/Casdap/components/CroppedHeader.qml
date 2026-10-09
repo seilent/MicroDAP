@@ -20,6 +20,8 @@ Item {
     Text {
         id: label
 
+        readonly property string touchKind: "header"
+
         x: Ui.px(Ui.hubEdge + root.shift)
         y: root.baselineY - label.baselineOffset
         text: root.text

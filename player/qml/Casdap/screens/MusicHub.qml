@@ -585,6 +585,42 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        switch (kind) {
+        case "row":
+        case "divider":
+            hub.activeList.touchFocus(index)
+            return "a"
+        case "cell":
+        case "letter":
+            hub.activeList.touchFocus(index)
+            hub.gridCol = hit.touchCol
+            hub.clampCol()
+            return "a"
+        case "pivot":
+            return "tap"
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        switch (kind) {
+        case "pivot":
+            if (index !== hub.pivotIndex)
+                hub.switchPivot(index - hub.pivotIndex)
+            break
+        case "row":
+        case "divider":
+        case "cell":
+        case "letter":
+            hub.activeList.ensureVisible(Motion.scroll)
+            break
+        }
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
@@ -860,10 +896,12 @@ Page {
         height: hub.height - pane.y
         visible: hub.shownPivot === pane.pivot
         model: pane.bound ? pane.source : null
+        focusable: (i) => hub.focusableAt(pane.pivot, i)
         onFocusIndexChanged: {
             if (d.ready && hub.activeList === pane)
                 hub.syncFocus()
         }
+        onTouchFocused: hub.syncFocus()
 
         Timer {
             id: entranceClock
@@ -952,6 +990,8 @@ Page {
         readonly property bool isFocused: row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
         readonly property Item dividerItem: dividerText
+        readonly property string touchKind: row.divider ? "divider" : "row"
+        readonly property int touchIndex: row.index
 
         ListRow {
             id: listRow
@@ -1009,6 +1049,9 @@ Page {
                 readonly property bool isFocused: row.isFocusedRow && hub.gridCol === cell.index
                 readonly property Item tileItem: cell.letter ? null : cellLoader.item
                 readonly property Item letterItem: cell.letter ? cellLoader.item : null
+                readonly property string touchKind: cell.letter ? "letter" : "cell"
+                readonly property int touchIndex: row.index
+                readonly property int touchCol: cell.index
 
                 x: Ui.px(Ui.hubEdge + cell.index * hub.cellPitch)
                 y: 0

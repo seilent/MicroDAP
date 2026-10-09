@@ -20,14 +20,31 @@ Item {
     property alias scrim: scrim
     property alias panel: panel
     property alias bar: bar
+    readonly property string touchKind: root.shown ? "" : "block"
 
     signal accepted(int index)
     signal rejected()
 
     visible: (root.shown || root.progress > 0) && !root.screenOff
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (!root.shown)
+            return ""
+        switch (kind) {
+        case "item":
+            root.focusIndex = index
+            return "a"
+        case "scrim":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
     Rectangle {
         id: scrim
+
+        readonly property string touchKind: root.shown ? "scrim" : ""
 
         anchors.fill: parent
         color: root.scrimColor
@@ -36,6 +53,8 @@ Item {
 
     Rectangle {
         id: panel
+
+        readonly property string touchKind: "block"
 
         x: 0
         y: root.height - panel.height + (1 - root.progress) * panel.height
@@ -72,6 +91,8 @@ Item {
                     required property int index
                     required property var modelData
                     readonly property bool isFocused: row.index === root.focusIndex
+                    readonly property string touchKind: root.shown ? "item" : ""
+                    readonly property int touchIndex: row.index
 
                     width: list.width
                     height: root.pitch
