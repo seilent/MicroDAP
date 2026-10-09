@@ -60,6 +60,8 @@ add_library(casdapcore STATIC
     src/core/Player.h
     src/core/PowerBridge.cpp
     src/core/PowerBridge.h
+    src/core/QrtrLink.cpp
+    src/core/QrtrLink.h
     src/core/Queue.cpp
     src/core/Queue.h
     src/core/RgbControl.cpp
@@ -74,6 +76,11 @@ add_library(casdapcore STATIC
     src/core/Settings.h
     src/core/SleepInhibitor.cpp
     src/core/SleepInhibitor.h
+    src/core/SscLink.h
+    src/core/SscRotation.cpp
+    src/core/SscRotation.h
+    src/core/SscWire.cpp
+    src/core/SscWire.h
     src/core/State.cpp
     src/core/State.h
     src/core/StatusModel.cpp

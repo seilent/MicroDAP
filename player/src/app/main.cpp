@@ -22,6 +22,7 @@
 #include "Screenshot.h"
 #include "SensorRotation.h"
 #include "Settings.h"
+#include "SscRotation.h"
 #include "State.h"
 #include "StatusModel.h"
 #include "AudioInfo.h"
@@ -33,6 +34,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
 #include <QQuickGraphicsConfiguration>
@@ -301,10 +303,15 @@ int main(int argc, char *argv[])
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
     std::unique_ptr<casdap::GuideChord> guide;
     std::unique_ptr<casdap::OutputWatch> outputs;
-    std::unique_ptr<casdap::SensorRotation> sensor;
+    std::unique_ptr<QObject> sensor;
     if (!overlayMode) {
         guide = std::make_unique<casdap::GuideChord>();
-        sensor = std::make_unique<casdap::SensorRotation>();
+        const QString backend = qEnvironmentVariable("CASDAP_SENSOR_BACKEND");
+        if (backend == QLatin1StringView("ssc")
+            || (backend != QLatin1StringView("proxy") && QFileInfo::exists(QStringLiteral("/dev/fastrpc-sdsp"))))
+            sensor = std::make_unique<casdap::SscRotation>();
+        else
+            sensor = std::make_unique<casdap::SensorRotation>();
         outputs = std::make_unique<casdap::OutputWatch>();
         outputs->setScreenOff(power.screenOff());
         QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, outputs.get(),
