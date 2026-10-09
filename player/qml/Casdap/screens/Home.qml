@@ -195,6 +195,25 @@ Page {
         sheet.open()
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        switch (kind) {
+        case "menu":
+            home.showMenu()
+            home.setFocus(index)
+            return "a"
+        case "peek":
+            return !Ui.landscape && !home.quickplayShown ? "left" : ""
+        case "menu-peek": {
+            if (Ui.landscape || !home.quickplayShown)
+                return ""
+            const p = hit.mapToItem(home, x, hit.height / 2)
+            return p.x < quickplayPanel.x + quickplayPanel.width * quickplayPanel.scale ? "" : "b"
+        }
+        default:
+            return ""
+        }
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
@@ -268,6 +287,8 @@ Page {
     Item {
         id: quickplayPanel
 
+        readonly property string touchKind: Ui.landscape ? "" : "peek"
+
         x: 0
         y: home.quickplayY
         width: Ui.px(Ui.qpW)
@@ -288,6 +309,7 @@ Page {
             active: home.quickplayShown
             pressed: home.pressed && home.quickplayShown
             onPanBack: home.showMenu()
+            onTouchFront: home.showQuickplay()
             onOpenPhone: home.nowPlayingBluetooth()
             onPlay: (entry) => home.playRequested(entry)
             onPin: (entry) => home.openPinSheet(entry)
@@ -296,6 +318,8 @@ Page {
 
     Turnstile {
         id: menuPanel
+
+        readonly property string touchKind: !Ui.landscape && home.quickplayShown ? "menu-peek" : ""
 
         x: home.menuX
         y: Ui.px(Motion.quickplayMenuY) * home.pan
@@ -328,6 +352,8 @@ Page {
                 required property int index
                 required property var modelData
                 readonly property bool isFocused: item.index === home.focusIndex
+                readonly property string touchKind: Ui.landscape || !home.quickplayShown ? "menu" : ""
+                readonly property int touchIndex: item.index
                 readonly property real itemBaseline: home ? home.itemBaseline(item.index) : 0
                 readonly property string subtitle: home.subtitleFor(item.modelData.name, item.modelData.subtitle)
                 readonly property real labelBaseline: item.y + label.y + label.baselineOffset

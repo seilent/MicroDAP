@@ -22,6 +22,9 @@
 | hub | `touch-scrolled` | `--pivot artists`, `--size 640x960` and `960x640` | focus row fully inside `[CONTENT_TOP, H - ROW_HEIGHT]` | pending |
 | album | `pressed` | `--size 640x960` and `960x640` | focused track row at F3 scale | pending |
 | queue | `touch-scrolled` | `--size 640x960` and `960x640` | focus row fully inside `[CONTENT_TOP, H - ROW_HEIGHT]` | pending |
+| home | `pressed` | `--size 640x960` and `960x640` | focused menu item at F3 scale | pending |
+| quickplay | `pressed` | `--size 640x960` and `960x640` | focused tile at F3 scale inside its slot | pending |
+| nowplaying | `pressed` | `--size 640x960` and `960x640` | focused ring at F3 scale | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

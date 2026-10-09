@@ -4,6 +4,7 @@ import QtQuick
 Item {
     id: root
 
+    property string fixture: "browse"
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
 
     Rectangle {
@@ -58,6 +59,9 @@ Item {
         bluez: root.contextBluez
         status: sampleStatus
 
-        Component.onCompleted: screen.completeAll()
+        Component.onCompleted: {
+            screen.completeAll()
+            screen.pressed = root.fixture === "pressed"
+        }
     }
 }

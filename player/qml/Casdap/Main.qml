@@ -1176,7 +1176,9 @@ Window {
 
     Component {
         id: nowPlayingShotComponent
-        NowPlayingShot {}
+        NowPlayingShot {
+            fixture: root.shotState
+        }
     }
 
     Component {
@@ -1228,6 +1230,7 @@ Window {
         id: homeShotComponent
         HomeShot {
             overlay: root.shotOverlay
+            fixture: root.shotState
         }
     }
 
@@ -1235,6 +1238,7 @@ Window {
         id: quickplayShotComponent
         HomeShot {
             quickplay: true
+            fixture: root.shotState
         }
     }
 }

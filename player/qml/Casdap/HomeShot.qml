@@ -6,6 +6,7 @@ Item {
 
     property bool quickplay: false
     property bool overlay: false
+    property string fixture: "browse"
 
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var contextRecent: typeof QuickplayRecent === "undefined" ? null : QuickplayRecent
@@ -67,6 +68,7 @@ Item {
             if (root.quickplay)
                 home.showQuickplay()
             home.completeAll()
+            home.pressed = root.fixture === "pressed"
         }
     }
 }

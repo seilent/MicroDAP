@@ -12,6 +12,7 @@ Item {
     property bool active: false
     property bool pressed: false
     property int focusIndex: 0
+    property bool touchFocusing: false
 
     readonly property bool phoneTile: qp.bluez !== null && qp.bluez.connected === true
     readonly property string phoneName: qp.phoneTile ? qp.bluez.deviceName : ""
@@ -44,6 +45,7 @@ Item {
     signal play(var entry)
     signal openPhone()
     signal pin(var entry)
+    signal touchFront()
 
     width: Ui.px(Ui.qpW)
 
@@ -56,6 +58,8 @@ Item {
         property string sectionName: ""
         property string defaultKind: ""
         readonly property int flat: t.offset + t.index
+        readonly property string touchKind: "tile"
+        readonly property int touchIndex: t.flat
         readonly property string kind: t.model.kind === undefined || t.model.kind === null || t.model.kind === ""
             ? t.defaultKind : String(t.model.kind)
         readonly property var entry: ({
@@ -182,6 +186,30 @@ Item {
         return true
     }
 
+    function touchSetFocus(index: int): void {
+        qp.touchFocusing = true
+        qp.focusIndex = qp.clampIndex(index)
+        qp.touchFocusing = false
+    }
+
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (kind !== "tile")
+            return ""
+        if (!qp.active && !Ui.landscape)
+            return "left"
+        qp.touchFocusing = true
+        qp.focusIndex = qp.clampIndex(index)
+        if (!qp.active)
+            qp.touchFront()
+        qp.touchFocusing = false
+        return "a"
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (kind === "tile")
+            qp.ensureVisible(Motion.scroll)
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         switch (name) {
         case "up":
@@ -276,6 +304,7 @@ Item {
     }
 
     function ensureVisible(duration: int): void {
+        touchScroller.stop()
         if (qp.count <= 0 || qp.focusIndex < 0 || qp.focusIndex >= qp.count)
             return
         const p = qp.sectionOf(qp.focusIndex)
@@ -322,8 +351,13 @@ Item {
             scrollAnim.complete()
     }
 
-    onFocusIndexChanged: qp.ensureVisible(Motion.scroll)
+    onFocusIndexChanged: {
+        if (!qp.touchFocusing)
+            qp.ensureVisible(Motion.scroll)
+    }
     onActiveChanged: {
+        if (qp.touchFocusing)
+            return
         if (qp.active)
             qp.ensureVisible(0)
         else
@@ -369,6 +403,40 @@ Item {
     Flickable {
         id: flick
 
+        readonly property bool touchScroll: true
+        readonly property bool touchScrollEnabled: Ui.landscape || qp.active
+        property alias touch: touchScroller
+
+        function stopScroll(): void {
+            scrollAnim.stop()
+        }
+
+        function clampFocusToView(): void {
+            if (qp.count <= 0)
+                return
+            const top = flick.contentY
+            const bottom = flick.contentY + flick.height
+            const focusTop = qp.tileTop(qp.focusIndex)
+            if (focusTop >= top && focusTop + qp.tilePx <= bottom)
+                return
+            const col = qp.column(qp.focusIndex)
+            let best = -1
+            let distance = Infinity
+            for (let pass = 0; pass < 2 && best < 0; pass++) {
+                for (let i = 0; i < qp.count; i++) {
+                    const y = qp.tileTop(i)
+                    if ((pass === 0 && qp.column(i) !== col) || y < top || y + qp.tilePx > bottom)
+                        continue
+                    if (Math.abs(y - focusTop) < distance) {
+                        distance = Math.abs(y - focusTop)
+                        best = i
+                    }
+                }
+            }
+            if (best >= 0)
+                qp.touchSetFocus(best)
+        }
+
         anchors.fill: parent
         contentWidth: width
         contentHeight: content.height
@@ -376,6 +444,13 @@ Item {
         onContentHeightChanged: qp.scheduleSettle()
         onHeightChanged: qp.scheduleSettle()
         boundsBehavior: Flickable.StopAtBounds
+
+        TouchScroll {
+            id: touchScroller
+
+            flick: qp.flick
+            onMoved: flick.clampFocusToView()
+        }
 
         Item {
             id: content
@@ -428,7 +503,9 @@ Item {
                         PressScale {
                             id: phone
 
-                            readonly property bool focused: qp.active && qp.focusIndex === 0
+                            readonly property bool focused: qp.phoneTile && qp.active && qp.focusIndex === 0
+                            readonly property string touchKind: "tile"
+                            readonly property int touchIndex: 0
                             readonly property var entry: ({
                                 section: "pins",
                                 kind: "phone",

@@ -8,7 +8,7 @@ TestCase {
     name: "Home"
     when: windowShown
     visible: true
-    width: 640
+    width: 960
     height: 960
 
     readonly property real canvasW: 320
@@ -28,6 +28,14 @@ TestCase {
         height: 960
         stack: pages
         pad: fakePad
+    }
+
+    TouchLayer {
+        id: layer
+
+        width: 960
+        height: 960
+        router: router
     }
 
     QtObject {
@@ -675,6 +683,27 @@ TestCase {
         compare(qp.emptyText.visible, true)
     }
 
+    function test_press_follows_late_pins() {
+        const page = open()
+        router.dispatch("left", false)
+        const qp = page.quickplay
+        page.pressed = true
+        compare(qp.phoneItem.focused, false)
+        compare(qp.tileAt(0).entry.section, "history")
+        compare(qp.tileAt(0).scale, 0.96)
+        pins.append({ id: 1, kind: "album", title: "Pin 1", subtitle: "Artist 1", artPath: "" })
+        pins.append({ id: 2, kind: "artist", title: "Pin 2", subtitle: "", artPath: "" })
+        compare(qp.phoneItem.focused, false)
+        compare(qp.tileAt(0).entry.section, "pins")
+        compare(qp.tileAt(0).scale, 0.96)
+        compare(qp.tileAt(1).scale, 1)
+        compare(qp.tileAt(2).entry.section, "history")
+        compare(qp.tileAt(2).focused, false)
+        compare(qp.tileAt(2).scale, 1)
+        page.pressed = false
+        compare(qp.tileAt(0).scale, 1)
+    }
+
     function test_phone_tile_kind() {
         const page = open({ animated: false, bluez: phone })
         router.dispatch("left", false)
@@ -920,5 +949,220 @@ TestCase {
         const top = qp.tileTop(qp.focusIndex) - qp.flick.contentY
         verify(top >= -0.5)
         verify(top + qp.tilePx <= qp.height + 0.5)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function test_touch_menu_opens_item() {
+        const page = open()
+        tc.tapAt(page.menuItem(2))
+        compare(page.focusIndex, 2)
+        compare(counters.navigated, ["playlists"])
+    }
+
+    function test_touch_peek_brings_quickplay() {
+        const page = open()
+        tc.tapAt(page.quickplayPanel, Ui.px(4), Ui.px(4))
+        compare(page.quickplayShown, true)
+        compare(counters.navigated, [])
+    }
+
+    function test_touch_peek_tile_only_brings_quickplay() {
+        const page = open()
+        const qp = page.quickplay
+        const tile = qp.tileAt(qp.pinsCount)
+        compare(qp.active, false)
+        const before = qp.focusIndex
+        compare(qp.touchPress("tile", qp.pinsCount, 0, tile), "left")
+        compare(qp.focusIndex, before)
+        tc.tapAt(tile)
+        compare(page.quickplayShown, true)
+        compare(counters.played, [])
+    }
+
+    function test_touch_tile_in_front_plays() {
+        const page = open()
+        page.showQuickplay()
+        page.completeAll()
+        const qp = page.quickplay
+        tc.tapAt(qp.tileAt(qp.pinsCount + 1))
+        compare(qp.focusIndex, qp.pinsCount + 1)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].title, "History 2")
+    }
+
+    function test_touch_scaled_menu_returns() {
+        const page = open()
+        page.showQuickplay()
+        page.completeAll()
+        tc.tapAt(page.menuItem(0))
+        compare(page.quickplayShown, false)
+        compare(counters.navigated, [])
+    }
+
+    function test_touch_landscape_tile_focuses_and_plays() {
+        Ui.setSurface(960, 640)
+        const page = pages.push(homeComponent, { animated: false })
+        compare(Ui.landscape, true)
+        const qp = page.quickplay
+        tc.tapAt(qp.tileAt(qp.pinsCount))
+        compare(page.quickplayShown, true)
+        compare(counters.played.length, 1)
+        compare(counters.played[0].title, "History 1")
+    }
+
+    function test_touch_landscape_menu_tap_from_quickplay() {
+        Ui.setSurface(960, 640)
+        const page = pages.push(homeComponent, { animated: false })
+        router.dispatch("left", false)
+        compare(page.quickplayShown, true)
+        tc.tapAt(page.menuItem(3))
+        compare(page.quickplayShown, false)
+        compare(page.focusIndex, 3)
+        compare(counters.navigated, ["history"])
+        compare(counters.played, [])
+    }
+
+    function test_touch_landscape_tile_press_keeps_content_y() {
+        Ui.setSurface(960, 640)
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = pages.push(homeComponent, { animated: false })
+        const qp = page.quickplay
+        qp.flick.contentY = qp.headerTop(1) + Ui.px(4)
+        const y = qp.flick.contentY
+        const k = qp.pinsCount + 2
+        verify(qp.tileTop(k) >= y)
+        const tile = qp.tileAt(k)
+        mousePress(tile, tile.width / 2, tile.height / 2)
+        compare(page.quickplayShown, true)
+        compare(qp.focusIndex, k)
+        compare(qp.flick.contentY, y)
+        mouseRelease(tile, tile.width / 2, tile.height / 2)
+        wait(0)
+        wait(0)
+        compare(counters.played.length, 1)
+    }
+
+    function test_touch_overlapped_menu_column_does_not_return() {
+        Ui.userScale = 1.1
+        verify(Ui.canvasW < 300)
+        const page = open()
+        page.showQuickplay()
+        page.completeAll()
+        const qp = page.quickplay
+        const right = page.quickplayPanel.x + page.quickplayPanel.width * page.quickplayPanel.scale
+        const ty = qp.tileTop(qp.pinsCount + 1) - qp.flick.contentY + qp.tilePx / 2
+        const x = page.menuPanel.mapToItem(page, Ui.px(2), page.menuPanel.mapFromItem(page, 0, ty).y).x
+        verify(x < right)
+        verify(page.menuPanel.contains(page.menuPanel.mapFromItem(page, x, ty)))
+        tc.tapAt(page, x, ty)
+        compare(page.quickplayShown, true)
+        compare(counters.navigated, [])
+    }
+
+    function test_touch_watermark_does_nothing() {
+        const page = open()
+        tc.tapAt(page.watermark)
+        compare(page.quickplayShown, false)
+        compare(counters.navigated, [])
+    }
+
+    function test_touch_quickplay_drag_only_in_front() {
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = open()
+        const qp = page.quickplay
+        const x = Ui.px(4)
+        tc.dragUp(page.quickplayPanel, x, page.quickplayPanel.height * 0.5, Ui.px(60))
+        compare(qp.flick.contentY, 0)
+        compare(page.quickplayShown, false)
+        page.showQuickplay()
+        page.completeAll()
+        tc.dragUp(page, Ui.px(100), page.height - Ui.px(20), Ui.px(100))
+        verify(qp.flick.contentY > 0)
+        compare(counters.played, [])
+    }
+
+    function test_touch_half_tile_press_keeps_content_y() {
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = open()
+        page.showQuickplay()
+        page.completeAll()
+        const qp = page.quickplay
+        const k = qp.pinsCount + 2
+        qp.flick.contentY = qp.tileTop(k) + qp.tilePx / 2
+        const y = qp.flick.contentY
+        const tile = qp.tileAt(k)
+        mousePress(tile, tile.width / 2, tile.height * 0.75)
+        compare(qp.focusIndex, k)
+        compare(qp.flick.contentY, y)
+        mouseRelease(tile, tile.width / 2, tile.height * 0.75)
+        wait(0)
+        wait(0)
+        compare(counters.played.length, 1)
+    }
+
+    function flingQuickplay(page) {
+        const qp = page.quickplay
+        const x = Ui.px(100)
+        const y = page.height - Ui.px(20)
+        mousePress(page, x, y)
+        for (let i = 1; i <= 20; i++) {
+            mouseMove(page, x, y - Ui.px(150) * i / 20, -1, Qt.LeftButton)
+            wait(5)
+        }
+        mouseRelease(page, x, y - Ui.px(150))
+        wait(0)
+        wait(0)
+        return qp
+    }
+
+    function test_touch_fling_across_clamp_keeps_moving() {
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = open()
+        page.showQuickplay()
+        page.completeAll()
+        const qp = tc.flingQuickplay(page)
+        verify(qp.flick.touch.flinging)
+        const atRelease = qp.flick.contentY
+        wait(50)
+        verify(qp.flick.contentY > atRelease)
+        tryVerify(() => !qp.flick.touch.flinging, 5000)
+        verify(qp.focusIndex > 0)
+        const top = qp.tileTop(qp.focusIndex)
+        verify(top >= qp.flick.contentY && top + qp.tilePx <= qp.flick.contentY + qp.flick.height)
+    }
+
+    function test_touch_fling_across_settle_stops() {
+        fill(history, "History", 8)
+        fill(fresh, "New", 8)
+        const page = open()
+        page.showQuickplay()
+        page.completeAll()
+        const qp = tc.flingQuickplay(page)
+        verify(qp.flick.touch.flinging)
+        fresh.remove(fresh.count - 1)
+        wait(0)
+        wait(0)
+        compare(qp.flick.touch.flinging, false)
+        verify(qp.flick.contentY <= Math.max(0, qp.flick.contentHeight - qp.flick.height))
     }
 }

@@ -125,6 +125,25 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        switch (kind) {
+        case "row":
+        case "ring":
+            return "a"
+        case "pivot":
+            return "tap"
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (kind === "pivot" && index !== page.pivotIndex)
+            page.switchPivot(index - page.pivotIndex)
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         switch (name) {
         case "lb":
@@ -250,6 +269,17 @@ Page {
             color: page.battery < Ui.batteryLowPercent ? Ui.accent : Ui.textFull
         }
 
+        Item {
+            id: nameBlock
+
+            readonly property string touchKind: "row"
+
+            x: Ui.px(Ui.hubEdge - Ui.focusBarOffset)
+            y: Ui.px(page.nameBlockTop)
+            width: page.width - Ui.px(Ui.hubEdge) - nameBlock.x
+            height: Ui.px(page.nameBlockHeight)
+        }
+
         FocusBar {
             id: focusBar
 
@@ -262,6 +292,8 @@ Page {
 
         ListRow {
             id: transportRow
+
+            readonly property string touchKind: "row"
 
             visible: page.transportActive
             y: Ui.px(page.rowTop)
@@ -317,6 +349,8 @@ Page {
 
             Ring {
                 id: pairingRing
+
+                readonly property string touchKind: "ring"
 
                 size: Ui.backRing
                 glyph: "bluetooth"

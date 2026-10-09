@@ -89,6 +89,7 @@ Page {
     readonly property real progressWidth: np.artSide
     readonly property real timeBaseline: np.progressY + Ui.px(Ui.npTimeDrop)
     readonly property real ringY: Ui.px(Ui.npRingY)
+    readonly property real titleBottom: np.nextBaseline + Ui.px(Ui.npNextPitch) * (Ui.npNextCount - 1)
     readonly property Item holder: np.parent
     readonly property bool fadingPage: np.holder !== null && np.holder.kind === "fade" && np.stack !== null
         && np.stack.phase !== "idle" && (np.stack.incoming === np.holder || np.stack.outgoing === np.holder)
@@ -399,6 +400,24 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (np.idle)
+            return "a"
+        switch (kind) {
+        case "ring":
+            np.focusRow = 0
+            np.ringIndex = index
+            return "a"
+        case "title":
+            np.focusRow = 1
+            return "a"
+        case "back":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
     function completeAll() {
         if (trackAnim.running)
             trackAnim.complete()
@@ -676,6 +695,8 @@ Page {
         Item {
             id: backRingClip
 
+            readonly property string touchKind: "back"
+
             width: Ui.px(Ui.backRingX + Ui.backRing)
             height: Ui.px(Ui.backRingY + Ui.backRing)
             clip: true
@@ -852,6 +873,17 @@ Page {
                 animated: np.live
             }
 
+            Item {
+                id: titleBlock
+
+                readonly property string touchKind: "title"
+
+                x: np.textX
+                y: np.titleBaseline - Ui.px(Ui.capHeight * Ui.npTitle.size)
+                width: content.width - Ui.px(Ui.edge) - titleBlock.x
+                height: np.titleBottom - titleBlock.y
+            }
+
             Text {
                 id: titleItem
 
@@ -922,6 +954,17 @@ Page {
                         easing.type: Motion.bezier
                         easing.bezierCurve: Motion.decel
                     }
+                }
+
+                Item {
+                    id: ringHit
+
+                    readonly property string touchKind: "ring"
+                    readonly property int touchIndex: ringItem.index
+
+                    anchors.centerIn: parent
+                    width: Ui.px(Ui.npRingCenter(1) - Ui.npRingCenter(0))
+                    height: Math.max(0, Math.min(ringHit.width, 2 * (np.ringY - np.titleBottom)))
                 }
             }
         }

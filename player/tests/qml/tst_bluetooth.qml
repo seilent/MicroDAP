@@ -29,6 +29,14 @@ TestCase {
         stack: pages
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     QtObject {
         id: fake
 
@@ -485,5 +493,39 @@ TestCase {
         const center = page.pairingRing.mapToItem(page, page.pairingRing.width / 2, page.pairingRing.height / 2)
         fuzzyCompare(center.x, Ui.px(Ui.canvasW / 2), 0.01)
         fuzzyCompare(center.y, Ui.px(98 + 90), 0.01)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function test_touch_transport_row_opens_now_playing() {
+        fake.activate()
+        const page = open()
+        tc.tapAt(page.transportRow)
+        compare(counters.nowPlayingOpens, 1)
+    }
+
+    function test_touch_name_block_toggles() {
+        fake.connect()
+        const page = open()
+        tc.tapAt(page.stateText)
+        compare(fake.calls, ["play"])
+    }
+
+    function test_touch_pairing_ring_starts_pairing() {
+        const page = open({ animated: false, pivotIndex: 1 })
+        compare(page.shownPivot, 1)
+        tc.tapAt(page.pairingRing)
+        compare(fake.calls, ["startPairing 120"])
+    }
+
+    function test_touch_pivot_by_tap() {
+        const page = open()
+        const label = page.strip.labelItem(1)
+        tc.tapAt(label, Ui.px(4), label.height / 2)
+        compare(page.pivotIndex, 1)
     }
 }

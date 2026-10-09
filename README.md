@@ -152,6 +152,18 @@ the gap each side, as high as wide) and tags album and song rows; `AlbumDetail` 
 (`syncFocus()` or `focusIndex`). `Sheet` owns its rows (`item`), panel (`block`) and scrim (`scrim`, B); `JumpGrid`
 owns its letters with rows (`letter`) and EXIT (`exit`), its root is `block`; while either is not `shown` its
 items, scrim, letters and EXIT carry no tag and the root reads `block`, so a tap during the close reaches nothing.
+Home: menu items (`menu`, untagged while Quickplay is in front in portrait) call `showMenu()`, focus and act as A;
+in portrait the Quickplay holder is `peek` (`left` while the menu is in front) and the scaled menu column is
+`menu-peek` while Quickplay is in front (`b`, nothing where it overlaps the Quickplay panel). `Quickplay` owns its tiles and the phone tile (`tile`, the flat
+index): in portrait while not `active` a tile returns `left`; otherwise it focuses the tile under `touchFocusing`
+and, in landscape while not `active`, emits `touchFront()` (Home runs `showQuickplay()`) under the same guard;
+`touchFocusing` keeps `onFocusIndexChanged` and `onActiveChanged` from scrolling, and `touchTap` brings the tile inside. Its `flick` is a scroller only in landscape or while
+`active`, with a `TouchScroll` (default limit) and a clamp to the nearest fully visible tile in the focused
+column, any column when none in it is fully visible. `NowPlaying` puts a `ring` Item inside each `Ring` delegate (the ring center spacing wide, as high as
+wide but at most twice the distance from the ring center up to the title block bottom), a `titleBlock` (`title`) from `textX` to W - EDGE and from the title cap top to the last next track baseline slot,
+and tags `backRingClip` (`back`); while `idle` every tap returns `a` with no focus move, so the wake is the only
+effect. `Bluetooth` tags the transport row and a `nameBlock` (`row`, HUB_EDGE - 8 to W - HUB_EDGE, name cap top
+to the state baseline slot) and the pairing ring (`ring`), all A, and its pivot labels.
 
 Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
 32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, white only: the
@@ -532,7 +544,7 @@ its edit and steps right, `orientation-edit-end` steps to LANDSCAPE FLIPPED, `or
 `Outputs` that reads not internal, `auto-rotate` focuses AUTO ROTATE with it ON, `auto-rotate-unsupported` with a
 sensor that reads unsupported, `auto-rotate-below` focuses SAVER with AUTO ROTATE ON, `auto-rotate-off` focuses
 AUTO ROTATE with it OFF, `auto-rotate-edit` opens its edit and steps to ON; the `settings` sample reads AUTO ROTATE OFF;
-`pressed` sets `pressed` on the `hub`, `album` and `queue` page so the focused
+`pressed` sets `pressed` on the `hub`, `album`, `queue`, `home`, `quickplay` and `nowplaying` page so the focused
 item shows its F3 scale (on `hub` a focused divider or letter tile first moves down or right to a song row or album cell),
 `touch-scrolled` sets the `hub` or `queue` list `contentY` to one and a half rows and runs `clampFocusToView()`),
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`

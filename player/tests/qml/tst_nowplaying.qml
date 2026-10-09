@@ -26,6 +26,14 @@ TestCase {
         stack: pages
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     QtObject {
         id: fakeQueue
 
@@ -249,6 +257,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -794,5 +804,75 @@ TestCase {
         compare(page.backdrop.animating, false)
         page.screenOff = false
         compare(page.idleTimer.running, true)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function test_touch_rings_toggle() {
+        const page = open()
+        tc.tapAt(page.ring(0))
+        compare(fakePlayer.calls, ["toggleShuffle"])
+        tc.tapAt(page.ring(1))
+        compare(page.ringIndex, 1)
+        compare(fakePlayer.calls, ["toggleShuffle", "cycleRepeat"])
+        tc.tapAt(page.ring(2))
+        compare(page.ringIndex, 2)
+        compare(fakePlayer.calls[fakePlayer.calls.length - 1], "rate")
+    }
+
+    function test_touch_phone_ring_toggles() {
+        fakeBluez.activate()
+        const page = open()
+        compare(page.shownVariant, true)
+        tc.tapAt(page.ring(0))
+        compare(page.ringIndex, 0)
+        compare(fakeBluez.calls, ["pause"])
+        tc.tapAt(page.ring(1))
+        compare(page.ringIndex, 1)
+        compare(fakeBluez.shuffle, "alltracks")
+    }
+
+    function test_touch_title_opens_queue() {
+        const page = open()
+        tc.tapAt(page.titleItem)
+        compare(page.focusRow, 1)
+        compare(counters.queueOpens, 1)
+    }
+
+    function test_touch_last_next_track_opens_queue() {
+        const page = open()
+        compare(page.nextRepeater.count, 3)
+        tc.tapAt(page.nextRepeater.itemAt(2))
+        compare(counters.queueOpens, 1)
+        compare(fakePlayer.calls, [])
+    }
+
+    function test_touch_back_ring_returns() {
+        const page = open()
+        compare(pages.depth, 2)
+        tc.tapAt(page.backRing)
+        compare(pages.depth, 1)
+    }
+
+    function test_touch_first_tap_after_idle_restores() {
+        const page = open({ animated: true })
+        page.idle = true
+        tc.tapAt(page.ring(1))
+        compare(page.idle, false)
+        compare(page.ringIndex, 0)
+        compare(page.focusRow, 0)
+        compare(fakePlayer.calls, [])
+    }
+
+    function test_touch_art_does_nothing() {
+        const page = open()
+        tc.tapAt(page.artItem)
+        compare(fakePlayer.calls, [])
+        compare(counters.queueOpens, 0)
+        compare(pages.depth, 2)
     }
 }
