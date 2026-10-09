@@ -13,7 +13,6 @@ PressScale {
     property real glyphSize: root.size / 2
     property real level: 1.0
     property real arcSweep: 0
-    property bool animated: true
     readonly property alias iconItem: icon
     readonly property bool swapping: swap.running
 

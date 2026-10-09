@@ -78,6 +78,14 @@ TestCase {
         }
     }
 
+    PressScale {
+        id: still
+
+        width: 100
+        height: 100
+        animated: false
+    }
+
     Component {
         id: plainPage
 
@@ -309,6 +317,14 @@ TestCase {
         const other = page.rows.itemAtIndex(1)
         verify(other !== null)
         compare(other.scale, 1)
+    }
+
+    function test_press_scale_lands_without_animation() {
+        compare(still.scale, 1)
+        still.pressed = true
+        compare(still.scale, 0.96)
+        still.pressed = false
+        compare(still.scale, 1)
     }
 
     function test_b_pops() {

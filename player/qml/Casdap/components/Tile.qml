@@ -10,7 +10,6 @@ PressScale {
     property string subtitle: ""
     property bool focused: false
     property bool captioned: true
-    property bool animated: true
 
     readonly property real borderWidth: Ui.px(Ui.focusBorder)
     readonly property real captionAlpha: root.focused ? Ui.alphaFull : Ui.gridCaption.alpha

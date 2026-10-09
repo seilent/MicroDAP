@@ -105,7 +105,7 @@ with a 100 ms easeIn `contentY` tween per step; LT/RT move one page of whole row
 It reuses delegates (`reuseItems`, `cacheBuffer` one list height); every row delegate stops its entrance and
 lands at `enter` 1 in `ListView.onPooled`.
 `FocusBar` is the 2 u white bar at `HUB_EDGE - 8` spanning the row, following in 100 ms sine.
-`PressScale` scales its item to 0.96 while A is held, 100 ms linear each way.
+`PressScale` scales its item to 0.96 while A is held, 100 ms linear each way, at once while `animated` is false.
 
 Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
 32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, white only: the

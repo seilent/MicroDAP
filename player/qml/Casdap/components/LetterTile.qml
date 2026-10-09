@@ -8,7 +8,6 @@ PressScale {
     property real size: Ui.tileS
     property bool focused: false
     property bool empty: false
-    property bool animated: true
 
     readonly property real borderWidth: Ui.px(root.focused ? Ui.focusBorder : Ui.letterTileBorder)
     readonly property real borderAlpha: root.focused ? Ui.alphaFull : Ui.alphaLow

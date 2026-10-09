@@ -443,6 +443,7 @@ Item {
                             width: qp.tilePx
                             height: qp.tilePx
                             pressed: phone.focused && qp.pressed
+                            animated: qp.animated
 
                             Rectangle {
                                 anchors.fill: parent

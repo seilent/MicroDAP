@@ -15,7 +15,6 @@ PressScale {
     property bool countLine: false
     property bool ring: false
     property string ringGlyph: "play"
-    property bool animated: true
 
     readonly property real indent: Ui.songIndent
     readonly property bool indented: root.number !== "" || root.ring

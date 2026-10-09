@@ -373,6 +373,7 @@ Page {
                 height: sub.visible ? sub.y + sub.height : label.height
                 opacity: item.enter * (1 - item.exitCurve)
                 pressed: item.isFocused && home.pressed && !home.quickplayShown
+                animated: home.animated
 
                 onEnterChanged: {
                     if (item.index === 0)
