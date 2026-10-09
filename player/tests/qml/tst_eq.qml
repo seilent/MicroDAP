@@ -27,6 +27,14 @@ TestCase {
         pad: null
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     QtObject {
         id: fakeEq
 
@@ -140,6 +148,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -709,5 +719,99 @@ TestCase {
         router.dispatch("a", false)
         page.screenOff = true
         compare(tc.rowItem(page.headphonesPane, 3).enter, 1)
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function tapHeaderWord(page) {
+        tc.tapAt(page.header, page.header.textX + Ui.px(4), page.header.textBaseline - Ui.px(4))
+    }
+
+    function tapEqRow(page, index, fraction) {
+        const item = tc.rowItem(page.headphonesPane, index)
+        tc.tapAt(item, item.width * (fraction === undefined ? 0.25 : fraction), item.height / 2)
+    }
+
+    function test_touch_row_enters_edit() {
+        const page = open()
+        tc.tapEqRow(page, 1)
+        compare(page.focusIndex, 1)
+        compare(page.editing, true)
+        compare(page.editKey, "preamp")
+    }
+
+    function test_touch_halves_step_fine() {
+        const page = open()
+        tc.tapEqRow(page, 1)
+        tc.tapEqRow(page, 1, 0.75)
+        compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["stepPreamp", "headphones", 1, false]))
+        tc.tapEqRow(page, 1, 0.25)
+        compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["stepPreamp", "headphones", -1, false]))
+        compare(page.editing, true)
+    }
+
+    function test_touch_band_opens_and_closes() {
+        const page = open()
+        tc.tapEqRow(page, 2)
+        compare(page.headphonesPane.openBand, 0)
+        compare(page.editing, false)
+        tc.tapEqRow(page, 2)
+        compare(page.headphonesPane.openBand, -1)
+    }
+
+    function test_touch_header_reverts_then_pops() {
+        const page = open()
+        tc.tapEqRow(page, 1)
+        tc.tapEqRow(page, 1, 0.75)
+        const n = fakeEq.calls.length
+        tc.tapHeaderWord(page)
+        compare(page.editing, false)
+        compare(tc.callAt(n), JSON.stringify(["stepPreamp", "headphones", -1, false]))
+        compare(pages.depth, 2)
+        tc.tapHeaderWord(page)
+        compare(pages.depth, 1)
+    }
+
+    function test_touch_pivot_by_tap() {
+        const page = open()
+        const label = page.strip.labelItem(1)
+        tc.tapAt(label, Ui.px(4), label.height / 2)
+        compare(page.pivotIndex, 1)
+    }
+
+    function test_touch_drag_scrolls_outside_edit() {
+        const page = open()
+        const pane = page.headphonesPane
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), Ui.px(100))
+        verify(pane.contentY > 0)
+        compare(page.editing, false)
+        const top = page.focusIndex * page.pitch
+        verify(top >= pane.contentY - 0.5)
+        verify(top + page.pitch <= pane.contentY + pane.height + 0.5)
+    }
+
+    function test_touch_drag_in_edit_does_nothing() {
+        const page = open()
+        tc.tapEqRow(page, 1)
+        compare(page.editing, true)
+        tc.dragUp(page, page.width / 2, page.height - Ui.px(20), Ui.px(100))
+        compare(page.headphonesPane.contentY, 0)
+        compare(page.editing, true)
+        compare(page.focusIndex, 1)
     }
 }

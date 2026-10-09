@@ -27,6 +27,14 @@ TestCase {
         pad: null
     }
 
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+    }
+
     QtObject {
         id: fakeSettings
 
@@ -48,6 +56,7 @@ TestCase {
         property bool wifiOffScreenOff: false
         property string orientation: "portrait"
         property bool autoRotate: false
+        property bool touch: true
     }
 
     QtObject {
@@ -209,7 +218,7 @@ TestCase {
     readonly property var expectedKeys: [
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
-        "label-display", "accent", "accentArt", "orientation", "autoRotate", "scale", "saver", "rgb", "toasts",
+        "label-display", "accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts",
         "label-power", "screenOff", "suspend", "wifi",
         "about"
     ]
@@ -230,6 +239,8 @@ TestCase {
         pages.height = h
         router.width = w
         router.height = h
+        layer.width = w
+        layer.height = h
     }
 
     function init() {
@@ -254,6 +265,7 @@ TestCase {
         fakeSettings.wifiOffScreenOff = false
         fakeSettings.orientation = "portrait"
         fakeSettings.autoRotate = false
+        fakeSettings.touch = true
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -1693,5 +1705,204 @@ TestCase {
         compare(tc.rowOf(page, "codec").value, "aptx (pending)")
         fakeCodec.pending = false
         compare(tc.rowOf(page, "codec").value, "aptx")
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function dragUp(item, x, y, distance) {
+        mousePress(item, x, y)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(item, x, y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(item, x, y - distance)
+        wait(0)
+        wait(0)
+    }
+
+    function tapHeaderWord(page) {
+        tc.tapAt(page.header, page.header.textX + Ui.px(4), page.header.textBaseline - Ui.px(4))
+    }
+
+    function tapRow(page, key, fraction) {
+        tc.focusKey(page, key)
+        const item = tc.itemOf(page, key)
+        tc.tapAt(item, item.width * (fraction === undefined ? 0.25 : fraction), item.height / 2)
+    }
+
+    function test_touch_value_row_enters_edit() {
+        const page = open()
+        tc.tapRow(page, "output")
+        compare(page.editing, true)
+        compare(page.editKey, "output")
+    }
+
+    function test_touch_halves_step() {
+        const page = open()
+        tc.tapRow(page, "output")
+        tc.tapRow(page, "output", 0.75)
+        compare(fakeSettings.output, "speaker")
+        tc.tapRow(page, "output", 0.25)
+        compare(fakeSettings.output, "auto")
+        compare(page.editing, true)
+    }
+
+    function test_touch_tap_moves_focus_and_edits() {
+        const page = open()
+        tc.focusKey(page, "output")
+        const item = tc.itemOf(page, "hpGain")
+        tc.tapAt(item, item.width * 0.25, item.height / 2)
+        compare(page.focusIndex, tc.keyIndex(page, "hpGain"))
+        compare(page.editing, true)
+        compare(page.editKey, "hpGain")
+    }
+
+    function test_touch_other_row_confirms_without_focus_move() {
+        const page = open()
+        tc.tapRow(page, "output")
+        tc.tapRow(page, "output", 0.75)
+        const focus = page.focusIndex
+        const item = tc.itemOf(page, "hpGain")
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(page.editing, false)
+        compare(page.focusIndex, focus)
+        compare(fakeSettings.output, "speaker")
+    }
+
+    function test_touch_header_reverts_edit() {
+        const page = open()
+        tc.tapRow(page, "output")
+        tc.tapRow(page, "output", 0.75)
+        compare(fakeSettings.output, "speaker")
+        tc.tapHeaderWord(page)
+        compare(page.editing, false)
+        compare(fakeSettings.output, "auto")
+        compare(pages.depth, 2)
+    }
+
+    function test_touch_orientation_applies_on_confirm() {
+        const page = open()
+        tc.tapRow(page, "orientation")
+        compare(page.editKey, "orientation")
+        tc.tapRow(page, "orientation", 0.75)
+        compare(fakeSettings.orientation, "portrait")
+        const item = tc.itemOf(page, "accentArt")
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(page.editing, false)
+        compare(fakeSettings.orientation, "portrait-flipped")
+    }
+
+    function test_touch_row_listed_after_auto_rotate() {
+        const page = open()
+        compare(page.indexOfKey("touch"), page.indexOfKey("autoRotate") + 1)
+        compare(tc.rowOf(page, "touch").title, "touch")
+        compare(tc.rowOf(page, "touch").value, "on")
+        pages.clear()
+        const overlay = open({ overlay: true })
+        compare(overlay.indexOfKey("touch"), -1)
+    }
+
+    function test_touch_step_writes_only_at_a() {
+        const page = open()
+        tc.edit(page, "touch")
+        router.dispatch("right", false)
+        compare(tc.rowOf(page, "touch").value, "off")
+        compare(fakeSettings.touch, true)
+        router.dispatch("a", false)
+        compare(fakeSettings.touch, false)
+        compare(tc.rowOf(page, "touch").value, "off")
+    }
+
+    function test_touch_b_and_leaving_keep_value() {
+        const page = open()
+        tc.edit(page, "touch")
+        router.dispatch("right", false)
+        router.dispatch("b", false)
+        compare(page.editing, false)
+        compare(fakeSettings.touch, true)
+        tc.edit(page, "touch")
+        router.dispatch("right", false)
+        pages.pop()
+        compare(fakeSettings.touch, true)
+    }
+
+    function test_touch_off_by_tap_disables_handler() {
+        const r = tc.openInMain()
+        const page = r.page
+        compare(r.main.touchLayer.enabled, true)
+        tc.tapRow(page, "touch")
+        compare(page.editKey, "touch")
+        tc.tapRow(page, "touch", 0.75)
+        compare(fakeSettings.touch, true)
+        const item = tc.itemOf(page, "accentArt")
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(fakeSettings.touch, false)
+        compare(r.main.touchOn, false)
+        compare(r.main.touchLayer.enabled, false)
+        compare(page.editing, false)
+        wait(Motion.touchReturnDelay + 50)
+        compare(page.pressed, false)
+    }
+
+    function test_touch_sub_row_toggles_folder() {
+        const page = open()
+        tc.tapRow(page, "folders")
+        compare(page.foldersOpen, true)
+        const sub = tc.keyIndex(page, "folders") + 2
+        page.focusIndex = sub
+        page.ensureVisible(0)
+        const item = tc.rowItem(page, sub)
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/armada/Music", "/run/media/armada/SD"]))
+        compare(page.editing, false)
+    }
+
+    function test_touch_rescan_starts_scan() {
+        const page = open({ library: fakeLibrary })
+        tc.tapRow(page, "rescan")
+        compare(fakeLibrary.rescans, 1)
+    }
+
+    function test_touch_info_row_does_nothing() {
+        const page = open()
+        tc.tapRow(page, "about")
+        compare(page.aboutOpen, true)
+        const about = tc.keyIndex(page, "about")
+        const info = about + 1
+        compare(page.rows[info].kind, "info")
+        const item = tc.rowItem(page, info)
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(page.focusIndex, about)
+        compare(page.aboutOpen, true)
+        compare(page.editing, false)
+    }
+
+    function test_touch_drag_from_label_scrolls() {
+        const page = open()
+        const label = tc.itemOf(page, "label-output")
+        const y = label.mapToItem(page, 0, label.height / 2).y
+        verify(y > page.flick.y && y < page.height)
+        tc.dragUp(page, page.width / 2, y, Ui.px(100))
+        verify(page.flick.contentY > 0)
+        verify(page.isFocusable(page.focusIndex))
+        const top = page.rowTopOf(page.focusIndex)
+        verify(top >= page.flick.contentY - 0.5)
+        verify(top + page.rowHeightOf(page.focusedRow) <= page.flick.contentY + page.flick.height + 0.5)
+    }
+
+    function test_touch_drag_in_edit_does_nothing() {
+        const page = open()
+        tc.tapRow(page, "output")
+        compare(page.editing, true)
+        const y = page.height - Ui.px(20)
+        tc.dragUp(page, page.width / 2, y, Ui.px(100))
+        compare(page.flick.contentY, 0)
+        compare(page.editing, true)
+        compare(page.editKey, "output")
+        compare(page.focusIndex, tc.keyIndex(page, "output"))
     }
 }

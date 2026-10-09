@@ -164,6 +164,13 @@ wide but at most twice the distance from the ring center up to the title block b
 and tags `backRingClip` (`back`); while `idle` every tap returns `a` with no focus move, so the wake is the only
 effect. `Bluetooth` tags the transport row and a `nameBlock` (`row`, HUB_EDGE - 8 to W - HUB_EDGE, name cap top
 to the state baseline slot) and the pairing ring (`ring`), all A, and its pivot labels.
+`SettingsScreen` and `EqScreen` rows are `row` or `sub` (labels and info rows untagged); outside edit mode a tap
+focuses the row and acts as A, in edit mode a tap on the edited row returns `left` or `right` by the half it lands
+in, the header word `b` (revert) and any other tap `a` (confirm). Their scrollers (`flick`, each EQ `Pane`) take no
+drag while `editing` and clamp the focus to a fully visible focusable row (Settings: `rowAtY` of the view edge,
+then `nearestFocusable` inward; EQ: `contentY / pitch` rounded inward). `Dialog` (power menu, switch prompt) owns
+its items (`item`) and scrim (`scrim`, B); the title is `block`; while not `shown` the root reads `block` and the
+children carry no tag.
 
 Components under `components/`: `Glyph` draws one `GlyphPaths.js` path as a `Shape` scaled from the
 32 u box. `Ring` holds a Glyph at half the ring size, stroke 3 u idle and 4 u focused, white only: the
@@ -362,7 +369,8 @@ the edit leave it unchanged; `EXTERNAL DISPLAY` read only while orientation does
 effective orientation while auto rotate is on, supported and orientation applies; absent in overlay mode),
 `AUTO ROTATE` (`ON`, `OFF` on `Settings.autoRotate`; left/right toggle the value text, A writes it, B leaves it;
 `UNSUPPORTED` read only, no edit mode, while `Sensor` is null or `Sensor.supported` is false; absent in overlay
-mode), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps, shows the effective `Ui.userScale`; a step writes
+mode), `TOUCH` (`ON`, `OFF` on `Settings.touch`; left/right toggle `touchDraft`, A writes it, B and every other close
+leave it; OFF disables Main's `TouchLayer`; absent in overlay mode), `SCALE` (0.8 to `Ui.sMax` in 0.1 steps, shows the effective `Ui.userScale`; a step writes
 `Settings.scale` only when it differs from the effective value, B restores the saved `Settings.scale`; focus and
 the scroll are kept), `SAVER` (10, 15, 30 s, 1, 2, 5 min on
 `Settings.saverSeconds`), `RGB` (`ACCENT`, `OFF`, `ARMADA` on `Settings.rgb`; reads `UNSUPPORTED` and A enters no
@@ -546,7 +554,8 @@ sensor that reads unsupported, `auto-rotate-below` focuses SAVER with AUTO ROTAT
 AUTO ROTATE with it OFF, `auto-rotate-edit` opens its edit and steps to ON; the `settings` sample reads AUTO ROTATE OFF;
 `pressed` sets `pressed` on the `hub`, `album`, `queue`, `home`, `quickplay` and `nowplaying` page so the focused
 item shows its F3 scale (on `hub` a focused divider or letter tile first moves down or right to a song row or album cell),
-`touch-scrolled` sets the `hub` or `queue` list `contentY` to one and a half rows and runs `clampFocusToView()`),
+`touch-scrolled` sets the `hub` or `queue` list `contentY` to one and a half rows and runs `clampFocusToView()`,
+`touch` focuses TOUCH on `settings`, `touch-edit` also opens its edit with OFF drafted; the `settings` sample reads TOUCH ON),
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),

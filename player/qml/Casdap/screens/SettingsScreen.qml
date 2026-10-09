@@ -26,6 +26,7 @@ Page {
     property var editOriginal: null
     property string orientationDraft: ""
     property bool autoRotateDraft: false
+    property bool touchDraft: true
     property int eqRevision: 0
     property var folders: []
     property var shownValues: ({})
@@ -50,7 +51,7 @@ Page {
         output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
         codec: "btCodec", accent: "accentHue", accentArt: "accentFromArt", scale: "scale", saver: "saverSeconds",
         rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds", suspend: "suspendMinutes",
-        wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate"
+        wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate", touch: "touch"
     })
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
@@ -66,6 +67,8 @@ Page {
     readonly property string orientation: page.settings !== null && page.orientations.indexOf(String(page.settings.orientation)) >= 0
         ? String(page.settings.orientation) : "portrait"
     readonly property bool autoRotate: page.settings !== null && page.settings.autoRotate === true
+    readonly property bool touchEnabled: page.settings === null || page.settings.touch !== false
+    readonly property string touchValue: (page.editing && page.editKey === "touch" ? page.touchDraft : page.touchEnabled) ? "on" : "off"
     readonly property bool sensorSupported: !page.overlay && page.sensor !== null && page.sensor.supported === true
     readonly property bool autoFollowing: page.autoRotate && page.sensorSupported && Ui.orientationActive
     readonly property string effectiveOrientation: page.orientations[[0, 2, Ui.landscapeTurn, (Ui.landscapeTurn + 2) % 4].indexOf(Ui.turn)]
@@ -223,6 +226,8 @@ Page {
             out.push(page.row("orientation", "orientation", page.orientationValue, !Ui.orientationActive || page.autoFollowing))
         if (!page.overlay)
             out.push(page.row("autoRotate", "auto rotate", page.autoRotateValue, !page.sensorSupported))
+        if (!page.overlay)
+            out.push(page.row("touch", "touch", page.touchValue, false))
         out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
         out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
         if (!page.overlay)
@@ -310,6 +315,7 @@ Page {
     }
 
     function scrollTo(y: real, duration: int) {
+        touchScroller.stop()
         const target = Math.max(0, Math.min(page.maxContentY(), y))
         scrollAnim.stop()
         if (target === flick.contentY)
@@ -458,6 +464,9 @@ Page {
         case "autoRotate":
             page.autoRotateDraft = !page.autoRotateDraft
             return true
+        case "touch":
+            page.touchDraft = !page.touchDraft
+            return true
         default:
             return false
         }
@@ -504,6 +513,8 @@ Page {
             return page.orientation
         case "autoRotate":
             return page.autoRotate
+        case "touch":
+            return page.touchEnabled
         default:
             return undefined
         }
@@ -513,6 +524,7 @@ Page {
         page.editOriginal = page.currentOf(key)
         page.orientationDraft = page.orientation
         page.autoRotateDraft = page.autoRotate
+        page.touchDraft = page.touchEnabled
         page.editKey = key
         page.editing = true
     }
@@ -530,7 +542,7 @@ Page {
         const original = page.editOriginal
         if (key === "scale")
             page.applyScale(Number(original))
-        else if (key !== "orientation" && key !== "autoRotate")
+        else if (key !== "orientation" && key !== "autoRotate" && key !== "touch")
             page.set(page.settingOf(key), original)
         page.confirmEdit()
     }
@@ -539,11 +551,14 @@ Page {
         const key = page.editKey
         const draft = page.orientationDraft
         const autoDraft = page.autoRotateDraft
+        const touchDraft = page.touchDraft
         page.confirmEdit()
         if (key === "orientation")
             page.set("orientation", draft)
         else if (key === "autoRotate")
             page.set("autoRotate", autoDraft)
+        else if (key === "touch")
+            page.set("touch", touchDraft)
     }
 
     function revertOrConfirmForRotation(): void {
@@ -676,6 +691,31 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (page.editing) {
+            if (kind === "header")
+                return "b"
+            if ((kind === "row" || kind === "sub") && index === page.focusIndex)
+                return x < hit.width / 2 ? "left" : "right"
+            return "a"
+        }
+        switch (kind) {
+        case "row":
+        case "sub":
+            page.focusIndex = index
+            return "a"
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (!page.editing && (kind === "row" || kind === "sub"))
+            page.ensureVisible(Motion.scroll)
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
@@ -768,6 +808,8 @@ Page {
         readonly property bool sub: item.modelData.kind === "sub"
         readonly property bool info: item.modelData.kind === "info"
         readonly property bool hasSwatch: item.modelData.key === "accent"
+        readonly property string touchKind: item.label || item.info ? "" : item.sub ? "sub" : "row"
+        readonly property int touchIndex: item.index
         readonly property var titleRole: item.label ? Ui.sectionLabel : item.sub ? Ui.settingsSub : item.info ? Ui.settingsValue : Ui.settingsItem
         readonly property real titleAlpha: item.label ? Ui.sectionLabel.alpha
             : item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
@@ -922,6 +964,39 @@ Page {
     Flickable {
         id: flick
 
+        readonly property bool touchScroll: true
+        readonly property bool touchScrollEnabled: !page.editing
+        property alias touch: touchScroller
+
+        function stopScroll(): void {
+            scrollAnim.stop()
+        }
+
+        function clampFocusToView(): void {
+            const r = page.focusedRow
+            if (r === null)
+                return
+            const top = flick.contentY
+            const bottom = flick.contentY + flick.height
+            const rowTop = page.rowTopOf(page.focusIndex)
+            if (rowTop >= top - 0.5 && rowTop + page.rowHeightOf(r) <= bottom + 0.5)
+                return
+            let target = -1
+            if (rowTop < top) {
+                let i = page.rowAtY(top)
+                if (page.rowTopOf(i) < top - 0.5)
+                    i++
+                target = page.nearestFocusable(i, 1)
+            } else {
+                let i = page.rowAtY(bottom)
+                if (page.rowTopOf(i) + page.rowHeightOf(page.rows[i]) > bottom + 0.5)
+                    i--
+                target = page.nearestFocusable(i, -1)
+            }
+            if (target >= 0)
+                page.focusIndex = target
+        }
+
         x: 0
         y: Ui.px(Ui.contentTop)
         width: page.width
@@ -938,6 +1013,14 @@ Page {
             model: page.rows
 
             delegate: SettingsRow {}
+        }
+
+        TouchScroll {
+            id: touchScroller
+
+            flick: page.flick
+            limit: page.maxContentY
+            onMoved: flick.clampFocusToView()
         }
     }
 

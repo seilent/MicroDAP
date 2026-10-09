@@ -14,6 +14,15 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.fixture === "touch" || root.fixture === "touch-edit") {
+            screen.focusIndex = screen.indexOfKey("touch")
+            if (root.fixture === "touch-edit") {
+                screen.activate()
+                screen.step(1)
+            }
+            screen.keepFocusVisible()
+            return
+        }
         if (root.fixture.startsWith("auto-rotate")) {
             screen.focusIndex = screen.indexOfKey(root.fixture === "auto-rotate-below" ? "saver" : "autoRotate")
             if (root.fixture === "auto-rotate-edit") {
@@ -56,6 +65,7 @@ Item {
         property bool wifiOffScreenOff: false
         property string orientation: root.orientation
         property bool autoRotate: root.fixture === "auto-rotate" || root.fixture === "auto-rotate-below"
+        property bool touch: true
     }
 
     QtObject {

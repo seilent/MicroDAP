@@ -62,6 +62,114 @@ TestCase {
         height: 960
     }
 
+    PowerMenu {
+        id: powerMenu
+
+        width: 640
+        height: 960
+    }
+
+    SwitchPrompt {
+        id: prompt
+
+        width: 640
+        height: 960
+    }
+
+    ListModel {
+        id: rowsModel
+
+        Component.onCompleted: {
+            for (let i = 0; i < 20; i++)
+                rowsModel.append({ title: "row " + i })
+        }
+    }
+
+    Component {
+        id: rowPage
+
+        Page {
+            id: rp
+
+            property var activations: []
+
+            list: rowList
+            onActivated: (index) => rp.activations = rp.activations.concat([index])
+
+            FocusList {
+                id: rowList
+
+                y: Ui.px(Ui.contentTop)
+                width: rp.width
+                height: rp.height - rowList.y
+                model: rowsModel
+                delegate: Item {
+                    id: row
+
+                    required property int index
+                    readonly property string touchKind: "row"
+                    readonly property int touchIndex: row.index
+
+                    width: rowList.width
+                    height: rowList.rowPitch
+                }
+            }
+        }
+    }
+
+    PageStack {
+        id: pages
+
+        width: 640
+        height: 960
+    }
+
+    PadRouter {
+        id: router
+
+        width: 640
+        height: 960
+        stack: pages
+        modal: powerMenu.shown ? powerMenu : prompt
+    }
+
+    TouchLayer {
+        id: layer
+
+        width: 640
+        height: 960
+        router: router
+        dialogs: [prompt, powerMenu]
+    }
+
+    SignalSpy {
+        id: routedSpy
+
+        target: router
+        signalName: "routed"
+    }
+
+    SignalSpy {
+        id: verbSpy
+
+        target: powerMenu
+        signalName: "verb"
+    }
+
+    SignalSpy {
+        id: keepSpy
+
+        target: prompt
+        signalName: "keepInBackground"
+    }
+
+    SignalSpy {
+        id: closeSpy
+
+        target: prompt
+        signalName: "closePlayer"
+    }
+
     SignalSpy {
         id: acceptedSpy
 
@@ -103,6 +211,17 @@ TestCase {
         jump.dismiss()
         acceptedSpy.clear()
         rejectedSpy.clear()
+        powerMenu.close()
+        powerMenu.complete()
+        prompt.close()
+        prompt.complete()
+        pages.animate = false
+        pages.clear()
+        pages.push(rowPage, {})
+        routedSpy.clear()
+        verbSpy.clear()
+        keepSpy.clear()
+        closeSpy.clear()
     }
 
     function test_backdrop_stops() {
@@ -629,5 +748,91 @@ TestCase {
         jump.show("m")
         compare(jump.visible, false)
         compare(jump.letter, "m")
+    }
+
+    function tapAt(item, x, y) {
+        mouseClick(item, x, y)
+        wait(0)
+        wait(0)
+    }
+
+    function count(spy, name) {
+        let n = 0
+        for (let i = 0; i < spy.count; i++) {
+            if (spy.signalArguments[i][0] === name)
+                n++
+        }
+        return n
+    }
+
+    function pageRowY(page, index) {
+        return page.list.y + (index + 0.5) * page.list.rowPitch - page.list.contentY
+    }
+
+    function itemY(d, index) {
+        return Ui.px(Ui.contentTop) + (index + 0.5) * d.pitch
+    }
+
+    function openDialog(d) {
+        d.open()
+        d.complete()
+        compare(d.shown, true)
+    }
+
+    function test_touch_power_item_runs_verb() {
+        tc.openDialog(powerMenu)
+        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 2))
+        compare(verbSpy.count, 1)
+        compare(verbSpy.signalArguments[0][0], "suspend")
+        compare(powerMenu.shown, false)
+    }
+
+    function test_touch_power_scrim_closes() {
+        tc.openDialog(powerMenu)
+        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, powerMenu.items.length + 1))
+        compare(powerMenu.shown, false)
+        compare(verbSpy.count, 0)
+    }
+
+    function test_touch_second_scrim_tap_during_hide() {
+        const page = pages.currentItem
+        tc.openDialog(powerMenu)
+        const y = tc.itemY(powerMenu, powerMenu.items.length + 1)
+        tc.tapAt(powerMenu, powerMenu.width / 2, y)
+        compare(powerMenu.shown, false)
+        verify(powerMenu.animating)
+        tc.tapAt(powerMenu, powerMenu.width / 2, y)
+        compare(powerMenu.shown, false)
+        compare(verbSpy.count, 0)
+        compare(page.activations, [])
+        compare(tc.count(routedSpy, "a"), 0)
+    }
+
+    function test_touch_switch_prompt_items() {
+        prompt.show(false)
+        prompt.complete()
+        tc.tapAt(prompt, prompt.width / 2, tc.itemY(prompt, prompt.keepIndex))
+        compare(keepSpy.count, 1)
+        compare(closeSpy.count, 0)
+        prompt.close()
+        prompt.complete()
+        prompt.show(true)
+        prompt.complete()
+        tc.tapAt(prompt, prompt.width / 2, tc.itemY(prompt, prompt.closeIndex))
+        compare(closeSpy.count, 1)
+        prompt.close()
+        prompt.complete()
+    }
+
+    function test_touch_page_under_dialog_gets_nothing() {
+        const page = pages.currentItem
+        tc.tapAt(page, page.width / 2, tc.pageRowY(page, 4))
+        compare(page.activations, [4])
+        page.activations = []
+        tc.openDialog(powerMenu)
+        tc.tapAt(page, page.width / 2, tc.pageRowY(page, 7))
+        compare(page.activations, [])
+        compare(tc.count(routedSpy, "a"), 1)
+        compare(verbSpy.count, 0)
     }
 }

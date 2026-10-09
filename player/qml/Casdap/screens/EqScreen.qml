@@ -307,6 +307,37 @@ Page {
         return true
     }
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (page.editing) {
+            if (kind === "header")
+                return "b"
+            if ((kind === "row" || kind === "sub") && index === page.focusIndex)
+                return x < hit.width / 2 ? "left" : "right"
+            return "a"
+        }
+        switch (kind) {
+        case "row":
+        case "sub":
+            page.focusIndex = index
+            return "a"
+        case "pivot":
+            return "tap"
+        case "header":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
+    function touchTap(kind: string, index: int, hit: Item) {
+        if (page.editing)
+            return
+        if (kind === "pivot" && index !== page.pivotIndex)
+            page.switchPivot(index - page.pivotIndex)
+        else if (kind === "row" || kind === "sub")
+            page.activePane.ensureVisible(page.focusIndex, Motion.scroll)
+    }
+
     function handleAction(name: string, repeat: bool): bool {
         if (page.editing)
             return page.handleEdit(name, repeat)
@@ -417,6 +448,8 @@ Page {
         readonly property bool isFocused: item.owner !== null && page.pivotIndex === item.owner.pivot && page.focusIndex === item.index
         readonly property bool editing: item.isFocused && page.editing && page.editKey === item.modelData.key
         readonly property bool sub: item.modelData.kind === "sub"
+        readonly property string touchKind: item.sub ? "sub" : "row"
+        readonly property int touchIndex: item.index
         readonly property var titleRole: item.sub ? page.subRole : Ui.settingsItem
         readonly property real titleAlpha: item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
         readonly property real valueAlpha: item.isFocused ? Ui.settingsValueFocused : Ui.settingsValueDim
@@ -580,6 +613,9 @@ Page {
         readonly property bool scrolling: scrollAnim.running
         readonly property real scrollTarget: scrollAnim.to
         readonly property Repeater repeater: rowRepeater
+        readonly property bool touchScroll: true
+        readonly property bool touchScrollEnabled: !page.editing
+        property alias touch: touchScroller
 
         signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve, int from)
         signal settle()
@@ -627,6 +663,7 @@ Page {
         }
 
         function scrollTo(y: real, duration: int): void {
+            touchScroller.stop()
             const target = Math.max(0, Math.min(pane.maxContentY(), y))
             scrollAnim.stop()
             if (target === pane.contentY)
@@ -651,7 +688,25 @@ Page {
                 scrollAnim.complete()
         }
 
+        function stopScroll(): void {
+            scrollAnim.stop()
+        }
+
+        function clampFocusToView(): void {
+            if (page.activePane !== pane || pane.rows.length === 0)
+                return
+            const first = Math.ceil(pane.contentY / page.pitch - 0.001)
+            const last = Math.min(pane.rows.length - 1, Math.floor((pane.contentY + pane.height) / page.pitch + 0.001) - 1)
+            if (last < first)
+                return
+            if (page.focusIndex < first)
+                page.focusIndex = first
+            else if (page.focusIndex > last)
+                page.focusIndex = last
+        }
+
         function reset(): void {
+            touchScroller.stop()
             scrollAnim.stop()
             pane.pendingFrom = -1
             pane.openBand = -1
@@ -694,6 +749,14 @@ Page {
             target: pane
             property: "contentY"
             easing.type: Motion.easeIn
+        }
+
+        TouchScroll {
+            id: touchScroller
+
+            flick: pane
+            limit: pane.maxContentY
+            onMoved: pane.clampFocusToView()
         }
     }
 

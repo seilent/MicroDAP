@@ -25,6 +25,10 @@
 | home | `pressed` | `--size 640x960` and `960x640` | focused menu item at F3 scale | pending |
 | quickplay | `pressed` | `--size 640x960` and `960x640` | focused tile at F3 scale inside its slot | pending |
 | nowplaying | `pressed` | `--size 640x960` and `960x640` | focused ring at F3 scale | pending |
+| settings | `touch-edit` | `--size 640x960` and `960x640` | TOUCH draft OFF in accent after AUTO ROTATE | pending |
+| settings | `touch` | `--size 640x960` and `960x640` | TOUCH reads ON after AUTO ROTATE, focus on TOUCH | pending |
+| eq | `pressed` | `--size 640x960` and `960x640` | renders as browse (EQ rows have no F3) | pending |
+| power | `pressed` | `--size 640x960` and `960x640` | renders as browse (dialog items have no F3) | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

@@ -137,6 +137,8 @@ const QStringList &states()
         QStringLiteral("auto-rotate-edit"),
         QStringLiteral("pressed"),
         QStringLiteral("touch-scrolled"),
+        QStringLiteral("touch"),
+        QStringLiteral("touch-edit"),
     };
     return names;
 }

@@ -23,14 +23,31 @@ Item {
     property alias bar: bar
     property alias openAnimation: openAnim
     property alias closeAnimation: closeAnim
+    readonly property string touchKind: root.shown ? "" : "block"
 
     signal accepted(int index)
     signal rejected()
 
     visible: (root.shown || root.animating) && !root.screenOff
 
+    function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (!root.shown)
+            return ""
+        switch (kind) {
+        case "item":
+            root.focusIndex = index
+            return "a"
+        case "scrim":
+            return "b"
+        default:
+            return ""
+        }
+    }
+
     Rectangle {
         id: scrim
+
+        readonly property string touchKind: root.shown ? "scrim" : ""
 
         anchors.fill: parent
         color: root.scrimColor
@@ -47,6 +64,8 @@ Item {
 
         Text {
             id: titleText
+
+            readonly property string touchKind: "block"
 
             x: root.edge
             y: Ui.px(Ui.pivotBaseline) - titleText.baselineOffset
@@ -71,6 +90,8 @@ Item {
                     required property int index
                     required property var modelData
                     readonly property bool isFocused: row.index === root.focusIndex
+                    readonly property string touchKind: root.shown ? "item" : ""
+                    readonly property int touchIndex: row.index
 
                     width: list.width
                     height: root.pitch
