@@ -1,5 +1,6 @@
 #include "VolumeKeys.h"
 
+#include "AlsaVolume.h"
 #include "Settings.h"
 
 #include <QAbstractEventDispatcher>
@@ -7,6 +8,7 @@
 #include <QDir>
 #include <QFile>
 #include <QMetaMethod>
+#include <QPointer>
 #include <QSocketNotifier>
 
 #include <cerrno>
@@ -260,6 +262,17 @@ void PulseSinkVolume::step(int percent)
         return;
     m_pendingSteps += direction;
     m_pendingPercent += percent;
+}
+
+void PulseSinkVolume::dropPending()
+{
+    const bool sending = m_send.isActive();
+    m_send.stop();
+    m_unmute = false;
+    m_pendingSteps = 0;
+    m_pendingPercent = 0;
+    if (sending)
+        validate();
 }
 
 void PulseSinkVolume::onState(pa_context *context, void *userdata)
@@ -555,19 +568,23 @@ void PulseSinkVolume::sinkMuted(const QString &name, std::function<void(bool ok,
     });
 }
 
-void PulseSinkVolume::setSinkVolumeDb(const QString &name, double db)
+void PulseSinkVolume::setSinkVolumeDb(const QString &name, double db, std::function<void(bool ok)> done)
 {
     const QByteArray sink = name.toUtf8();
-    querySink(PA_INVALID_INDEX, sink, [this, sink, db](const pa_sink_info *info) {
+    querySink(PA_INVALID_INDEX, sink, [this, sink, db, done](const pa_sink_info *info) {
         if (!info || !pa_cvolume_valid(&info->volume)) {
             qWarning().noquote() << "casdap volume: no sink" << QString::fromUtf8(sink);
+            if (done)
+                done(false);
             return;
         }
         pa_cvolume volume;
         pa_cvolume_set(&volume, info->volume.channels, pa_sw_volume_from_dB(db));
-        dacCall("sink volume", [this, sink, volume] {
+        auto request = std::make_unique<Request>();
+        request->set = done ? done : [](bool) {};
+        issue(std::move(request), [this, sink, volume](Request *raw) {
             return pa_context_set_sink_volume_by_name(m_context, sink.constData(), &volume,
-                                                      &PulseSinkVolume::onDacSet, this);
+                                                      &PulseSinkVolume::onRequestSet, raw);
         });
     });
 }
@@ -651,6 +668,18 @@ void PulseSinkVolume::onDacSet(pa_context *context, int success, void *userdata)
     qWarning() << "casdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
 }
 
+void PulseSinkVolume::onRequestSet(pa_context *context, int success, void *userdata)
+{
+    auto *request = static_cast<Request *>(userdata);
+    if (context != request->self->m_context)
+        return;
+    if (!success)
+        qWarning() << "casdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
+    std::unique_ptr<Request> owned = request->self->take(request);
+    if (owned)
+        owned->set(success != 0);
+}
+
 void PulseSinkVolume::querySink(quint32 index, const QByteArray &name,
                                 std::function<void(const pa_sink_info *)> done)
 {
@@ -716,13 +745,16 @@ void PulseSinkVolume::fail(std::unique_ptr<Request> request)
         return;
     QMetaObject::invokeMethod(
         this,
-        [sink = std::move(request->sink), card = std::move(request->card), inputs = std::move(request->inputs)] {
+        [sink = std::move(request->sink), card = std::move(request->card), inputs = std::move(request->inputs),
+         set = std::move(request->set)] {
             if (sink)
                 sink(nullptr);
             if (card)
                 card(nullptr);
             if (inputs)
                 inputs(nullptr);
+            if (set)
+                set(false);
         },
         Qt::QueuedConnection);
 }
@@ -762,6 +794,139 @@ void PulseSinkVolume::dacCall(const char *what, const std::function<pa_operation
         return;
     }
     pa_operation_unref(operation);
+}
+
+RoutedSinkVolume::RoutedSinkVolume(SinkVolume *pulse, DacSinkPort *dac, AlsaVolume *alsa, int storeDelayMs,
+                                   QObject *parent)
+    : SinkVolume(parent)
+    , m_pulse(pulse)
+    , m_dac(dac)
+    , m_alsa(alsa)
+{
+    m_pulse->setParent(this);
+    m_store.setSingleShot(true);
+    m_store.setInterval(storeDelayMs);
+    connect(&m_store, &QTimer::timeout, this, [this] { storeSync(m_card); });
+    connect(m_pulse, &SinkVolume::levelChanged, this, [this](int percent) {
+        if (m_route == Route::Pulse)
+            emit levelChanged(percent);
+    });
+    connect(m_alsa, &AlsaVolume::levelChanged, this, [this](int percent) {
+        if (m_route == Route::Alsa)
+            emit levelChanged(percent);
+    });
+}
+
+void RoutedSinkVolume::step(int percent)
+{
+    if (m_route == Route::Pulse) {
+        m_pulse->step(percent);
+        return;
+    }
+    if (percent == 0)
+        return;
+    if (!mixerOn(false)) {
+        qWarning().noquote() << "casdap volume: press skipped, mixer not open on" << m_card;
+        return;
+    }
+    m_alsa->pressed(percent);
+    keepOwned();
+    if (percent > 0 && !m_sink.isEmpty())
+        m_dac->unmuteSink(m_sink);
+    m_dirty = true;
+    if (m_storeAllowed)
+        m_store.start();
+}
+
+void RoutedSinkVolume::setRoute(Route route, const QString &cardId, const QString &sink)
+{
+    const QString card = route == Route::Alsa ? cardId : QString();
+    if (route == m_route && card == m_card) {
+        m_sink = route == Route::Alsa ? sink : QString();
+        return;
+    }
+    keepOwned();
+    m_store.stop();
+    m_dirty = false;
+    if (route == Route::Alsa)
+        m_pulse->dropPending();
+    m_route = route;
+    m_card = card;
+    m_sink = route == Route::Alsa ? sink : QString();
+    if (route == Route::Alsa)
+        qInfo().noquote() << "casdap volume: route alsa hw:CARD=" + card;
+    else
+        qInfo() << "casdap volume: route pulse";
+}
+
+void RoutedSinkVolume::setStoreAllowed(bool allowed)
+{
+    m_storeAllowed = allowed;
+    if (!allowed)
+        m_store.stop();
+    else if (m_dirty && m_route == Route::Alsa && !m_store.isActive())
+        m_store.start();
+}
+
+void RoutedSinkVolume::storeSync(const QString &cardId)
+{
+    if (m_route != Route::Alsa || cardId != m_card || m_sink.isEmpty()) {
+        qWarning().noquote() << "casdap volume: store sync skipped for" << cardId;
+        return;
+    }
+    if (!mixerOn(true)) {
+        qWarning().noquote() << "casdap volume: store sync skipped, mixer not open on" << cardId;
+        return;
+    }
+    m_store.stop();
+    m_dirty = false;
+    const double db = m_alsa->stepDb();
+    qInfo().noquote() << "casdap volume: store sync" << cardId << "step" << m_alsa->step() << db << "dB";
+    QPointer<RoutedSinkVolume> self(this);
+    m_dac->setSinkVolumeDb(m_sink, db, [self, cardId](bool ok) {
+        if (!self || self->m_route != Route::Alsa || self->m_card != cardId || !self->mixerOn(true))
+            return;
+        if (!ok) {
+            qWarning().noquote() << "casdap volume: store sync failed on" << cardId;
+            return;
+        }
+        self->m_alsa->nudge();
+        self->m_alsa->watchReturn(storeWatchMs);
+    });
+}
+
+int RoutedSinkVolume::ownedStep(const QString &cardId) const
+{
+    if (!cardId.isEmpty() && cardId == m_alsa->cardId() && m_alsa->rangeDb() > 0.0)
+        return m_alsa->step();
+    return m_owned.value(cardId, -1);
+}
+
+void RoutedSinkVolume::setOwnedStep(const QString &cardId, int step)
+{
+    m_owned.insert(cardId, step);
+    if (!cardId.isEmpty() && cardId == m_alsa->cardId()) {
+        m_alsa->setOwnedStep(step);
+        keepOwned();
+    }
+}
+
+DacVolumePort::Route RoutedSinkVolume::route() const
+{
+    return m_route;
+}
+
+void RoutedSinkVolume::keepOwned()
+{
+    const QString card = m_alsa->cardId();
+    if (!card.isEmpty() && m_alsa->rangeDb() > 0.0)
+        m_owned.insert(card, m_alsa->step());
+}
+
+bool RoutedSinkVolume::mixerOn(bool requireOpen) const
+{
+    return (!requireOpen || m_alsa->isOpen()) && !m_card.isEmpty() && m_alsa->cardId() == m_card
+        && m_alsa->rangeDb() > 0.0;
 }
 
 VolumeKeys::VolumeKeys(KeySource *keys, SinkVolume *sink, Settings *settings, QObject *parent)

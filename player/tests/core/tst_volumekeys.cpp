@@ -27,6 +27,7 @@ namespace {
 constexpr int retry = 50;
 
 const MixerRange fiio{0, 120, -60.0, 0.0};
+const QString fiioSink = QStringLiteral("alsa_output.usb-FIIO_SNOWSKY_TINY_B-01.analog-stereo");
 
 class FakeKeys : public KeySource
 {
@@ -45,12 +46,18 @@ public:
         steps.append(percent);
     }
 
+    void dropPending() override
+    {
+        ++drops;
+    }
+
     void report(int level)
     {
         emit levelChanged(level);
     }
 
     QList<int> steps;
+    int drops = 0;
 };
 
 using Props = QList<QPair<QByteArray, QByteArray>>;
@@ -110,6 +117,7 @@ private slots:
     void alsaPressWhileClosed();
     void alsaWatchRewrites();
     void alsaWatchGivesUp();
+    void alsaWatchKeepsLaterEnd();
     void alsaPressAtLimitSkipsWrite();
     void alsaMuteFloorMapped();
     void alsaNonLinearRejected();
@@ -118,6 +126,17 @@ private slots:
     void bluezInputMatched();
     void dacHelpersFailWithoutServer();
     void dacFailuresDroppedWithObject();
+    void routedPulseForwards();
+    void routedAlsaWritesPcm();
+    void routedDropsPulseLevels();
+    void routedDownNeverUnmutes();
+    void routedStoreSyncOrder();
+    void routedStoreSyncAfterLastPress();
+    void routedStoreSyncGated();
+    void routedOwnedStepPerCard();
+    void routedStoreSyncNudge();
+    void routedSkipsWithoutMixer();
+    void routedDropsPulsePending();
 
 private:
     void addNode(const QString &event, const QString &name);
@@ -661,6 +680,25 @@ void VolumeKeysTest::alsaWatchRewrites()
     QCOMPARE(volume.step(), current);
 }
 
+void VolumeKeysTest::alsaWatchKeepsLaterEnd()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned), 10);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    volume.setOwnedStep(90);
+    QElapsedTimer clock;
+    clock.start();
+    volume.watchReturn(1500);
+    volume.watchReturn(200);
+    QCOMPARE(mixer->writes, QList<long>({90, 90}));
+    QTest::qWait(600);
+    mixer->foreign(60);
+    QTRY_COMPARE(mixer->writes.size(), 3);
+    QCOMPARE(mixer->writes.last(), 90L);
+    QVERIFY(clock.elapsed() < 1500);
+}
+
 void VolumeKeysTest::alsaWatchGivesUp()
 {
     auto owned = std::make_unique<FakeMixer>();
@@ -842,6 +880,341 @@ void VolumeKeysTest::dacFailuresDroppedWithObject()
     }
     QTest::qWait(100);
     QCOMPARE(calls, 0);
+}
+
+void VolumeKeysTest::routedPulseForwards()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    QStringList log;
+    FakeDacSink dac(&log);
+    AlsaVolume alsa(std::make_unique<FakeMixer>(&log), 10);
+    auto *keys = new FakeKeys;
+    auto *pulse = new FakeSink;
+    auto *routed = new RoutedSinkVolume(pulse, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QSignalSpy levels(&volume, &VolumeKeys::levelChanged);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    QCOMPARE(routed->route(), DacVolumePort::Route::Pulse);
+    keys->press(1);
+    keys->press(-1);
+    QCOMPARE(pulse->steps, QList<int>({5, -5}));
+    pulse->report(42);
+    QCOMPARE(levels.count(), 1);
+    QCOMPARE(levels.at(0).at(0).toInt(), 42);
+    routed->setStoreAllowed(true);
+    QTest::qWait(150);
+    QVERIFY(log.isEmpty());
+    QCOMPARE(alsa.step(), 80);
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), 80);
+    QCOMPARE(routed->ownedStep(QStringLiteral("C")), -1);
+}
+
+void VolumeKeysTest::routedAlsaWritesPcm()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume alsa(std::move(owned), 10);
+    auto *keys = new FakeKeys;
+    auto *pulse = new FakeSink;
+    auto *routed = new RoutedSinkVolume(pulse, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QSignalSpy levels(&volume, &VolumeKeys::levelChanged);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    QCOMPARE(routed->route(), DacVolumePort::Route::Alsa);
+    keys->press(1);
+    const int first = AlsaVolume::stepFor(80, 5, fiio);
+    QCOMPARE(alsa.step(), first);
+    QCOMPARE(mixer->writes, QList<long>({long(first)}));
+    QCOMPARE(levels.count(), 1);
+    QCOMPARE(levels.last().at(0).toInt(), qRound(AlsaVolume::percentOfDb(AlsaVolume::dbOfStep(first, fiio))));
+    settings.setVolumeStep(10);
+    keys->press(1);
+    const int second = AlsaVolume::stepFor(first, 10, fiio);
+    QCOMPARE(alsa.step(), second);
+    QCOMPARE(levels.count(), 2);
+    QTRY_COMPARE(mixer->writes.last(), long(second));
+    QVERIFY(pulse->steps.isEmpty());
+    QCOMPARE(dac.calls, QStringList({QStringLiteral("unmute ") + fiioSink, QStringLiteral("unmute ") + fiioSink}));
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), second);
+}
+
+void VolumeKeysTest::routedDropsPulseLevels()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    AlsaVolume alsa(std::make_unique<FakeMixer>(), 10);
+    auto *keys = new FakeKeys;
+    auto *pulse = new FakeSink;
+    auto *routed = new RoutedSinkVolume(pulse, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QSignalSpy levels(&volume, &VolumeKeys::levelChanged);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    pulse->report(42);
+    QCOMPARE(levels.count(), 0);
+    keys->press(-1);
+    pulse->report(37);
+    QCOMPARE(levels.count(), 1);
+    QCOMPARE(levels.last().at(0).toInt(),
+             qRound(AlsaVolume::percentOfDb(AlsaVolume::dbOfStep(AlsaVolume::stepFor(80, -5, fiio), fiio))));
+    routed->setRoute(DacVolumePort::Route::Pulse, QString(), QString());
+    pulse->report(42);
+    QCOMPARE(levels.count(), 2);
+    QCOMPARE(levels.last().at(0).toInt(), 42);
+    keys->press(1);
+    QCOMPARE(pulse->steps, QList<int>({5}));
+    QCOMPARE(levels.count(), 2);
+}
+
+void VolumeKeysTest::routedDownNeverUnmutes()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    dac.muted = true;
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume alsa(std::move(owned), 10);
+    auto *keys = new FakeKeys;
+    auto *routed = new RoutedSinkVolume(new FakeSink, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    keys->press(-1);
+    keys->press(-1);
+    QTRY_COMPARE(mixer->writes.last(), long(alsa.step()));
+    QVERIFY(dac.calls.isEmpty());
+    QVERIFY(dac.muted);
+    keys->press(1);
+    QCOMPARE(dac.calls, QStringList({QStringLiteral("unmute ") + fiioSink}));
+    QVERIFY(!dac.muted);
+}
+
+void VolumeKeysTest::routedStoreSyncOrder()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    QStringList log;
+    FakeDacSink dac(&log);
+    AlsaVolume alsa(std::make_unique<FakeMixer>(&log), 10);
+    auto *keys = new FakeKeys;
+    auto *routed = new RoutedSinkVolume(new FakeSink, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    routed->setStoreAllowed(true);
+    keys->press(1);
+    const int step = alsa.step();
+    const QString pcm = QStringLiteral("PCM %1").arg(step);
+    QTRY_COMPARE_WITH_TIMEOUT(log.size(), 6, 1000);
+    QCOMPARE(log, QStringList({pcm, QStringLiteral("unmute ") + fiioSink,
+                               QStringLiteral("sink volume %1 %2").arg(fiioSink).arg(AlsaVolume::dbOfStep(step, fiio)),
+                               QStringLiteral("sink volume done ") + fiioSink, QStringLiteral("PCM %1").arg(step + 1),
+                               pcm}));
+    QCOMPARE(dac.volumeDb, alsa.stepDb());
+    QTest::qWait(RoutedSinkVolume::storeWatchMs + 100);
+    QCOMPARE(log.size(), 6);
+}
+
+void VolumeKeysTest::routedStoreSyncAfterLastPress()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    AlsaVolume alsa(std::make_unique<FakeMixer>(), 10);
+    auto *keys = new FakeKeys;
+    auto *routed = new RoutedSinkVolume(new FakeSink, &dac, &alsa, 1000);
+    VolumeKeys volume(keys, routed, &settings);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    routed->setStoreAllowed(true);
+    const QString sync = QStringLiteral("sink volume ") + fiioSink;
+    keys->press(-1);
+    QTest::qWait(100);
+    QCOMPARE(dac.calls.filter(sync).size(), 0);
+    keys->press(-1);
+    QElapsedTimer since;
+    since.start();
+    QTRY_COMPARE_WITH_TIMEOUT(dac.calls.filter(sync).size(), 1, 3000);
+    QVERIFY(since.elapsed() >= 950);
+    QCOMPARE(dac.volumeDb, alsa.stepDb());
+    QTest::qWait(400);
+    QCOMPARE(dac.calls.filter(sync).size(), 1);
+}
+
+void VolumeKeysTest::routedStoreSyncGated()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume alsa(std::move(owned), 10);
+    auto *keys = new FakeKeys;
+    auto *routed = new RoutedSinkVolume(new FakeSink, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    const QString sync = QStringLiteral("sink volume ") + fiioSink;
+    keys->press(-1);
+    QTest::qWait(200);
+    QCOMPARE(dac.calls.filter(sync).size(), 0);
+    routed->setStoreAllowed(true);
+    QTRY_COMPARE(dac.calls.filter(sync).size(), 1);
+    keys->press(-1);
+    routed->setStoreAllowed(false);
+    QTest::qWait(200);
+    QCOMPARE(dac.calls.filter(sync).size(), 1);
+    const qsizetype writes = mixer->writes.size();
+    routed->storeSync(QStringLiteral("B"));
+    QCOMPARE(dac.calls.filter(sync).size(), 2);
+    QTRY_COMPARE(mixer->writes.size(), writes + 2);
+    QCOMPARE(mixer->writes.last(), long(alsa.step()));
+    routed->setStoreAllowed(true);
+    QTest::qWait(200);
+    QCOMPARE(dac.calls.filter(sync).size(), 2);
+    routed->storeSync(QStringLiteral("C"));
+    QCOMPARE(dac.calls.filter(sync).size(), 2);
+    keys->press(-1);
+    routed->setRoute(DacVolumePort::Route::Pulse, QString(), QString());
+    routed->storeSync(QStringLiteral("B"));
+    QTest::qWait(200);
+    QCOMPARE(dac.calls.filter(sync).size(), 2);
+}
+
+void VolumeKeysTest::routedOwnedStepPerCard()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume alsa(std::move(owned), 10);
+    auto *keys = new FakeKeys;
+    auto *routed = new RoutedSinkVolume(new FakeSink, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), 80);
+    keys->press(1);
+    const int moved = alsa.step();
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), moved);
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink + QStringLiteral(".3"));
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), moved);
+    keys->press(1);
+    QCOMPARE(dac.calls.last(), QStringLiteral("unmute ") + fiioSink + QStringLiteral(".3"));
+    const int again = alsa.step();
+    mixer->value = 40;
+    QVERIFY(alsa.open(QStringLiteral("C")));
+    keys->press(1);
+    QCOMPARE(alsa.step(), 40);
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), again);
+    QCOMPARE(routed->ownedStep(QStringLiteral("C")), 40);
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("C"), QStringLiteral("alsa_output.usb-Apple"));
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), again);
+    routed->setOwnedStep(QStringLiteral("B"), 30);
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), 30);
+    QCOMPARE(alsa.step(), 40);
+    routed->setOwnedStep(QStringLiteral("C"), 50);
+    QCOMPARE(alsa.step(), 50);
+    QCOMPARE(routed->ownedStep(QStringLiteral("C")), 50);
+    routed->setRoute(DacVolumePort::Route::Pulse, QString(), QString());
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), 30);
+    QCOMPARE(routed->ownedStep(QStringLiteral("C")), 50);
+    QCOMPARE(routed->ownedStep(QStringLiteral("D")), -1);
+}
+
+void VolumeKeysTest::routedStoreSyncNudge()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    mixer->value = 120;
+    AlsaVolume alsa(std::move(owned), 10);
+    auto *routed = new RoutedSinkVolume(new FakeSink, &dac, &alsa, 50);
+    VolumeKeys volume(new FakeKeys, routed, &settings);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    routed->storeSync(QStringLiteral("B"));
+    QVERIFY(mixer->writes.isEmpty());
+    QTRY_COMPARE(mixer->writes, QList<long>({119, 120}));
+    mixer->foreign(70);
+    QTRY_COMPARE(mixer->writes.size(), 3);
+    QCOMPARE(mixer->writes.last(), 120L);
+    QTest::qWait(RoutedSinkVolume::storeWatchMs + 100);
+    mixer->foreign(60);
+    QTest::qWait(100);
+    QCOMPARE(mixer->writes.size(), 3);
+    routed->storeSync(QStringLiteral("B"));
+    QTRY_COMPARE(mixer->writes.size(), 4);
+    QCOMPARE(mixer->writes.last(), 120L);
+    QTest::qWait(RoutedSinkVolume::storeWatchMs + 100);
+    QCOMPARE(mixer->writes.size(), 4);
+    dac.setOk = false;
+    mixer->foreign(60);
+    routed->storeSync(QStringLiteral("B"));
+    QTRY_COMPARE(dac.calls.last(), QStringLiteral("sink volume done ") + fiioSink);
+    QTest::qWait(100);
+    QCOMPARE(mixer->writes.size(), 4);
+}
+
+void VolumeKeysTest::routedSkipsWithoutMixer()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume alsa(std::move(owned), 10);
+    auto *keys = new FakeKeys;
+    auto *pulse = new FakeSink;
+    auto *routed = new RoutedSinkVolume(pulse, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    QSignalSpy levels(&volume, &VolumeKeys::levelChanged);
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    routed->setStoreAllowed(true);
+    keys->press(1);
+    routed->storeSync(QStringLiteral("B"));
+    QTest::qWait(150);
+    QVERIFY(dac.calls.isEmpty());
+    QVERIFY(mixer->writes.isEmpty());
+    QVERIFY(pulse->steps.isEmpty());
+    QCOMPARE(levels.count(), 0);
+    QVERIFY(alsa.open(QStringLiteral("C")));
+    keys->press(1);
+    routed->storeSync(QStringLiteral("B"));
+    QTest::qWait(150);
+    QVERIFY(dac.calls.isEmpty());
+    QVERIFY(mixer->writes.isEmpty());
+    QCOMPARE(alsa.step(), 80);
+    QCOMPARE(routed->ownedStep(QStringLiteral("B")), -1);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    alsa.close();
+    keys->press(1);
+    QCOMPARE(levels.count(), 1);
+    QCOMPARE(alsa.step(), AlsaVolume::stepFor(80, 5, fiio));
+    routed->storeSync(QStringLiteral("B"));
+    QTest::qWait(150);
+    QCOMPARE(dac.calls, QStringList({QStringLiteral("unmute ") + fiioSink}));
+}
+
+void VolumeKeysTest::routedDropsPulsePending()
+{
+    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    FakeDacSink dac;
+    AlsaVolume alsa(std::make_unique<FakeMixer>(), 10);
+    auto *keys = new FakeKeys;
+    auto *pulse = new FakeSink;
+    auto *routed = new RoutedSinkVolume(pulse, &dac, &alsa, 50);
+    VolumeKeys volume(keys, routed, &settings);
+    keys->press(1);
+    routed->setRoute(DacVolumePort::Route::Pulse, QString(), QString());
+    QCOMPARE(pulse->drops, 0);
+    QVERIFY(alsa.open(QStringLiteral("B")));
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink);
+    QCOMPARE(pulse->drops, 1);
+    routed->setRoute(DacVolumePort::Route::Alsa, QStringLiteral("B"), fiioSink + QStringLiteral(".3"));
+    routed->setRoute(DacVolumePort::Route::Pulse, QString(), QString());
+    QCOMPARE(pulse->drops, 1);
+    QCOMPARE(pulse->steps, QList<int>({5}));
 }
 
 QTEST_GUILESS_MAIN(VolumeKeysTest)

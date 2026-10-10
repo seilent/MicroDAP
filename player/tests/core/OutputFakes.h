@@ -1,10 +1,13 @@
 #pragma once
 
 #include "AlsaVolume.h"
+#include "OutputPorts.h"
 
 #include <QList>
+#include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 
 #include <cerrno>
 #include <functional>
@@ -152,6 +155,87 @@ private:
     QStringList *m_log;
     int m_pipe[2] = {-1, -1};
     short m_events = 0;
+};
+
+class FakeDacSink : public DacSinkPort
+{
+public:
+    explicit FakeDacSink(QStringList *log = nullptr)
+        : m_log(log)
+    {
+    }
+
+    void cardInfo(quint32, std::function<void(const DacCard &)> done) override
+    {
+        const DacCard out = card;
+        QTimer::singleShot(0, &m_context, [done, out] { done(out); });
+    }
+
+    void setDefaultSink(const QString &name) override
+    {
+        record(QStringLiteral("default %1").arg(name));
+    }
+
+    void sinkVolumeDb(const QString &, std::function<void(bool ok, double db)> done) override
+    {
+        const double out = volumeDb;
+        QTimer::singleShot(0, &m_context, [done, out] { done(true, out); });
+    }
+
+    void sinkMuted(const QString &, std::function<void(bool ok, bool muted)> done) override
+    {
+        const bool out = muted;
+        QTimer::singleShot(0, &m_context, [done, out] { done(true, out); });
+    }
+
+    void setSinkVolumeDb(const QString &name, double db, std::function<void(bool ok)> done = nullptr) override
+    {
+        record(QStringLiteral("sink volume %1 %2").arg(name).arg(db));
+        QTimer::singleShot(0, &m_context, [this, name, db, done] {
+            QTimer::singleShot(0, &m_context, [this, name, db, done] {
+                if (setOk)
+                    volumeDb = db;
+                record(QStringLiteral("sink volume done %1").arg(name));
+                if (done)
+                    done(setOk);
+            });
+        });
+    }
+
+    void unmuteSink(const QString &name) override
+    {
+        muted = false;
+        record(QStringLiteral("unmute %1").arg(name));
+    }
+
+    void bluezInputs(std::function<void(const QList<quint32> &)> done) override
+    {
+        const QList<quint32> out = inputs;
+        QTimer::singleShot(0, &m_context, [done, out] { done(out); });
+    }
+
+    void moveSinkInput(quint32 index, const QString &sink) override
+    {
+        record(QStringLiteral("move %1 %2").arg(index).arg(sink));
+    }
+
+    QStringList calls;
+    DacCard card;
+    QList<quint32> inputs;
+    double volumeDb = 0.0;
+    bool muted = false;
+    bool setOk = true;
+
+private:
+    void record(const QString &call)
+    {
+        calls.append(call);
+        if (m_log)
+            m_log->append(call);
+    }
+
+    QStringList *m_log;
+    QObject m_context;
 };
 
 }

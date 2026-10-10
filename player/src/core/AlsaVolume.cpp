@@ -255,6 +255,11 @@ bool AlsaVolume::isOpen() const
     return m_open;
 }
 
+QString AlsaVolume::cardId() const
+{
+    return m_cardId;
+}
+
 int AlsaVolume::step() const
 {
     return m_owned;
@@ -309,10 +314,28 @@ void AlsaVolume::watchReturn(int ms)
         qWarning().noquote() << "casdap volume: watch on a closed mixer for" << m_cardId;
         return;
     }
-    m_rewrites = 0;
-    m_watch.start(ms);
+    if (!m_watch.isActive())
+        m_rewrites = 0;
+    m_watch.start(qMax(ms, m_watch.remainingTime()));
     m_send.stop();
     write();
+}
+
+void AlsaVolume::nudge()
+{
+    if (!m_open || m_hw != m_owned || m_range.max <= m_range.min)
+        return;
+    const long neighbor = m_owned < m_range.max ? m_owned + 1 : m_owned - 1;
+    const int err = m_backend->set(neighbor);
+    if (err == -ENODEV) {
+        lose("write failed");
+        return;
+    }
+    if (err < 0) {
+        qWarning().noquote() << "casdap volume: write failed on" << m_cardId << std::strerror(-err);
+        return;
+    }
+    m_hw = neighbor;
 }
 
 bool AlsaVolume::usableRange(MixerRange *range)

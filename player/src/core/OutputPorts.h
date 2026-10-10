@@ -53,10 +53,24 @@ public:
     virtual void setDefaultSink(const QString &name) = 0;
     virtual void sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done) = 0;
     virtual void sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done) = 0;
-    virtual void setSinkVolumeDb(const QString &name, double db) = 0;
+    virtual void setSinkVolumeDb(const QString &name, double db, std::function<void(bool ok)> done = nullptr) = 0;
     virtual void unmuteSink(const QString &name) = 0;
     virtual void bluezInputs(std::function<void(const QList<quint32> &)> done) = 0;
     virtual void moveSinkInput(quint32 index, const QString &sink) = 0;
+};
+
+class DacVolumePort
+{
+public:
+    enum class Route { Pulse, Alsa };
+
+    virtual ~DacVolumePort() = default;
+
+    virtual void setRoute(Route route, const QString &cardId, const QString &sink) = 0;
+    virtual void setStoreAllowed(bool allowed) = 0;
+    virtual void storeSync(const QString &cardId) = 0;
+    virtual int ownedStep(const QString &cardId) const = 0;
+    virtual void setOwnedStep(const QString &cardId, int step) = 0;
 };
 
 }

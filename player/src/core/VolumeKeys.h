@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QElapsedTimer>
+#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -25,6 +26,7 @@ class QSocketNotifier;
 
 namespace casdap {
 
+class AlsaVolume;
 class Settings;
 
 class KeySource : public QObject
@@ -87,6 +89,7 @@ public:
     using QObject::QObject;
 
     virtual void step(int percent) = 0;
+    virtual void dropPending() {}
 
 signals:
     void levelChanged(int percent);
@@ -112,12 +115,13 @@ public:
     static bool isBluezInput(const pa_proplist *props);
 
     void step(int percent) override;
+    void dropPending() override;
 
     void cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done) override;
     void setDefaultSink(const QString &name) override;
     void sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done) override;
     void sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done) override;
-    void setSinkVolumeDb(const QString &name, double db) override;
+    void setSinkVolumeDb(const QString &name, double db, std::function<void(bool ok)> done = nullptr) override;
     void unmuteSink(const QString &name) override;
     void bluezInputs(std::function<void(const QList<quint32> &)> done) override;
     void moveSinkInput(quint32 index, const QString &sink) override;
@@ -133,6 +137,7 @@ private:
         std::function<void(const pa_sink_info *)> sink;
         std::function<void(const pa_card_info *)> card;
         std::function<void(const QList<quint32> *)> inputs;
+        std::function<void(bool)> set;
         PulseSinkVolume *self = nullptr;
         QList<quint32> found;
         bool delivered = false;
@@ -148,6 +153,7 @@ private:
     static void onRequestCard(pa_context *context, const pa_card_info *info, int eol, void *userdata);
     static void onRequestInput(pa_context *context, const pa_sink_input_info *info, int eol, void *userdata);
     static void onDacSet(pa_context *context, int success, void *userdata);
+    static void onRequestSet(pa_context *context, int success, void *userdata);
 
     void connectContext();
     void teardown(bool reconnect);
@@ -184,6 +190,43 @@ private:
     bool m_revalidate = false;
     bool m_failLogged = false;
     bool m_unmute = false;
+};
+
+class RoutedSinkVolume : public SinkVolume, public DacVolumePort
+{
+    Q_OBJECT
+
+public:
+    static constexpr int defaultStoreDelayMs = 2000;
+    static constexpr int storeWatchMs = 500;
+
+    RoutedSinkVolume(SinkVolume *pulse, DacSinkPort *dac, AlsaVolume *alsa, int storeDelayMs = defaultStoreDelayMs,
+                     QObject *parent = nullptr);
+
+    void step(int percent) override;
+
+    void setRoute(Route route, const QString &cardId, const QString &sink) override;
+    void setStoreAllowed(bool allowed) override;
+    void storeSync(const QString &cardId) override;
+    int ownedStep(const QString &cardId) const override;
+    void setOwnedStep(const QString &cardId, int step) override;
+
+    Route route() const;
+
+private:
+    void keepOwned();
+    bool mixerOn(bool requireOpen) const;
+
+    SinkVolume *m_pulse;
+    DacSinkPort *m_dac;
+    AlsaVolume *m_alsa;
+    QTimer m_store;
+    QHash<QString, int> m_owned;
+    QString m_card;
+    QString m_sink;
+    Route m_route = Route::Pulse;
+    bool m_storeAllowed = false;
+    bool m_dirty = false;
 };
 
 class VolumeKeys : public QObject

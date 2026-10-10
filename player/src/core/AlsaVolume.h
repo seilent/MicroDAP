@@ -78,6 +78,7 @@ public:
     bool open(const QString &cardId);
     void close();
     bool isOpen() const;
+    QString cardId() const;
     int step() const;
     double stepDb() const;
     double rangeDb() const;
@@ -85,6 +86,7 @@ public:
     void setStep(int step);
     void pressed(int deltaPercent);
     void watchReturn(int ms);
+    void nudge();
 
 signals:
     void levelChanged(int percent);
