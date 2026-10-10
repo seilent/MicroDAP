@@ -127,6 +127,16 @@ QString keyEqSpeaker()
     return QStringLiteral("eqSpeaker");
 }
 
+QString keyOutputLevel()
+{
+    return QStringLiteral("outputLevel");
+}
+
+QString keySampleRate()
+{
+    return QStringLiteral("sampleRate");
+}
+
 double normalizeScale(double scale)
 {
     const double stepped = qRound(scale * 10.0) / 10.0;
@@ -227,6 +237,18 @@ QStringList Settings::orientations()
             QStringLiteral("landscape-flipped")};
 }
 
+QStringList Settings::outputLevels()
+{
+    return {QStringLiteral("off"), QStringLiteral("bitperfect"), QStringLiteral("exclusive")};
+}
+
+QStringList Settings::sampleRates()
+{
+    return {QStringLiteral("auto"), QStringLiteral("44100"), QStringLiteral("48000"), QStringLiteral("88200"),
+            QStringLiteral("96000"), QStringLiteral("176400"), QStringLiteral("192000"),
+            QStringLiteral("352800"), QStringLiteral("384000")};
+}
+
 QStringList Settings::defaultRoots()
 {
     return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
@@ -313,6 +335,10 @@ void Settings::load()
     m_eqHeadphones = normalizeEq(m_settings.value(keyEqHeadphones()).toString());
     m_eqUsb = normalizeEq(m_settings.value(keyEqUsb()).toString());
     m_eqSpeaker = normalizeEq(m_settings.value(keyEqSpeaker()).toString());
+    const QString level = m_settings.value(keyOutputLevel()).toString().toLower();
+    m_outputLevel = outputLevels().contains(level) ? level : outputLevels().first();
+    const QString rate = m_settings.value(keySampleRate()).toString().toLower();
+    m_sampleRate = sampleRates().contains(rate) ? rate : sampleRates().first();
 }
 
 QString Settings::path() const
@@ -669,6 +695,36 @@ void Settings::setEqSpeaker(const QString &key)
     m_eqSpeaker = value;
     store(keyEqSpeaker(), m_eqSpeaker);
     emit eqSpeakerChanged();
+}
+
+QString Settings::outputLevel() const
+{
+    return m_outputLevel;
+}
+
+void Settings::setOutputLevel(const QString &level)
+{
+    const QString value = level.toLower();
+    if (!outputLevels().contains(value) || m_outputLevel == value)
+        return;
+    m_outputLevel = value;
+    store(keyOutputLevel(), m_outputLevel);
+    emit outputLevelChanged();
+}
+
+QString Settings::sampleRate() const
+{
+    return m_sampleRate;
+}
+
+void Settings::setSampleRate(const QString &rate)
+{
+    const QString value = rate.toLower();
+    if (!sampleRates().contains(value) || m_sampleRate == value)
+        return;
+    m_sampleRate = value;
+    store(keySampleRate(), m_sampleRate);
+    emit sampleRateChanged();
 }
 
 QString Settings::eq(const QString &output) const

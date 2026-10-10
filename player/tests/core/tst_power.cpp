@@ -94,6 +94,7 @@ private slots:
     void settingsOrientation();
     void settingsAutoRotate();
     void settingsTouch();
+    void settingsOutputLevel();
     void statusSysfs();
     void clockFormat();
 
@@ -857,6 +858,62 @@ void PowerTest::settingsTouch()
     }
     Settings on(path);
     QVERIFY(on.touch());
+}
+
+void PowerTest::settingsOutputLevel()
+{
+    const QString path = m_dir.path() + QStringLiteral("/level.ini");
+    QCOMPARE(Settings::outputLevels(),
+             QStringList({QStringLiteral("off"), QStringLiteral("bitperfect"), QStringLiteral("exclusive")}));
+    QCOMPARE(Settings::sampleRates(),
+             QStringList({QStringLiteral("auto"), QStringLiteral("44100"), QStringLiteral("48000"),
+                          QStringLiteral("88200"), QStringLiteral("96000"), QStringLiteral("176400"),
+                          QStringLiteral("192000"), QStringLiteral("352800"), QStringLiteral("384000")}));
+    {
+        Settings settings(path);
+        QCOMPARE(settings.outputLevel(), QStringLiteral("off"));
+        QCOMPARE(settings.sampleRate(), QStringLiteral("auto"));
+        QSignalSpy levelSpy(&settings, &Settings::outputLevelChanged);
+        QSignalSpy rateSpy(&settings, &Settings::sampleRateChanged);
+        settings.setOutputLevel(QStringLiteral("off"));
+        settings.setSampleRate(QStringLiteral("auto"));
+        QCOMPARE(levelSpy.count(), 0);
+        QCOMPARE(rateSpy.count(), 0);
+        settings.setOutputLevel(QStringLiteral("EXCLUSIVE"));
+        settings.setOutputLevel(QStringLiteral("exclusive"));
+        settings.setOutputLevel(QStringLiteral("on"));
+        QCOMPARE(settings.outputLevel(), QStringLiteral("exclusive"));
+        QCOMPARE(levelSpy.count(), 1);
+        settings.setSampleRate(QStringLiteral("352800"));
+        settings.setSampleRate(QStringLiteral("352800"));
+        settings.setSampleRate(QStringLiteral("22050"));
+        QCOMPARE(settings.sampleRate(), QStringLiteral("352800"));
+        QCOMPARE(rateSpy.count(), 1);
+        QVERIFY(!readFile(path).contains(QStringLiteral("outputLevel")));
+        QTRY_VERIFY_WITH_TIMEOUT(readFile(path).contains(QStringLiteral("outputLevel=exclusive")),
+                                 Settings::syncDelayMs + busTimeoutMs);
+        QVERIFY(readFile(path).contains(QStringLiteral("sampleRate=352800")));
+    }
+    {
+        Settings again(path);
+        QCOMPARE(again.outputLevel(), QStringLiteral("exclusive"));
+        QCOMPARE(again.sampleRate(), QStringLiteral("352800"));
+        again.setOutputLevel(QStringLiteral("bitperfect"));
+        again.setSampleRate(QStringLiteral("AUTO"));
+    }
+    {
+        Settings back(path);
+        QCOMPARE(back.outputLevel(), QStringLiteral("bitperfect"));
+        QCOMPARE(back.sampleRate(), QStringLiteral("auto"));
+    }
+    QVERIFY(writeFile(path, QStringLiteral("[General]\noutputLevel=on\nsampleRate=22050\n")));
+    Settings bogus(path);
+    QCOMPARE(bogus.outputLevel(), QStringLiteral("off"));
+    QCOMPARE(bogus.sampleRate(), QStringLiteral("auto"));
+    QVERIFY(writeFile(path, QStringLiteral("[General]\noutputLevel=Exclusive\nsampleRate=96000\n")));
+    Settings cased(path);
+    QCOMPARE(cased.outputLevel(), QStringLiteral("exclusive"));
+    QCOMPARE(cased.sampleRate(), QStringLiteral("96000"));
 }
 
 void PowerTest::statusSysfs()

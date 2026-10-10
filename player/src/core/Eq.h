@@ -134,6 +134,8 @@ public:
     QVariantMap activeProfileMap() const;
     EqProfile activeProfile() const;
     int revision() const;
+    bool bypassed() const;
+    void setBypassed(bool on);
 
     EqProfile profile(const QString &output) const;
     void setCustom(const QString &output, const EqProfile &profile);
@@ -193,6 +195,7 @@ private:
     QTimer m_syncTimer;
     EqProfile m_applied = EqProfile::off();
     bool m_appliedOnce = false;
+    bool m_bypassed = false;
     bool m_editing = false;
     int m_revision = 0;
 };

@@ -574,6 +574,21 @@ int EqControl::revision() const
     return m_revision;
 }
 
+bool EqControl::bypassed() const
+{
+    return m_bypassed;
+}
+
+void EqControl::setBypassed(bool on)
+{
+    if (m_bypassed == on)
+        return;
+    m_bypassed = on;
+    qInfo() << "casdap eq: bypass" << (on ? "on" : "off");
+    if (!on && m_appliedOnce)
+        emit profileApplied(m_applied);
+}
+
 EqProfile EqControl::profile(const QString &output) const
 {
     const QString k = key(output);
@@ -887,7 +902,8 @@ void EqControl::applyActive()
     }
     qInfo() << "casdap eq: apply" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
     emit activeProfileChanged();
-    emit profileApplied(m_applied);
+    if (!m_bypassed)
+        emit profileApplied(m_applied);
 }
 
 void EqControl::stepBand(const QString &output, int band, const QString &field, int direction, bool coarse)

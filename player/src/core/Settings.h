@@ -34,6 +34,8 @@ class Settings : public QObject
     Q_PROPERTY(QString eqHeadphones READ eqHeadphones WRITE setEqHeadphones NOTIFY eqHeadphonesChanged)
     Q_PROPERTY(QString eqUsb READ eqUsb WRITE setEqUsb NOTIFY eqUsbChanged)
     Q_PROPERTY(QString eqSpeaker READ eqSpeaker WRITE setEqSpeaker NOTIFY eqSpeakerChanged)
+    Q_PROPERTY(QString outputLevel READ outputLevel WRITE setOutputLevel NOTIFY outputLevelChanged)
+    Q_PROPERTY(QString sampleRate READ sampleRate WRITE setSampleRate NOTIFY sampleRateChanged)
     Q_PROPERTY(QString path READ path CONSTANT)
 
 public:
@@ -59,6 +61,8 @@ public:
     static QList<int> volumeSteps();
     static QStringList rgbModes();
     static QStringList orientations();
+    static QStringList outputLevels();
+    static QStringList sampleRates();
     static QStringList defaultRoots();
     Q_INVOKABLE static QStringList candidateRoots();
 
@@ -108,6 +112,10 @@ public:
     void setEqUsb(const QString &key);
     QString eqSpeaker() const;
     void setEqSpeaker(const QString &key);
+    QString outputLevel() const;
+    void setOutputLevel(const QString &level);
+    QString sampleRate() const;
+    void setSampleRate(const QString &rate);
 
     static QString normalizeEq(const QString &key);
     Q_INVOKABLE QString eq(const QString &output) const;
@@ -138,6 +146,8 @@ signals:
     void eqHeadphonesChanged();
     void eqUsbChanged();
     void eqSpeakerChanged();
+    void outputLevelChanged();
+    void sampleRateChanged();
 
 private:
     void load();
@@ -169,6 +179,8 @@ private:
     QString m_eqHeadphones;
     QString m_eqUsb;
     QString m_eqSpeaker;
+    QString m_outputLevel;
+    QString m_sampleRate;
 };
 
 }
