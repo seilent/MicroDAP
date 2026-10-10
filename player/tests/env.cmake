@@ -9,6 +9,7 @@ function(casdap_test_env name)
         XDG_DATA_HOME=${root}/data
         XDG_CACHE_HOME=${root}/cache
         XDG_RUNTIME_DIR=${root}/runtime
+        CASDAP_ROTATE_MOTION=0
     )
     set_tests_properties(${name} PROPERTIES ENVIRONMENT "${env}")
 endfunction()

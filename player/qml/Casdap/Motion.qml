@@ -28,6 +28,14 @@ QtObject {
         return (Math.exp(1 * t) - 1) / (Math.exp(1) - 1)
     }
 
+    function expOut1(t: real): real {
+        return 1 - (Math.exp(1 * (1 - t)) - 1) / (Math.exp(1) - 1)
+    }
+
+    function sineOut(t: real): real {
+        return Math.sin(t * Math.PI / 2)
+    }
+
     function expIn15(t: real): real {
         return (Math.exp(15 * t) - 1) / (Math.exp(15) - 1)
     }
@@ -68,6 +76,8 @@ QtObject {
     readonly property real turnstileInAngle: -80
     readonly property int headerOut: 250
     readonly property real headerOutShift: -0.25
+    readonly property int rotateOut: 250
+    readonly property int rotateIn: 250
 
     readonly property int homeEnter: 220
     readonly property int homeEnterPeek: 420

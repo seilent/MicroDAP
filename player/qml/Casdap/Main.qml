@@ -87,6 +87,22 @@ Window {
     property bool pendingHide: false
     property bool rootHidden: false
     property bool toastShown: false
+    property bool rotateMotion: Env.rotateMotion
+    property bool sweeping: false
+    property bool sweepSwitched: false
+    property int sweepD: 0
+    property int sweepTurn: 0
+    property bool sweepActive: false
+    property real sweepW: 0
+    property real sweepH: 0
+    property real sweepOut: 0
+    property real sweepIn: 0
+    readonly property real spin: !root.sweeping ? 0
+        : !root.sweepSwitched ? root.sweepD * 90 * Motion.expIn1(root.sweepOut)
+        : -root.sweepD * 90 * (1 - Motion.expOut1(root.sweepIn))
+    readonly property real spinOpacity: !root.sweeping ? 1
+        : !root.sweepSwitched ? 1 - Motion.sineOut(root.sweepOut)
+        : Motion.sineOut(root.sweepIn)
     property var lastToastId: null
     property string addSource: ""
     readonly property bool hidden: root.overlay && !root.overlayMapped
@@ -109,6 +125,7 @@ Window {
     property alias toastWindow: toastWindow
     property alias hiddenToast: hiddenToast
     property alias touchLayer: touchLayer
+    property alias sweep: sweep
     property alias cursorBlank: cursorBlank
 
     signal hideOverlayRequested()
@@ -144,6 +161,7 @@ Window {
     onHiddenChanged: {
         if (!root.hidden)
             return
+        root.landSweep()
         pages.completeAll()
         overlays.completeAll()
         switchPrompt.complete()
@@ -152,6 +170,7 @@ Window {
     }
     onPowerScreenOffChanged: {
         if (root.powerScreenOff) {
+            root.landSweep()
             pages.completeAll()
             overlays.completeAll()
             switchPrompt.complete()
@@ -233,8 +252,17 @@ Window {
     function syncSurface(): void {
         const active = !root.overlay && !root.shotOverlay && root.height > root.width && root.internalOutput
         const turn = active ? root.requestedTurn() : 0
+        const landed = root.sweeping
+        if (landed) {
+            if (active === root.sweepActive && root.width === root.sweepW && root.height === root.sweepH)
+                return
+            root.landSweep()
+        }
         if (root.surfaceSynced && (turn !== Ui.turn || active !== Ui.orientationActive)) {
-            root.applyOrientation(turn, active)
+            if (!landed && root.sweepWanted(turn, active))
+                root.startSweep(turn, active)
+            else
+                root.applyOrientation(turn, active)
             return
         }
         Ui.setSurface(root.width, root.height)
@@ -264,12 +292,18 @@ Window {
             root.settings.orientation = name
     }
 
-    function applyOrientation(turn: int, active: bool): void {
-        touchLayer.cancel()
-        pages.eachPage((page) => {
-            if (typeof page.revertOrConfirmForRotation === "function")
-                page.revertOrConfirmForRotation()
-        })
+    function sweepWanted(turn: int, active: bool): bool {
+        return root.rotateMotion && active && Ui.orientationActive && turn !== Ui.turn
+            && root.width === Ui.surfaceW && root.height === Ui.surfaceH
+            && root.visible && !root.off && !root.screenshot
+    }
+
+    function sweepDelta(from: int, to: int): int {
+        const d = ((to - from + 6) % 4) - 2
+        return d === -2 ? 2 : d
+    }
+
+    function completeMotion(): void {
         pages.completeAll()
         pages.eachPage((page) => {
             if (typeof page.completeAll === "function")
@@ -279,6 +313,53 @@ Window {
         switchPrompt.complete()
         powerMenu.complete()
         saver.land()
+    }
+
+    function startSweep(turn: int, active: bool): void {
+        touchLayer.cancel()
+        root.completeMotion()
+        root.sweepD = root.sweepDelta(Ui.turn, turn)
+        root.sweepTurn = turn
+        root.sweepActive = active
+        root.sweepW = root.width
+        root.sweepH = root.height
+        root.sweepOut = 0
+        root.sweepIn = 0
+        root.sweepSwitched = false
+        root.sweeping = true
+        sweep.restart()
+    }
+
+    function switchSweep(): void {
+        if (!root.sweeping || root.sweepSwitched)
+            return
+        root.sweepSwitched = true
+        root.applyOrientation(root.sweepTurn, root.sweepActive)
+    }
+
+    function endSweep(): void {
+        root.sweeping = false
+        root.sweepSwitched = false
+        Qt.callLater(root.syncSurface)
+    }
+
+    function landSweep(): void {
+        if (!root.sweeping)
+            return
+        sweep.stop()
+        root.switchSweep()
+        root.sweeping = false
+        root.sweepSwitched = false
+        Qt.callLater(root.syncSurface)
+    }
+
+    function applyOrientation(turn: int, active: bool): void {
+        touchLayer.cancel()
+        pages.eachPage((page) => {
+            if (typeof page.revertOrConfirmForRotation === "function")
+                page.revertOrConfirmForRotation()
+        })
+        root.completeMotion()
         Ui.turn = turn
         Ui.orientationActive = active
         Ui.setSurface(root.width, root.height)
@@ -746,6 +827,33 @@ Window {
         readonly property bool internal: false
     }
 
+    SequentialAnimation {
+        id: sweep
+
+        NumberAnimation {
+            target: root
+            property: "sweepOut"
+            from: 0
+            to: 1
+            duration: Motion.rotateOut
+            easing.type: Motion.linear
+        }
+        ScriptAction {
+            script: root.switchSweep()
+        }
+        NumberAnimation {
+            target: root
+            property: "sweepIn"
+            from: 0
+            to: 1
+            duration: Motion.rotateIn
+            easing.type: Motion.linear
+        }
+        ScriptAction {
+            script: root.endSweep()
+        }
+    }
+
     Timer {
         id: saverTimer
 
@@ -769,7 +877,10 @@ Window {
         height: Ui.windowH
         x: Math.round((root.width - rotor.width) / 2)
         y: Math.round((root.height - rotor.height) / 2)
-        rotation: Ui.turn * 90
+        rotation: Ui.turn * 90 + root.spin
+        opacity: root.spinOpacity
+        layer.enabled: root.sweeping
+        layer.smooth: true
 
         HoverHandler {
             id: cursorBlank
@@ -815,6 +926,7 @@ Window {
             pad: typeof Pad === "undefined" ? null : Pad
             guide: typeof Guide === "undefined" ? null : Guide
             screenOff: root.off
+            sweeping: root.sweeping
             onNowPlaying: root.openNowPlaying()
             onRotate: (raw) => root.rotateBy(raw)
         }

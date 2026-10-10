@@ -41,7 +41,7 @@ build manifest head as `manifest`); `fontsReady` reports all five.
 `Ui.setSurface(w, h)` takes the window size; `Ui.turn` is the content turn in quarter turns clockwise
 and `windowW`/`windowH` are read only, the surface swapped at an odd turn, so every token follows a
 rotation. `Main.qml` draws everything but the toast window inside `rotor` (`Ui.windowW` x `Ui.windowH`,
-centered at a rounded offset, `rotation: Ui.turn * 90`). `syncSurface()` runs one `Qt.callLater` after a
+centered at a rounded offset, `rotation: Ui.turn * 90` plus the sweep `spin`). `syncSurface()` runs one `Qt.callLater` after a
 resize, a change of `Settings.orientation`, `Outputs.internal`, the taken sensor turn or the pin, and directly in
 `Component.onCompleted`.
 Orientation applies (`Ui.orientationActive`) in DAP mode while the window is taller than wide and
@@ -56,9 +56,18 @@ off or unsupported drops the taken turn and the pin. A change of the turn or of 
 or AUTO ROTATE edit reverts and any other settings edit confirms, the page turn and every page's `completeAll()` (through
 `PageStack.eachPage`), the overlay layer, the switch prompt, the power menu and the saver land, the turn
 changes, then every page's `keepFocusVisible()` brings its focused row inside; Main emits
-`orientationApplied(turn)`. `Ui.userScale` is a `Binding` to `Settings.scale` clamped to `[sMin, sMax]`, so a
+`orientationApplied(turn)`. Rotate sweep (design-11, T18a): a turn change with orientation applying before and after,
+the window at the current surface size, the window visible, the screen on and `rotateMotion` (`Env.rotateMotion`, false
+only with `CASDAP_ROTATE_MOTION=0`, which every ctest sets) lands the motion at once, then the rotor sweeps from the old
+angle by the shortest quarter turn delta (a half turn sweeps clockwise) and fades out (250 ms, `expIn1` rotation, `sineOut`
+fade), the T18 switch runs at opacity 0 (`orientationApplied` 250 ms after the request), and the new layout sweeps the
+same way from the old angle into place and fades in (250 ms, `expOut1`, `sineOut`). The rotor is a smooth layer only
+while `sweeping`. `PadRouter.locked` includes `sweeping`, so pad presses and touch are dropped and a drag is canceled;
+the Guide chord still takes the Guide and rotates, and a turn requested during the sweep starts a new sweep after it.
+Screen off, an overlay hide, a change of `orientationActive` or of the window size land the sweep and run T18 at once.
+`Ui.userScale` is a `Binding` to `Settings.scale` clamped to `[sMin, sMax]`, so a
 saved 1.1 shows 1.0 in landscape and 1.1 again in portrait. The first `frameSwapped` logs
-`casdap: first frame turn <n>`. The wake from screen off calls `Outputs.refresh()`. `Motion` (singleton) holds the curves (`expOut6`, `expIn6`, `expIn1`, `expIn15` as
+`casdap: first frame turn <n>`. The wake from screen off calls `Outputs.refresh()`. `Motion` (singleton) holds the curves (`expOut6`, `expIn6`, `expIn1`, `expOut1`, `expIn15`, `sineOut` as
 functions on a linear 0..1 progress, `decel` and `strip` as `Easing.BezierSpline` arrays, Qt stand
 ins for the shell curves) and every duration. `Turnstile` applies the `Matrix4x4` page rotation about
 a hinge with perspective `d = 2.3 * width` px. `PageStack` runs the exit animation (250 ms, expIn6)

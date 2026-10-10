@@ -192,6 +192,32 @@ TestCase {
         }
     }
 
+    Connections {
+        id: spinWatch
+
+        property real maxOut: 0
+        property real maxSpin: 0
+        property real minOpacity: 1
+
+        target: main
+
+        function reset() {
+            spinWatch.maxOut = 0
+            spinWatch.maxSpin = 0
+            spinWatch.minOpacity = 1
+        }
+
+        function onSpinChanged() {
+            if (!main.sweepSwitched)
+                spinWatch.maxOut = Math.max(spinWatch.maxOut, Math.abs(main.spin))
+            spinWatch.maxSpin = Math.max(spinWatch.maxSpin, main.spin)
+        }
+
+        function onSpinOpacityChanged() {
+            spinWatch.minOpacity = Math.min(spinWatch.minOpacity, main.spinOpacity)
+        }
+    }
+
     SignalSpy {
         id: routedSpy
 
@@ -210,6 +236,8 @@ TestCase {
     }
 
     function init() {
+        main.landSweep()
+        main.rotateMotion = false
         main.router.pad = fakePad
         main.router.guide = null
         main.router.chordHeld = ({})
@@ -247,6 +275,8 @@ TestCase {
     }
 
     function cleanup() {
+        main.landSweep()
+        main.rotateMotion = false
         main.pageStack.animate = true
         if (main.saver.shown) {
             main.saver.hide()
@@ -946,6 +976,256 @@ TestCase {
         fakeSensor.supported = false
         tc.settle()
         compare(Ui.turn, 2)
+    }
+
+    function turnNamed(turn) {
+        return main.orientations.find((value) => main.turnFor(value) === turn)
+    }
+
+    function startSweep(name) {
+        main.rotateMotion = true
+        fakeSettings.orientation = name
+        tc.settle()
+        compare(main.sweeping, true)
+    }
+
+    function test_sweep_chord() {
+        main.router.guide = fakeGuide
+        main.rotateMotion = true
+        spinWatch.reset()
+        const started = Date.now()
+        tc.push("up")
+        tc.settle()
+        compare(main.sweeping, true)
+        compare(main.router.locked, true)
+        compare(main.rotor.layer.enabled, true)
+        compare(main.sweepD, Ui.landscapeTurn === 1 ? 1 : -1)
+        tryCompare(appliedSpy, "count", 1, 1000)
+        verify(spinWatch.maxOut > 0 && spinWatch.maxOut <= 90)
+        verify(spinWatch.minOpacity < 1)
+        verify(Date.now() - started >= Motion.rotateOut - 20)
+        compare(appliedSpy.signalArguments[0][0], Ui.landscapeTurn)
+        tryCompare(main, "sweeping", false, 1000)
+        compare(main.rotor.rotation, Ui.landscapeTurn * 90)
+        compare(main.rotor.opacity, 1)
+        compare(main.rotor.layer.enabled, false)
+        compare(main.router.locked, false)
+        compare(appliedSpy.count, 1)
+        fakePad.released(fakePad.code("up"))
+    }
+
+    function test_sweep_half_turn() {
+        spinWatch.reset()
+        tc.startSweep("portrait-flipped")
+        compare(main.sweepD, 2)
+        tryCompare(main, "sweeping", false, 1000)
+        verify(spinWatch.maxSpin > 90)
+        compare(Ui.turn, 2)
+        compare(main.rotor.rotation, 180)
+    }
+
+    function test_sweep_three_to_zero() {
+        fakeSettings.orientation = tc.turnNamed(3)
+        tc.settle()
+        compare(Ui.turn, 3)
+        spinWatch.reset()
+        tc.startSweep("portrait")
+        compare(main.sweepD, 1)
+        tryCompare(main, "sweeping", false, 1000)
+        verify(spinWatch.maxSpin > 0)
+        compare(Ui.turn, 0)
+        compare(main.rotor.rotation, 0)
+    }
+
+    function test_sweep_phases() {
+        tc.startSweep("landscape")
+        const d = main.sweepD
+        main.sweep.stop()
+        main.sweepOut = 1
+        compare(main.spin, d * 90)
+        compare(main.spinOpacity, 0)
+        compare(Ui.turn, 0)
+        main.switchSweep()
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(main.spin, -d * 90)
+        compare(main.spinOpacity, 0)
+        compare(appliedSpy.count, 1)
+        main.sweepIn = 1
+        compare(main.spin, 0)
+        compare(main.spinOpacity, 1)
+        main.endSweep()
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(appliedSpy.count, 1)
+    }
+
+    function test_sweep_drops_pad() {
+        const page = main.pageStack.push(listPage, {})
+        tc.startSweep("landscape")
+        tc.push("a")
+        compare(routedSpy.count, 0)
+        compare(page.pressedNames, [])
+        fakePad.released(fakePad.code("a"))
+        tryCompare(main, "sweeping", false, 1000)
+        tc.push("a")
+        compare(routedSpy.count, 1)
+        fakePad.released(fakePad.code("a"))
+    }
+
+    function test_sweep_cancels_touch() {
+        const page = main.pageStack.push(listPage, {})
+        mousePress(page, page.width / 2, page.height / 2, Qt.LeftButton)
+        compare(main.touchLayer.down, true)
+        compare(main.touchLayer.dead, false)
+        tc.startSweep("landscape")
+        compare(main.touchLayer.dead, true)
+        mouseRelease(page, page.width / 2, page.height / 2, Qt.LeftButton)
+        tryCompare(main, "sweeping", false, 1000)
+    }
+
+    function test_sweep_second_chord() {
+        main.router.guide = fakeGuide
+        main.rotateMotion = true
+        tc.push("up")
+        fakePad.released(fakePad.code("up"))
+        tc.settle()
+        compare(main.sweeping, true)
+        tc.push("right")
+        fakePad.released(fakePad.code("right"))
+        compare(fakeGuide.takes, 2)
+        compare(rotateSpy.count, 2)
+        tc.settle()
+        compare(main.sweepTurn, Ui.landscapeTurn)
+        tryCompare(appliedSpy, "count", 2, 2000)
+        compare(Ui.turn, (Ui.landscapeTurn + 1) % 4)
+        tryCompare(main, "sweeping", false, 1000)
+        compare(main.rotor.rotation, Ui.turn * 90)
+    }
+
+    function test_sweep_screen_off_lands() {
+        tc.startSweep("landscape")
+        fakePower.screenOff = true
+        compare(main.sweeping, false)
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(main.rotor.rotation, Ui.landscapeTurn * 90)
+        compare(main.rotor.opacity, 1)
+        compare(appliedSpy.count, 1)
+        fakePower.screenOff = false
+        tc.settle()
+    }
+
+    function test_sweep_screen_off_keeps_deferred_turn() {
+        main.router.guide = fakeGuide
+        main.rotateMotion = true
+        tc.push("up")
+        fakePad.released(fakePad.code("up"))
+        tc.settle()
+        compare(main.sweeping, true)
+        tc.push("right")
+        fakePad.released(fakePad.code("right"))
+        tc.settle()
+        fakePower.screenOff = true
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(Ui.turn, main.turnFor(fakeSettings.orientation))
+        compare(Ui.turn, (Ui.landscapeTurn + 1) % 4)
+        fakePower.screenOff = false
+        tc.settle()
+    }
+
+    function test_sweep_resize_lands() {
+        tc.startSweep("landscape")
+        main.shotHeight = 961
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(Ui.surfaceH, 961)
+        compare(appliedSpy.count, 1)
+    }
+
+    function test_sweep_resize_applies_deferred_turn_at_once() {
+        tc.startSweep("landscape")
+        fakeSettings.orientation = "portrait-flipped"
+        tc.settle()
+        compare(main.sweeping, true)
+        main.shotHeight = 961
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(Ui.turn, 2)
+        compare(appliedSpy.count, 2)
+        tc.settle()
+        compare(main.sweeping, false)
+    }
+
+    function test_sweep_first_sync_synchronous() {
+        main.rotateMotion = true
+        main.surfaceSynced = false
+        fakeSettings.orientation = "landscape"
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(main.surfaceSynced, true)
+        compare(Ui.turn, Ui.landscapeTurn)
+        compare(appliedSpy.count, 0)
+    }
+
+    function test_sweep_output_change_lands() {
+        tc.startSweep("landscape")
+        fakeOutputs.internal = false
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(Ui.orientationActive, false)
+        compare(Ui.turn, 0)
+        compare(appliedSpy.count, 2)
+        fakeOutputs.internal = true
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(Ui.turn, Ui.landscapeTurn)
+    }
+
+    function test_sweep_off_when_screen_off() {
+        main.rotateMotion = true
+        fakePower.screenOff = true
+        fakeSettings.orientation = "landscape"
+        tc.settle()
+        compare(main.sweeping, false)
+        compare(Ui.turn, Ui.landscapeTurn)
+        fakePower.screenOff = false
+        tc.settle()
+    }
+
+    function test_sweep_frames_data() {
+        return [
+            { tag: "landscape", value: "landscape" },
+            { tag: "portrait-flipped", value: "portrait-flipped" }
+        ]
+    }
+
+    function test_sweep_frames(data) {
+        tc.startSweep(data.value)
+        main.sweep.stop()
+        const d = main.sweepD
+        const frames = [
+            ["000", false, 0, 0, 1],
+            ["125", false, 0.5, d * 90 * Motion.expIn1(0.5), 1 - Motion.sineOut(0.5)],
+            ["250", false, 1, d * 90, 0],
+            ["250in", true, 0, -d * 90, 0],
+            ["375", true, 0.5, -d * 90 * (1 - Motion.expOut1(0.5)), Motion.sineOut(0.5)],
+            ["500", true, 1, 0, 1]
+        ]
+        for (const f of frames) {
+            if (f[1]) {
+                main.switchSweep()
+                main.sweepIn = f[2]
+            } else {
+                main.sweepOut = f[2]
+            }
+            fuzzyCompare(main.spin, f[3], 0.001)
+            fuzzyCompare(main.rotor.opacity, f[4], 0.001)
+            waitForRendering(main.contentItem)
+            grabImage(main.contentItem).save("sweep-" + data.tag + "-" + f[0] + ".png")
+        }
+        main.endSweep()
+        tc.settle()
     }
 
     function test_wake_refreshes_outputs() {

@@ -11,7 +11,8 @@ Item {
     property Item saver: null
     property bool screenOff: false
     property bool keyboard: true
-    readonly property bool locked: router.stack !== null && router.stack.inputLocked
+    property bool sweeping: false
+    readonly property bool locked: (router.stack !== null && router.stack.inputLocked) || router.sweeping
     readonly property bool modalUp: router.modal !== null && router.modal.shown === true
     readonly property bool saverUp: router.saver !== null && router.saver.shown === true
     readonly property bool rotating: Ui.orientationActive && !router.screenOff

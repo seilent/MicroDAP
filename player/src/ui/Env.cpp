@@ -62,4 +62,9 @@ int Env::landscapeTurn() const
     return qEnvironmentVariable("CASDAP_LANDSCAPE_TURN") == QLatin1StringView("3") ? 3 : 1;
 }
 
+bool Env::rotateMotion() const
+{
+    return qEnvironmentVariable("CASDAP_ROTATE_MOTION") != QLatin1StringView("0");
+}
+
 }
