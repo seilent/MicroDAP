@@ -1137,10 +1137,11 @@ the release notes and in `usr/share/casdap/build-manifest`.
 
 Install: pick the asset matching `VERSION_ID` in `/etc/os-release`, write it to
 `/var/lib/extensions/casdap.raw`, then `systemd-sysext refresh`, `systemctl restart polkit
-inputplumber casdap-guard`, `systemctl start armada-controller-type.service`, then as the user
+inputplumber casdap-guard`, `udevadm control --reload`, `/usr/libexec/casdap/casdap-usb-audio --scan`,
+`systemctl start armada-controller-type.service`, then as the user
 `systemctl --user restart pipewire pipewire-pulse wireplumber` (or log in again). The inputplumber
 restart drops the controller for a moment; run it outside a game. Uninstall: delete the file, run the
-same commands. Nothing under `/etc` to clean.
+same commands without the scan. Nothing under `/etc` to clean.
 
 The Armada side ships `casdap-check.service` (`ConditionPathExists=/var/lib/extensions/casdap.raw`,
 `After=systemd-sysext.service`): passes when `/usr/lib/extension-release.d/extension-release.casdap`
