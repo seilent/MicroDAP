@@ -8,6 +8,12 @@
 #include <QStringList>
 #include <QTimer>
 
+#include "OutputPorts.h"
+
+#include <functional>
+#include <memory>
+#include <vector>
+
 #include <pulse/context.h>
 #include <pulse/introspect.h>
 #include <pulse/subscribe.h>
@@ -86,7 +92,7 @@ signals:
     void levelChanged(int percent);
 };
 
-class PulseSinkVolume : public SinkVolume
+class PulseSinkVolume : public SinkVolume, public DacSinkPort
 {
     Q_OBJECT
 
@@ -101,16 +107,47 @@ public:
 
     static pa_cvolume stepped(const pa_cvolume &volume, int percent);
     static int level(const pa_cvolume &volume);
+    static int alsaCardOf(const pa_proplist *props);
+    static DacCard dacCardOf(const pa_proplist *props);
+    static bool isBluezInput(const pa_proplist *props);
 
     void step(int percent) override;
 
+    void cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done) override;
+    void setDefaultSink(const QString &name) override;
+    void sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done) override;
+    void sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done) override;
+    void setSinkVolumeDb(const QString &name, double db) override;
+    void unmuteSink(const QString &name) override;
+    void bluezInputs(std::function<void(const QList<quint32> &)> done) override;
+    void moveSinkInput(quint32 index, const QString &sink) override;
+
+signals:
+    void sinkAppeared(quint32 index, const QString &name, int card);
+    void sinkChanged(quint32 index);
+    void cardRemoved(quint32 cardIndex);
+
 private:
+    struct Request
+    {
+        std::function<void(const pa_sink_info *)> sink;
+        std::function<void(const pa_card_info *)> card;
+        std::function<void(const QList<quint32> *)> inputs;
+        PulseSinkVolume *self = nullptr;
+        QList<quint32> found;
+        bool delivered = false;
+    };
+
     static void onState(pa_context *context, void *userdata);
     static void onEvent(pa_context *context, pa_subscription_event_type_t type, quint32 index, void *userdata);
     static void onServerInfo(pa_context *context, const pa_server_info *info, void *userdata);
     static void onValidSink(pa_context *context, const pa_sink_info *info, int eol, void *userdata);
     static void onOutsideSink(pa_context *context, const pa_sink_info *info, int eol, void *userdata);
     static void onSet(pa_context *context, int success, void *userdata);
+    static void onRequestSink(pa_context *context, const pa_sink_info *info, int eol, void *userdata);
+    static void onRequestCard(pa_context *context, const pa_card_info *info, int eol, void *userdata);
+    static void onRequestInput(pa_context *context, const pa_sink_input_info *info, int eol, void *userdata);
+    static void onDacSet(pa_context *context, int success, void *userdata);
 
     void connectContext();
     void teardown(bool reconnect);
@@ -118,7 +155,17 @@ private:
     void apply(int percent);
     void send();
     bool quiet() const;
+    void querySink(quint32 index, const QByteArray &name, std::function<void(const pa_sink_info *)> done);
+    void queryCard(quint32 index, std::function<void(const pa_card_info *)> done);
+    void queryInputs(std::function<void(const QList<quint32> *)> done);
+    void issue(std::unique_ptr<Request> request, const std::function<pa_operation *(Request *)> &start);
+    std::unique_ptr<Request> take(Request *request);
+    void fail(std::unique_ptr<Request> request);
+    void failPending();
+    void watchSink(quint32 index, bool appeared);
+    void dacCall(const char *what, const std::function<pa_operation *()> &start);
 
+    std::vector<std::unique_ptr<Request>> m_requests;
     pa_glib_mainloop *m_mainloop = nullptr;
     pa_context *m_context = nullptr;
     QTimer m_teardown;

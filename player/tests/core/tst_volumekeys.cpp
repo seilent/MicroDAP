@@ -53,6 +53,16 @@ public:
     QList<int> steps;
 };
 
+using Props = QList<QPair<QByteArray, QByteArray>>;
+
+std::unique_ptr<pa_proplist, void (*)(pa_proplist *)> proplistOf(const Props &props)
+{
+    std::unique_ptr<pa_proplist, void (*)(pa_proplist *)> out(pa_proplist_new(), &pa_proplist_free);
+    for (const auto &[key, value] : props)
+        pa_proplist_sets(out.get(), key.constData(), value.constData());
+    return out;
+}
+
 pa_cvolume volumeOf(std::initializer_list<pa_volume_t> values)
 {
     pa_cvolume volume;
@@ -103,6 +113,11 @@ private slots:
     void alsaPressAtLimitSkipsWrite();
     void alsaMuteFloorMapped();
     void alsaNonLinearRejected();
+    void dacCardOf_data();
+    void dacCardOf();
+    void bluezInputMatched();
+    void dacHelpersFailWithoutServer();
+    void dacFailuresDroppedWithObject();
 
 private:
     void addNode(const QString &event, const QString &name);
@@ -130,6 +145,7 @@ void VolumeKeysTest::cleanup()
         ::close(fd);
     m_fds.clear();
     m_dir.reset();
+    qunsetenv("PULSE_SERVER");
 }
 
 void VolumeKeysTest::addNode(const QString &event, const QString &name)
@@ -720,6 +736,112 @@ void VolumeKeysTest::alsaNonLinearRejected()
     QCOMPARE(mixer->opens.size(), 1);
     QCOMPARE(mixer->closes, 1);
     QVERIFY(!mixer->isOpen);
+}
+
+void VolumeKeysTest::dacCardOf_data()
+{
+    QTest::addColumn<Props>("props");
+    QTest::addColumn<int>("card");
+    QTest::addColumn<QString>("reserve");
+
+    QTest::newRow("fiio") << Props{{"api.alsa.card", "1"},
+                                   {"alsa.card", "1"},
+                                   {"api.dbus.ReserveDevice1", "Audio1"},
+                                   {"api.dbus.ReserveDevice1.Priority", "-20"},
+                                   {"device.name", "alsa_card.usb-FIIO_SNOWSKY_TINY_B_000000000000-01"}}
+                          << 1 << QStringLiteral("Audio1");
+    QTest::newRow("no reserve") << Props{{"alsa.card", "1"}, {"device.name", "alsa_card.usb-FIIO"}} << -1 << QString();
+    QTest::newRow("no alsa card") << Props{{"api.alsa.card", "1"}, {"api.dbus.ReserveDevice1", "Audio1"}} << -1
+                                  << QString();
+    QTest::newRow("bad alsa card") << Props{{"alsa.card", "B"}, {"api.dbus.ReserveDevice1", "Audio1"}} << -1
+                                   << QString();
+    QTest::newRow("empty") << Props{} << -1 << QString();
+}
+
+void VolumeKeysTest::dacCardOf()
+{
+    QFETCH(Props, props);
+    QFETCH(int, card);
+    QFETCH(QString, reserve);
+    const auto list = proplistOf(props);
+    const DacCard out = PulseSinkVolume::dacCardOf(list.get());
+    QCOMPARE(out.isValid(), card >= 0);
+    QCOMPARE(out.alsaCard, card);
+    QCOMPARE(out.reserveName, reserve);
+    QCOMPARE(out.cardIndex, quint32(PA_INVALID_INDEX));
+    QCOMPARE(PulseSinkVolume::dacCardOf(nullptr).isValid(), false);
+}
+
+void VolumeKeysTest::bluezInputMatched()
+{
+    QVERIFY(PulseSinkVolume::isBluezInput(
+        proplistOf({{"node.name", "bluez_input.BC_27_7A_6F_A9_6F.2"}, {"media.name", "SeFL (codec aptX)"}}).get()));
+    QVERIFY(!PulseSinkVolume::isBluezInput(proplistOf({{"node.name", "casdap-player"}}).get()));
+    QVERIFY(!PulseSinkVolume::isBluezInput(proplistOf({{"media.name", "bluez_input.BC_27_7A_6F_A9_6F.2"}}).get()));
+    QVERIFY(!PulseSinkVolume::isBluezInput(nullptr));
+    QCOMPARE(PulseSinkVolume::alsaCardOf(proplistOf({{"alsa.card", "0"}}).get()), 0);
+    QCOMPARE(PulseSinkVolume::alsaCardOf(proplistOf({{"alsa.card", "-1"}}).get()), -1);
+    QCOMPARE(PulseSinkVolume::alsaCardOf(proplistOf({}).get()), -1);
+}
+
+void VolumeKeysTest::dacHelpersFailWithoutServer()
+{
+    qputenv("PULSE_SERVER", QFile::encodeName(QStringLiteral("unix:") + m_dir->filePath(QStringLiteral("none"))));
+    PulseSinkVolume sink;
+    int cards = 0;
+    int volumes = 0;
+    int mutes = 0;
+    int inputs = 0;
+    DacCard card;
+    card.alsaCard = 1;
+    card.reserveName = QStringLiteral("Audio1");
+    bool volumeOk = true;
+    bool muteOk = true;
+    QList<quint32> found{7};
+    sink.cardInfo(69, [&](const DacCard &out) {
+        ++cards;
+        card = out;
+    });
+    sink.sinkVolumeDb(QStringLiteral("alsa_output.usb-FIIO"), [&](bool ok, double) {
+        ++volumes;
+        volumeOk = ok;
+    });
+    sink.sinkMuted(QStringLiteral("alsa_output.usb-FIIO"), [&](bool ok, bool) {
+        ++mutes;
+        muteOk = ok;
+    });
+    sink.bluezInputs([&](const QList<quint32> &out) {
+        ++inputs;
+        found = out;
+    });
+    sink.setDefaultSink(QStringLiteral("alsa_output.usb-FIIO"));
+    sink.setSinkVolumeDb(QStringLiteral("alsa_output.usb-FIIO"), -40.0);
+    sink.unmuteSink(QStringLiteral("alsa_output.usb-FIIO"));
+    sink.moveSinkInput(7, QStringLiteral("alsa_output.usb-FIIO"));
+    QCOMPARE(cards + volumes + mutes + inputs, 0);
+    QTRY_COMPARE(cards, 1);
+    QTRY_COMPARE(volumes, 1);
+    QTRY_COMPARE(mutes, 1);
+    QTRY_COMPARE(inputs, 1);
+    QTest::qWait(100);
+    QCOMPARE(cards + volumes + mutes + inputs, 4);
+    QVERIFY(!card.isValid());
+    QVERIFY(!volumeOk);
+    QVERIFY(!muteOk);
+    QVERIFY(found.isEmpty());
+}
+
+void VolumeKeysTest::dacFailuresDroppedWithObject()
+{
+    qputenv("PULSE_SERVER", QFile::encodeName(QStringLiteral("unix:") + m_dir->filePath(QStringLiteral("none"))));
+    int calls = 0;
+    {
+        PulseSinkVolume sink;
+        sink.cardInfo(69, [&](const DacCard &) { ++calls; });
+        sink.bluezInputs([&](const QList<quint32> &) { ++calls; });
+    }
+    QTest::qWait(100);
+    QCOMPARE(calls, 0);
 }
 
 QTEST_GUILESS_MAIN(VolumeKeysTest)

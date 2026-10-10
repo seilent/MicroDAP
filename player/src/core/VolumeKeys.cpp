@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QMetaMethod>
 #include <QSocketNotifier>
 
 #include <cerrno>
@@ -272,7 +273,8 @@ void PulseSinkVolume::onState(pa_context *context, void *userdata)
         self->m_failLogged = false;
         pa_context_set_subscribe_callback(context, &PulseSinkVolume::onEvent, self);
         unref(pa_context_subscribe(context,
-                                   pa_subscription_mask_t(PA_SUBSCRIPTION_MASK_SINK | PA_SUBSCRIPTION_MASK_SERVER),
+                                   pa_subscription_mask_t(PA_SUBSCRIPTION_MASK_SINK | PA_SUBSCRIPTION_MASK_SERVER
+                                                          | PA_SUBSCRIPTION_MASK_CARD),
                                    nullptr, nullptr));
         self->validate();
         break;
@@ -295,7 +297,17 @@ void PulseSinkVolume::onEvent(pa_context *context, pa_subscription_event_type_t 
         self->validate();
         return;
     }
-    if (facility != PA_SUBSCRIPTION_EVENT_SINK || (type & PA_SUBSCRIPTION_EVENT_TYPE_MASK) != PA_SUBSCRIPTION_EVENT_CHANGE)
+    const int kind = type & PA_SUBSCRIPTION_EVENT_TYPE_MASK;
+    if (facility == PA_SUBSCRIPTION_EVENT_CARD) {
+        if (kind == PA_SUBSCRIPTION_EVENT_REMOVE)
+            emit self->cardRemoved(index);
+        return;
+    }
+    if (facility != PA_SUBSCRIPTION_EVENT_SINK)
+        return;
+    if (kind == PA_SUBSCRIPTION_EVENT_NEW || kind == PA_SUBSCRIPTION_EVENT_CHANGE)
+        self->watchSink(index, kind == PA_SUBSCRIPTION_EVENT_NEW);
+    if (kind != PA_SUBSCRIPTION_EVENT_CHANGE)
         return;
     if (!self->m_valid || self->m_validating || index != self->m_sinkIndex || !self->quiet())
         return;
@@ -392,6 +404,7 @@ void PulseSinkVolume::teardown(bool reconnect)
         pa_context_unref(m_context);
         m_context = nullptr;
     }
+    failPending();
     m_send.stop();
     m_unmute = false;
     m_valid = false;
@@ -462,6 +475,293 @@ void PulseSinkVolume::send()
 bool PulseSinkVolume::quiet() const
 {
     return m_clock.elapsed() - m_lastSetMs >= quietMs;
+}
+
+int PulseSinkVolume::alsaCardOf(const pa_proplist *props)
+{
+    const char *value = props ? pa_proplist_gets(props, "alsa.card") : nullptr;
+    if (!value)
+        return -1;
+    bool ok = false;
+    const int card = QByteArray(value).toInt(&ok);
+    return ok && card >= 0 ? card : -1;
+}
+
+DacCard PulseSinkVolume::dacCardOf(const pa_proplist *props)
+{
+    const int card = alsaCardOf(props);
+    const char *reserve = props ? pa_proplist_gets(props, "api.dbus.ReserveDevice1") : nullptr;
+    if (card < 0 || !reserve || !*reserve)
+        return DacCard{};
+    DacCard out;
+    out.alsaCard = card;
+    out.reserveName = QString::fromUtf8(reserve);
+    return out;
+}
+
+bool PulseSinkVolume::isBluezInput(const pa_proplist *props)
+{
+    const char *name = props ? pa_proplist_gets(props, "node.name") : nullptr;
+    return name && QByteArray(name).startsWith("bluez_input.");
+}
+
+void PulseSinkVolume::cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done)
+{
+    querySink(sinkIndex, QByteArray(), [this, done](const pa_sink_info *info) {
+        if (!info || info->card == PA_INVALID_INDEX) {
+            done(DacCard{});
+            return;
+        }
+        queryCard(info->card, [done](const pa_card_info *card) {
+            if (!card) {
+                done(DacCard{});
+                return;
+            }
+            DacCard out = dacCardOf(card->proplist);
+            if (out.isValid())
+                out.cardIndex = card->index;
+            done(out);
+        });
+    });
+}
+
+void PulseSinkVolume::setDefaultSink(const QString &name)
+{
+    const QByteArray sink = name.toUtf8();
+    dacCall("default sink", [this, sink] {
+        return pa_context_set_default_sink(m_context, sink.constData(), &PulseSinkVolume::onDacSet, this);
+    });
+}
+
+void PulseSinkVolume::sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done)
+{
+    querySink(PA_INVALID_INDEX, name.toUtf8(), [done](const pa_sink_info *info) {
+        if (!info) {
+            done(false, 0.0);
+            return;
+        }
+        done(true, pa_sw_volume_to_dB(pa_cvolume_max(&info->volume)));
+    });
+}
+
+void PulseSinkVolume::sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done)
+{
+    querySink(PA_INVALID_INDEX, name.toUtf8(), [done](const pa_sink_info *info) {
+        if (!info) {
+            done(false, false);
+            return;
+        }
+        done(true, info->mute != 0);
+    });
+}
+
+void PulseSinkVolume::setSinkVolumeDb(const QString &name, double db)
+{
+    const QByteArray sink = name.toUtf8();
+    querySink(PA_INVALID_INDEX, sink, [this, sink, db](const pa_sink_info *info) {
+        if (!info || !pa_cvolume_valid(&info->volume)) {
+            qWarning().noquote() << "casdap volume: no sink" << QString::fromUtf8(sink);
+            return;
+        }
+        pa_cvolume volume;
+        pa_cvolume_set(&volume, info->volume.channels, pa_sw_volume_from_dB(db));
+        dacCall("sink volume", [this, sink, volume] {
+            return pa_context_set_sink_volume_by_name(m_context, sink.constData(), &volume,
+                                                      &PulseSinkVolume::onDacSet, this);
+        });
+    });
+}
+
+void PulseSinkVolume::unmuteSink(const QString &name)
+{
+    const QByteArray sink = name.toUtf8();
+    dacCall("sink unmute", [this, sink] {
+        return pa_context_set_sink_mute_by_name(m_context, sink.constData(), 0, &PulseSinkVolume::onDacSet, this);
+    });
+}
+
+void PulseSinkVolume::bluezInputs(std::function<void(const QList<quint32> &)> done)
+{
+    queryInputs([done](const QList<quint32> *found) { done(found ? *found : QList<quint32>{}); });
+}
+
+void PulseSinkVolume::moveSinkInput(quint32 index, const QString &sink)
+{
+    const QByteArray name = sink.toUtf8();
+    dacCall("sink input move", [this, index, name] {
+        return pa_context_move_sink_input_by_name(m_context, index, name.constData(), &PulseSinkVolume::onDacSet,
+                                                  this);
+    });
+}
+
+void PulseSinkVolume::onRequestSink(pa_context *context, const pa_sink_info *info, int eol, void *userdata)
+{
+    auto *request = static_cast<Request *>(userdata);
+    if (context != request->self->m_context)
+        return;
+    if (eol == 0) {
+        if (info && !request->delivered) {
+            request->delivered = true;
+            request->sink(info);
+        }
+        return;
+    }
+    std::unique_ptr<Request> owned = request->self->take(request);
+    if (owned && !owned->delivered)
+        owned->sink(nullptr);
+}
+
+void PulseSinkVolume::onRequestCard(pa_context *context, const pa_card_info *info, int eol, void *userdata)
+{
+    auto *request = static_cast<Request *>(userdata);
+    if (context != request->self->m_context)
+        return;
+    if (eol == 0) {
+        if (info && !request->delivered) {
+            request->delivered = true;
+            request->card(info);
+        }
+        return;
+    }
+    std::unique_ptr<Request> owned = request->self->take(request);
+    if (owned && !owned->delivered)
+        owned->card(nullptr);
+}
+
+void PulseSinkVolume::onRequestInput(pa_context *context, const pa_sink_input_info *info, int eol, void *userdata)
+{
+    auto *request = static_cast<Request *>(userdata);
+    if (context != request->self->m_context)
+        return;
+    if (eol == 0) {
+        if (info && isBluezInput(info->proplist))
+            request->found.append(info->index);
+        return;
+    }
+    std::unique_ptr<Request> owned = request->self->take(request);
+    if (owned)
+        owned->inputs(eol > 0 ? &owned->found : nullptr);
+}
+
+void PulseSinkVolume::onDacSet(pa_context *context, int success, void *userdata)
+{
+    auto *self = static_cast<PulseSinkVolume *>(userdata);
+    if (context != self->m_context || success)
+        return;
+    qWarning() << "casdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
+}
+
+void PulseSinkVolume::querySink(quint32 index, const QByteArray &name,
+                                std::function<void(const pa_sink_info *)> done)
+{
+    auto request = std::make_unique<Request>();
+    request->sink = std::move(done);
+    issue(std::move(request), [this, index, name](Request *raw) {
+        if (index != PA_INVALID_INDEX)
+            return pa_context_get_sink_info_by_index(m_context, index, &PulseSinkVolume::onRequestSink, raw);
+        return pa_context_get_sink_info_by_name(m_context, name.constData(), &PulseSinkVolume::onRequestSink, raw);
+    });
+}
+
+void PulseSinkVolume::queryCard(quint32 index, std::function<void(const pa_card_info *)> done)
+{
+    auto request = std::make_unique<Request>();
+    request->card = std::move(done);
+    issue(std::move(request), [this, index](Request *raw) {
+        return pa_context_get_card_info_by_index(m_context, index, &PulseSinkVolume::onRequestCard, raw);
+    });
+}
+
+void PulseSinkVolume::queryInputs(std::function<void(const QList<quint32> *)> done)
+{
+    auto request = std::make_unique<Request>();
+    request->inputs = std::move(done);
+    issue(std::move(request), [this](Request *raw) {
+        return pa_context_get_sink_input_info_list(m_context, &PulseSinkVolume::onRequestInput, raw);
+    });
+}
+
+void PulseSinkVolume::issue(std::unique_ptr<Request> request, const std::function<pa_operation *(Request *)> &start)
+{
+    request->self = this;
+    if (!m_context) {
+        fail(std::move(request));
+        return;
+    }
+    Request *raw = request.get();
+    m_requests.push_back(std::move(request));
+    pa_operation *operation = start(raw);
+    if (!operation) {
+        fail(take(raw));
+        return;
+    }
+    pa_operation_unref(operation);
+}
+
+std::unique_ptr<PulseSinkVolume::Request> PulseSinkVolume::take(Request *request)
+{
+    for (auto it = m_requests.begin(); it != m_requests.end(); ++it) {
+        if (it->get() == request) {
+            std::unique_ptr<Request> owned = std::move(*it);
+            m_requests.erase(it);
+            return owned;
+        }
+    }
+    return nullptr;
+}
+
+void PulseSinkVolume::fail(std::unique_ptr<Request> request)
+{
+    if (!request || request->delivered)
+        return;
+    QMetaObject::invokeMethod(
+        this,
+        [sink = std::move(request->sink), card = std::move(request->card), inputs = std::move(request->inputs)] {
+            if (sink)
+                sink(nullptr);
+            if (card)
+                card(nullptr);
+            if (inputs)
+                inputs(nullptr);
+        },
+        Qt::QueuedConnection);
+}
+
+void PulseSinkVolume::failPending()
+{
+    std::vector<std::unique_ptr<Request>> pending = std::move(m_requests);
+    m_requests.clear();
+    for (std::unique_ptr<Request> &request : pending)
+        fail(std::move(request));
+}
+
+void PulseSinkVolume::watchSink(quint32 index, bool appeared)
+{
+    const QMetaMethod signal = appeared ? QMetaMethod::fromSignal(&PulseSinkVolume::sinkAppeared)
+                                        : QMetaMethod::fromSignal(&PulseSinkVolume::sinkChanged);
+    if (!isSignalConnected(signal))
+        return;
+    querySink(index, QByteArray(), [this, appeared](const pa_sink_info *info) {
+        if (!info)
+            return;
+        const int card = alsaCardOf(info->proplist);
+        if (card < 0)
+            return;
+        if (appeared)
+            emit sinkAppeared(info->index, QString::fromUtf8(info->name), card);
+        else
+            emit sinkChanged(info->index);
+    });
+}
+
+void PulseSinkVolume::dacCall(const char *what, const std::function<pa_operation *()> &start)
+{
+    pa_operation *operation = m_context ? start() : nullptr;
+    if (!operation) {
+        qWarning() << "casdap volume: dac sink call failed" << what;
+        return;
+    }
+    pa_operation_unref(operation);
 }
 
 VolumeKeys::VolumeKeys(KeySource *keys, SinkVolume *sink, Settings *settings, QObject *parent)
