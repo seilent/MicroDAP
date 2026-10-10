@@ -48,7 +48,7 @@ bool applyOverlayAtoms(QWindow *window, bool fullscreen)
     if (!window)
         return false;
     auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
-    if (!x11) {
+    if (!x11 || !x11->connection()) {
         QTextStream(stderr) << "casdap-player: overlay mode needs the xcb platform\n";
         return false;
     }
