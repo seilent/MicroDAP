@@ -45,6 +45,7 @@ test:
     bash tests/wait-x-test.sh
     bash tests/overlay-unit-test.sh
     bash tests/bt-test.sh
+    bash tests/usb-audio-test.sh
     just test-player
 
 test-player:

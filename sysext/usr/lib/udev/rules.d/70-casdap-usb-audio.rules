@@ -1,0 +1,2 @@
+ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/libexec/casdap/casdap-usb-audio %S%p"
+ACTION=="bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", DRIVER=="usbhid", RUN+="/usr/libexec/casdap/casdap-usb-audio %S%p/.."

@@ -588,11 +588,11 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just base` | Reads `IMAGE_VERSION`, `VERSION_ID` and the booted image digest from the device into `build/base.env`. |
 | `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, installs the Selawik 1.01 TTFs (`build/fonts.sh`, sha256 pinned, cached in `build/cache/`) to `usr/share/fonts/casdap/`, runs `build/aptx.sh` (the aptX codec rpms, sha256 pinned, cached in `build/cache/aptx/`, into `usr/lib64/`), writes `version` and `build-manifest`. |
 | `just build` | `dist` plus `casdap-<ver>-armada<VERSION_ID>-arm64.raw` (squashfs, zstd). |
-| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/` and `build/device-apply` to `/tmp/casdap-apply`, runs it as root (`systemd-sysext refresh`, restarts polkit and `casdap-guard`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, touches `/tmp/casdap-restart-audio` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed), then as the user `systemctl --user daemon-reload`, restarts `casdap-hotkeyd.service` and, with the marker present, the user `pipewire pipewire-pulse wireplumber`. |
+| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/` and `build/device-apply` to `/tmp/casdap-apply`, runs it as root (`systemd-sysext refresh`, restarts polkit and `casdap-guard`, `udevadm control --reload`, `casdap-usb-audio --scan`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, touches `/tmp/casdap-restart-audio` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed), then as the user `systemctl --user daemon-reload`, restarts `casdap-hotkeyd.service` and, with the marker present, the user `pipewire pipewire-pulse wireplumber`. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just test-player` | ctest of `build/player` inside the builder (after `just dist`); prints `skip: no builder image` where the image is absent. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
-| `just test` | `tests/session-control-test.sh`, `tests/priv-test.sh`, `tests/hotkeyd-test.sh`, `tests/pad-test.sh`, `tests/intercept-test.sh`, `tests/keep-test.sh`, `tests/codec-test.sh`, `tests/power-test.sh`, `tests/powerd-test.sh`, `tests/wait-x-test.sh`, `tests/overlay-unit-test.sh`, `tests/bt-test.sh`, then `just test-player`. Needs the stock `session-control` at `CASDAP_BASE_ROOT/usr/libexec/armada/` (defaults to `/`, else `../armada/system_files`). |
+| `just test` | `tests/session-control-test.sh`, `tests/priv-test.sh`, `tests/hotkeyd-test.sh`, `tests/pad-test.sh`, `tests/intercept-test.sh`, `tests/keep-test.sh`, `tests/codec-test.sh`, `tests/power-test.sh`, `tests/powerd-test.sh`, `tests/wait-x-test.sh`, `tests/overlay-unit-test.sh`, `tests/bt-test.sh`, `tests/usb-audio-test.sh`, then `just test-player`. Needs the stock `session-control` at `CASDAP_BASE_ROOT/usr/libexec/armada/` (defaults to `/`, else `../armada/system_files`). |
 
 `CASDAP_DEVICE` overrides `armada@pm2`. Root steps on the device run through `ssh -t`
 and `sudo`. Run the dev loop from game mode or ssh, not from inside the casdap session.
@@ -998,6 +998,20 @@ the two words again, so plugging in with `auto` or unplugging a USB DAC with the
 change. Every word emits `applied(word, ok)`.
 `CASDAP_WPCTL_BIN`, `CASDAP_PACTL_BIN`, `CASDAP_AMIXER_BIN` and `CASDAP_SYSTEMCTL_BIN` replace the
 binaries.
+
+USB DAC autosuspend: `/usr/libexec/casdap/casdap-usb-audio <usb device path>` handles a USB device with an
+audio class interface and a HID interface bound to `usbhid` whose report descriptor declares no Generic Desktop
+usage page or usage (a descriptor that cannot be read or walked counts as Generic Desktop). Each such HID
+interface is written to `/sys/bus/usb/drivers/usbhid/unbind`, then the device gets `power/control` `auto` and
+`power/autosuspend_delay_ms` 2000; each write is best effort and a failure is logged. The DAC suspends once its
+PCM closes, and its HID media buttons stop working. Gamepads with audio (DualSense, DualShock 4), keyboards,
+mice and audio only devices are left alone, and a device with no HID interface bound writes nothing.
+`70-casdap-usb-audio.rules` runs it on a `usb_device` add or bind and on the parent of a `usbhid` interface
+bind; `--scan` walks every device under `/sys/bus/usb/devices`, from `casdap-usb-audio.service` at boot
+(`Wants=` from `multi-user.target.d`) and from `device-apply`. `CASDAP_SYS_ROOT` replaces `/sys`. Journal lines:
+`casdap-usb-audio: <dev> <vid>:<pid> hid <intf> unbound` (or `unbind failed`), `<dev> autosuspend on`,
+`<dev> skipped, generic desktop hid`, `<dev> power/control write failed`. Undo as root:
+`echo <intf> > /sys/bus/usb/drivers/usbhid/bind`.
 
 EQ: `playbin` `audio-filter` is `audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp !
 equalizer-nbands name=casdap-eq num-bands=10 ! audioconvert`, built once with the pipeline at off (every band

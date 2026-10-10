@@ -8,6 +8,8 @@ changed=$(rsync -ai --delete /tmp/casdap/ /var/lib/extensions/casdap/)
 systemd-sysext refresh
 systemctl restart polkit
 systemctl restart casdap-guard.service
+udevadm control --reload
+/usr/libexec/casdap/casdap-usb-audio --scan
 if [[ -n "${input}" ]] || grep -q 'usr/share/inputplumber/' <<<"${changed}"; then
     systemctl restart inputplumber.service
     systemctl start armada-controller-type.service
