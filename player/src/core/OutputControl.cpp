@@ -1,8 +1,10 @@
 #include "OutputControl.h"
 
+#include "AudioInfo.h"
 #include "Settings.h"
 
 #include <QDebug>
+#include <QFile>
 #include <QRegularExpression>
 
 namespace casdap {
@@ -144,7 +146,7 @@ QString OutputControl::usbSink() const
 
 bool OutputControl::usbPresent() const
 {
-    return !m_usbSink.isEmpty();
+    return m_held != HeldState::None || !m_usbSink.isEmpty();
 }
 
 bool OutputControl::busy() const
@@ -167,6 +169,7 @@ void OutputControl::setActive(bool active)
         m_pollTimer.start();
     } else {
         m_pollTimer.stop();
+        m_reread = false;
     }
     emit activeChanged();
 }
@@ -186,6 +189,54 @@ int OutputControl::spkGain() const
     return m_spkGain;
 }
 
+OutputControl::HeldState OutputControl::held() const
+{
+    return m_held;
+}
+
+void OutputControl::setHeld(HeldState state)
+{
+    if (m_held == state)
+        return;
+    const bool usb = usbPresent();
+    const bool released = state == HeldState::None;
+    m_held = state;
+    qInfo() << "casdap output: held"
+            << (released ? "none" : state == HeldState::Held ? "held" : "returning");
+    if (usb != usbPresent())
+        emit usbSinkChanged();
+    if (released)
+        refresh();
+}
+
+void OutputControl::watchCard(int index, const QString &id)
+{
+    m_watchIndex = index;
+    m_watchId = id;
+    m_watchGone = false;
+    qInfo() << "casdap output: watch card" << index << id;
+}
+
+void OutputControl::unwatchCard()
+{
+    m_watchIndex = -1;
+    m_watchId.clear();
+    m_watchGone = false;
+}
+
+void OutputControl::checkWatchedCard()
+{
+    if (m_watchIndex < 0 || m_watchGone)
+        return;
+    QFile file(AudioInfo::asoundDir() + QStringLiteral("/card") + QString::number(m_watchIndex) + QStringLiteral("/id"));
+    const QString id = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed() : QString();
+    if (id == m_watchId)
+        return;
+    m_watchGone = true;
+    qInfo() << "casdap output: card gone" << m_watchIndex << m_watchId << "reads" << id;
+    emit cardGone(m_watchIndex);
+}
+
 void OutputControl::apply(const QString &output)
 {
     if (!outputs().contains(output)) {
@@ -200,6 +251,7 @@ void OutputControl::apply(const QString &output)
     drop(m_jack);
     drop(m_sinkList);
     m_reading = false;
+    m_reread = false;
     m_applying = true;
     m_everApplied = true;
     updateBusy();
@@ -209,17 +261,25 @@ void OutputControl::apply(const QString &output)
 
 void OutputControl::refresh()
 {
-    if (m_applying || m_reading)
+    checkWatchedCard();
+    if (m_applying || m_reading) {
+        m_reread = true;
         return;
+    }
     m_reading = true;
     const bool jack = m_jackPresent;
     const QString usb = m_usbSink;
     readBoth([this, jack, usb] {
         m_reading = false;
-        if (!m_everApplied || (jack == m_jackPresent && usb == m_usbSink))
+        if (m_everApplied && (jack != m_jackPresent || usb != m_usbSink)) {
+            qInfo() << "casdap output: edge, jack" << m_jackPresent << "usb" << m_usbSink;
+            apply(m_output);
             return;
-        qInfo() << "casdap output: edge, jack" << m_jackPresent << "usb" << m_usbSink;
-        apply(m_output);
+        }
+        if (!m_reread)
+            return;
+        m_reread = false;
+        refresh();
     });
 }
 
@@ -246,7 +306,9 @@ void OutputControl::readSinks(Handler done)
         [this, done](bool ok, const QByteArray &out) {
         if (ok) {
             m_sinks = parseSinks(QString::fromUtf8(out));
-            setUsbSink(usbSinkIn(m_sinks));
+            const QString usb = usbSinkIn(m_sinks);
+            if (!usb.isEmpty() || m_held == HeldState::None)
+                setUsbSink(usb);
         }
         done(ok, out);
     });
@@ -255,6 +317,12 @@ void OutputControl::readSinks(Handler done)
 void OutputControl::resolveAndSet()
 {
     const QString active = resolve(m_output, m_jackPresent, usbPresent());
+    if (active == QLatin1StringView("usb") && m_held != HeldState::None) {
+        qInfo() << "casdap output: usb held, default sink kept";
+        setActiveOutput(active);
+        finish(true);
+        return;
+    }
     const QString sink = active == QLatin1StringView("usb") ? m_usbSink
         : active == QLatin1StringView("headphones") ? headphonesSink() : speakerSink();
     if (!m_sinks.contains(sink)) {
@@ -393,6 +461,10 @@ void OutputControl::finish(bool ok)
     emit applied(m_output, ok);
     if (ok)
         applyHeadphone();
+    if (!m_reread)
+        return;
+    m_reread = false;
+    refresh();
 }
 
 void OutputControl::updateBusy()

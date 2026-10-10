@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OutputPorts.h"
+
 #include <QByteArray>
 #include <QObject>
 #include <QProcess>
@@ -11,7 +13,7 @@
 
 namespace casdap {
 
-class OutputControl : public QObject
+class OutputControl : public QObject, public HeldOutputPort
 {
     Q_OBJECT
     Q_PROPERTY(QString output READ output NOTIFY outputChanged)
@@ -54,6 +56,11 @@ public:
     QString hpGain() const;
     QString hpAmp() const;
     int spkGain() const;
+    HeldState held() const;
+
+    void setHeld(HeldState state) override;
+    void watchCard(int index, const QString &id) override;
+    void unwatchCard() override;
 
     Q_INVOKABLE void apply(const QString &output);
     Q_INVOKABLE void refresh();
@@ -71,6 +78,7 @@ signals:
     void hpAmpChanged();
     void spkGainChanged();
     void applied(const QString &output, bool ok);
+    void cardGone(int index);
 
 private:
     using Handler = std::function<void(bool ok, const QByteArray &out)>;
@@ -89,6 +97,7 @@ private:
     void startWords(const QStringList &words);
     void nextWord();
     void updateBusy();
+    void checkWatchedCard();
 
     QString m_output;
     QString m_activeOutput;
@@ -98,11 +107,16 @@ private:
     bool m_busy = false;
     bool m_applying = false;
     bool m_reading = false;
+    bool m_reread = false;
     bool m_everApplied = false;
     bool m_active = false;
     QString m_hpGain;
     QString m_hpAmp;
     int m_spkGain = 0;
+    HeldState m_held = HeldState::None;
+    int m_watchIndex = -1;
+    QString m_watchId;
+    bool m_watchGone = false;
     QStringList m_words;
     QTimer m_pollTimer;
     QProcess *m_apply = nullptr;

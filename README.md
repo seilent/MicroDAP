@@ -997,8 +997,8 @@ name starting with `alsa_output.usb-` (empty when none), `usbPresent` follows it
 `alsa_output.platform-sound.HiFi__Speaker__sink` and `HiFi__Headphones__sink`. `jackPresent` reads the
 `Headphone Jack` block of `amixer -c0 contents` (`values=on`; the CARD control has no cget name). Both are
 polled every 2 s for the whole DAP session (the screen off state included) and read again inside every apply; a jack edge or the USB sink appearing or
-disappearing reapplies the current output (the poll skips while an apply runs; an edge after the apply's own read
-is caught by the next poll). The USB DAC seen on the device
+disappearing reapplies the current output. A `refresh()` during a read or an apply, the poll's included, queues one
+reread that runs when it finishes, so an edge after the apply's own read is applied then. The USB DAC seen on the device
 (Apple USB-C dongle) takes 48 kHz only, so 44.1 sources are resampled by the graph while it is the output.
 `busy` is true while a command chain runs, `applied(output, ok)` ends it.
 `setHeadphone(gain, amp)` takes `Settings.hpGain` and `Settings.hpAmp` at start and on every change and

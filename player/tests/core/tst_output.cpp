@@ -98,13 +98,23 @@ private slots:
     void polling();
     void speakerGainWords();
     void missingBinaries();
+    void heldKeepsUsb();
+    void returningPollNoApply();
+    void watchedCardGone();
+    void watchedCardPolled();
+    void rereadDuringRead();
+    void rereadDuringApply();
 
 private:
+    int count(const QString &line) const;
+
     QTemporaryDir m_dir;
     QString m_bin;
     QString m_log;
     QString m_sinksFile;
     QString m_jackFile;
+    QString m_cardIdFile;
+    QString m_gateFile;
 };
 
 void OutputTest::initTestCase()
@@ -114,12 +124,20 @@ void OutputTest::initTestCase()
     m_log = m_dir.path() + QStringLiteral("/calls.log");
     m_sinksFile = m_dir.path() + QStringLiteral("/sinks.txt");
     m_jackFile = m_dir.path() + QStringLiteral("/jack.txt");
+    m_cardIdFile = m_dir.path() + QStringLiteral("/asound/card1/id");
+    m_gateFile = m_dir.path() + QStringLiteral("/gate");
     const QString logLine = QStringLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"") + m_log
                             + QStringLiteral("\"\n");
     QVERIFY(writeFile(m_bin + QStringLiteral("/wpctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/pactl"),
                       QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("[ \"$1\" = list ] && cat \"") + m_sinksFile
                           + QStringLiteral("\"\nexit 0\n"),
+                      true));
+    QVERIFY(writeFile(m_bin + QStringLiteral("/slow/pactl"),
+                      QStringLiteral("#!/bin/sh\nif [ \"$1\" = list ]; then\nout=$(cat \"") + m_sinksFile
+                          + QStringLiteral("\")\n") + logLine
+                          + QStringLiteral("while [ -f \"") + m_gateFile
+                          + QStringLiteral("\" ]; do sleep 0.05; done\nprintf '%s\\n' \"$out\"\nexit 0\nfi\n") + logLine + QStringLiteral("exit 0\n"),
                       true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/amixer"),
@@ -131,6 +149,7 @@ void OutputTest::initTestCase()
     qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
     qputenv("CASDAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
     qputenv("CASDAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
+    qputenv("CASDAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
     QCOMPARE(OutputControl::wpctlPath(), m_bin + QStringLiteral("/wpctl"));
     QCOMPARE(OutputControl::pactlPath(), m_bin + QStringLiteral("/pactl"));
     QCOMPARE(OutputControl::amixerPath(), m_bin + QStringLiteral("/amixer"));
@@ -140,8 +159,16 @@ void OutputTest::initTestCase()
 void OutputTest::init()
 {
     QFile::remove(m_log);
+    QFile::remove(m_gateFile);
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
+    QVERIFY(writeFile(m_cardIdFile, QStringLiteral("B\n")));
+    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
+}
+
+int OutputTest::count(const QString &line) const
+{
+    return readFile(m_log).count(line);
 }
 
 void OutputTest::parsesSinks()
@@ -531,6 +558,200 @@ void OutputTest::missingBinaries()
     qputenv("CASDAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
     qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
     qputenv("CASDAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
+}
+
+void OutputTest::heldKeepsUsb()
+{
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QCOMPARE(control.held(), HeldOutputPort::HeldState::None);
+    QSignalSpy usbSpy(&control, &OutputControl::usbSinkChanged);
+    QSignalSpy activeSpy(&control, &OutputControl::activeOutputChanged);
+
+    control.setHeld(HeldOutputPort::HeldState::Held);
+    QCOMPARE(control.held(), HeldOutputPort::HeldState::Held);
+    QCOMPARE(usbSpy.count(), 0);
+    QFile::remove(m_log);
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
+    control.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 1);
+    QVERIFY(control.usbPresent());
+    QCOMPARE(control.usbSink(), QString::fromUtf8(usbName));
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QCOMPARE(usbSpy.count(), 0);
+    QCOMPARE(activeSpy.count(), 0);
+
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QVERIFY(applied.at(1).at(1).toBool());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+
+    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
+    control.refresh();
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QVERIFY(applied.at(2).at(1).toBool());
+    QVERIFY(!control.jackPresent());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QCOMPARE(activeSpy.count(), 0);
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
+
+    QFile::remove(m_log);
+    control.setHeld(HeldOutputPort::HeldState::None);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
+    QVERIFY(applied.at(3).at(1).toBool());
+    QVERIFY(!control.usbPresent());
+    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
+    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::speakerSink())));
+}
+
+void OutputTest::returningPollNoApply()
+{
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+
+    control.setHeld(HeldOutputPort::HeldState::Returning);
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
+    QFile::remove(m_log);
+    control.setActive(true);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTest::qWait(300);
+    QFile::remove(m_log);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 1);
+    QVERIFY(control.usbPresent());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
+
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QFile::remove(m_log);
+    control.setHeld(HeldOutputPort::HeldState::None);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 1);
+    QVERIFY(control.usbPresent());
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
+    control.setActive(false);
+}
+
+void OutputTest::watchedCardGone()
+{
+    OutputControl control;
+    QSignalSpy gone(&control, &OutputControl::cardGone);
+    QFile::remove(m_cardIdFile);
+    control.refresh();
+    QCOMPARE(gone.count(), 0);
+
+    QVERIFY(writeFile(m_cardIdFile, QStringLiteral("B\n")));
+    control.watchCard(1, QStringLiteral("B"));
+    control.refresh();
+    QCOMPARE(gone.count(), 0);
+
+    QFile::remove(m_cardIdFile);
+    control.refresh();
+    QCOMPARE(gone.count(), 1);
+    QCOMPARE(gone.at(0).at(0).toInt(), 1);
+    control.refresh();
+    QCOMPARE(gone.count(), 1);
+
+    QVERIFY(writeFile(m_cardIdFile, QStringLiteral("C\n")));
+    control.watchCard(1, QStringLiteral("B"));
+    control.refresh();
+    QCOMPARE(gone.count(), 2);
+    QCOMPARE(gone.at(1).at(0).toInt(), 1);
+
+    control.watchCard(1, QStringLiteral("C"));
+    control.refresh();
+    QCOMPARE(gone.count(), 2);
+
+    control.unwatchCard();
+    QFile::remove(m_cardIdFile);
+    control.refresh();
+    QCOMPARE(gone.count(), 2);
+
+    control.watchCard(2, QStringLiteral("B"));
+    control.refresh();
+    QCOMPARE(gone.count(), 3);
+    QCOMPARE(gone.at(2).at(0).toInt(), 2);
+}
+
+void OutputTest::watchedCardPolled()
+{
+    OutputControl control;
+    QSignalSpy gone(&control, &OutputControl::cardGone);
+    control.watchCard(1, QStringLiteral("B"));
+    control.setActive(true);
+    QCOMPARE(gone.count(), 0);
+    QFile::remove(m_cardIdFile);
+    QTRY_COMPARE_WITH_TIMEOUT(gone.count(), 1, waitMs);
+    QCOMPARE(gone.at(0).at(0).toInt(), 1);
+    QTest::qWait(2500);
+    QCOMPARE(gone.count(), 1);
+    control.setActive(false);
+}
+
+void OutputTest::rereadDuringRead()
+{
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
+
+    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    QVERIFY(writeFile(m_gateFile, QString()));
+    QFile::remove(m_log);
+    control.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    control.refresh();
+    control.refresh();
+    control.refresh();
+    QVERIFY(QFile::remove(m_gateFile));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QVERIFY(applied.at(1).at(1).toBool());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QTest::qWait(1500);
+    QCOMPARE(applied.count(), 2);
+    QCOMPARE(count(QStringLiteral("pactl list sinks short\n")), 3);
+    QCOMPARE(count(QStringLiteral("amixer -c0 contents\n")), 3);
+}
+
+void OutputTest::rereadDuringApply()
+{
+    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    QVERIFY(writeFile(m_gateFile, QString()));
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    control.refresh();
+    control.refresh();
+    control.refresh();
+    QVERIFY(QFile::remove(m_gateFile));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QVERIFY(applied.at(0).at(1).toBool());
+    QVERIFY(applied.at(1).at(1).toBool());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QTest::qWait(1500);
+    QCOMPARE(applied.count(), 2);
+    QCOMPARE(count(QStringLiteral("pactl list sinks short\n")), 3);
+    const QString log = readFile(m_log);
+    QVERIFY2(log.contains(setDefault(OutputControl::headphonesSink())), qPrintable(log));
+    QVERIFY2(log.endsWith(setDefault(QString::fromUtf8(usbName))), qPrintable(log));
 }
 
 QTEST_GUILESS_MAIN(OutputTest)

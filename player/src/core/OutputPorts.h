@@ -17,4 +17,16 @@ public:
     virtual void quitAndJoin(int ms) = 0;
 };
 
+class HeldOutputPort
+{
+public:
+    enum class HeldState { None, Held, Returning };
+
+    virtual ~HeldOutputPort() = default;
+
+    virtual void setHeld(HeldState state) = 0;
+    virtual void watchCard(int index, const QString &id) = 0;
+    virtual void unwatchCard() = 0;
+};
+
 }
