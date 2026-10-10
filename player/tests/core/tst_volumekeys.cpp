@@ -1,3 +1,5 @@
+#include "AlsaVolume.h"
+#include "OutputFakes.h"
 #include "Settings.h"
 #include "VolumeKeys.h"
 
@@ -5,13 +7,16 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QSignalSpy>
+#include <QSocketNotifier>
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <cmath>
 #include <memory>
 
 #include <fcntl.h>
 #include <linux/input.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -20,6 +25,8 @@ using namespace casdap;
 namespace {
 
 constexpr int retry = 50;
+
+const MixerRange fiio{0, 120, -60.0, 0.0};
 
 class FakeKeys : public KeySource
 {
@@ -78,6 +85,24 @@ private slots:
     void steppedEveryChannel();
     void steppedAdds();
     void levelIsMaxChannel();
+    void alsaPercentRoundTrips();
+    void alsaStepZeroIsFloor();
+    void alsaStepClamps();
+    void alsaStepAtLeastOne();
+    void alsaStepNearest();
+    void alsaPollErrorCloses_data();
+    void alsaPollErrorCloses();
+    void alsaEventsFailureCloses();
+    void alsaNoDeviceWriteCloses();
+    void alsaCloseSilent();
+    void alsaReopenById();
+    void alsaPacing();
+    void alsaPressWhileClosed();
+    void alsaWatchRewrites();
+    void alsaWatchGivesUp();
+    void alsaPressAtLimitSkipsWrite();
+    void alsaMuteFloorMapped();
+    void alsaNonLinearRejected();
 
 private:
     void addNode(const QString &event, const QString &name);
@@ -363,6 +388,338 @@ void VolumeKeysTest::levelIsMaxChannel()
     QCOMPARE(PulseSinkVolume::level(volumeOf({32768, 36045})), 55);
     QCOMPARE(PulseSinkVolume::level(volumeOf({PA_VOLUME_NORM})), 100);
     QCOMPARE(PulseSinkVolume::level(volumeOf({PA_VOLUME_MUTED, PA_VOLUME_MUTED})), 0);
+}
+
+void VolumeKeysTest::alsaPercentRoundTrips()
+{
+    QVERIFY(qFuzzyCompare(AlsaVolume::percentOfDb(0.0), 100.0));
+    QVERIFY(qFuzzyCompare(AlsaVolume::percentOfDb(-60.0), 10.0));
+    QVERIFY(qFuzzyCompare(AlsaVolume::dbOfPercent(10.0), -60.0));
+    QVERIFY(qFuzzyIsNull(AlsaVolume::dbOfPercent(100.0)));
+    for (int half = -120; half <= 0; ++half) {
+        const double db = half / 2.0;
+        QVERIFY(qAbs(AlsaVolume::dbOfPercent(AlsaVolume::percentOfDb(db)) - db) < 1e-9);
+    }
+    for (int percent = 10; percent <= 100; ++percent)
+        QVERIFY(qAbs(AlsaVolume::percentOfDb(AlsaVolume::dbOfPercent(percent)) - percent) < 1e-9);
+    for (int step = 0; step <= 120; ++step) {
+        const double percent = AlsaVolume::percentOfDb(AlsaVolume::dbOfStep(step, fiio));
+        QCOMPARE(AlsaVolume::stepFor(step, 0, fiio), step);
+        QVERIFY(qAbs(AlsaVolume::dbOfPercent(percent) - (step / 2.0 - 60.0)) < 1e-9);
+    }
+}
+
+void VolumeKeysTest::alsaStepZeroIsFloor()
+{
+    QCOMPARE(AlsaVolume::dbOfStep(0, fiio), -60.0);
+    QCOMPARE(qRound(AlsaVolume::percentOfDb(AlsaVolume::dbOfStep(0, fiio))), 10);
+    QCOMPARE(AlsaVolume::dbOfStep(120, fiio), 0.0);
+    QCOMPARE(AlsaVolume::dbOfStep(20, fiio), -50.0);
+}
+
+void VolumeKeysTest::alsaStepClamps()
+{
+    for (int delta : {2, 5, 10}) {
+        QCOMPARE(AlsaVolume::stepFor(120, delta, fiio), 120);
+        QCOMPARE(AlsaVolume::stepFor(119, delta, fiio), 120);
+        QCOMPARE(AlsaVolume::stepFor(0, -delta, fiio), 0);
+        QCOMPARE(AlsaVolume::stepFor(1, -delta, fiio), 0);
+        QCOMPARE(AlsaVolume::stepFor(200, delta, fiio), 120);
+        QCOMPARE(AlsaVolume::stepFor(-5, -delta, fiio), 0);
+    }
+}
+
+void VolumeKeysTest::alsaStepAtLeastOne()
+{
+    for (int delta : {2, 5, 10}) {
+        for (int step = 0; step < 120; ++step)
+            QVERIFY(AlsaVolume::stepFor(step, delta, fiio) > step);
+        for (int step = 1; step <= 120; ++step)
+            QVERIFY(AlsaVolume::stepFor(step, -delta, fiio) < step);
+    }
+}
+
+void VolumeKeysTest::alsaStepNearest()
+{
+    QCOMPARE(AlsaVolume::stepFor(60, 5, fiio), 68);
+    QCOMPARE(AlsaVolume::stepFor(60, -5, fiio), 51);
+    QCOMPARE(AlsaVolume::stepFor(0, 2, fiio), 10);
+    QCOMPARE(AlsaVolume::stepFor(100, 10, fiio), 107);
+}
+
+void VolumeKeysTest::alsaPollErrorCloses_data()
+{
+    QTest::addColumn<int>("events");
+    QTest::newRow("err") << int(POLLERR);
+    QTest::newRow("hup") << int(POLLHUP);
+    QTest::newRow("nval") << int(POLLNVAL);
+    QTest::newRow("err with in") << int(POLLERR | POLLIN);
+}
+
+void VolumeKeysTest::alsaPollErrorCloses()
+{
+    QFETCH(int, events);
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    int enabledAtClose = -1;
+    mixer->onClose = [&volume, &enabledAtClose] {
+        enabledAtClose = 0;
+        const QList<QSocketNotifier *> notifiers = volume.findChildren<QSocketNotifier *>();
+        for (QSocketNotifier *notifier : notifiers) {
+            if (notifier->isEnabled())
+                ++enabledAtClose;
+        }
+    };
+    QSignalSpy spy(&volume, &AlsaVolume::disconnected);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(volume.findChildren<QSocketNotifier *>().size(), 1);
+    mixer->fire(short(events));
+    QTRY_VERIFY(!volume.isOpen());
+    QCOMPARE(enabledAtClose, 0);
+    QCOMPARE(mixer->closes, 1);
+    QTRY_COMPARE(spy.count(), 1);
+    mixer->fire(short(events));
+    QTest::qWait(50);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(mixer->closes, 1);
+}
+
+void VolumeKeysTest::alsaEventsFailureCloses()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    QSignalSpy spy(&volume, &AlsaVolume::disconnected);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    mixer->handleResult = -EIO;
+    mixer->fire(POLLIN);
+    QTRY_VERIFY(!volume.isOpen());
+    QCOMPARE(mixer->closes, 1);
+    QTRY_COMPARE(spy.count(), 1);
+}
+
+void VolumeKeysTest::alsaNoDeviceWriteCloses()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    QSignalSpy spy(&volume, &AlsaVolume::disconnected);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    mixer->setResult = -ENODEV;
+    volume.pressed(5);
+    QVERIFY(!volume.isOpen());
+    QCOMPARE(mixer->writes.size(), 1);
+    QCOMPARE(mixer->closes, 1);
+    QCOMPARE(spy.count(), 0);
+    QTRY_COMPARE(spy.count(), 1);
+    volume.pressed(5);
+    QTest::qWait(50);
+    QCOMPARE(mixer->writes.size(), 1);
+    QCOMPARE(spy.count(), 1);
+}
+
+void VolumeKeysTest::alsaCloseSilent()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    QSignalSpy spy(&volume, &AlsaVolume::disconnected);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    volume.close();
+    QVERIFY(!volume.isOpen());
+    QCOMPARE(mixer->closes, 1);
+    QTest::qWait(50);
+    QCOMPARE(spy.count(), 0);
+}
+
+void VolumeKeysTest::alsaReopenById()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    mixer->value = 80;
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(volume.step(), 80);
+    QCOMPARE(volume.rangeDb(), 60.0);
+    QCOMPARE(volume.stepDb(), -20.0);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(mixer->opens, QStringList({QStringLiteral("B")}));
+    volume.close();
+    mixer->value = 70;
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(volume.step(), 80);
+    volume.close();
+    mixer->value = 50;
+    QVERIFY(volume.open(QStringLiteral("C")));
+    QCOMPARE(volume.step(), 50);
+    mixer->value = 30;
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(volume.step(), 30);
+    QCOMPARE(mixer->opens, QStringList({QStringLiteral("B"), QStringLiteral("B"), QStringLiteral("C"),
+                                        QStringLiteral("B")}));
+    QCOMPARE(mixer->closes, 3);
+    QVERIFY(mixer->writes.isEmpty());
+    mixer->openResult = -ENODEV;
+    volume.close();
+    QVERIFY(!volume.open(QStringLiteral("B")));
+    QVERIFY(!volume.isOpen());
+}
+
+void VolumeKeysTest::alsaPacing()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    QSignalSpy levels(&volume, &AlsaVolume::levelChanged);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    for (int i = 0; i < 5; ++i)
+        volume.pressed(2);
+    QCOMPARE(levels.count(), 5);
+    QCOMPARE(mixer->writes.size(), 1);
+    QVERIFY(mixer->writes.first() > 80);
+    QTRY_COMPARE_WITH_TIMEOUT(mixer->writes.size(), 2, 1000);
+    QCOMPARE(mixer->writes.last(), long(volume.step()));
+    QCOMPARE(mixer->value, long(volume.step()));
+    QCOMPARE(levels.last().at(0).toInt(), qRound(AlsaVolume::percentOfDb(volume.stepDb())));
+    QTest::qWait(2 * AlsaVolume::defaultPacingMs);
+    QCOMPARE(mixer->writes.size(), 2);
+}
+
+void VolumeKeysTest::alsaPressWhileClosed()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    QSignalSpy levels(&volume, &AlsaVolume::levelChanged);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    volume.close();
+    volume.pressed(5);
+    QCOMPARE(levels.count(), 1);
+    const int moved = volume.step();
+    QCOMPARE(moved, AlsaVolume::stepFor(80, 5, fiio));
+    QVERIFY(mixer->writes.isEmpty());
+    mixer->value = 40;
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(mixer->writes, QList<long>({long(moved)}));
+    QCOMPARE(mixer->value, long(moved));
+    volume.close();
+    volume.pressed(5);
+    mixer->value = 40;
+    QVERIFY(volume.open(QStringLiteral("C")));
+    QCOMPARE(mixer->writes.size(), 1);
+    QCOMPARE(volume.step(), 40);
+}
+
+void VolumeKeysTest::alsaWatchRewrites()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned), 5000);
+    QSignalSpy foreign(&volume, &AlsaVolume::foreignStep);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    volume.setOwnedStep(90);
+    QElapsedTimer clock;
+    clock.start();
+    volume.watchReturn(1500);
+    QCOMPARE(mixer->writes, QList<long>({90}));
+    QTest::qWait(50);
+    QCOMPARE(foreign.count(), 0);
+    mixer->foreign(60);
+    QTRY_COMPARE(mixer->writes.size(), 2);
+    QCOMPARE(mixer->writes.last(), 90L);
+    QCOMPARE(foreign.count(), 1);
+    QCOMPARE(foreign.last().at(0).toInt(), 60);
+    volume.pressed(5);
+    const int current = volume.step();
+    QCOMPARE(current, AlsaVolume::stepFor(90, 5, fiio));
+    mixer->foreign(50);
+    QTRY_COMPARE(mixer->writes.size(), 3);
+    QCOMPARE(mixer->writes.last(), long(current));
+    QVERIFY(clock.elapsed() < 1500);
+    QTest::qWait(int(2000 - clock.elapsed()));
+    mixer->foreign(40);
+    QTRY_COMPARE(foreign.count(), 3);
+    QTest::qWait(200);
+    QCOMPARE(mixer->writes, QList<long>({90, 90, long(current)}));
+    QCOMPARE(volume.step(), current);
+}
+
+void VolumeKeysTest::alsaWatchGivesUp()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned), 5000);
+    QSignalSpy foreign(&volume, &AlsaVolume::foreignStep);
+    QVERIFY(volume.open(QStringLiteral("B")));
+    volume.setOwnedStep(90);
+    volume.watchReturn(5000);
+    QCOMPARE(mixer->writes.size(), 1);
+    for (int i = 0; i <= AlsaVolume::maxRewrites + 1; ++i) {
+        mixer->foreign(60 + i);
+        QTRY_COMPARE(foreign.count(), i + 1);
+    }
+    QTest::qWait(50);
+    QCOMPARE(mixer->writes.size(), 1 + AlsaVolume::maxRewrites);
+    QCOMPARE(mixer->value, long(60 + AlsaVolume::maxRewrites + 1));
+}
+
+void VolumeKeysTest::alsaPressAtLimitSkipsWrite()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    AlsaVolume volume(std::move(owned));
+    QSignalSpy levels(&volume, &AlsaVolume::levelChanged);
+    mixer->value = 120;
+    QVERIFY(volume.open(QStringLiteral("B")));
+    volume.pressed(5);
+    QCOMPARE(levels.count(), 1);
+    QCOMPARE(levels.last().at(0).toInt(), 100);
+    QTest::qWait(50);
+    QVERIFY(mixer->writes.isEmpty());
+    volume.setOwnedStep(0);
+    volume.pressed(-5);
+    QCOMPARE(levels.count(), 2);
+    QCOMPARE(levels.last().at(0).toInt(), 10);
+    QTest::qWait(50);
+    QVERIFY(mixer->writes.isEmpty());
+}
+
+void VolumeKeysTest::alsaMuteFloorMapped()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    mixer->mixerRange = MixerRange{0, 120, -99999.99, 0.0};
+    mixer->dbCurve = [](long step) { return step == 0 ? -99999.99 : -59.5 + (step - 1) * 0.5; };
+    mixer->value = 0;
+    AlsaVolume volume(std::move(owned));
+    QVERIFY(volume.open(QStringLiteral("B")));
+    QCOMPARE(volume.rangeDb(), 59.5);
+    QCOMPARE(volume.step(), 1);
+    QCOMPARE(volume.stepDb(), -59.5);
+    volume.setOwnedStep(0);
+    QCOMPARE(volume.step(), 1);
+    volume.setOwnedStep(60);
+    volume.pressed(5);
+    QCOMPARE(mixer->writes.size(), 1);
+    QVERIFY(mixer->writes.first() > 60 && mixer->writes.first() < 75);
+    volume.setOwnedStep(1);
+    volume.close();
+    volume.pressed(-10);
+    QCOMPARE(volume.step(), 1);
+}
+
+void VolumeKeysTest::alsaNonLinearRejected()
+{
+    auto owned = std::make_unique<FakeMixer>();
+    FakeMixer *mixer = owned.get();
+    mixer->dbCurve = [](long step) { return 20.0 * std::log10(double(qMax(step, 1L)) / 120.0); };
+    AlsaVolume volume(std::move(owned));
+    QVERIFY(!volume.open(QStringLiteral("B")));
+    QVERIFY(!volume.isOpen());
+    QCOMPARE(mixer->opens.size(), 1);
+    QCOMPARE(mixer->closes, 1);
+    QVERIFY(!mixer->isOpen);
 }
 
 QTEST_GUILESS_MAIN(VolumeKeysTest)

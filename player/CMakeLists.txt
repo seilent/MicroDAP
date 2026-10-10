@@ -19,6 +19,8 @@ qt_standard_project_setup(REQUIRES 6.11)
 add_library(casdapcore STATIC
     src/core/AccentControl.cpp
     src/core/AccentControl.h
+    src/core/AlsaVolume.cpp
+    src/core/AlsaVolume.h
     src/core/ArtColor.cpp
     src/core/ArtColor.h
     src/core/BluezModel.cpp
