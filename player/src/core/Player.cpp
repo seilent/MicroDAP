@@ -23,6 +23,59 @@ constexpr guint audioOnlyFlags = 0x2;
 constexpr const char *eqDescription =
     "audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp "
     "! equalizer-nbands name=casdap-eq num-bands=10 ! audioconvert";
+constexpr const char *bitPerfectFilter = "audioconvert ! capsfilter caps=audio/x-raw,format=F32LE";
+
+GstElement *parseBin(const QString &description, const char *what)
+{
+    if (description.isEmpty()) {
+        qWarning() << "casdap player:" << what << "empty";
+        return nullptr;
+    }
+    const QByteArray text = description.toUtf8();
+    GError *err = nullptr;
+    GstElement *bin = gst_parse_bin_from_description(text.constData(), TRUE, &err);
+    if (!bin)
+        qWarning() << "casdap player:" << what << description << (err ? err->message : "failed");
+    g_clear_error(&err);
+    return bin;
+}
+
+void detach(GstElement *element)
+{
+    GstObject *parent = gst_object_get_parent(GST_OBJECT(element));
+    if (!parent)
+        return;
+    gst_bin_remove(GST_BIN(parent), element);
+    gst_object_unref(parent);
+}
+
+QVariantMap formatOf(GstCaps *caps)
+{
+    QVariantMap map;
+    if (!caps || gst_caps_get_size(caps) == 0)
+        return map;
+    const GstStructure *structure = gst_caps_get_structure(caps, 0);
+    if (const gchar *format = gst_structure_get_string(structure, "format"))
+        map.insert(QStringLiteral("format"), QString::fromUtf8(format));
+    gint value = 0;
+    if (gst_structure_get_int(structure, "rate", &value))
+        map.insert(QStringLiteral("rate"), value);
+    if (gst_structure_get_int(structure, "channels", &value))
+        map.insert(QStringLiteral("channels"), value);
+    return map;
+}
+
+QVariantMap padFormat(GstPad *pad)
+{
+    if (!pad)
+        return {};
+    GstCaps *caps = gst_pad_get_current_caps(pad);
+    const QVariantMap map = formatOf(caps);
+    if (caps)
+        gst_caps_unref(caps);
+    gst_object_unref(pad);
+    return map;
+}
 
 int remapMoved(int r, int start, int end, int row)
 {
@@ -58,19 +111,13 @@ Player::Player(Library *library, QObject *parent)
         qWarning() << "casdap player: playbin not available";
     } else {
         g_object_set(m_playbin, "flags", audioOnlyFlags, nullptr);
-        const QByteArray description =
-            qEnvironmentVariable("CASDAP_AUDIO_SINK", QStringLiteral("pulsesink")).toUtf8();
-        GError *err = nullptr;
-        GstElement *sink = gst_parse_bin_from_description(description.constData(), TRUE, &err);
-        if (!sink) {
-            qWarning() << "casdap player: audio sink" << description
-                       << (err ? err->message : "failed");
-        } else {
-            g_object_set(m_playbin, "audio-sink", sink, nullptr);
-        }
-        g_clear_error(&err);
+        m_audioSinkEnv = qEnvironmentVariable("CASDAP_AUDIO_SINK");
+        if (m_audioSinkEnv.isNull() && qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
+            m_audioSinkEnv = QLatin1String("");
+        m_exclusiveEnv = qEnvironmentVariable("CASDAP_EXCLUSIVE_SINK");
         if (qEnvironmentVariableIntValue("CASDAP_EQ_DISABLE") != 1)
             buildEq();
+        configure(OutputChain::Pw);
         m_bus = gst_element_get_bus(m_playbin);
         GPollFD fd;
         gst_bus_get_pollfd(m_bus, &fd);
@@ -122,6 +169,8 @@ Player::~Player()
     }
     if (m_playbin)
         gst_object_unref(m_playbin);
+    if (m_eqFilter)
+        gst_object_unref(m_eqFilter);
 }
 
 Player::Status Player::status() const
@@ -131,7 +180,7 @@ Player::Status Player::status() const
 
 qint64 Player::position() const
 {
-    if (m_positionPoll || !m_playbin || m_status != Playing)
+    if (m_positionPoll || !m_playbin || m_status != Playing || m_playAfterSeek)
         return m_position;
     gint64 position = 0;
     if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position) && position >= 0)
@@ -205,16 +254,159 @@ void Player::buildEq()
         gst_object_unref(gst_object_ref_sink(filter));
         return;
     }
-    g_object_set(m_playbin, "audio-filter", filter, nullptr);
-    m_eqFilter = filter;
+    m_eqFilter = GST_ELEMENT(gst_object_ref_sink(filter));
     m_preamp = preamp;
     m_eqBands = bands;
     applyEq(EqProfile::off());
 }
 
+QString Player::sinkDescription(OutputChain chain, const QString &audioSinkEnv,
+                                const QString &exclusiveEnv, const QString &policyExclusive,
+                                const QString &cardId)
+{
+    switch (chain) {
+    case OutputChain::Bp:
+        return audioSinkEnv.isNull() ? QStringLiteral("pulsesink volume=1.0 mute=false") : audioSinkEnv;
+    case OutputChain::Ex:
+        if (exclusiveEnv.isEmpty())
+            return policyExclusive;
+        return QString(exclusiveEnv).replace(QStringLiteral("%1"), cardId);
+    case OutputChain::None:
+    case OutputChain::Pw:
+        break;
+    }
+    return audioSinkEnv.isNull() ? QStringLiteral("pulsesink") : audioSinkEnv;
+}
+
+GstElement *Player::pwFilter(int rate)
+{
+    if (m_eqFilter)
+        detach(m_eqFilter);
+    if (rate <= 0)
+        return m_eqFilter;
+    GstElement *tail =
+        parseBin(QStringLiteral("audioresample ! capsfilter caps=audio/x-raw,rate=%1").arg(rate), "rate filter");
+    if (!tail)
+        return m_eqFilter;
+    if (!m_eqFilter)
+        return tail;
+    GstElement *bin = gst_bin_new(nullptr);
+    gst_bin_add_many(GST_BIN(bin), m_eqFilter, tail, nullptr);
+    GstPad *sink = gst_element_get_static_pad(m_eqFilter, "sink");
+    GstPad *src = gst_element_get_static_pad(tail, "src");
+    const bool ok = sink && src && gst_element_link(m_eqFilter, tail)
+                    && gst_element_add_pad(bin, gst_ghost_pad_new("sink", sink))
+                    && gst_element_add_pad(bin, gst_ghost_pad_new("src", src));
+    if (sink)
+        gst_object_unref(sink);
+    if (src)
+        gst_object_unref(src);
+    if (ok)
+        return bin;
+    qWarning() << "casdap player: rate filter link failed" << rate;
+    detach(m_eqFilter);
+    gst_object_unref(gst_object_ref_sink(bin));
+    return m_eqFilter;
+}
+
+bool Player::configure(OutputChain chain)
+{
+    const bool exclusive = chain == OutputChain::Ex && m_policy;
+    const QString card = exclusive ? m_policy->exclusiveCard() : QString();
+    const int rate = chain == OutputChain::Pw && m_policy ? m_policy->fixedRate() : 0;
+    const QString description = sinkDescription(chain, m_audioSinkEnv, m_exclusiveEnv,
+                                                exclusive ? m_policy->exclusiveSink() : QString(), card);
+    if (m_configChain != OutputChain::None && chain == m_configChain && description == m_configSink
+        && card == m_configCard && rate == m_configRate)
+        return true;
+    GstElement *sink = parseBin(description, "audio sink");
+    GstElement *filter = nullptr;
+    if (chain == OutputChain::Bp)
+        filter = parseBin(QString::fromLatin1(bitPerfectFilter), "bit perfect filter");
+    if (chain != OutputChain::Pw && (!sink || (chain == OutputChain::Bp && !filter))) {
+        if (sink)
+            gst_object_unref(gst_object_ref_sink(sink));
+        if (filter)
+            gst_object_unref(gst_object_ref_sink(filter));
+        m_configChain = OutputChain::None;
+        m_configSink.clear();
+        m_configCard.clear();
+        m_configRate = 0;
+        return false;
+    }
+    m_configChain = chain;
+    m_configSink = description;
+    m_configCard = card;
+    m_configRate = rate;
+    if (sink || m_sink) {
+        g_object_set(m_playbin, "audio-sink", sink, nullptr);
+        m_sink = sink;
+    }
+    if (chain == OutputChain::Pw)
+        filter = pwFilter(rate);
+    g_object_set(m_playbin, "audio-filter", filter, nullptr);
+    m_filter = filter;
+    return true;
+}
+
 GstElement *Player::audioFilter() const
 {
-    return m_eqFilter;
+    return m_filter;
+}
+
+GstElement *Player::audioSink() const
+{
+    return m_sink;
+}
+
+void Player::setPolicy(OutputPolicy *policy)
+{
+    m_policy = policy;
+}
+
+Player::OutputChain Player::builtChain() const
+{
+    return m_builtChain;
+}
+
+bool Player::parked() const
+{
+    return m_parked;
+}
+
+std::optional<Player::PendingBuild> Player::pendingBuild() const
+{
+    return m_pending;
+}
+
+QVariantMap Player::sourceFormat() const
+{
+    return m_sourceFormat;
+}
+
+QVariantMap Player::sinkFormat() const
+{
+    return m_sinkFormat;
+}
+
+void Player::setFormats(const QVariantMap &source, const QVariantMap &sink)
+{
+    if (source == m_sourceFormat && sink == m_sinkFormat)
+        return;
+    m_sourceFormat = source;
+    m_sinkFormat = sink;
+    emit formatChanged();
+}
+
+void Player::readFormats()
+{
+    GstPad *audio = nullptr;
+    if (g_signal_lookup("get-audio-pad", G_OBJECT_TYPE(m_playbin))) {
+        gint current = 0;
+        g_object_get(m_playbin, "current-audio", &current, nullptr);
+        g_signal_emit_by_name(m_playbin, "get-audio-pad", qMax(0, current), &audio);
+    }
+    setFormats(padFormat(audio), padFormat(m_sink ? gst_element_get_static_pad(m_sink, "sink") : nullptr));
 }
 
 void Player::applyEq(const EqProfile &profile)
@@ -295,7 +487,7 @@ void Player::setTransportReady(bool ready)
         return;
     m_resumeOnReady = false;
     if (!m_transportActive && m_status == Paused)
-        resumeNow();
+        resumeFrom();
 }
 
 bool Player::playPending() const
@@ -323,7 +515,7 @@ void Player::releaseHold()
     m_playPending = false;
     m_holdTimer.stop();
     if (m_status == Paused)
-        resumeNow();
+        resumeFrom();
 }
 
 void Player::cancelHold()
@@ -331,6 +523,61 @@ void Player::cancelHold()
     m_playPending = false;
     m_holdTimer.stop();
     m_resumeOnReady = false;
+}
+
+void Player::resumeFrom()
+{
+    if (!m_playbin || m_status != Paused)
+        return;
+    const OutputChain wanted = m_policy ? m_policy->chainFor(GST_STATE_PLAYING) : OutputChain::Pw;
+    if (!m_parked && !m_pending && m_builtChain == wanted) {
+        resumeNow();
+        return;
+    }
+    const int index = m_queue->currentIndex();
+    if (index < 0 || index >= m_queue->count()) {
+        stop();
+        return;
+    }
+    request(index, GST_STATE_PLAYING, m_pending ? m_pending->positionMs : m_position, false,
+            !m_pending || m_pending->sameListen);
+}
+
+void Player::rebuildAt(qint64 positionMs, GstState state)
+{
+    startAt(m_queue->currentIndex(), state, positionMs, true);
+}
+
+void Player::park(qint64 positionMs)
+{
+    const int index = m_queue->currentIndex();
+    if (!m_playbin || m_status == Stopped || index < 0 || index >= m_queue->count())
+        return;
+    cancelHold();
+    m_pending.reset();
+    setNull();
+    m_parked = true;
+    setStatus(Paused);
+    setPosition(qMax<qint64>(0, positionMs));
+}
+
+void Player::buildPending(OutputChain chain)
+{
+    if (!m_pending)
+        return;
+    PendingBuild pending = *std::exchange(m_pending, std::nullopt);
+    const int index = m_queue->currentIndex();
+    if (!m_playbin || index < 0 || index >= m_queue->count()) {
+        stop();
+        return;
+    }
+    const QueueEntry current = m_queue->entry(index);
+    if (current.id != pending.entry.id || current.path != pending.entry.path) {
+        pending.entry = current;
+        pending.positionMs = 0;
+        pending.sameListen = false;
+    }
+    build(index, pending, chain, false);
 }
 
 void Player::resumeNow()
@@ -509,34 +756,97 @@ void Player::setNull()
         while (GstMessage *message = gst_bus_pop(m_bus))
             gst_message_unref(message);
     }
+    m_builtChain = OutputChain::None;
+    m_parked = false;
+    setFormats({}, {});
     QMutexLocker lock(&m_chainMutex);
     m_chain.pending.clear();
     m_chain.stale = false;
     m_prerolled = false;
     m_pendingSeek = -1;
+    m_playAfterSeek = false;
 }
 
-void Player::startAt(int index, GstState target)
+void Player::startAt(int index, GstState target, qint64 positionMs, bool sameListen)
 {
     if (!m_playbin || index < 0 || index >= m_queue->count()) {
         stop();
         return;
     }
+    request(index, target, positionMs, true, sameListen);
+}
+
+void Player::request(int index, GstState target, qint64 positionMs, bool guard, bool sameListen)
+{
+    PendingBuild pending{m_queue->entry(index), target, positionMs, sameListen};
+    if (!m_policy) {
+        m_pending.reset();
+        build(index, pending, OutputChain::Pw, guard);
+        return;
+    }
+    if (guard && pending.target == GST_STATE_PLAYING && holdForPhone())
+        pending.target = GST_STATE_PAUSED;
+    const Admit admit = m_policy->admit(pending);
+    if (admit.now) {
+        m_pending.reset();
+        build(index, pending, admit.chain, false);
+        return;
+    }
+    hold(index, pending);
+}
+
+void Player::hold(int index, const PendingBuild &pending)
+{
     setNull();
+    m_pending = pending;
+    m_queue->setCurrentIndex(index);
+    if (!pending.sameListen) {
+        m_historyCounted = true;
+        m_listenStarted = false;
+    }
+    setPosition(pending.positionMs);
+    setStatus(pending.target == GST_STATE_PLAYING ? Playing : Paused);
+    emit currentChanged();
+}
+
+void Player::build(int index, const PendingBuild &pending, OutputChain chain, bool guard)
+{
+    setNull();
+    if (!configure(chain)) {
+        if (chain == OutputChain::Ex && m_policy) {
+            hold(index, pending);
+            qWarning() << "casdap player: output error" << int(GST_RESOURCE_ERROR_FAILED) << "exclusive sink";
+            m_policy->outputError(GST_RESOURCE_ERROR_FAILED);
+            return;
+        }
+        chain = OutputChain::Pw;
+        configure(chain);
+    }
+    m_builtChain = chain;
+    m_sameListen = pending.sameListen && m_listenStarted;
+    m_listenCounted = m_historyCounted;
+    m_listenStarted = m_sameListen;
+    m_outputErrorSent = false;
     m_queue->setCurrentIndex(index);
     {
         QMutexLocker lock(&m_chainMutex);
         m_chain.last = index;
         m_chain.pending = {index};
     }
-    if (target == GST_STATE_PLAYING && holdForPhone())
+    GstState target = pending.target;
+    if (guard && target == GST_STATE_PLAYING && holdForPhone())
         target = GST_STATE_PAUSED;
     m_historyCounted = true;
     setPosition(0);
-    setUri(m_queue->entry(index).path);
-    gst_element_set_state(m_playbin, target);
+    setUri(pending.entry.path);
+    m_playAfterSeek = m_policy && target == GST_STATE_PLAYING && pending.positionMs > 0;
+    gst_element_set_state(m_playbin, m_playAfterSeek ? GST_STATE_PAUSED : target);
     setStatus(target == GST_STATE_PLAYING ? Playing : Paused);
     emit currentChanged();
+    if (pending.positionMs > 0) {
+        m_pendingSeek = pending.positionMs;
+        setPosition(pending.positionMs);
+    }
 }
 
 void Player::play(const QList<QueueEntry> &entries, int start)
@@ -643,9 +953,9 @@ void Player::restore(const QList<QueueEntry> &entries, int index, qint64 positio
     if (m_queue->count() == 0)
         return;
     const bool resume = playing && m_transportReady && !m_transportActive;
-    startAt(m_queue->currentIndex(), resume ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+    startAt(m_queue->currentIndex(), resume ? GST_STATE_PLAYING : GST_STATE_PAUSED, positionMs);
     m_resumeOnReady = playing && !m_transportReady;
-    if (positionMs > 0) {
+    if (positionMs > 0 && m_status == Stopped) {
         m_pendingSeek = positionMs;
         setPosition(positionMs);
     }
@@ -673,7 +983,7 @@ void Player::resume()
         break;
     case Paused:
         if (!holdForPhone())
-            resumeNow();
+            resumeFrom();
         break;
     case Stopped:
         if (m_queue->count() > 0)
@@ -685,9 +995,14 @@ void Player::resume()
 void Player::pause()
 {
     cancelHold();
+    if (m_pending) {
+        park(m_pending->positionMs);
+        return;
+    }
     if (!m_playbin || m_status != Playing)
         return;
     pollPosition();
+    m_playAfterSeek = false;
     gst_element_set_state(m_playbin, GST_STATE_PAUSED);
     setStatus(Paused);
 }
@@ -695,6 +1010,7 @@ void Player::pause()
 void Player::stop()
 {
     cancelHold();
+    m_pending.reset();
     setNull();
     setStatus(Stopped);
     setPosition(0);
@@ -720,12 +1036,14 @@ void Player::previous()
     startAt(index < 0 ? m_queue->currentIndex() : index, GST_STATE_PLAYING);
 }
 
-void Player::doSeek(qint64 ms)
+bool Player::doSeek(qint64 ms)
 {
     const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT);
-    if (!gst_element_seek_simple(m_playbin, GST_FORMAT_TIME, flags, ms * GST_MSECOND))
+    const bool ok = gst_element_seek_simple(m_playbin, GST_FORMAT_TIME, flags, ms * GST_MSECOND);
+    if (!ok)
         qWarning() << "casdap player: seek failed" << ms;
     setPosition(ms);
+    return ok;
 }
 
 void Player::seek(qint64 ms)
@@ -733,6 +1051,15 @@ void Player::seek(qint64 ms)
     if (!m_playbin || m_status == Stopped)
         return;
     const qint64 target = qMax<qint64>(0, ms);
+    if (m_pending) {
+        m_pending->positionMs = target;
+        setPosition(target);
+        return;
+    }
+    if (m_parked) {
+        setPosition(target);
+        return;
+    }
     if (!m_prerolled) {
         m_pendingSeek = target;
         setPosition(target);
@@ -818,7 +1145,7 @@ void Player::updateDuration()
 
 void Player::pollPosition()
 {
-    if (!m_playbin || m_status != Playing)
+    if (!m_playbin || m_status != Playing || m_playAfterSeek)
         return;
     gint64 position = 0;
     if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position) && position >= 0)
@@ -844,16 +1171,21 @@ void Player::handleStreamStart()
             startAt(following, m_status == Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
         return;
     }
+    const bool same = std::exchange(m_sameListen, false);
     if (index >= 0 && index < m_queue->count())
         m_queue->setCurrentIndex(index);
     m_errorStreak = 0;
     m_firstErrorRow = -1;
-    m_historyCounted = false;
-    setPosition(0);
+    m_historyCounted = same && m_listenCounted;
+    m_listenStarted = true;
+    if (!m_policy || m_pendingSeek < 0)
+        setPosition(0);
     updateDuration();
+    readFormats();
     emit currentChanged();
-    emit trackStarted(m_queue->currentIndex());
-    if (m_status == Playing)
+    if (!same)
+        emit trackStarted(m_queue->currentIndex());
+    if (m_status == Playing && !m_historyCounted)
         addHistoryNow();
 }
 
@@ -868,12 +1200,19 @@ void Player::handleEos()
 void Player::handleAsyncDone()
 {
     m_prerolled = true;
+    bool seeking = false;
     if (m_pendingSeek >= 0) {
         const qint64 target = m_pendingSeek;
         m_pendingSeek = -1;
-        doSeek(target);
+        seeking = doSeek(target);
+        if (seeking && m_playAfterSeek)
+            return;
     }
+    if (std::exchange(m_playAfterSeek, false))
+        gst_element_set_state(m_playbin, GST_STATE_PLAYING);
     updateDuration();
+    if (!seeking)
+        readFormats();
     pollPosition();
 }
 
@@ -882,6 +1221,18 @@ void Player::handleError(GstMessage *message)
     GError *err = nullptr;
     gchar *debug = nullptr;
     gst_message_parse_error(message, &err, &debug);
+    const bool exclusive = m_builtChain == OutputChain::Ex && m_policy;
+    const bool fromSink = m_sink && err && err->domain == GST_RESOURCE_ERROR
+                          && gst_object_has_as_ancestor(GST_MESSAGE_SRC(message), GST_OBJECT(m_sink));
+    if (exclusive && (m_outputErrorSent || fromSink)) {
+        if (!std::exchange(m_outputErrorSent, true)) {
+            qWarning() << "casdap player: output error" << err->code << err->message;
+            m_policy->outputError(err->code);
+        }
+        g_clear_error(&err);
+        g_free(debug);
+        return;
+    }
     const QString text = err ? QString::fromUtf8(err->message) : QStringLiteral("playback error");
     qWarning() << "casdap player:" << text << (debug ? debug : "");
     g_clear_error(&err);

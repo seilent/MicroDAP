@@ -12,12 +12,15 @@
 
 #include <gst/gst.h>
 
+#include <optional>
+
 class QSocketNotifier;
 
 namespace casdap {
 
 class BluezModel;
 class Library;
+class OutputPolicy;
 
 void initGStreamer(int &argc, char **argv);
 
@@ -30,6 +33,8 @@ class Player : public QObject
     Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
     Q_PROPERTY(Queue *queue READ queue CONSTANT)
     Q_PROPERTY(bool positionPollEnabled READ positionPollEnabled WRITE setPositionPollEnabled NOTIFY positionPollEnabledChanged)
+    Q_PROPERTY(QVariantMap sourceFormat READ sourceFormat NOTIFY formatChanged)
+    Q_PROPERTY(QVariantMap sinkFormat READ sinkFormat NOTIFY formatChanged)
 
 public:
     enum Status {
@@ -38,6 +43,26 @@ public:
         Paused,
     };
     Q_ENUM(Status)
+
+    enum class OutputChain {
+        None,
+        Pw,
+        Bp,
+        Ex,
+    };
+    Q_ENUM(OutputChain)
+
+    struct PendingBuild
+    {
+        QueueEntry entry;
+        GstState target = GST_STATE_PAUSED;
+        qint64 positionMs = 0;
+        bool sameListen = false;
+    };
+
+    static QString sinkDescription(OutputChain chain, const QString &audioSinkEnv,
+                                   const QString &exclusiveEnv, const QString &policyExclusive,
+                                   const QString &cardId = {});
 
     explicit Player(Library *library = nullptr, QObject *parent = nullptr);
     ~Player() override;
@@ -59,7 +84,18 @@ public:
     bool positionPollEnabled() const;
     void setPositionPollEnabled(bool on);
     GstElement *audioFilter() const;
+    GstElement *audioSink() const;
     void applyEq(const casdap::EqProfile &profile);
+    void setPolicy(OutputPolicy *policy);
+    OutputChain builtChain() const;
+    bool parked() const;
+    std::optional<PendingBuild> pendingBuild() const;
+    QVariantMap sourceFormat() const;
+    QVariantMap sinkFormat() const;
+    void buildPending(OutputChain chain);
+    void rebuildAt(qint64 positionMs, GstState state);
+    void resumeFrom();
+    void park(qint64 positionMs);
 
     void play(const QList<QueueEntry> &entries, int start = 0);
     Q_INVOKABLE int playSource(const QString &kind, qint64 id, const QString &mode, qint64 startId = -1);
@@ -86,6 +122,7 @@ signals:
     void durationChanged();
     void currentChanged();
     void positionPollEnabledChanged();
+    void formatChanged();
     void trackStarted(int index);
     void endOfStream();
     void error(const QString &message);
@@ -108,16 +145,23 @@ private:
     static void aboutToFinish(GstElement *element, gpointer data);
 
     void buildEq();
+    bool configure(OutputChain chain);
+    GstElement *pwFilter(int rate);
+    void build(int index, const PendingBuild &pending, OutputChain chain, bool guard);
+    void request(int index, GstState target, qint64 positionMs, bool guard, bool sameListen);
+    void hold(int index, const PendingBuild &pending);
+    void readFormats();
+    void setFormats(const QVariantMap &source, const QVariantMap &sink);
     void pollBus();
     void pollPosition();
     void handleStreamStart();
     void handleEos();
     void handleError(GstMessage *message);
     void handleAsyncDone();
-    void startAt(int index, GstState target);
+    void startAt(int index, GstState target, qint64 positionMs = 0, bool sameListen = false);
     void setUri(const QString &path);
     void setNull();
-    void doSeek(qint64 ms);
+    bool doSeek(qint64 ms);
     void setStatus(Status status);
     void setPosition(qint64 ms);
     void updateDuration();
@@ -147,6 +191,25 @@ private:
     QTimer m_holdTimer;
     GstElement *m_playbin = nullptr;
     GstElement *m_eqFilter = nullptr;
+    GstElement *m_filter = nullptr;
+    GstElement *m_sink = nullptr;
+    QString m_audioSinkEnv;
+    QString m_exclusiveEnv;
+    OutputPolicy *m_policy = nullptr;
+    OutputChain m_configChain = OutputChain::None;
+    QString m_configSink;
+    QString m_configCard;
+    int m_configRate = 0;
+    OutputChain m_builtChain = OutputChain::None;
+    bool m_parked = false;
+    bool m_outputErrorSent = false;
+    bool m_playAfterSeek = false;
+    bool m_sameListen = false;
+    bool m_listenCounted = false;
+    bool m_listenStarted = false;
+    std::optional<PendingBuild> m_pending;
+    QVariantMap m_sourceFormat;
+    QVariantMap m_sinkFormat;
     GstElement *m_preamp = nullptr;
     QList<GObject *> m_eqBands;
     GstBus *m_bus = nullptr;
@@ -166,6 +229,25 @@ private:
     int m_removeTarget = -1;
     QMutex m_chainMutex;
     Chain m_chain;
+};
+
+struct Admit
+{
+    bool now = true;
+    Player::OutputChain chain = Player::OutputChain::Pw;
+};
+
+class OutputPolicy
+{
+public:
+    virtual ~OutputPolicy() = default;
+
+    virtual Player::OutputChain chainFor(GstState target) const = 0;
+    virtual Admit admit(const Player::PendingBuild &build) = 0;
+    virtual QString exclusiveSink() const = 0;
+    virtual QString exclusiveCard() const = 0;
+    virtual int fixedRate() const = 0;
+    virtual void outputError(int code) = 0;
 };
 
 }

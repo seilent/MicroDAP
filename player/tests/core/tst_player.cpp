@@ -155,6 +155,25 @@ private slots:
     void stateMigration();
     void stateRevMismatch();
     void stateRestoreByPath();
+    void sinkDescriptionText();
+    void chainWithoutPolicy();
+    void chainRoundTrip();
+    void rateTail();
+    void pendingLatestWins();
+    void pendingQueueEdits();
+    void pendingPauseParks();
+    void resumeFromChain();
+    void rebuildAtKeeps();
+    void seekWhileParked();
+    void exclusiveErrors();
+    void pwSinkError();
+    void formats();
+    void exclusiveSwallowsAfterError();
+    void sameListenRebuild();
+    void playingBuildAtPosition();
+    void badSinkConfigure();
+    void guardBeforeAdmit();
+    void rateTailNoWarnings();
 
 private:
     int historyCount() const;
@@ -221,6 +240,172 @@ QJsonObject readJson(const QString &path)
     QJsonObject object;
     State::read(path, object);
     return object;
+}
+
+using Chain = Player::OutputChain;
+
+class FakePolicy : public OutputPolicy
+{
+public:
+    Chain chainFor(GstState) const override { return want; }
+    Admit admit(const Player::PendingBuild &build) override
+    {
+        admitted.append(build);
+        return {now, chain};
+    }
+    QString exclusiveSink() const override { return QStringLiteral("fakesink sync=false"); }
+    QString exclusiveCard() const override { return card; }
+    int fixedRate() const override { return rate; }
+    void outputError(int code) override { errors.append(code); }
+
+    Chain want = Chain::Pw;
+    Chain chain = Chain::Pw;
+    bool now = true;
+    int rate = 0;
+    QString card = QStringLiteral("B");
+    QList<Player::PendingBuild> admitted;
+    QList<int> errors;
+};
+
+std::unique_ptr<Player> withEnv(const char *name, const QByteArray &value)
+{
+    const bool set = qEnvironmentVariableIsSet(name);
+    const QByteArray before = qgetenv(name);
+    qputenv(name, value);
+    auto player = std::make_unique<Player>();
+    if (set)
+        qputenv(name, before);
+    else
+        qunsetenv(name);
+    return player;
+}
+
+std::unique_ptr<Player> exclusivePlayer(
+    const QByteArray &description = QByteArrayLiteral("fakesink sync=false name=casdap-ex"))
+{
+    return withEnv("CASDAP_EXCLUSIVE_SINK", description);
+}
+
+QAtomicInt glibWarnings;
+
+void countWarnings(const gchar *domain, GLogLevelFlags level, const gchar *message, gpointer)
+{
+    if (level & (G_LOG_LEVEL_WARNING | G_LOG_LEVEL_CRITICAL)) {
+        glibWarnings.fetchAndAddOrdered(1);
+        qInfo() << "glib" << domain << message;
+    }
+    g_log_default_handler(domain, level, message, nullptr);
+}
+
+GstElement *pipelineOf(GstElement *element)
+{
+    GstObject *top = GST_OBJECT(gst_object_ref(element));
+    while (GstObject *parent = gst_object_get_parent(top)) {
+        gst_object_unref(top);
+        top = parent;
+    }
+    return GST_ELEMENT(top);
+}
+
+GstElement *builtFilter(Player &player)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    GstElement *filter = nullptr;
+    g_object_get(top, "audio-filter", &filter, nullptr);
+    gst_object_unref(top);
+    if (filter)
+        gst_object_unref(filter);
+    return filter;
+}
+
+GstElement *builtSink(Player &player)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    GstElement *sink = nullptr;
+    g_object_get(top, "audio-sink", &sink, nullptr);
+    gst_object_unref(top);
+    if (sink)
+        gst_object_unref(sink);
+    return sink;
+}
+
+QStringList factories(GstElement *bin, bool recurse)
+{
+    QStringList names;
+    GstIterator *it = recurse ? gst_bin_iterate_recurse(GST_BIN(bin)) : gst_bin_iterate_elements(GST_BIN(bin));
+    GValue item = G_VALUE_INIT;
+    while (gst_iterator_next(it, &item) == GST_ITERATOR_OK) {
+        auto *element = GST_ELEMENT(g_value_get_object(&item));
+        if (GstElementFactory *factory = gst_element_get_factory(element))
+            names.append(QString::fromUtf8(GST_OBJECT_NAME(factory)));
+        g_value_reset(&item);
+    }
+    g_value_unset(&item);
+    gst_iterator_free(it);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+bool prerolled(Player &player)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while ((player.sinkFormat().isEmpty() || player.sourceFormat().isEmpty()) && timer.elapsed() < playTimeoutMs)
+        QTest::qWait(20);
+    if (player.sinkFormat().isEmpty() || player.sourceFormat().isEmpty() || !player.audioSink())
+        return false;
+    GstElement *top = pipelineOf(player.audioSink());
+    GstState state = GST_STATE_VOID_PENDING;
+    const GstStateChangeReturn ret = gst_element_get_state(top, &state, nullptr, 5 * GST_SECOND);
+    gst_object_unref(top);
+    return ret == GST_STATE_CHANGE_SUCCESS && state == GST_STATE_PAUSED;
+}
+
+void postSinkError(Player &player, GstResourceError code)
+{
+    GstIterator *it = gst_bin_iterate_sinks(GST_BIN(player.audioSink()));
+    GValue item = G_VALUE_INIT;
+    GstElement *child = nullptr;
+    if (gst_iterator_next(it, &item) == GST_ITERATOR_OK)
+        child = GST_ELEMENT(g_value_dup_object(&item));
+    g_value_unset(&item);
+    gst_iterator_free(it);
+    QVERIFY(child);
+    GError *error = g_error_new_literal(GST_RESOURCE_ERROR, code, "The device has been disconnected.");
+    gst_element_post_message(child, gst_message_new_error(GST_OBJECT(child), error, "test"));
+    g_error_free(error);
+    gst_object_unref(child);
+}
+
+double bandGain(Player &player, guint index)
+{
+    GstElement *eq = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-eq");
+    if (!eq)
+        return -100.0;
+    GObject *band = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), index);
+    double gain = -100.0;
+    if (band) {
+        g_object_get(band, "gain", &gain, nullptr);
+        g_object_unref(band);
+    }
+    gst_object_unref(eq);
+    return gain;
+}
+
+bool reachesPlaying(Player &player)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    QElapsedTimer timer;
+    timer.start();
+    GstState state = GST_STATE_VOID_PENDING;
+    while (timer.elapsed() < playTimeoutMs) {
+        gst_element_get_state(top, &state, nullptr, 0);
+        if (state == GST_STATE_PLAYING)
+            break;
+        QTest::qWait(10);
+    }
+    gst_object_unref(top);
+    return state == GST_STATE_PLAYING;
 }
 
 }
@@ -1570,6 +1755,654 @@ void PlayerTest::stateRestoreByPath()
     QCOMPARE(player.queue()->entry(3).title, QStringLiteral("Lost Song"));
     QCOMPARE(state.queueRev(), qint64(7));
     player.stop();
+}
+
+void PlayerTest::sinkDescriptionText()
+{
+    const QString o181 = QStringLiteral("audioconvert dithering=none noise-shaping=none ! audio/x-raw,format=S32LE "
+                                        "! alsasink device=hw:CARD=B,DEV=0");
+    QCOMPARE(Player::sinkDescription(Chain::Pw, {}, {}, o181, QStringLiteral("B")), QStringLiteral("pulsesink"));
+    QCOMPARE(Player::sinkDescription(Chain::Bp, {}, {}, o181, QStringLiteral("B")),
+             QStringLiteral("pulsesink volume=1.0 mute=false"));
+    QCOMPARE(Player::sinkDescription(Chain::Ex, {}, {}, o181, QStringLiteral("B")), o181);
+
+    const QString sink = QStringLiteral("fakesink sync=false");
+    const QString exclusive = QStringLiteral("alsasink device=hw:CARD=%1,DEV=0");
+    QCOMPARE(Player::sinkDescription(Chain::Pw, sink, exclusive, o181, QStringLiteral("B")), sink);
+    QCOMPARE(Player::sinkDescription(Chain::Bp, sink, exclusive, o181, QStringLiteral("B")), sink);
+    QCOMPARE(Player::sinkDescription(Chain::Ex, sink, exclusive, o181, QStringLiteral("B")),
+             QStringLiteral("alsasink device=hw:CARD=B,DEV=0"));
+    QCOMPARE(Player::sinkDescription(Chain::Ex, {}, sink, o181, QStringLiteral("B")), sink);
+}
+
+void PlayerTest::chainWithoutPolicy()
+{
+    const QStringList eqFactories = {QStringLiteral("audioconvert"), QStringLiteral("audioconvert"),
+                                     QStringLiteral("capsfilter"), QStringLiteral("equalizer-nbands"),
+                                     QStringLiteral("volume")};
+    for (const bool withPolicy : {false, true}) {
+        Player player;
+        FakePolicy policy;
+        if (withPolicy)
+            player.setPolicy(&policy);
+        GstElement *eq = player.audioFilter();
+        GstElement *sink = player.audioSink();
+        QVERIFY(eq);
+        QVERIFY(sink);
+        QCOMPARE(factories(sink, false), QStringList({QStringLiteral("fakesink")}));
+        QCOMPARE(factories(eq, false), eqFactories);
+
+        player.restore(m_tracks, 0, 0);
+        QVERIFY(prerolled(player));
+        QCOMPARE(player.builtChain(), Chain::Pw);
+        QCOMPARE(builtFilter(player), eq);
+        QCOMPARE(builtSink(player), sink);
+
+        player.rebuildAt(0, GST_STATE_PAUSED);
+        QVERIFY(prerolled(player));
+        QCOMPARE(builtFilter(player), eq);
+        QCOMPARE(builtSink(player), sink);
+        QCOMPARE(player.audioSink(), sink);
+        QCOMPARE(policy.admitted.size(), withPolicy ? 2 : 0);
+        player.stop();
+    }
+}
+
+void PlayerTest::chainRoundTrip()
+{
+    auto player = exclusivePlayer();
+    FakePolicy policy;
+    player->setPolicy(&policy);
+    GstElement *eq = player->audioFilter();
+    QVERIFY(eq);
+
+    player->restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(builtFilter(*player), eq);
+
+    policy.chain = Chain::Bp;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->builtChain(), Chain::Bp);
+    GstElement *filter = builtFilter(*player);
+    QVERIFY(filter);
+    QVERIFY(filter != eq);
+    QCOMPARE(factories(filter, false), QStringList({QStringLiteral("audioconvert"), QStringLiteral("capsfilter")}));
+    QCOMPARE(player->sinkFormat().value(QStringLiteral("format")).toString(), QStringLiteral("F32LE"));
+    QCOMPARE(factories(builtSink(*player), false), QStringList({QStringLiteral("fakesink")}));
+
+    policy.chain = Chain::Ex;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->builtChain(), Chain::Ex);
+    QVERIFY(!builtFilter(*player));
+    QVERIFY(!player->audioFilter());
+    GstElement *named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "casdap-ex");
+    QVERIFY(named);
+    gst_object_unref(named);
+
+    policy.chain = Chain::Pw;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->builtChain(), Chain::Pw);
+    QCOMPARE(builtFilter(*player), eq);
+    QCOMPARE(player->audioFilter(), eq);
+    named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "casdap-ex");
+    QVERIFY(!named);
+
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = 4.5;
+    player->applyEq(profile);
+    QVERIFY(std::abs(bandGain(*player, 0) - 4.5) < 1e-6);
+    player->applyEq(EqProfile::off());
+    QCOMPARE(bandGain(*player, 0), 0.0);
+    player->stop();
+}
+
+void PlayerTest::rateTail()
+{
+    Player player;
+    FakePolicy policy;
+    player.setPolicy(&policy);
+    GstElement *eq = player.audioFilter();
+    QVERIFY(eq);
+
+    policy.rate = 96000;
+    player.restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(player));
+    GstElement *filter = builtFilter(player);
+    QVERIFY(filter);
+    QVERIFY(filter != eq);
+    QCOMPARE(GST_ELEMENT(GST_OBJECT_PARENT(eq)), filter);
+    QVERIFY(factories(filter, true).contains(QStringLiteral("audioresample")));
+    QVERIFY(factories(filter, true).contains(QStringLiteral("equalizer-nbands")));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), 96000);
+    const int source = player.sourceFormat().value(QStringLiteral("rate")).toInt();
+    QVERIFY(source > 0);
+    QVERIFY(source != 96000);
+
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = 3.0;
+    player.applyEq(profile);
+    QVERIFY(std::abs(bandGain(player, 0) - 3.0) < 1e-6);
+
+    policy.rate = 0;
+    player.rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(player));
+    QCOMPARE(builtFilter(player), eq);
+    QVERIFY(!factories(eq, true).contains(QStringLiteral("audioresample")));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), source);
+    QVERIFY(std::abs(bandGain(player, 0) - 3.0) < 1e-6);
+
+    policy.rate = 96000;
+    policy.chain = Chain::Bp;
+    player.rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(player));
+    QVERIFY(!factories(builtFilter(player), true).contains(QStringLiteral("audioresample")));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), source);
+
+    policy.chain = Chain::Pw;
+    player.rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(player));
+    QCOMPARE(GST_ELEMENT(GST_OBJECT_PARENT(eq)), builtFilter(player));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), 96000);
+    player.stop();
+}
+
+void PlayerTest::pendingLatestWins()
+{
+    Player player;
+    FakePolicy policy;
+    policy.now = false;
+    player.setPolicy(&policy);
+    QSignalSpy started(&player, &Player::trackStarted);
+    const QList<QueueEntry> entries = m_tracks + m_tracks;
+
+    player.play(entries, 0);
+    QCOMPARE(player.status(), Player::Playing);
+    QVERIFY(player.pendingBuild());
+    for (int i = 0; i < 5; ++i)
+        player.next();
+    QCOMPARE(policy.admitted.size(), 6);
+    QCOMPARE(player.queue()->currentIndex(), 5);
+    QCOMPARE(player.status(), Player::Playing);
+    QVERIFY(player.pendingBuild());
+    QCOMPARE(player.pendingBuild()->entry.path, entries.at(5).path);
+    QCOMPARE(player.pendingBuild()->target, GST_STATE_PLAYING);
+    QCOMPARE(player.builtChain(), Chain::None);
+    QTest::qWait(200);
+    QCOMPARE(started.count(), 0);
+
+    player.buildPending(Chain::Pw);
+    QVERIFY(!player.pendingBuild());
+    QCOMPARE(player.builtChain(), Chain::Pw);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 5);
+    QCOMPARE(policy.admitted.size(), 6);
+    player.stop();
+}
+
+void PlayerTest::pendingQueueEdits()
+{
+    Player player;
+    FakePolicy policy;
+    policy.now = false;
+    player.setPolicy(&policy);
+    QSignalSpy started(&player, &Player::trackStarted);
+
+    player.play(m_tracks, 1);
+    player.queue()->remove(0);
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    QCOMPARE(policy.admitted.size(), 1);
+    player.buildPending(Chain::Pw);
+    QTRY_VERIFY_WITH_TIMEOUT(started.count() >= 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 0);
+    QCOMPARE(player.queue()->entry(0).path, m_tracks.at(1).path);
+    player.stop();
+    started.clear();
+
+    player.play(m_tracks, 0);
+    player.seek(1500);
+    QCOMPARE(player.pendingBuild()->positionMs, qint64(1500));
+    player.queue()->remove(0);
+    QVERIFY(player.pendingBuild());
+    QCOMPARE(player.pendingBuild()->entry.path, m_tracks.at(1).path);
+    QCOMPARE(player.pendingBuild()->positionMs, qint64(0));
+    QCOMPARE(player.queue()->currentIndex(), 0);
+    player.buildPending(Chain::Pw);
+    QTRY_VERIFY_WITH_TIMEOUT(started.count() >= 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 0);
+    QCOMPARE(player.queue()->entry(0).path, m_tracks.at(1).path);
+    player.stop();
+    started.clear();
+
+    player.play(m_tracks, 2);
+    player.seek(900);
+    player.queue()->set(m_tracks, 0);
+    player.buildPending(Chain::Pw);
+    QCOMPARE(player.position(), qint64(0));
+    QTRY_VERIFY_WITH_TIMEOUT(started.count() >= 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 0);
+    player.stop();
+    started.clear();
+
+    player.play({m_tracks.at(0)}, 0);
+    QVERIFY(player.pendingBuild());
+    player.queue()->remove(0);
+    QCOMPARE(player.status(), Player::Stopped);
+    QVERIFY(!player.pendingBuild());
+    player.buildPending(Chain::Pw);
+    QTest::qWait(200);
+    QCOMPARE(started.count(), 0);
+    QCOMPARE(player.builtChain(), Chain::None);
+}
+
+void PlayerTest::pendingPauseParks()
+{
+    Player player;
+    FakePolicy policy;
+    policy.now = false;
+    player.setPolicy(&policy);
+    QSignalSpy started(&player, &Player::trackStarted);
+
+    player.play(m_tracks, 1);
+    player.seek(700);
+    QCOMPARE(player.status(), Player::Playing);
+    player.pause();
+    QCOMPARE(player.status(), Player::Paused);
+    QVERIFY(player.parked());
+    QVERIFY(!player.pendingBuild());
+    QCOMPARE(player.position(), qint64(700));
+    QCOMPARE(player.queue()->currentIndex(), 1);
+
+    policy.now = true;
+    player.buildPending(Chain::Pw);
+    QTest::qWait(200);
+    QCOMPARE(started.count(), 0);
+    QCOMPARE(player.builtChain(), Chain::None);
+    QVERIFY(player.parked());
+    QCOMPARE(policy.admitted.size(), 1);
+    player.stop();
+    QVERIFY(!player.parked());
+}
+
+void PlayerTest::resumeFromChain()
+{
+    auto player = syncPlayer();
+    FakePolicy policy;
+    player->setPolicy(&policy);
+
+    player->restore({m_long}, 0, 0);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(policy.admitted.size(), 1);
+    player->resumeFrom();
+    QCOMPARE(player->status(), Player::Playing);
+    QCOMPARE(policy.admitted.size(), 1);
+    QTest::qWait(300);
+    player->pause();
+    const qint64 at = player->position();
+    QVERIFY(at > 0);
+
+    policy.want = Chain::Bp;
+    policy.chain = Chain::Bp;
+    player->resumeFrom();
+    QCOMPARE(policy.admitted.size(), 2);
+    QCOMPARE(policy.admitted.last().target, GST_STATE_PLAYING);
+    QCOMPARE(policy.admitted.last().positionMs, at);
+    QCOMPARE(policy.admitted.last().entry.path, m_long.path);
+    QCOMPARE(player->builtChain(), Chain::Bp);
+    QCOMPARE(player->status(), Player::Playing);
+
+    player->park(1200);
+    QVERIFY(player->parked());
+    QCOMPARE(player->status(), Player::Paused);
+    QCOMPARE(player->builtChain(), Chain::None);
+    player->resumeFrom();
+    QCOMPARE(policy.admitted.size(), 3);
+    QCOMPARE(policy.admitted.last().positionMs, qint64(1200));
+    QCOMPARE(policy.admitted.last().target, GST_STATE_PLAYING);
+    QVERIFY(!player->parked());
+    QCOMPARE(player->status(), Player::Playing);
+    QCOMPARE(player->position(), qint64(1200));
+    player->stop();
+}
+
+void PlayerTest::rebuildAtKeeps()
+{
+    Player player;
+    FakePolicy policy;
+    player.setPolicy(&policy);
+    player.restore(m_tracks, 1, 0);
+    QVERIFY(prerolled(player));
+
+    player.rebuildAt(800, GST_STATE_PAUSED);
+    QCOMPARE(policy.admitted.size(), 2);
+    QCOMPARE(policy.admitted.last().entry.path, m_tracks.at(1).path);
+    QCOMPARE(policy.admitted.last().positionMs, qint64(800));
+    QCOMPARE(policy.admitted.last().target, GST_STATE_PAUSED);
+    QCOMPARE(player.queue()->currentIndex(), 1);
+    QCOMPARE(player.position(), qint64(800));
+    QCOMPARE(player.status(), Player::Paused);
+    QVERIFY(prerolled(player));
+    QCOMPARE(player.queue()->currentIndex(), 1);
+    QTRY_VERIFY_WITH_TIMEOUT(std::abs(player.position() - 800) < 300, playTimeoutMs);
+    player.stop();
+}
+
+void PlayerTest::seekWhileParked()
+{
+    Player player;
+    FakePolicy policy;
+    player.setPolicy(&policy);
+    player.restore(m_tracks, 1, 0);
+    QVERIFY(prerolled(player));
+
+    player.park(1000);
+    QVERIFY(player.parked());
+    QCOMPARE(player.position(), qint64(1000));
+    player.seek(1500);
+    QCOMPARE(player.position(), qint64(1500));
+    QVERIFY(player.parked());
+    QCOMPARE(player.builtChain(), Chain::None);
+    QCOMPARE(policy.admitted.size(), 1);
+    QVERIFY(player.sinkFormat().isEmpty());
+
+    policy.now = false;
+    player.resumeFrom();
+    QCOMPARE(policy.admitted.size(), 2);
+    QCOMPARE(policy.admitted.last().positionMs, qint64(1500));
+    QCOMPARE(policy.admitted.last().target, GST_STATE_PLAYING);
+    QCOMPARE(policy.admitted.last().entry.path, m_tracks.at(1).path);
+    QVERIFY(player.pendingBuild());
+    player.stop();
+    QVERIFY(!player.pendingBuild());
+}
+
+void PlayerTest::exclusiveErrors()
+{
+    auto player = exclusivePlayer();
+    FakePolicy policy;
+    policy.chain = Chain::Ex;
+    player->setPolicy(&policy);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+
+    player->restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->builtChain(), Chain::Ex);
+    postSinkError(*player, GST_RESOURCE_ERROR_WRITE);
+    QTRY_COMPARE_WITH_TIMEOUT(policy.errors.size(), 1, playTimeoutMs);
+    QCOMPARE(policy.errors.first(), int(GST_RESOURCE_ERROR_WRITE));
+    postSinkError(*player, GST_RESOURCE_ERROR_WRITE);
+    postSinkError(*player, GST_RESOURCE_ERROR_WRITE);
+    QTest::qWait(300);
+    QCOMPARE(policy.errors.size(), 1);
+    QCOMPARE(policy.admitted.size(), 1);
+    QCOMPARE(player->queue()->currentIndex(), 0);
+    QCOMPARE(started.count(), 1);
+
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    postSinkError(*player, GST_RESOURCE_ERROR_OPEN_WRITE);
+    QTRY_COMPARE_WITH_TIMEOUT(policy.errors.size(), 2, playTimeoutMs);
+    QCOMPARE(policy.errors.last(), int(GST_RESOURCE_ERROR_OPEN_WRITE));
+    postSinkError(*player, GST_RESOURCE_ERROR_OPEN_WRITE);
+    QTest::qWait(300);
+    QCOMPARE(policy.errors.size(), 2);
+    QCOMPARE(policy.admitted.size(), 2);
+    QCOMPARE(player->queue()->currentIndex(), 0);
+
+    QueueEntry missing;
+    missing.path = m_dir.path() + QStringLiteral("/missing-ex.flac");
+    missing.title = QStringLiteral("missing");
+    started.clear();
+    player->restore({missing, m_tracks.at(0)}, 0, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QCOMPARE(started.at(0).at(0).toInt(), 1);
+    QCOMPARE(policy.admitted.last().entry.path, m_tracks.at(0).path);
+    QCOMPARE(policy.errors.size(), 2);
+    player->stop();
+}
+
+void PlayerTest::pwSinkError()
+{
+    for (const bool withPolicy : {false, true}) {
+        Player player;
+        FakePolicy policy;
+        if (withPolicy)
+            player.setPolicy(&policy);
+        QSignalSpy errors(&player, &Player::error);
+        QSignalSpy started(&player, &Player::trackStarted);
+        player.restore(m_tracks, 0, 0);
+        QVERIFY(prerolled(player));
+        QCOMPARE(started.count(), 1);
+        postSinkError(player, GST_RESOURCE_ERROR_WRITE);
+        QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, playTimeoutMs);
+        QCOMPARE(player.queue()->currentIndex(), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+        QCOMPARE(started.at(1).at(0).toInt(), 1);
+        QCOMPARE(player.status(), Player::Paused);
+        QVERIFY(policy.errors.isEmpty());
+        player.stop();
+    }
+}
+
+void PlayerTest::formats()
+{
+    Player player;
+    QSignalSpy changed(&player, &Player::formatChanged);
+    QVERIFY(player.sourceFormat().isEmpty());
+    QVERIFY(player.sinkFormat().isEmpty());
+    player.restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(player));
+    QVERIFY(changed.count() >= 1);
+    const QVariantMap source = player.sourceFormat();
+    const QVariantMap sink = player.sinkFormat();
+    QVERIFY(source.value(QStringLiteral("rate")).toInt() > 0);
+    QVERIFY(!source.value(QStringLiteral("format")).toString().isEmpty());
+    QVERIFY(source.value(QStringLiteral("channels")).toInt() > 0);
+    QCOMPARE(sink.value(QStringLiteral("rate")).toInt(), source.value(QStringLiteral("rate")).toInt());
+    QVERIFY(!sink.value(QStringLiteral("format")).toString().isEmpty());
+    player.stop();
+    QVERIFY(player.sourceFormat().isEmpty());
+    QVERIFY(player.sinkFormat().isEmpty());
+}
+
+void PlayerTest::exclusiveSwallowsAfterError()
+{
+    auto player = exclusivePlayer();
+    FakePolicy policy;
+    policy.chain = Chain::Ex;
+    player->setPolicy(&policy);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy errors(player.get(), &Player::error);
+
+    player->restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(*player));
+    postSinkError(*player, GST_RESOURCE_ERROR_WRITE);
+    QTRY_COMPARE_WITH_TIMEOUT(policy.errors.size(), 1, playTimeoutMs);
+
+    GstElement *top = pipelineOf(player->audioSink());
+    GError *error = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_FAILED, "Internal data stream error.");
+    gst_element_post_message(top, gst_message_new_error(GST_OBJECT(top), error, "test"));
+    g_error_free(error);
+    gst_object_unref(top);
+    QTest::qWait(300);
+    QCOMPARE(player->queue()->currentIndex(), 0);
+    QCOMPARE(errors.count(), 0);
+    QCOMPARE(policy.errors.size(), 1);
+    QCOMPARE(policy.admitted.size(), 1);
+    QCOMPARE(started.count(), 1);
+    player->stop();
+}
+
+void PlayerTest::sameListenRebuild()
+{
+    QueueEntry entry = m_long;
+    entry.id = m_tracks.at(0).id;
+    auto player = syncPlayer(m_library.get());
+    FakePolicy policy;
+    player->setPolicy(&policy);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    const int before = historyCount();
+
+    player->play({entry}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QCOMPARE(historyCount() - before, 1);
+    QTest::qWait(300);
+
+    player->park(player->position());
+    QVERIFY(player->parked());
+    player->resumeFrom();
+    QCOMPARE(player->status(), Player::Playing);
+    QVERIFY(reachesPlaying(*player));
+    QTest::qWait(300);
+    QCOMPARE(started.count(), 1);
+    QCOMPARE(historyCount() - before, 1);
+
+    player->rebuildAt(player->position(), GST_STATE_PLAYING);
+    QVERIFY(reachesPlaying(*player));
+    QTest::qWait(300);
+    QCOMPARE(started.count(), 1);
+    QCOMPARE(historyCount() - before, 1);
+    QCOMPARE(policy.admitted.size(), 3);
+
+    player->playAt(0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(historyCount() - before, 2);
+    player->stop();
+}
+
+void PlayerTest::playingBuildAtPosition()
+{
+    auto player = syncPlayer();
+    FakePolicy policy;
+    player->setPolicy(&policy);
+
+    player->restore({m_long}, 0, 2000, true);
+    QCOMPARE(player->status(), Player::Playing);
+    QCOMPARE(policy.admitted.last().target, GST_STATE_PLAYING);
+    GstElement *top = pipelineOf(player->audioSink());
+    QElapsedTimer timer;
+    timer.start();
+    GstState state = GST_STATE_VOID_PENDING;
+    while (timer.elapsed() < playTimeoutMs) {
+        QCOMPARE(player->status(), Player::Playing);
+        QVERIFY(player->position() >= 1900);
+        gst_element_get_state(top, &state, nullptr, 0);
+        if (state == GST_STATE_PLAYING)
+            break;
+        QTest::qWait(5);
+    }
+    gst_object_unref(top);
+    QCOMPARE(state, GST_STATE_PLAYING);
+    const qint64 at = player->position();
+    QVERIFY2(std::abs(at - 2000) < 100, QByteArray::number(at).constData());
+    player->stop();
+}
+
+void PlayerTest::badSinkConfigure()
+{
+    auto player = exclusivePlayer(QByteArrayLiteral("nosuchelement-casdap"));
+    FakePolicy policy;
+    policy.chain = Chain::Ex;
+    player->setPolicy(&policy);
+    GstElement *eq = player->audioFilter();
+    QVERIFY(eq);
+    QSignalSpy errors(player.get(), &Player::error);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+
+    player->restore(m_tracks, 1, 0);
+    QCOMPARE(policy.errors, QList<int>({int(GST_RESOURCE_ERROR_FAILED)}));
+    QCOMPARE(errors.count(), 0);
+    QCOMPARE(player->builtChain(), Chain::None);
+    QVERIFY(player->pendingBuild());
+    QCOMPARE(player->pendingBuild()->entry.path, m_tracks.at(1).path);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QCOMPARE(player->status(), Player::Paused);
+
+    player->buildPending(Chain::Pw);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->builtChain(), Chain::Pw);
+    QCOMPARE(builtFilter(*player), eq);
+    QCOMPARE(started.count(), 1);
+
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QCOMPARE(policy.errors.size(), 2);
+    QCOMPARE(player->builtChain(), Chain::None);
+    policy.chain = Chain::Pw;
+    player->buildPending(Chain::Pw);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(builtFilter(*player), eq);
+    QCOMPARE(errors.count(), 0);
+    player->stop();
+
+    auto bad = withEnv("CASDAP_AUDIO_SINK", QByteArrayLiteral("nosuchelement-casdap"));
+    FakePolicy bpPolicy;
+    bpPolicy.chain = Chain::Bp;
+    bad->setPolicy(&bpPolicy);
+    GstElement *badEq = bad->audioFilter();
+    QVERIFY(badEq);
+    QVERIFY(!bad->audioSink());
+    bad->restore(m_tracks, 0, 0);
+    QCOMPARE(bad->builtChain(), Chain::Pw);
+    QCOMPARE(bad->audioFilter(), badEq);
+    QVERIFY(!bad->audioSink());
+    QVERIFY(bpPolicy.errors.isEmpty());
+    bad->stop();
+}
+
+void PlayerTest::guardBeforeAdmit()
+{
+    auto player = syncPlayer();
+    FakeBluezModel fake;
+    fake.setTransportActive(true);
+    player->setBluez(&fake);
+    FakePolicy policy;
+    player->setPolicy(&policy);
+
+    player->play({m_long}, 0);
+    QCOMPARE(policy.admitted.size(), 1);
+    QCOMPARE(policy.admitted.last().target, GST_STATE_PAUSED);
+    QCOMPARE(player->status(), Player::Paused);
+    QVERIFY(player->playPending());
+    player->stop();
+
+    player->park(500);
+    QVERIFY(!player->parked());
+    QCOMPARE(player->status(), Player::Stopped);
+    QCOMPARE(player->position(), qint64(0));
+    player->setBluez(nullptr);
+
+    Player empty;
+    empty.setPolicy(&policy);
+    empty.park(500);
+    QVERIFY(!empty.parked());
+    QCOMPARE(empty.status(), Player::Stopped);
+}
+
+void PlayerTest::rateTailNoWarnings()
+{
+    Player player;
+    FakePolicy policy;
+    player.setPolicy(&policy);
+    glibWarnings.storeRelaxed(0);
+    const GLogFunc previous = g_log_set_default_handler(countWarnings, nullptr);
+
+    player.restore(m_tracks, 0, 0);
+    const bool first = prerolled(player);
+    const int source = player.sinkFormat().value(QStringLiteral("rate")).toInt();
+    policy.rate = 96000;
+    player.rebuildAt(0, GST_STATE_PAUSED);
+    const bool second = prerolled(player);
+    const int fixed = player.sinkFormat().value(QStringLiteral("rate")).toInt();
+    player.stop();
+
+    g_log_set_default_handler(previous, nullptr);
+    QVERIFY(first);
+    QVERIFY(second);
+    QVERIFY(source > 0);
+    QCOMPARE(fixed, 96000);
+    QCOMPARE(glibWarnings.loadRelaxed(), 0);
 }
 
 QTEST_GUILESS_MAIN(PlayerTest)
