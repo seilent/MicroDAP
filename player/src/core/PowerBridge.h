@@ -90,6 +90,7 @@ public:
     bool screenOff() const;
     void setScreenOff(bool off);
     int volume() const;
+    void setVolume(int percent);
     QStringList driftPaths() const;
     QString playbackStatus() const;
     bool overlayShown() const;

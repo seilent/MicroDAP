@@ -10,6 +10,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
+pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse libpulse-mainloop-glib)
 find_package(SDL3 REQUIRED CONFIG)
 
 qt_standard_project_setup(REQUIRES 6.11)
@@ -89,6 +90,8 @@ add_library(casdapcore STATIC
     src/core/SystemBluezModel.h
     src/core/Version.cpp
     src/core/Version.h
+    src/core/VolumeKeys.cpp
+    src/core/VolumeKeys.h
 )
 target_include_directories(casdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_definitions(casdapcore PRIVATE CASDAP_VERSION="${PROJECT_VERSION}")
@@ -99,6 +102,7 @@ target_link_libraries(casdapcore PUBLIC
     Qt6::Sql
     PkgConfig::GST
     PkgConfig::TAGLIB
+    PkgConfig::PULSE
     SDL3::SDL3
 )
 

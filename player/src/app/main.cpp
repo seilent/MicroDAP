@@ -28,6 +28,7 @@
 #include "AudioInfo.h"
 #include "SystemBluezModel.h"
 #include "Version.h"
+#include "VolumeKeys.h"
 
 #include <QCommandLineParser>
 #include <QDBusConnection>
@@ -304,8 +305,12 @@ int main(int argc, char *argv[])
     std::unique_ptr<casdap::GuideChord> guide;
     std::unique_ptr<casdap::OutputWatch> outputs;
     std::unique_ptr<QObject> sensor;
+    std::unique_ptr<casdap::VolumeKeys> volumeKeys;
     if (!overlayMode) {
         guide = std::make_unique<casdap::GuideChord>();
+        volumeKeys = std::make_unique<casdap::VolumeKeys>(new casdap::EvdevKeys, new casdap::PulseSinkVolume,
+                                                          &settings);
+        QObject::connect(volumeKeys.get(), &casdap::VolumeKeys::levelChanged, &power, &casdap::PowerBridge::setVolume);
         const QString backend = qEnvironmentVariable("CASDAP_SENSOR_BACKEND");
         if (backend == QLatin1StringView("ssc")
             || (backend != QLatin1StringView("proxy") && QFileInfo::exists(QStringLiteral("/dev/fastrpc-sdsp"))))

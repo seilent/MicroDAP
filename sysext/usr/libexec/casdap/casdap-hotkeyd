@@ -10,7 +10,6 @@ TAP_MAX_AGE_MS="${CASDAP_HOTKEYD_TAP_MAX_AGE_MS:-300}"
 DOUBLE_MS="${CASDAP_HOTKEYD_DOUBLE_MS:-350}"
 DEVICE_WAIT_SEC="${CASDAP_HOTKEYD_DEVICE_WAIT_SEC:-15}"
 DEVICE_NAME="${CASDAP_HOTKEYD_DEVICE_NAME:-InputPlumber Keyboard}"
-VOLUME_NAMES="${CASDAP_HOTKEYD_VOLUME_NAMES-gpio-keys:pm8941_resin}"
 BUZZ_LEVEL="${CASDAP_HOTKEYD_BUZZ_LEVEL:-1.0}"
 BUZZ_MS="${CASDAP_HOTKEYD_BUZZ_MS:-15}"
 BUZZ_DOUBLE_MS="${CASDAP_HOTKEYD_BUZZ_DOUBLE_MS:-15 50 15}"
@@ -20,7 +19,6 @@ DEV_INPUT="${CASDAP_DEV_INPUT:-/dev/input}"
 SYS_INPUT="${CASDAP_SYS_INPUT:-/sys/class/input}"
 GUIDE_DIR="${CASDAP_GUIDE_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/casdap-guide}"
 POWER_RUNTIME="${CASDAP_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/casdap-power}"
-SETTINGS="${CASDAP_SETTINGS_FILE:-${HOME}/.config/casdap/settings.ini}"
 PATH="${PATH}:/usr/libexec/casdap"
 
 log() { logger -t casdap-hotkeyd -- "$*"; }
@@ -103,29 +101,6 @@ wait_for_key_device() {
     done
 }
 
-volume_devices() {
-    local names name dev
-    IFS=: read -r -a names <<< "${VOLUME_NAMES}"
-    for name in "${names[@]}"; do
-        [[ -n "${name}" ]] || continue
-        if dev=$(key_device "${name}"); then
-            printf '%s\n' "${dev}"
-        else
-            log "volume node ${name} not found"
-        fi
-    done
-}
-
-event_stream() {
-    local dev pids=()
-    for dev in "$@"; do
-        evtest "${dev}" 2>/dev/null &
-        pids+=($!)
-    done
-    wait -n
-    kill "${pids[@]}" 2>/dev/null
-}
-
 session_state() {
     if systemctl --user is-active --quiet gamescope-session-plus@casdap.service; then
         echo casdap
@@ -141,8 +116,6 @@ title_running() { pgrep -f 'SteamLaunch AppId=' >/dev/null 2>&1; }
 plasma_running() { pgrep -x plasmashell >/dev/null 2>&1; }
 
 last_hold_ms=0
-vol_key=
-vol_session=
 toggle_end_ms=0
 toggle_timeouts=0
 pending=0
@@ -328,47 +301,8 @@ resolve_due() {
     resolve_tap "${due_ev}" "${due_session}" "${due_release_ev}"
 }
 
-setting() {
-    local line value=
-    if [[ -r "${SETTINGS}" ]]; then
-        while IFS= read -r line || [[ -n "${line}" ]]; do
-            line="${line%$'\r'}"
-            [[ "${line}" == "$1="* ]] || continue
-            value="${line#*=}"
-        done < "${SETTINGS}"
-    fi
-    printf '%s\n' "${value}"
-}
-
-volume_step() {
-    local value
-    value=$(setting volumeStep)
-    case "${value}" in
-        2|5|10) printf '%s\n' "${value}" ;;
-        *) printf '5\n' ;;
-    esac
-}
-
-on_volume() {
-    local dir=$1 value=$2 label level rest step
-    if [[ "${value}" == 1 || "${dir}" != "${vol_key}" ]]; then
-        vol_key=${dir}
-        vol_session=$(session_state)
-    fi
-    [[ "${vol_session}" == casdap ]] || return 0
-    step=$(volume_step)
-    [[ "${dir}" == + ]] && run wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
-    run wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "${step}%${dir}"
-    read -r label level rest < <(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
-    if [[ "${label:-}" != Volume: || -z "${level:-}" ]]; then
-        log "wpctl get-volume gave no level"
-        return 0
-    fi
-    run busctl --user emit /org/casdap/Hotkeys org.casdap.Hotkeys VolumeChanged d "${level}"
-}
-
 main() {
-    local dev vol_devs line read_result state press_ms press_ev hold_ms release_ev rem due_rem session pocket
+    local dev line read_result state press_ms press_ev hold_ms release_ev rem due_rem session pocket
 
     trap 'exit 0' INT TERM
 
@@ -380,10 +314,9 @@ main() {
         log "${DEVICE_NAME} not found after ${DEVICE_WAIT_SEC} s"
         return 0
     }
-    mapfile -t vol_devs < <(volume_devices)
 
-    log "watching ${dev} for ${KEY}, volume on ${vol_devs[*]:-none}, hold ${LONG_MS} ms, pocket hold ${POCKET_LONG_MS} ms, double tap ${DOUBLE_MS} ms, chord ${CHORD_MS} ms, dry run ${DRY_RUN}"
-    exec 3< <(event_stream "${dev}" "${vol_devs[@]}")
+    log "watching ${dev} for ${KEY}, hold ${LONG_MS} ms, pocket hold ${POCKET_LONG_MS} ms, double tap ${DOUBLE_MS} ms, chord ${CHORD_MS} ms, dry run ${DRY_RUN}"
+    exec 3< <(evtest "${dev}" 2>/dev/null)
     state=idle
     press_ms=0
     press_ev=0
@@ -486,12 +419,6 @@ main() {
                     fi
                 fi
                 state=idle
-                ;;
-            *"(KEY_VOLUMEUP), value "[12])
-                on_volume + "${line##*value }"
-                ;;
-            *"(KEY_VOLUMEDOWN), value "[12])
-                on_volume - "${line##*value }"
                 ;;
         esac
     done

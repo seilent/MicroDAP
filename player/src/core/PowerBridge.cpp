@@ -586,10 +586,15 @@ bool PowerBridge::rejectWithoutOverlay(const char *member)
     return true;
 }
 
+void PowerBridge::setVolume(int percent)
+{
+    m_volume = qBound(0, percent, 100);
+    emit volumeChanged(m_volume);
+}
+
 void PowerBridge::onVolumeChanged(double level)
 {
-    m_volume = qRound(qBound(0.0, level, 1.0) * 100.0);
-    emit volumeChanged(m_volume);
+    setVolume(qRound(qBound(0.0, level, 1.0) * 100.0));
 }
 
 void PowerBridge::notifyPlaybackStatus()

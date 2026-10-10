@@ -127,6 +127,35 @@ else()
 endif()
 casdap_test_env(ssc)
 
+qt_add_executable(tst_volumekeys core/tst_volumekeys.cpp)
+target_link_libraries(tst_volumekeys PRIVATE casdapcore Qt6::Test)
+add_test(NAME volumekeys COMMAND tst_volumekeys)
+casdap_test_env(volumekeys)
+
+set(volume_nodes ${CMAKE_CURRENT_BINARY_DIR}/volume-nodes)
+file(MAKE_DIRECTORY ${volume_nodes})
+add_test(NAME volumekeys-screenshot
+    COMMAND casdap-player --screenshot blank --size 640x960 --out ${shots}/volumekeys-blank-640x960.png
+)
+set_tests_properties(volumekeys-screenshot PROPERTIES FAIL_REGULAR_EXPRESSION "casdap volume:")
+casdap_test_env(volumekeys-screenshot)
+set_property(TEST volumekeys-screenshot APPEND PROPERTY ENVIRONMENT
+    "CASDAP_DEV_INPUT=${volume_nodes}" "CASDAP_SYS_INPUT=${volume_nodes}")
+
+find_program(TIMEOUT_BIN timeout)
+if(DBUS_RUN_SESSION AND TIMEOUT_BIN)
+    add_test(NAME volumekeys-overlay
+        COMMAND ${DBUS_RUN_SESSION} -- ${TIMEOUT_BIN} 5 $<TARGET_FILE:casdap-player> --overlay
+    )
+    set_tests_properties(volumekeys-overlay PROPERTIES
+        PASS_REGULAR_EXPRESSION "overlay mode needs the xcb platform"
+        FAIL_REGULAR_EXPRESSION "casdap volume:"
+    )
+    casdap_test_env(volumekeys-overlay)
+    set_property(TEST volumekeys-overlay APPEND PROPERTY ENVIRONMENT
+        "CASDAP_DEV_INPUT=${volume_nodes}" "CASDAP_SYS_INPUT=${volume_nodes}" "CASDAP_AUDIO_SINK=fakesink sync=false")
+endif()
+
 qt_add_executable(tst_artcolor core/tst_artcolor.cpp)
 target_link_libraries(tst_artcolor PRIVATE casdapcore Qt6::Test)
 add_test(NAME artcolor COMMAND tst_artcolor)
