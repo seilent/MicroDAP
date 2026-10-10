@@ -1,18 +1,27 @@
 #pragma once
 
 #include <QByteArray>
+#include <QList>
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 
 namespace casdap {
+
+struct UsbStream
+{
+    QStringList formats;
+    QList<int> rates;
+};
 
 class AudioInfo : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString pcmFormat READ pcmFormat NOTIFY pcmFormatChanged)
     Q_PROPERTY(int graphRate READ graphRate NOTIFY graphRateChanged)
+    Q_PROPERTY(int hwRate READ hwRate NOTIFY hwRateChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
 
 public:
@@ -21,6 +30,7 @@ public:
 
     QString pcmFormat() const;
     int graphRate() const;
+    int hwRate() const;
     bool active() const;
     void setActive(bool active);
 
@@ -30,6 +40,8 @@ public:
     static QString parse(const QString &text);
     static QString parseState(const QString &text);
     static int parseGraphRate(const QByteArray &json);
+    static UsbStream streamFor(int card);
+    static QList<int> ratesFor(int card);
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void refreshGraphRate();
@@ -37,6 +49,7 @@ public:
 signals:
     void pcmFormatChanged();
     void graphRateChanged();
+    void hwRateChanged();
     void activeChanged();
 
 private:

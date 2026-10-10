@@ -9,12 +9,15 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 
+#include <algorithm>
+
 namespace casdap {
 
 namespace {
 
 constexpr int pollMs = 2000;
 constexpr int dumpTimeoutMs = 5000;
+constexpr int allowedRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 
 int rateOf(const QJsonValue &value)
 {
@@ -94,6 +97,11 @@ QString AudioInfo::pcmFormat() const
 int AudioInfo::graphRate() const
 {
     return m_graphRate;
+}
+
+int AudioInfo::hwRate() const
+{
+    return m_hwRate;
 }
 
 bool AudioInfo::active() const
@@ -191,15 +199,75 @@ int AudioInfo::parseGraphRate(const QByteArray &json)
     return rateOf(metadataValue(objects, QStringLiteral("settings"), QStringLiteral("clock.rate")));
 }
 
+UsbStream AudioInfo::streamFor(int card)
+{
+    static const QRegularExpression rangeRe(QStringLiteral("^(\\d+)\\s*-\\s*(\\d+)\\s*\\(continuous\\)"));
+    static const QRegularExpression separatorRe(QStringLiteral("[,\\s]+"));
+    UsbStream stream;
+    const QString text = readText(QDir(asoundDir()).filePath(QStringLiteral("card%1/stream0").arg(card)));
+    bool playback = false;
+    for (const QString &raw : text.split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (line.isEmpty())
+            continue;
+        if (!raw.at(0).isSpace()) {
+            playback = line == QLatin1StringView("Playback:");
+            continue;
+        }
+        if (!playback)
+            continue;
+        if (line.startsWith(QLatin1StringView("Format:"))) {
+            for (const QString &format : line.mid(7).split(separatorRe, Qt::SkipEmptyParts)) {
+                if (!stream.formats.contains(format))
+                    stream.formats.append(format);
+            }
+        } else if (line.startsWith(QLatin1StringView("Rates:"))) {
+            const QString value = line.mid(6).trimmed();
+            const auto add = [&stream](int rate) {
+                if (rate > 0 && !stream.rates.contains(rate))
+                    stream.rates.append(rate);
+            };
+            if (const QRegularExpressionMatch range = rangeRe.match(value); range.hasMatch()) {
+                const int low = range.captured(1).toInt();
+                const int high = range.captured(2).toInt();
+                for (const int rate : allowedRates) {
+                    if (rate >= low && rate <= high)
+                        add(rate);
+                }
+            } else {
+                for (const QString &token : value.split(separatorRe, Qt::SkipEmptyParts))
+                    add(token.toInt());
+            }
+        }
+    }
+    std::sort(stream.rates.begin(), stream.rates.end());
+    return stream;
+}
+
+QList<int> AudioInfo::ratesFor(int card)
+{
+    const QList<int> offered = streamFor(card).rates;
+    QList<int> rates;
+    for (const int rate : allowedRates) {
+        if (offered.contains(rate))
+            rates.append(rate);
+    }
+    return rates;
+}
+
 void AudioInfo::refresh()
 {
     const QString path = hwParamsPath();
     const QString value = path.isEmpty() ? QString() : parse(readText(path));
-    m_hwRate = value.section(QLatin1Char(' '), 0, 0).toInt();
+    const int hwRate = value.section(QLatin1Char(' '), 0, 0).toInt();
+    const bool hwRateMoved = hwRate != m_hwRate;
+    m_hwRate = hwRate;
     if (value != m_pcmFormat) {
         m_pcmFormat = value;
         emit pcmFormatChanged();
     }
+    if (hwRateMoved)
+        emit hwRateChanged();
     if (m_pwRate == 0)
         updateGraphRate();
 }

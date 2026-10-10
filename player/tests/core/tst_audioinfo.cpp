@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -20,6 +21,10 @@ private slots:
     void graphRateFromStub();
     void graphRateWithoutPwDump();
     void picksRunningSubstream();
+    void streamOfFiio();
+    void streamOfAppleDongle();
+    void streamPlaybackOnlyAndRanges();
+    void hwRateFromHwParams();
 };
 
 namespace {
@@ -38,6 +43,83 @@ const char *dumpJson = R"([
      "props": {"node.name": "alsa_output.platform-sound.HiFi__Speaker__sink"},
      "params": {"Format": [{"mediaType": "audio", "rate": 44100, "channels": 2}]}}}
 ])";
+
+const char *fiioStream = R"(FIIO SNOWSKY TINY B at usb-xhci-hcd.3.auto-1, high speed : USB Audio
+
+Playback:
+  Status: Stop
+  Interface 2
+    Altset 1
+    Format: S16_LE
+    Channels: 2
+    Endpoint: 0x07 (7 OUT) (ADAPTIVE)
+    Rates: 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000
+    Data packet interval: 125 us
+    Bits: 16
+    Channel map: FL FR
+  Interface 2
+    Altset 2
+    Format: S24_3LE
+    Channels: 2
+    Endpoint: 0x07 (7 OUT) (ADAPTIVE)
+    Rates: 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000
+    Data packet interval: 125 us
+    Bits: 24
+    Channel map: FL FR
+  Interface 2
+    Altset 3
+    Format: S32_LE
+    Channels: 2
+    Endpoint: 0x07 (7 OUT) (ADAPTIVE)
+    Rates: 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000
+    Data packet interval: 125 us
+    Bits: 32
+    Channel map: FL FR
+  Interface 2
+    Altset 4
+    Format: DSD_U32_BE
+    Channels: 2
+    Endpoint: 0x07 (7 OUT) (ADAPTIVE)
+    Rates: 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000
+    Data packet interval: 125 us
+    Bits: 32
+    DSD raw: DOP=0, bitrev=0
+    Channel map: FL FR
+)";
+
+const char *dongleStream = R"(Apple, Inc. USB-C to 3.5mm Headphone Jack Adapter at usb-xhci-hcd.1.auto-1, high speed : USB Audio
+
+Playback:
+  Status: Stop
+  Interface 1
+    Altset 1
+    Format: S24_3LE
+    Channels: 2
+    Endpoint: 0x01 (1 OUT) (SYNC)
+    Rates: 48000
+    Data packet interval: 125 us
+    Bits: 24
+    Channel map: FL FR
+  Interface 1
+    Altset 2
+    Format: S16_LE
+    Channels: 2
+    Endpoint: 0x01 (1 OUT) (SYNC)
+    Rates: 48000
+    Data packet interval: 125 us
+    Bits: 16
+    Channel map: FL FR
+)";
+
+bool writeText(const QString &path, const QByteArray &text)
+{
+    if (!QDir().mkpath(QFileInfo(path).path()))
+        return false;
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    return file.write(text) == text.size();
+}
 
 bool writeExecutable(const QString &path, const QString &text)
 {
@@ -185,6 +267,96 @@ void AudioInfoTest::picksRunningSubstream()
     info.refresh();
     QCOMPARE(info.pcmFormat(), QString());
     QCOMPARE(info.graphRate(), 0);
+
+    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("CASDAP_PW_DUMP_BIN");
+}
+
+void AudioInfoTest::streamOfFiio()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(writeText(dir.filePath(QStringLiteral("card1/stream0")), fiioStream));
+    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+
+    const QList<int> eight{44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
+    const UsbStream stream = AudioInfo::streamFor(1);
+    QCOMPARE(stream.formats, QStringList({QStringLiteral("S16_LE"), QStringLiteral("S24_3LE"),
+                                          QStringLiteral("S32_LE"), QStringLiteral("DSD_U32_BE")}));
+    QCOMPARE(stream.rates, eight);
+    QCOMPARE(AudioInfo::ratesFor(1), eight);
+
+    QVERIFY(AudioInfo::streamFor(2).formats.isEmpty());
+    QVERIFY(AudioInfo::streamFor(2).rates.isEmpty());
+    QVERIFY(AudioInfo::ratesFor(2).isEmpty());
+
+    qunsetenv("CASDAP_ASOUND_DIR");
+}
+
+void AudioInfoTest::streamOfAppleDongle()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(writeText(dir.filePath(QStringLiteral("card1/stream0")), dongleStream));
+    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+
+    const UsbStream stream = AudioInfo::streamFor(1);
+    QCOMPARE(stream.formats, QStringList({QStringLiteral("S24_3LE"), QStringLiteral("S16_LE")}));
+    QCOMPARE(stream.rates, QList<int>({48000}));
+    QCOMPARE(AudioInfo::ratesFor(1), QList<int>({48000}));
+
+    qunsetenv("CASDAP_ASOUND_DIR");
+}
+
+void AudioInfoTest::streamPlaybackOnlyAndRanges()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(writeText(dir.filePath(QStringLiteral("card2/stream0")),
+                      "Test DAC at usb-1, high speed : USB Audio\n\n"
+                      "Playback:\n  Status: Stop\n"
+                      "  Interface 1\n    Altset 1\n    Format: S16_LE S24_LE\n    Channels: 2\n"
+                      "    Rates: 32000, 44100, 768000\n"
+                      "  Interface 1\n    Altset 2\n    Format: S24_LE\n    Channels: 2\n"
+                      "    Rates: 8000 - 96000 (continuous)\n\n"
+                      "Capture:\n  Status: Stop\n"
+                      "  Interface 2\n    Altset 1\n    Format: S32_LE\n    Channels: 1\n"
+                      "    Rates: 176400\n"));
+    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+
+    const UsbStream stream = AudioInfo::streamFor(2);
+    QCOMPARE(stream.formats, QStringList({QStringLiteral("S16_LE"), QStringLiteral("S24_LE")}));
+    QCOMPARE(stream.rates, QList<int>({32000, 44100, 48000, 88200, 96000, 768000}));
+    QCOMPARE(AudioInfo::ratesFor(2), QList<int>({44100, 48000, 88200, 96000}));
+
+    qunsetenv("CASDAP_ASOUND_DIR");
+}
+
+void AudioInfoTest::hwRateFromHwParams()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString params = dir.filePath(QStringLiteral("card1/pcm0p/sub0/hw_params"));
+    QVERIFY(writeText(params, "access: MMAP_INTERLEAVED\nformat: S32_LE\nsubformat: STD\nchannels: 2\n"
+                              "rate: 44100 (44100/1)\nperiod_size: 441\nbuffer_size: 3528\n"));
+    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("CASDAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
+
+    AudioInfo info;
+    QSignalSpy changed(&info, &AudioInfo::hwRateChanged);
+    QCOMPARE(info.hwRate(), 0);
+    QCOMPARE(info.property("hwRate").toInt(), 0);
+    info.refresh();
+    QCOMPARE(info.hwRate(), 44100);
+    QCOMPARE(info.property("hwRate").toInt(), 44100);
+    QCOMPARE(changed.count(), 1);
+    info.refresh();
+    QCOMPARE(changed.count(), 1);
+
+    QVERIFY(writeText(params, "closed\n"));
+    info.refresh();
+    QCOMPARE(info.hwRate(), 0);
+    QCOMPARE(changed.count(), 2);
 
     qunsetenv("CASDAP_ASOUND_DIR");
     qunsetenv("CASDAP_PW_DUMP_BIN");
