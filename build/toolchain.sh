@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 set -eu
 
-pins="glibc libstdc++ libgcc qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire pulseaudio-libs pulseaudio-libs-glib2 taglib libxcb"
+pins="glibc libstdc++ libgcc qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire pulseaudio-libs pulseaudio-libs-glib2 alsa-lib taglib libxcb"
 negativo17=https://negativo17.org/repos/fedora-multimedia.repo
 negativo17_file=/etc/yum.repos.d/negativo17-fedora-multimedia.repo
 koji=https://kojipkgs.fedoraproject.org/packages
@@ -57,6 +57,7 @@ for name in qt6-qtbase qt6-qtdeclarative gstreamer1 SDL3 pipewire taglib libxcb;
     pinned "${name}" "${name}-devel"
 done
 pinned pulseaudio-libs pulseaudio-libs-devel pulseaudio-libs-glib2
+pinned alsa-lib alsa-lib-devel
 
 after=$(snapshot)
 if [[ "${before}" != "${after}" ]]; then

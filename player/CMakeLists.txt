@@ -11,6 +11,7 @@ pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse libpulse-mainloop-glib)
+pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
 find_package(SDL3 REQUIRED CONFIG)
 
 qt_standard_project_setup(REQUIRES 6.11)
@@ -103,6 +104,7 @@ target_link_libraries(casdapcore PUBLIC
     PkgConfig::GST
     PkgConfig::TAGLIB
     PkgConfig::PULSE
+    PkgConfig::ALSA
     SDL3::SDL3
 )
 
