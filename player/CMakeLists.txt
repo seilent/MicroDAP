@@ -29,6 +29,8 @@ add_library(casdapcore STATIC
     src/core/CodecFragment.h
     src/core/DbusPad.cpp
     src/core/DbusPad.h
+    src/core/DeviceReservation.cpp
+    src/core/DeviceReservation.h
     src/core/Eq.cpp
     src/core/Eq.h
     src/core/FakeBluezModel.cpp
@@ -53,6 +55,7 @@ add_library(casdapcore STATIC
     src/core/Mpris.h
     src/core/OutputControl.cpp
     src/core/OutputControl.h
+    src/core/OutputPorts.h
     src/core/OutputWatch.cpp
     src/core/OutputWatch.h
     src/core/OverlayBridge.cpp
