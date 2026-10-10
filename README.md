@@ -949,6 +949,12 @@ write is a temp file then rename. A file change runs `systemctl --user restart w
 reads true, the deferral is logged and the restart runs when `transportActive` goes false. An
 unchanged file runs nothing. `restarting` is true while the restart runs, `restartFinished(ok)` ends it;
 a failed restart leaves `pending` true. The phone picks among the offered codecs when it connects.
+`BluezModel.transportState` reads the selected device's `MediaTransport1.State` as `idle`, `pending` or `active`,
+and `none` with no transport; `transportActive` is true only for `active`. `restartForNet(reason)` restarts
+WirePlumber for the release net: a restart already running is joined (its `restartFinished` counts, also when
+`apply` replaces it), and it refuses with any transport present (returns false). A net restart that succeeds
+clears `pending` unless a deferred write came during it; a failed one leaves `pending` as it was. When it ends with
+`pending` true and no transport, the codec restart runs at once.
 `gamescope-session-plus@casdap.service.d/10-casdap-bt.conf` runs `casdap-codec clear` from `ExecStopPost`:
 with no fragment it runs nothing; while `casdap-keep check` (`CASDAP_KEEP_BIN`) exits 0 it keeps the fragment;
 otherwise it removes the fragment and runs `systemctl --user restart wireplumber`. Overlay CLOSE PLAYER runs it

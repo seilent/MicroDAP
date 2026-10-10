@@ -405,11 +405,13 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     void initialState();
+    void transportStates();
     void propertiesChanged();
     void positionPolling();
     void controls();
     void pairing();
     void deviceLifecycle();
+    void transportStateNone();
 
 private:
     std::unique_ptr<FakeBluez> m_fake;
@@ -516,6 +518,41 @@ void SystemBluezTest::initialState()
     QCOMPARE(m_model->pairingRemaining(), 0);
     QVERIFY(m_model->active());
     QVERIFY(!m_model->pollingPosition());
+}
+
+void SystemBluezTest::transportStates()
+{
+    QCOMPARE(m_model->transportState(), QStringLiteral("idle"));
+    QSignalSpy stateSpy(m_model.get(), &BluezModel::transportStateChanged);
+    QSignalSpy activeSpy(m_model.get(), &BluezModel::transportActiveChanged);
+    QStringList seen;
+    connect(m_model.get(), &BluezModel::transportActiveChanged, this, [this, &seen] {
+        seen.append(QStringLiteral("active ") + m_model->transportState());
+    });
+    connect(m_model.get(), &BluezModel::transportStateChanged, this, [this, &seen] {
+        seen.append(QStringLiteral("state ") + (m_model->transportActive() ? QStringLiteral("true")
+                                                                          : QStringLiteral("false")));
+    });
+
+    m_transport->set(mediaTransport1(), QStringLiteral("State"), QStringLiteral("pending"));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("pending"), busTimeoutMs);
+    QVERIFY(!m_model->transportActive());
+    QCOMPARE(activeSpy.count(), 0);
+
+    m_transport->set(mediaTransport1(), QStringLiteral("State"), QStringLiteral("active"));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("active"), busTimeoutMs);
+    QVERIFY(m_model->transportActive());
+    QCOMPARE(activeSpy.count(), 1);
+
+    m_transport->set(mediaTransport1(), QStringLiteral("State"), QStringLiteral("idle"));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("idle"), busTimeoutMs);
+    QVERIFY(!m_model->transportActive());
+    QCOMPARE(activeSpy.count(), 2);
+    QCOMPARE(stateSpy.count(), 3);
+    QCOMPARE(seen, QStringList({QStringLiteral("state false"), QStringLiteral("active active"),
+                                QStringLiteral("state true"), QStringLiteral("active idle"),
+                                QStringLiteral("state false")}));
+    disconnect(m_model.get(), nullptr, this, nullptr);
 }
 
 void SystemBluezTest::propertiesChanged()
@@ -641,6 +678,7 @@ void SystemBluezTest::deviceLifecycle()
 
     m_device->set(device1(), QStringLiteral("Connected"), false);
     QTRY_VERIFY_WITH_TIMEOUT(!m_model->connected(), busTimeoutMs);
+    QCOMPARE(m_model->transportState(), QStringLiteral("none"));
     QCOMPARE(m_model->deviceName(), QString());
     QCOMPARE(m_model->battery(), -1);
     QVERIFY(m_model->devicePath().isEmpty());
@@ -679,6 +717,29 @@ void SystemBluezTest::deviceLifecycle()
     QTRY_VERIFY_WITH_TIMEOUT(m_model->transportActive(), busTimeoutMs);
     QCOMPARE(m_model->volume(), 100);
     QCOMPARE(volumeSpy.count(), 1);
+}
+
+void SystemBluezTest::transportStateNone()
+{
+    QCOMPARE(m_model->transportState(), QStringLiteral("active"));
+    QSignalSpy stateSpy(m_model.get(), &BluezModel::transportStateChanged);
+    FakeObject *second = m_fake->object(secondDevicePath());
+    QVERIFY(second);
+    second->set(device1(), QStringLiteral("Connected"), false);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_model->connected(), busTimeoutMs);
+    QCOMPARE(m_model->transportState(), QStringLiteral("none"));
+    QVERIFY(!m_model->transportActive());
+    second->set(device1(), QStringLiteral("Connected"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("active"), busTimeoutMs);
+    QVERIFY(m_model->transportActive());
+    QCOMPARE(stateSpy.count(), 2);
+
+    QVERIFY(m_fake->remove(secondDevicePath() + QStringLiteral("/fd0")));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("none"), busTimeoutMs);
+    QVERIFY(m_model->transportPath().isEmpty());
+    QVERIFY(!m_model->transportActive());
+    QVERIFY(m_model->connected());
+    QCOMPARE(stateSpy.count(), 3);
 }
 
 QTEST_GUILESS_MAIN(SystemBluezTest)

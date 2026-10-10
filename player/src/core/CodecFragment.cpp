@@ -143,10 +143,27 @@ bool CodecFragment::apply(const QString &codec)
         return false;
     if (m_bluez && m_bluez->transportActive()) {
         qInfo() << "casdap codec:" << codec << "written, transport active, applies at the next wireplumber start";
+        if (m_process)
+            m_writtenDuringRestart = true;
         setPending(true);
         return true;
     }
     restart();
+    return true;
+}
+
+bool CodecFragment::restartForNet(const QString &reason)
+{
+    if (m_process) {
+        qInfo() << "casdap codec: restart for" << reason << "joins the running restart";
+        return true;
+    }
+    if (m_bluez && m_bluez->transportState() != QLatin1StringView("none")) {
+        qInfo() << "casdap codec: restart for" << reason << "refused, transport" << m_bluez->transportState();
+        return false;
+    }
+    qInfo() << "casdap codec: restart for" << reason;
+    restart(true);
     return true;
 }
 
@@ -182,34 +199,44 @@ bool CodecFragment::removeFragment()
     return true;
 }
 
-void CodecFragment::restart()
+void CodecFragment::restart(bool net)
 {
     dropProcess();
+    m_writtenDuringRestart = false;
     const QStringList args{QStringLiteral("--user"), QStringLiteral("restart"), QStringLiteral("wireplumber")};
     qInfo() << "casdap codec: restart" << systemctlPath() << args;
     m_process = new QProcess(this);
-    connect(m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+    connect(m_process, &QProcess::finished, this, [this, net](int code, QProcess::ExitStatus status) {
         const bool ok = status == QProcess::NormalExit && code == 0;
         if (!ok)
             qWarning() << "casdap codec: wireplumber restart exit" << code;
-        m_process->deleteLater();
-        m_process = nullptr;
-        setPending(!ok);
-        emit restartingChanged();
-        emit restartFinished(ok);
+        finishRestart(net, ok);
     });
-    connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+    connect(m_process, &QProcess::errorOccurred, this, [this, net](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
         qWarning() << "casdap codec: cannot start" << m_process->program();
-        m_process->deleteLater();
-        m_process = nullptr;
-        setPending(true);
-        emit restartingChanged();
-        emit restartFinished(false);
+        finishRestart(net, false);
     });
     m_process->start(systemctlPath(), args);
     emit restartingChanged();
+}
+
+void CodecFragment::finishRestart(bool net, bool ok)
+{
+    m_process->deleteLater();
+    m_process = nullptr;
+    if (!net)
+        setPending(!ok);
+    else if (ok && !m_writtenDuringRestart)
+        setPending(false);
+    emit restartingChanged();
+    emit restartFinished(ok);
+    if (!net || !m_pending || m_process
+        || (m_bluez && m_bluez->transportState() != QLatin1StringView("none")))
+        return;
+    qInfo() << "casdap codec: net restart ended, applying" << m_codec;
+    restart();
 }
 
 void CodecFragment::dropProcess()

@@ -27,7 +27,7 @@ QStringList FakeBluezModel::presets()
 
 void FakeBluezModel::clearAll()
 {
-    setTransportActive(false);
+    setTransportState(QStringLiteral("none"));
     setStatus(QStringLiteral("stopped"));
     setTrack({}, {}, {}, 0, 0, 0);
     setPositionMs(0);
@@ -61,7 +61,7 @@ bool FakeBluezModel::applyPreset(const QString &name)
         setPositionMs(presetPositionMs);
         setStatus(QStringLiteral("playing"));
         setTransportVolume(64);
-        setTransportActive(true);
+        setTransportState(QStringLiteral("active"));
         return true;
     }
     if (name == QLatin1StringView("pairing")) {
@@ -96,6 +96,11 @@ void FakeBluezModel::setDeviceName(const QString &name)
 void FakeBluezModel::setTransportActive(bool active)
 {
     updateTransportActive(active);
+}
+
+void FakeBluezModel::setTransportState(const QString &state)
+{
+    updateTransport(state == QLatin1StringView("active"), state);
 }
 
 void FakeBluezModel::setTrack(const QString &title, const QString &artist, const QString &album,

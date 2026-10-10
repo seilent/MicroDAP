@@ -11,6 +11,7 @@ class BluezModel : public QObject
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(QString deviceName READ deviceName NOTIFY deviceNameChanged)
     Q_PROPERTY(bool transportActive READ transportActive NOTIFY transportActiveChanged)
+    Q_PROPERTY(QString transportState READ transportState NOTIFY transportStateChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     Q_PROPERTY(QString artist READ artist NOTIFY artistChanged)
     Q_PROPERTY(QString album READ album NOTIFY albumChanged)
@@ -40,6 +41,7 @@ public:
     bool connected() const;
     QString deviceName() const;
     bool transportActive() const;
+    QString transportState() const;
     QString title() const;
     QString artist() const;
     QString album() const;
@@ -73,6 +75,7 @@ signals:
     void connectedChanged();
     void deviceNameChanged();
     void transportActiveChanged();
+    void transportStateChanged();
     void titleChanged();
     void artistChanged();
     void albumChanged();
@@ -95,6 +98,7 @@ protected:
     void updateConnected(bool connected);
     void updateDeviceName(const QString &name);
     void updateTransportActive(bool active);
+    void updateTransport(bool active, const QString &state);
     void updateTitle(const QString &title);
     void updateArtist(const QString &artist);
     void updateAlbum(const QString &album);
@@ -114,6 +118,7 @@ private:
     bool m_connected = false;
     QString m_deviceName;
     bool m_transportActive = false;
+    QString m_transportState = QStringLiteral("none");
     QString m_title;
     QString m_artist;
     QString m_album;

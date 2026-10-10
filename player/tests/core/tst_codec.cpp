@@ -53,9 +53,16 @@ private slots:
     void transportActiveDefers();
     void restartFailure();
     void rejectsUnknown();
+    void netRestartLeavesPending();
+    void netRestartAdoptsRunning();
+    void netRestartApplyReplaces();
+    void netRestartTransportGuard();
+    void netRestartClearsPending();
+    void netRestartFailureKeepsPending();
+    void netRestartAppliesDeferredCodec();
 
 private:
-    bool writeStub(const QString &exitCode = QStringLiteral("0"));
+    bool writeStub(const QString &exitCode = QStringLiteral("0"), const QString &delay = {});
 
     QTemporaryDir m_dir;
     QString m_confDir;
@@ -63,11 +70,12 @@ private:
     QString m_log;
 };
 
-bool CodecTest::writeStub(const QString &exitCode)
+bool CodecTest::writeStub(const QString &exitCode, const QString &delay)
 {
+    const QString sleep = delay.isEmpty() ? QString() : QStringLiteral("sleep ") + delay + QStringLiteral("\n");
     return writeFile(m_stub,
                      QStringLiteral("#!/bin/sh\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"") + m_log
-                         + QStringLiteral("\"\nexit ") + exitCode + QStringLiteral("\n"),
+                         + QStringLiteral("\"\n") + sleep + QStringLiteral("exit ") + exitCode + QStringLiteral("\n"),
                      true);
 }
 
@@ -233,6 +241,201 @@ void CodecTest::rejectsUnknown()
     QCOMPARE(fragment.codec(), QStringLiteral("auto"));
     QVERIFY(!QFile::exists(CodecFragment::confPath()));
     QVERIFY(!QFile::exists(m_log));
+}
+
+void CodecTest::netRestartLeavesPending()
+{
+    QVERIFY(writeStub(QStringLiteral("1")));
+    FakeBluezModel bluez;
+    CodecFragment fragment;
+    fragment.setBluez(&bluez);
+    QSignalSpy pending(&fragment, &CodecFragment::pendingChanged);
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+
+    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QVERIFY(fragment.restarting());
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(!finished.at(0).at(0).toBool());
+    QVERIFY(!fragment.pending());
+    QCOMPARE(pending.count(), 0);
+    QVERIFY(!QFile::exists(CodecFragment::confPath()));
+
+    qputenv("CASDAP_SYSTEMCTL_BIN", (m_dir.path() + QStringLiteral("/missing/systemctl")).toUtf8());
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^casdap codec: cannot start ")));
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
+    QVERIFY(!finished.at(1).at(0).toBool());
+    QVERIFY(!fragment.pending());
+    QCOMPARE(pending.count(), 0);
+    qputenv("CASDAP_SYSTEMCTL_BIN", m_stub.toUtf8());
+
+    QVERIFY(writeStub());
+    bluez.setTransportState(QStringLiteral("active"));
+    bluez.setTransportState(QStringLiteral("none"));
+    QVERIFY(!fragment.restarting());
+    QTest::qWait(100);
+    QCOMPARE(finished.count(), 2);
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl --user restart wireplumber\n"));
+}
+
+void CodecTest::netRestartAdoptsRunning()
+{
+    QVERIFY(writeStub(QStringLiteral("0"), QStringLiteral("0.5")));
+    CodecFragment fragment;
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+    QSignalSpy restarting(&fragment, &CodecFragment::restartingChanged);
+
+    QVERIFY(fragment.apply(QStringLiteral("aptx")));
+    QVERIFY(fragment.restarting());
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QLatin1Char('\n')), 1, waitMs);
+    QCOMPARE(restarting.count(), 1);
+
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QVERIFY(fragment.restarting());
+    QCOMPARE(restarting.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(finished.at(0).at(0).toBool());
+    QTest::qWait(200);
+    QCOMPARE(finished.count(), 1);
+    QCOMPARE(restarting.count(), 2);
+    QVERIFY(!fragment.restarting());
+    QVERIFY(!fragment.pending());
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl --user restart wireplumber\n"));
+}
+
+void CodecTest::netRestartApplyReplaces()
+{
+    QVERIFY(writeStub(QStringLiteral("0"), QStringLiteral("0.5")));
+    CodecFragment fragment;
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QLatin1Char('\n')), 1, waitMs);
+    QVERIFY(fragment.apply(QStringLiteral("aac")));
+    QVERIFY(fragment.restarting());
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(finished.at(0).at(0).toBool());
+    QTest::qWait(700);
+    QCOMPARE(finished.count(), 1);
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 2);
+
+    QVERIFY(fragment.apply(QStringLiteral("sbc")));
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QLatin1Char('\n')), 3, waitMs);
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QVERIFY(fragment.apply(QStringLiteral("ldac")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
+    QVERIFY(finished.at(1).at(0).toBool());
+    QTest::qWait(700);
+    QCOMPARE(finished.count(), 2);
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 4);
+    QVERIFY(!fragment.pending());
+}
+
+void CodecTest::netRestartTransportGuard()
+{
+    FakeBluezModel bluez;
+    CodecFragment fragment;
+    fragment.setBluez(&bluez);
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+
+    const QStringList states{QStringLiteral("idle"), QStringLiteral("pending"), QStringLiteral("active")};
+    for (const QString &state : states) {
+        bluez.setTransportState(state);
+        QCOMPARE(bluez.transportState(), state);
+        QVERIFY(!fragment.restartForNet(QStringLiteral("dac sink missing")));
+        QVERIFY(!fragment.restarting());
+    }
+    QTest::qWait(100);
+    QCOMPARE(finished.count(), 0);
+    QVERIFY(!QFile::exists(m_log));
+    QVERIFY(!fragment.pending());
+
+    bluez.setTransportState(QStringLiteral("none"));
+    QVERIFY(!fragment.restarting());
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(finished.at(0).at(0).toBool());
+    QVERIFY(!fragment.pending());
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl --user restart wireplumber\n"));
+}
+
+void CodecTest::netRestartClearsPending()
+{
+    QVERIFY(writeStub(QStringLiteral("1")));
+    FakeBluezModel bluez;
+    CodecFragment fragment;
+    fragment.setBluez(&bluez);
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QVERIFY(fragment.apply(QStringLiteral("aptx")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(fragment.pending());
+
+    QVERIFY(writeStub());
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
+    QVERIFY(finished.at(1).at(0).toBool());
+    QVERIFY(!fragment.pending());
+    QVERIFY(!fragment.restarting());
+
+    bluez.setTransportState(QStringLiteral("active"));
+    bluez.setTransportState(QStringLiteral("none"));
+    QTest::qWait(100);
+    QCOMPARE(finished.count(), 2);
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 2);
+}
+
+void CodecTest::netRestartFailureKeepsPending()
+{
+    QVERIFY(writeStub(QStringLiteral("1")));
+    FakeBluezModel bluez;
+    CodecFragment fragment;
+    fragment.setBluez(&bluez);
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QVERIFY(fragment.apply(QStringLiteral("aptx")));
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(fragment.pending());
+
+    QVERIFY(writeStub(QStringLiteral("1"), QStringLiteral("0.3")));
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    bluez.setTransportState(QStringLiteral("idle"));
+    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
+    QVERIFY(!finished.at(1).at(0).toBool());
+    QVERIFY(fragment.pending());
+    QVERIFY(!fragment.restarting());
+    QTest::qWait(500);
+    QCOMPARE(finished.count(), 2);
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 2);
+}
+
+void CodecTest::netRestartAppliesDeferredCodec()
+{
+    QVERIFY(writeStub(QStringLiteral("0"), QStringLiteral("0.5")));
+    FakeBluezModel bluez;
+    CodecFragment fragment;
+    fragment.setBluez(&bluez);
+    QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
+
+    QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
+    QTRY_COMPARE_WITH_TIMEOUT(readFile(m_log).count(QLatin1Char('\n')), 1, waitMs);
+    bluez.setTransportState(QStringLiteral("active"));
+    QVERIFY(fragment.apply(QStringLiteral("sbc")));
+    QVERIFY(fragment.pending());
+    bluez.setTransportState(QStringLiteral("none"));
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 1);
+
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
+    QVERIFY(finished.at(0).at(0).toBool());
+    QVERIFY(fragment.pending());
+    QVERIFY(fragment.restarting());
+    QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
+    QVERIFY(finished.at(1).at(0).toBool());
+    QVERIFY(!fragment.pending());
+    QVERIFY(!fragment.restarting());
+    QCOMPARE(readFile(m_log).count(QLatin1Char('\n')), 2);
 }
 
 QTEST_GUILESS_MAIN(CodecTest)

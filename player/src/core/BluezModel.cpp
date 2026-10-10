@@ -32,6 +32,11 @@ bool BluezModel::transportActive() const
     return m_transportActive;
 }
 
+QString BluezModel::transportState() const
+{
+    return m_transportState;
+}
+
 QString BluezModel::title() const
 {
     return m_title;
@@ -150,6 +155,18 @@ void BluezModel::updateTransportActive(bool active)
         return;
     m_transportActive = active;
     emit transportActiveChanged();
+}
+
+void BluezModel::updateTransport(bool active, const QString &state)
+{
+    const bool activeChanged = m_transportActive != active;
+    const bool stateChanged = m_transportState != state;
+    m_transportActive = active;
+    m_transportState = state;
+    if (activeChanged)
+        emit transportActiveChanged();
+    if (stateChanged)
+        emit transportStateChanged();
 }
 
 void BluezModel::updateTitle(const QString &title)

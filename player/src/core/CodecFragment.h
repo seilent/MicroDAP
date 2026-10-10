@@ -35,6 +35,7 @@ public:
     bool restarting() const;
 
     Q_INVOKABLE bool apply(const QString &codec);
+    bool restartForNet(const QString &reason);
 
 signals:
     void codecChanged();
@@ -46,13 +47,15 @@ private:
     void onTransportActiveChanged();
     bool writeFragment(const QString &text);
     bool removeFragment();
-    void restart();
+    void restart(bool net = false);
+    void finishRestart(bool net, bool ok);
     void dropProcess();
     void setPending(bool pending);
 
     BluezModel *m_bluez = nullptr;
     QString m_codec;
     bool m_pending = false;
+    bool m_writtenDuringRestart = false;
     QProcess *m_process = nullptr;
 };
 

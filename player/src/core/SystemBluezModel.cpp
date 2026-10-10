@@ -378,7 +378,7 @@ void SystemBluezModel::select(QString &devicePath, QString &transportPath,
 
 void SystemBluezModel::clearDevice()
 {
-    updateTransportActive(false);
+    updateTransport(false, QStringLiteral("none"));
     updateStatus(QStringLiteral("stopped"));
     updateTitle({});
     updateArtist({});
@@ -424,8 +424,13 @@ void SystemBluezModel::apply()
     else
         updateBattery(-1);
 
-    updateTransportActive(transport.value(QStringLiteral("State")).toString()
-                          == QLatin1StringView("active"));
+    const QString state = transport.value(QStringLiteral("State")).toString();
+    if (transportPath.isEmpty())
+        updateTransport(false, QStringLiteral("none"));
+    else if (state == QLatin1StringView("active") || state == QLatin1StringView("pending"))
+        updateTransport(state == QLatin1StringView("active"), state);
+    else
+        updateTransport(false, QStringLiteral("idle"));
     if (transport.contains(QStringLiteral("Volume"))) {
         const int raw = transport.value(QStringLiteral("Volume")).toInt();
         if (raw != m_transportVolume) {
