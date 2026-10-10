@@ -16,8 +16,15 @@ echo "$1" >> "${STATE}/opened"
 script="${STATE}/script-$(basename "$1")"
 [[ -f "${script}" ]] || exec sleep 10
 ev() { echo "Event: time $(date +%s.%6N), type 1 (EV_KEY), code $1 ($2), value $3"; }
+t0=$(date +%s%6N)
+at() {
+    local u=$(( t0 + $1 * 1000 ))
+    printf 'Event: time %d.%06d, type 1 (EV_KEY), code 183 (KEY_F13), value %d\n' $(( u / 1000000 )) $(( u % 1000000 )) "$2"
+}
 while read -r step; do
     case "${step}" in
+        press@*) at "${step#press@}" 1 ;;
+        release@*) at "${step#release@}" 0 ;;
         press)
             t=$(date +%s.%6N)
             echo "Event: time ${t}, type 1 (EV_KEY), code 183 (KEY_F13), value 1"
@@ -49,6 +56,10 @@ EOF
 
 cat > "${T}/bin/systemctl" <<'EOF'
 #!/usr/bin/bash
+if [[ "$*" == "--user is-active --quiet gamescope-session-plus@casdap.service" && -s "${STATE}/stall" ]]; then
+    sleep "$(cat "${STATE}/stall")"
+    rm -f "${STATE}/stall"
+fi
 case "$*" in
     "--user is-active --quiet gamescope-session-plus@casdap.service") [[ "$(cat "${STATE}/session")" == casdap ]] ;;
     "--user is-active --quiet gamescope-session-plus@steam.service")  [[ "$(cat "${STATE}/session")" == game ]] ;;
@@ -150,6 +161,7 @@ run_case() {
     echo "${INTERCEPT:-0}" > "${STATE}/intercept"
     printf '%s' "${BUSCTL_ERR:-}" > "${STATE}/busctl-stderr"
     printf '%s' "${BUSCTL_SLEEP:-}" > "${STATE}/busctl-sleep"
+    printf '%s' "${STALL:-}" > "${STATE}/stall"
     [[ -z "$5" ]] || printf '%s\n' "$5" | tr ';' '\n' > "${STATE}/script-event0"
     rc=0
     CASDAP_HOTKEYD_DRY_RUN="${6:-0}" "${daemon}" 2> "${STATE}/stderr" || rc=$?
@@ -453,6 +465,34 @@ run_case "tap logs play pause" casdap 0 0 "press;sleep 0.05;release"
 expect_log "tap, play pause"
 expect_no_stderr
 
+STALL=1.5 run_case "tap behind a stall is a tap" casdap 0 0 "press@0;release@50;sleep 1.8"
+expect_call "${playpause}"
+expect_no_call "${prompt}"
+expect_calls 1
+expect_no_rumble
+
+STALL=1.5 run_case "release 1.2 s after the press behind a stall is a hold" casdap 0 0 "press@0;release@1200;sleep 1.8"
+expect_call "${prompt}"
+expect_no_call "${playpause}"
+expect_calls 1
+expect_guide down 0
+
+STALL=1.5 run_case "chord with a late release is dropped" casdap 0 0 "press@0;sleep 0.05;chord;release@1200;sleep 1.8"
+expect_no_call "${prompt}"
+expect_no_call "${playpause}"
+expect_calls 0
+expect_log "chord, hold dropped"
+expect_no_rumble
+
+STALL=1.5 run_case "hold on the release line then a tap" casdap 0 0 "press@0;release@1200;press@1300;release@1350;sleep 1.8"
+expect_first_call "${prompt}"
+expect_last_call "${playpause}"
+expect_calls 2
+
+run_case "hold with no release fires at the timer" casdap 0 0 "press;sleep 0.4;snap;sleep 0.1;release"
+grep -qF -- "${prompt}" "${STATE}/snap" 2>/dev/null || fail "no prompt before the release"
+expect_calls 1
+
 mkdir -p "${CASDAP_RUNTIME_DIR}"
 : > "${CASDAP_RUNTIME_DIR}/off"
 
@@ -541,6 +581,27 @@ expect_calls 1
 run_case "pocket ignores a chord" casdap 0 0 "press;sleep 0.03;chord;release;sleep 0.4"
 expect_call "${playpause}"
 expect_no_log "chord,"
+
+STALL=1.5 run_case "pocket tap behind a stall is a tap" casdap 0 0 "press@0;release@50;sleep 2"
+expect_call "${playpause}"
+expect_no_call "${previous}"
+expect_calls 1
+
+STALL=1.5 run_case "pocket double tap behind a stall" casdap 0 0 "press@0;release@50;press@100;release@150;sleep 2"
+expect_call "${next}"
+expect_no_call "${playpause}"
+expect_no_call "${previous}"
+expect_calls 1
+
+STALL=1.5 run_case "pocket release late behind a stall is a hold" casdap 0 0 "press@0;release@600;sleep 2"
+expect_call "${previous}"
+expect_no_call "${playpause}"
+expect_calls 1
+
+STALL=1.5 run_case "pocket taps apart in event time behind a stall" casdap 0 0 "press@0;release@50;press@400;release@450;sleep 2.2"
+expect_call_count "${playpause}" 2
+expect_no_call "${next}"
+expect_calls 2
 
 rm -f "${CASDAP_RUNTIME_DIR}/off"
 

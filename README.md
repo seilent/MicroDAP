@@ -716,7 +716,7 @@ tracked is logged and does nothing.
 Polkit boundary: any process running as `armada` may start `casdap-switch.service`,
 `casdap-switch-back.service`, `casdap-priv@<verb>.service` and `armada-controller-type.service`.
 The verbs are fixed words (`bt-class-headphones`, `bt-class-default`, `backlight-off`, `backlight-on`,
-`cpu-dap`, `cpu-off`, `cpu-restore`, `hp-gain-low`, `hp-gain-normal`, `hp-gain-high`, `hp-amp-lohifi`,
+`cpu-dap`, `cpu-off`, `cpu-resave`, `cpu-restore`, `hp-gain-low`, `hp-gain-normal`, `hp-gain-high`, `hp-amp-lohifi`,
 `hp-amp-ulp`, `hp-amp-hifi`, `spk-gain-84`, `spk-gain-90`, `spk-gain-96`, `spk-gain-99`, `spk-gain-102`,
 `spk-gain-105`, `spk-gain-108`, `rgb-hue-0`, `rgb-hue-10`, ... `rgb-hue-350` (36 words, multiples of 10),
 `rgb-color-<h>-<s>` (144 words, `h` a multiple of 10 from 0 to 350, `s` 1 to 4),
@@ -757,12 +757,15 @@ non empty save writes it over the config (temp file then rename), runs `apply` a
 a zero byte save removes the config, runs `apply` and removes the save; without a save runs nothing and
 exits 0. A failed `get`, `set`, `off` or `apply` exits 1 and keeps the save.
 
-CPU and GPU floor: the three `cpu-*` words write cpufreq and devfreq under `CASDAP_SYSFS_ROOT` (default
+CPU and GPU floor: the `cpu-*` words write cpufreq and devfreq under `CASDAP_SYSFS_ROOT` (default
 `/sys`) and save the values they replace in `CASDAP_CPU_BEFORE_FILE` (default `/run/casdap/cpu-before`,
 one `path value` line per `policy*/scaling_max_freq`, `cpuN/online`, GPU `governor` and `max_freq`, temp file
 then rename, written only while absent). `cpu-dap` saves, sets `online` 1 on cpu1 to cpu3,
 `policy0/scaling_max_freq` 787200, `online` 0 on cpu4 to cpu7, GPU `governor` simple_ondemand and `max_freq`
-305000000. `cpu-off` saves, sets `online` 0 on cpu1 to cpu7 and `policy0/scaling_max_freq` 518400.
+305000000. `cpu-off` saves, sets `online` 1 on cpu1 to cpu3, `online` 0 on cpu4 to cpu7 and
+`policy0/scaling_max_freq` to the saved `policy0` value, or `policy0/cpuinfo_max_freq` without one; the governor and
+the GPU stay as they are. `cpu-resave` reads every saved path except `cpuN/online` again and replaces the value when
+the read gives a number, else keeps the line (an offline policy refuses the read); without a file it does nothing.
 `cpu-restore` sets every `online` to 1, writes every other saved line back and removes the file; without a
 file it only brings the cores online. A refused write is logged, the remaining writes still run and the word
 exits 1 with the save file kept. `org.armada.Power` is never touched.
@@ -789,8 +792,8 @@ the backlight; `last-ms` follows both, the slower CPU and Wi-Fi steps follow it.
 `lock` (`flock -w 10`, `lock timeout` and exit 1 when it fails) for their whole run. `toggle` takes the lock
 with `flock -n` and with it held logs `toggle during a transition, ignored` and exits 0; it does nothing within
 2 s of `last-ms` (`CASDAP_POWER_DEBOUNCE_MS`, both directions), else runs `screen-on` with the `off` marker and
-`screen-off` without it. `cpu-apply` starts `cpu-off` with the `off` marker,
-else `cpu-dap`. `idle-check` exits 0 outside the session; busy (`PlaybackStatus` contains `Playing`, or any
+`screen-off` without it. `cpu-apply` starts `casdap-priv@cpu-resave.service`, then `cpu-off` with the `off`
+marker, else `cpu-dap`. `idle-check` exits 0 outside the session; busy (`PlaybackStatus` contains `Playing`, or any
 `org.bluez.MediaTransport1` under `/org/bluez` on the system bus has `State` `active`) or `suspendMinutes`
 0 removes `idle-since`; idle writes it with the current unix time when absent and runs `systemctl suspend`
 once it is `suspendMinutes` old. `suspend` and `poweroff` run `systemctl suspend` and `systemctl poweroff`.
@@ -809,9 +812,12 @@ alone while casdap runs. The daemon finds the node named `pm8941_pwrkey` (`CASDA
 --system get-property` every 5 s (`CASDAP_POWERD_POLL_SEC`). `KEY_POWER` released under 1000 ms
 (`CASDAP_POWERD_LONG_MS`) runs `casdap-power toggle`; held 1000 ms, with the `off` marker it runs
 `casdap-power screen-on` first, then `busctl --user call org.casdap.Player /org/casdap/Player
-org.casdap.Player ShowPowerMenu`; a release without a press is dropped. The pad ticks for 15 ms
+org.casdap.Player ShowPowerMenu`; a release without a press is dropped. The hold time is the `evtest` event time:
+the hold timer runs from the press event, a line already waiting when it runs out is read first, and a release
+1000 ms or more after its press is a hold even when it is read late. A line without a time, or a gap under 0 or
+over 60000 ms, uses the read times. The pad ticks for 15 ms
 (`CASDAP_POWERD_BUZZ_MS`, level `CASDAP_POWERD_BUZZ_LEVEL` 1.0) when a tap is classified, before the toggle runs,
-and once when a hold passes 1000 ms. A tap within `CASDAP_POWER_DEBOUNCE_MS` (2000) of `last-ms` or while
+and once when a hold passes 1000 ms (at the release when it is read late). A tap within `CASDAP_POWER_DEBOUNCE_MS` (2000) of `last-ms` or while
 `flock -n` on the `lock` marker fails logs `tap during a transition or the debounce, no buzz` and still runs the
 toggle, which ignores it. The buzz is `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`, on
 every `/org/shadowblip/InputPlumber/CompositeDevice<N>` in a background subshell, a failed call skipped silently.
@@ -860,9 +866,15 @@ hold of 500 ms (`CASDAP_HOTKEYD_POCKET_LONG_MS`) sends `Previous`, a tap
 opens a 350 ms window (`CASDAP_HOTKEYD_DOUBLE_MS`) in which a second tap sends `Next` for both, else `PlayPause`
 goes out when the window ends; a hold inside the window sends the pending `PlayPause` first. The power key wakes
 the screen. The window runs on a
-read timeout. In Plasma a hold switches; in any other session it
+read timeout. Every guide press is classified by its `evtest` event time: the hold timer runs from the press
+event, and when the hold timer, the double tap window or the chord grace runs out with a line already waiting, that
+line is read first. A release at or past the hold threshold after its press is a hold even when it is read late,
+a second press under 350 ms after the first release is a double tap, and the chord
+threshold compares the same two times. A line without a time, or a gap under 0 or over 60000 ms, uses the read
+times for both sides. In Plasma a hold switches; in any other session it
 logs. Every hold that acts (switch, switch prompt, `Previous`) ticks the pad for 15 ms at level 1.0 the
-moment the hold threshold (1 s, 500 ms with the screen off) passes, while the button is still down; the first hold while a title runs and a
+moment the hold threshold (1 s, 500 ms with the screen off) passes, while the button is still down (at the release
+when a stall delays the read past it); the first hold while a title runs and a
 hold in an unknown session do not. A pocket double tap ticks 15 ms, 50 ms off, 15 ms as it sends `Next`;
 taps never tick. The tick runs `org.shadowblip.Output.ForceFeedback` `Rumble d <level>`, then `Rumble d 0`,
 on every `/org/shadowblip/InputPlumber/CompositeDevice<N>` in a background subshell, a failed call is

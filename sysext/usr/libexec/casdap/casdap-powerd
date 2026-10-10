@@ -19,6 +19,29 @@ log() { logger -t casdap-powerd -- "$*"; }
 
 now_ms() { date +%s%3N; }
 
+event_ms() {
+    local re='time ([0-9]+)\.([0-9]+),' usec
+    [[ "$1" =~ ${re} ]] || return 0
+    usec="${BASH_REMATCH[2]}000000"
+    printf '%d\n' $(( BASH_REMATCH[1] * 1000 + 10#${usec:0:3} ))
+}
+
+anchor_ms() {
+    if [[ -n "$1" ]] && (( $2 - $1 >= 0 && $2 - $1 <= 60000 )); then
+        printf '%d\n' "$1"
+    else
+        printf '%d\n' "$2"
+    fi
+}
+
+gap_ms() {
+    if [[ -n "$1" && -n "$3" ]] && (( $3 - $1 >= 0 && $3 - $1 <= 60000 )); then
+        printf '%d\n' $(( $3 - $1 ))
+    else
+        printf '%d\n' $(( $4 - $2 ))
+    fi
+}
+
 run() {
     if [[ "${DRY_RUN}" == 1 ]]; then
         log "would: $*"
@@ -136,7 +159,7 @@ on_profile() {
 profile=
 
 main() {
-    local dev line read_result state press_ms rem
+    local dev line partial read_result state press_ms press_raw press_at release_ms rem
 
     trap 'exit 0' INT TERM
 
@@ -149,20 +172,25 @@ main() {
     exec 3< <(event_stream "${dev}")
     state=idle
     press_ms=0
+    partial=
+    press_raw=
+    press_at=0
 
     while :; do
         read_result=0
         case "${state}" in
             held)
-                rem=$((LONG_MS - ($(now_ms) - press_ms)))
-                if (( rem <= 0 )); then
+                rem=$((press_at + LONG_MS - $(now_ms)))
+                if (( rem > 0 )); then
+                    IFS= read -r -u 3 -t "$(ms_sec "${rem}")" line 2>/dev/null || read_result=$?
+                elif read -t 0 -u 3 2>/dev/null; then
+                    IFS= read -r -u 3 line 2>/dev/null || read_result=$?
+                else
                     log "hold"
                     on_hold
                     state=draining
                     continue
                 fi
-                IFS= read -r -u 3 -t "$(printf '%d.%03d' $((rem / 1000)) $((rem % 1000)))" line 2>/dev/null \
-                    || read_result=$?
                 ;;
             *)
                 IFS= read -r -u 3 line 2>/dev/null || read_result=$?
@@ -170,22 +198,33 @@ main() {
         esac
 
         if (( read_result > 128 )) && [[ "${state}" == held ]]; then
+            partial+=${line}
             continue
         elif (( read_result != 0 )); then
             log "event stream ended"
             return 1
         fi
+        line=${partial}${line}
+        partial=
 
         case "${line}" in
             *"(${KEY}), value 1"*)
                 [[ "${state}" == idle ]] || continue
                 press_ms=$(now_ms)
+                press_raw=$(event_ms "${line}")
+                press_at=$(anchor_ms "${press_raw}" "${press_ms}")
                 state=held
                 ;;
             *"(${KEY}), value 0"*)
-                case "${state}" in
-                    held) on_tap ;;
-                esac
+                if [[ "${state}" == held ]]; then
+                    release_ms=$(now_ms)
+                    if (( $(gap_ms "${press_raw}" "${press_ms}" "$(event_ms "${line}")" "${release_ms}") >= LONG_MS )); then
+                        log "hold"
+                        on_hold
+                    else
+                        on_tap
+                    fi
+                fi
                 state=idle
                 ;;
             "profile "*)

@@ -16,7 +16,7 @@ cat > "${T}/bin/evtest" <<'EOF'
 #!/usr/bin/bash
 script="${STATE}/script-$(basename "$1")"
 [[ -f "${script}" ]] || exec sleep 10
-ev() { echo "Event: time 0.0, type 1 (EV_KEY), code $1 ($2), value $3"; }
+ev() { echo "Event: time $(date +%s.%6N), type 1 (EV_KEY), code $1 ($2), value $3"; }
 while read -r step; do
     case "${step}" in
         press) ev 116 KEY_POWER 1 ;;
@@ -49,6 +49,9 @@ EOF
 cat > "${T}/bin/casdap-power" <<'EOF'
 #!/usr/bin/bash
 echo "casdap-power $*" >> "${STATE}/calls"
+if [[ "$*" == cpu-apply && -s "${STATE}/apply-sleep" ]]; then
+    sleep "$(cat "${STATE}/apply-sleep")"
+fi
 EOF
 
 cat > "${T}/bin/logger" <<'EOF'
@@ -78,6 +81,7 @@ run_case() {
     : > "${STATE}/calls"
     : > "${STATE}/log"
     printf '%s' "${PROFILE-Balanced}" > "${STATE}/profile"
+    printf '%s' "${APPLY_SLEEP:-}" > "${STATE}/apply-sleep"
     if [[ "${OFF:-0}" == 1 ]]; then
         mkdir -p "${CASDAP_RUNTIME_DIR}"
         : > "${CASDAP_RUNTIME_DIR}/off"
@@ -227,6 +231,11 @@ run_case "profile change during a hold" "press;sleep 0.05;profile Eco;sleep 0.4;
 expect_call "${apply}"
 expect_call "${menu}"
 expect_calls 2
+
+CASDAP_POWERD_LONG_MS=400 APPLY_SLEEP=1 run_case "tap behind a slow profile apply" "sleep 0.3;press;sleep 0.02;profile Eco;sleep 0.2;release;sleep 1.2"
+expect_sequence "${apply}" "${toggle}"
+expect_buzz 1
+expect_no_call "${menu}"
 
 run_case "stream end" "press;sleep 0.05;release"
 [[ "${rc}" == 1 ]] || fail "exit ${rc} after stream end, expected 1"

@@ -64,12 +64,41 @@ cpu_dap() {
 }
 
 cpu_off() {
-    local n
+    local n path value max=
     save
-    for n in 1 2 3 4 5 6 7; do
+    while read -r path value; do
+        [[ "${path}" == "${cpu}/cpufreq/policy0/scaling_max_freq" ]] && max=${value}
+    done < "${before}"
+    if [[ -z "${max}" && -r "${cpu}/cpufreq/policy0/cpuinfo_max_freq" ]]; then
+        max=$(< "${cpu}/cpufreq/policy0/cpuinfo_max_freq")
+    fi
+    for n in 1 2 3; do
+        put "${cpu}/cpu${n}/online" 1
+    done
+    for n in 4 5 6 7; do
         put "${cpu}/cpu${n}/online" 0
     done
-    put "${cpu}/cpufreq/policy0/scaling_max_freq" 518400
+    if [[ -n "${max}" ]]; then
+        put "${cpu}/cpufreq/policy0/scaling_max_freq" "${max}"
+    else
+        echo "casdap-priv: no policy0 max frequency" >&2
+        failed=1
+    fi
+}
+
+cpu_resave() {
+    local tmp path value fresh
+    [[ -e "${before}" ]] || return 0
+    tmp="${before}.tmp"
+    : > "${tmp}"
+    while read -r path value; do
+        [[ -n "${path}" ]] || continue
+        if [[ "${path}" != */online ]] && fresh=$(cat -- "${path}" 2>/dev/null) && [[ "${fresh}" =~ ^[0-9]+$ ]]; then
+            value=${fresh}
+        fi
+        printf '%s %s\n' "${path}" "${value}" >> "${tmp}"
+    done < "${before}"
+    mv "${tmp}" "${before}"
 }
 
 cpu_restore() {
@@ -240,6 +269,7 @@ case "$1" in
     backlight-on)        backlight 0 ;;
     cpu-dap)             cpu_dap ;;
     cpu-off)             cpu_off ;;
+    cpu-resave)          cpu_resave ;;
     cpu-restore)         cpu_restore ;;
     hp-gain-low)         hp_gain 8 ;;
     hp-gain-normal)      hp_gain 20 ;;

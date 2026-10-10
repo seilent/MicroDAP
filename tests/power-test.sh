@@ -127,6 +127,7 @@ bl_on="systemctl start casdap-priv@backlight-on.service"
 cpu_off="systemctl start casdap-priv@cpu-off.service"
 cpu_dap="systemctl start casdap-priv@cpu-dap.service"
 cpu_restore="systemctl start casdap-priv@cpu-restore.service"
+cpu_resave="systemctl start casdap-priv@cpu-resave.service"
 wifi_off="nmcli radio wifi off"
 wifi_on="nmcli radio wifi on"
 rgb_sleep="systemctl start casdap-priv@rgb-sleep.service"
@@ -500,12 +501,12 @@ begin "cpu-apply with the marker"
 marker off
 run cpu-apply
 expect_rc 0
-expect_sequence "${cpu_off}"
+expect_sequence "${cpu_resave}" "${cpu_off}"
 
 begin "cpu-apply without the marker"
 run cpu-apply
 expect_rc 0
-expect_sequence "${cpu_dap}"
+expect_sequence "${cpu_resave}" "${cpu_dap}"
 
 begin "cpu-apply outside the session" inactive
 run cpu-apply

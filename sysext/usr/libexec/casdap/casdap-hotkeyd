@@ -35,6 +35,22 @@ event_ms() {
     printf '%d\n' $(( BASH_REMATCH[1] * 1000 + 10#${usec:0:3} ))
 }
 
+anchor_ms() {
+    if [[ -n "$1" ]] && (( $2 - $1 >= 0 && $2 - $1 <= 60000 )); then
+        printf '%d\n' "$1"
+    else
+        printf '%d\n' "$2"
+    fi
+}
+
+gap_ms() {
+    if [[ -n "$1" && -n "$3" ]] && (( $3 - $1 >= 0 && $3 - $1 <= 60000 )); then
+        printf '%d\n' $(( $3 - $1 ))
+    else
+        printf '%d\n' $(( $4 - $2 ))
+    fi
+}
+
 run() {
     if [[ "${DRY_RUN}" == 1 ]]; then
         log "would: $*"
@@ -120,6 +136,8 @@ toggle_end_ms=0
 toggle_timeouts=0
 pending=0
 pending_ms=0
+pending_ev=
+pending_read_ms=0
 due=0
 due_ms=0
 due_ev=0
@@ -215,7 +233,9 @@ on_pocket_tap() {
         return 0
     fi
     pending=1
-    pending_ms=$(( $(now_ms) + DOUBLE_MS ))
+    pending_ev=$1
+    pending_read_ms=$2
+    pending_ms=$(( $(anchor_ms "$1" "$2") + DOUBLE_MS ))
 }
 
 flush_pending() {
@@ -295,6 +315,19 @@ resolve_tap() {
     on_tap "$2" "$3"
 }
 
+guide_hold() {
+    guide_down 0
+    if (( $2 )); then
+        log "hold in $1"
+        on_pocket_hold
+    elif [[ "$1" == casdap ]] && chord_taken "$3"; then
+        log "chord, hold dropped"
+    else
+        log "hold in $1"
+        on_hold "$1"
+    fi
+}
+
 resolve_due() {
     (( due )) || return 0
     due=0
@@ -302,7 +335,8 @@ resolve_due() {
 }
 
 main() {
-    local dev line read_result state press_ms press_ev hold_ms release_ev rem due_rem session pocket
+    local dev line partial read_result state press_ms press_raw press_ev press_at hold_ms release_ms release_raw release_ev
+    local held_for rem due_rem session pocket
 
     trap 'exit 0' INT TERM
 
@@ -319,7 +353,10 @@ main() {
     exec 3< <(evtest "${dev}" 2>/dev/null)
     state=idle
     press_ms=0
+    partial=
+    press_raw=
     press_ev=0
+    press_at=0
     hold_ms=${LONG_MS}
     session=
     pocket=0
@@ -328,32 +365,23 @@ main() {
         read_result=0
         rem=
         if [[ "${state}" == held ]]; then
-            rem=$((press_ms + hold_ms - $(now_ms)))
-            if (( rem <= 0 )); then
-                guide_down 0
-                if (( pocket )); then
-                    log "hold in ${session}"
-                    on_pocket_hold
-                elif [[ "${session}" == casdap ]] && chord_taken "${press_ev}"; then
-                    log "chord, hold dropped"
-                else
-                    log "hold in ${session}"
-                    on_hold "${session}"
-                fi
+            rem=$((press_at + hold_ms - $(now_ms)))
+            if (( rem <= 0 )) && ! read -t 0 -u 3 2>/dev/null; then
+                guide_hold "${session}" "${pocket}" "${press_ev}"
                 state=draining
                 continue
             fi
         else
             if (( pending )); then
                 rem=$((pending_ms - $(now_ms)))
-                if (( rem <= 0 )); then
+                if (( rem <= 0 )) && ! read -t 0 -u 3 2>/dev/null; then
                     flush_pending
                     continue
                 fi
             fi
             if (( due )); then
                 due_rem=$((due_ms - $(now_ms)))
-                if (( due_rem <= 0 )); then
+                if (( due_rem <= 0 )) && ! read -t 0 -u 3 2>/dev/null; then
                     resolve_due
                     continue
                 fi
@@ -362,13 +390,14 @@ main() {
                 fi
             fi
         fi
-        if [[ -n "${rem}" ]]; then
+        if [[ -n "${rem}" ]] && (( rem > 0 )); then
             IFS= read -r -u 3 -t "$(ms_sec "${rem}")" line 2>/dev/null || read_result=$?
         else
             IFS= read -r -u 3 line 2>/dev/null || read_result=$?
         fi
 
         if (( read_result > 128 )) && [[ "${state}" == held || "${pending}" == 1 || "${due}" == 1 ]]; then
+            partial+=${line}
             continue
         elif (( read_result != 0 )); then
             resolve_due
@@ -376,15 +405,21 @@ main() {
             log "event stream ended"
             return 1
         fi
+        line=${partial}${line}
+        partial=
 
         case "${line}" in
             *"(${KEY}), value 1"*)
                 [[ "${state}" == idle ]] || continue
                 resolve_due
                 press_ms=$(now_ms)
-                press_ev=$(event_ms "${line}")
-                press_ev=${press_ev:-${press_ms}}
+                press_raw=$(event_ms "${line}")
+                press_ev=${press_raw:-${press_ms}}
+                press_at=$(anchor_ms "${press_raw}" "${press_ms}")
                 guide_down "${press_ev}"
+                if (( pending )) && (( $(gap_ms "${pending_ev}" "${pending_read_ms}" "${press_raw}" "${press_ms}") >= DOUBLE_MS )); then
+                    flush_pending
+                fi
                 if (( ! pending )); then
                     session=$(session_state)
                     pocket=0
@@ -398,13 +433,18 @@ main() {
                 ;;
             *"(${KEY}), value 0"*)
                 if [[ "${state}" == held ]]; then
-                    release_ev=$(event_ms "${line}")
-                    if (( pocket )); then
+                    release_ms=$(now_ms)
+                    release_raw=$(event_ms "${line}")
+                    release_ev=${release_raw}
+                    held_for=$(gap_ms "${press_raw}" "${press_ms}" "${release_raw}" "${release_ms}")
+                    if (( held_for >= hold_ms )); then
+                        guide_hold "${session}" "${pocket}" "${press_ev}"
+                    elif (( pocket )); then
                         guide_down 0
-                        on_pocket_tap
+                        on_pocket_tap "${release_raw}" "${release_ms}"
                     elif [[ "${session}" == casdap ]]; then
-                        release_ev=${release_ev:-$(now_ms)}
-                        if (( release_ev - press_ev < CHORD_MS )); then
+                        release_ev=${release_ev:-${release_ms}}
+                        if (( held_for < CHORD_MS )); then
                             due=1
                             due_ms=$(( $(now_ms) + CHORD_GRACE_MS ))
                             due_ev=${press_ev}

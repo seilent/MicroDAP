@@ -154,6 +154,7 @@ toggle() {
 
 cpu_apply() {
     require_session cpu-apply
+    run systemctl start casdap-priv@cpu-resave.service
     if [[ -e "${runtime}/off" ]]; then
         run systemctl start casdap-priv@cpu-off.service
     else

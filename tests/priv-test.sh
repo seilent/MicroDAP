@@ -61,6 +61,7 @@ reset() {
     echo 0 > "${sys}/class/backlight/panel0/bl_power"
     echo 0 > "${sys}/class/backlight/panel1/bl_power"
     echo 1804800 > "${cpu}/cpufreq/policy0/scaling_max_freq"
+    echo 1958400 > "${cpu}/cpufreq/policy0/cpuinfo_max_freq"
     echo 2419200 > "${cpu}/cpufreq/policy4/scaling_max_freq"
     echo 2841600 > "${cpu}/cpufreq/policy7/scaling_max_freq"
     for n in 1 2 3 4 5 6 7; do
@@ -135,8 +136,10 @@ expect_dap_floor() {
 }
 
 expect_off_floor() {
-    expect_value "${cpu}/cpufreq/policy0/scaling_max_freq" 518400
-    expect_online 0 0 0 0 0 0 0
+    expect_value "${cpu}/cpufreq/policy0/scaling_max_freq" "$1"
+    expect_value "${cpu}/cpufreq/policy4/scaling_max_freq" 2419200
+    expect_value "${cpu}/cpufreq/policy7/scaling_max_freq" 2841600
+    expect_online 1 1 1 0 0 0 0
 }
 
 case_name=bt-class-headphones
@@ -195,7 +198,7 @@ case_name="cpu-off after cpu-dap"
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "cpu-off exit ${rc}"
 [[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "cpu-off rewrote the save file"
-expect_off_floor
+expect_off_floor 1804800
 expect_value "${gpu}/governor" simple_ondemand
 expect_value "${gpu}/max_freq" 305000000
 
@@ -216,7 +219,7 @@ reset
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "cpu-off exit ${rc}"
 expect_saved
-expect_off_floor
+expect_off_floor 1804800
 expect_value "${gpu}/governor" userspace
 expect_value "${gpu}/max_freq" 587000000
 
@@ -225,13 +228,54 @@ saved=$(cat "${CASDAP_CPU_BEFORE_FILE}")
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "second cpu-off exit ${rc}"
 [[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "second cpu-off rewrote the save file"
-expect_off_floor
+expect_off_floor 1804800
 
 case_name="cpu-restore after cpu-off"
 run cpu-restore
 [[ "${rc}" == 0 ]] || fail "cpu-restore exit ${rc}"
 expect_untouched_sysfs
 [[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore left the save file"
+
+case_name="cpu-off without a policy0 line"
+reset
+mkdir -p "${T}/run"
+printf '%s\n' "${cpu}/cpu4/online 1" > "${CASDAP_CPU_BEFORE_FILE}"
+run cpu-off
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_off_floor 1958400
+[[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${cpu}/cpu4/online 1" ]] || fail "${case_name} rewrote the save file"
+
+case_name="cpu-resave without a file"
+reset
+run cpu-resave
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+expect_untouched_sysfs
+[[ ! -e "${T}/run" ]] || fail "${case_name} wrote a save file"
+
+case_name="cpu-resave refreshes the frequency lines"
+reset
+run cpu-dap
+echo 1497600 > "${cpu}/cpufreq/policy0/scaling_max_freq"
+echo 1920000 > "${cpu}/cpufreq/policy4/scaling_max_freq"
+echo 400000000 > "${gpu}/max_freq"
+chmod 0000 "${cpu}/cpufreq/policy7/scaling_max_freq"
+run cpu-resave
+chmod 0644 "${cpu}/cpufreq/policy7/scaling_max_freq"
+[[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
+[[ ! -e "${CASDAP_CPU_BEFORE_FILE}.tmp" ]] || fail "${case_name}: temp file left"
+[[ "$(grep -c . "${CASDAP_CPU_BEFORE_FILE}")" == 12 ]] || fail "${case_name}: $(grep -c . "${CASDAP_CPU_BEFORE_FILE}") saved lines, expected 12"
+grep -qxF "${cpu}/cpufreq/policy0/scaling_max_freq 1497600" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy0 not refreshed"
+grep -qxF "${cpu}/cpufreq/policy4/scaling_max_freq 1920000" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy4 not refreshed"
+grep -qxF "${cpu}/cpufreq/policy7/scaling_max_freq 2841600" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: unreadable policy7 line not kept"
+grep -qxF "${gpu}/max_freq 400000000" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: max_freq not refreshed"
+grep -qxF "${gpu}/governor userspace" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: governor line changed"
+for n in 1 2 3 4 5 6 7; do
+    grep -qxF "${cpu}/cpu${n}/online 1" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: cpu${n} online line changed"
+done
+run cpu-off
+[[ "${rc}" == 0 ]] || fail "${case_name}: cpu-off exit ${rc}"
+expect_value "${cpu}/cpufreq/policy0/scaling_max_freq" 1497600
+expect_online 1 1 1 0 0 0 0
 
 case_name="cpu-restore without a file"
 reset
