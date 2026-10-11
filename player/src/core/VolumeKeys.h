@@ -118,6 +118,7 @@ public:
     void dropPending() override;
 
     void cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done) override;
+    void sinkCard(const QString &name, std::function<void(const DacCard &)> done) override;
     void setDefaultSink(const QString &name) override;
     void sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done) override;
     void sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done) override;
@@ -163,6 +164,7 @@ private:
     bool quiet() const;
     void querySink(quint32 index, const QByteArray &name, std::function<void(const pa_sink_info *)> done);
     void queryCard(quint32 index, std::function<void(const pa_card_info *)> done);
+    void lookupCard(quint32 sinkIndex, const QByteArray &name, std::function<void(const DacCard &)> done);
     void queryInputs(std::function<void(const QList<quint32> *)> done);
     void issue(std::unique_ptr<Request> request, const std::function<pa_operation *(Request *)> &start);
     std::unique_ptr<Request> take(Request *request);

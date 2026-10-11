@@ -88,6 +88,11 @@ void FakeBluezModel::setConnected(bool connected)
     updateConnected(connected);
 }
 
+void FakeBluezModel::setReady(bool ready)
+{
+    updateReady(ready);
+}
+
 void FakeBluezModel::setDeviceName(const QString &name)
 {
     updateDeviceName(name);

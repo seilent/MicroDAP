@@ -20,6 +20,7 @@ public:
     void clearCommands();
 
     void setConnected(bool connected);
+    void setReady(bool ready);
     void setDeviceName(const QString &name);
     void setTransportActive(bool active);
     void setTransportState(const QString &state);

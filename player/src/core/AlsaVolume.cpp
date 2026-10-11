@@ -270,6 +270,16 @@ double AlsaVolume::stepDb() const
     return dbOfStep(m_owned, m_range);
 }
 
+int AlsaVolume::hwStep() const
+{
+    return int(m_hw);
+}
+
+double AlsaVolume::hwDb() const
+{
+    return dbOfStep(int(m_hw), m_range);
+}
+
 double AlsaVolume::rangeDb() const
 {
     return m_range.maxDb - m_range.minDb;

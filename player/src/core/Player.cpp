@@ -178,6 +178,24 @@ Player::Status Player::status() const
     return m_status;
 }
 
+Player::PlayState Player::playState() const
+{
+    switch (m_status) {
+    case Playing:
+        return PlayState::Playing;
+    case Paused:
+        return PlayState::Paused;
+    case Stopped:
+        break;
+    }
+    return PlayState::Stopped;
+}
+
+qint64 Player::positionMs() const
+{
+    return position();
+}
+
 qint64 Player::position() const
 {
     if (m_positionPoll || !m_playbin || m_status != Playing || m_playAfterSeek)

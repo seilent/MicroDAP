@@ -115,7 +115,7 @@ int child(int argc, char *argv[])
     QObject::connect(&reservation, &DeviceReservation::refused, &app, [&app] {
         app.exit(1);
     });
-    reservation.acquire(reserveName(), cardId());
+    reservation.acquire(reserveName(), cardId(), 1);
     return app.exec();
 }
 
@@ -166,8 +166,9 @@ void ReservationTest::hold()
 {
     m_reservation = std::make_unique<DeviceReservation>(quick);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 7);
     QTRY_COMPARE_WITH_TIMEOUT(acquired.count(), 1, busTimeoutMs);
+    QCOMPARE(acquired.first().first().toULongLong(), quint64(7));
     QTRY_VERIFY_WITH_TIMEOUT(fakeState().lastReplyMs >= 0, busTimeoutMs);
     const QString held = owner();
     QVERIFY(!held.isEmpty());
@@ -262,8 +263,9 @@ void ReservationTest::acquireRefused()
     m_reservation = std::make_unique<DeviceReservation>(quick);
     QSignalSpy refused(m_reservation.get(), &DeviceReservation::refused);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 3);
     QTRY_COMPARE_WITH_TIMEOUT(refused.count(), 1, busTimeoutMs);
+    QCOMPARE(refused.first().first().toULongLong(), quint64(3));
     QCOMPARE(acquired.count(), 0);
     QCOMPARE(owner(), QStringLiteral("fake"));
 }
@@ -405,7 +407,7 @@ void ReservationTest::waitReleasedIgnoresEarlierRelease()
     QTRY_COMPARE_WITH_TIMEOUT(released.count(), 1, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(owner(), QStringLiteral("fake"), busTimeoutMs);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(acquired.count(), 1, busTimeoutMs);
     const QString held = owner();
     QVERIFY(held != QLatin1StringView("fake"));
@@ -457,7 +459,7 @@ void ReservationTest::twoCycles()
     QTRY_COMPARE_WITH_TIMEOUT(released.count(), 1, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(owner(), QStringLiteral("fake"), busTimeoutMs);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(acquired.count(), 1, busTimeoutMs);
     const QString second = owner();
     QVERIFY(second != QLatin1StringView("fake"));
@@ -478,7 +480,7 @@ void ReservationTest::quitAnswersPending()
     QTRY_COMPARE_WITH_TIMEOUT(owner(), QStringLiteral("fake"), busTimeoutMs);
     QVERIFY(!fakeState().stuck);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 1);
     m_reservation->release();
     m_reservation->markGone();
     QTest::qWait(200);
@@ -526,7 +528,7 @@ void ReservationTest::markGoneClearedByAcquire()
     QTRY_COMPARE_WITH_TIMEOUT(owner(), QStringLiteral("fake"), busTimeoutMs);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
     QSignalSpy lost(m_reservation.get(), &DeviceReservation::nameLost);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(acquired.count(), 1, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(fakeState().calls, 2u, busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(fakeState().lastReplyMs >= 0, busTimeoutMs);
@@ -570,7 +572,7 @@ void ReservationTest::connectionLostOnBusDrop()
     m_reservation = std::make_unique<DeviceReservation>(quick);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
     QSignalSpy dropped(m_reservation.get(), &DeviceReservation::connectionLost);
-    m_reservation->acquire(reserveName(), cardId());
+    m_reservation->acquire(reserveName(), cardId(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(acquired.count(), 1, busTimeoutMs);
     qunsetenv("CASDAP_RESERVE_BUS");
     QVERIFY(!m_reservation->waitReleased(0));

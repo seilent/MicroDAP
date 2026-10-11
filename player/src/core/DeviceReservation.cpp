@@ -123,12 +123,12 @@ QString DeviceReservation::applicationName()
     return QStringLiteral("casdap");
 }
 
-void DeviceReservation::acquire(const QString &reserveName, const QString &cardId)
+void DeviceReservation::acquire(const QString &reserveName, const QString &cardId, quint64 seq)
 {
     if (m_joined)
         return;
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, reserveName, cardId] {
-        worker->acquire(reserveName, cardId);
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, reserveName, cardId, seq] {
+        worker->acquire(reserveName, cardId, seq);
     }, Qt::QueuedConnection);
 }
 
@@ -268,17 +268,18 @@ ReserveWorker::ReserveWorker(const DeviceReservation::Bounds &bounds, ReserveSha
     });
 }
 
-void ReserveWorker::acquire(const QString &reserveName, const QString &cardId)
+void ReserveWorker::acquire(const QString &reserveName, const QString &cardId, quint64 seq)
 {
     if (m_owned || m_endpoint)
         releaseNow();
+    m_acquireSeq = seq;
     ++m_generation;
     m_holdStart = m_nextCall;
     static const QRegularExpression nameRe(QStringLiteral("^Audio(\\d+)$"));
     const QRegularExpressionMatch match = nameRe.match(reserveName);
     if (!match.hasMatch() || cardId.isEmpty()) {
         qWarning().noquote() << "casdap reserve: cannot reserve" << reserveName << "for card" << cardId;
-        emit failed(QStringLiteral("name"));
+        emit failed(m_acquireSeq, QStringLiteral("name"));
         return;
     }
     m_service = DeviceReservation::serviceFor(reserveName);
@@ -288,7 +289,7 @@ void ReserveWorker::acquire(const QString &reserveName, const QString &cardId)
     m_gone = false;
     m_granted = false;
     if (!openBus()) {
-        emit failed(QStringLiteral("bus"));
+        emit failed(m_acquireSeq, QStringLiteral("bus"));
         return;
     }
     qInfo().noquote() << "casdap reserve: acquiring" << m_service << "for hw:CARD=" + cardId << "on"
@@ -310,18 +311,18 @@ void ReserveWorker::acquire(const QString &reserveName, const QString &cardId)
                                  << "timed out, taking and releasing the name";
             takeName(false);
             releaseNow();
-            emit failed(QStringLiteral("timeout"));
+            emit failed(m_acquireSeq, QStringLiteral("timeout"));
             return;
         }
         if (reply.type() == QDBusMessage::ErrorMessage && !noOwner(reply.errorName())) {
             qWarning().noquote() << "casdap reserve: RequestRelease(10) on" << m_service << "failed"
                                  << reply.errorName() << reply.errorMessage();
-            emit failed(reply.errorName());
+            emit failed(m_acquireSeq, reply.errorName());
             return;
         }
         if (reply.type() != QDBusMessage::ErrorMessage && !reply.arguments().value(0).toBool()) {
             qInfo().noquote() << "casdap reserve: owner of" << m_service << "refused";
-            emit refused();
+            emit refused(m_acquireSeq);
             return;
         }
         takeName(true);
@@ -336,7 +337,7 @@ bool ReserveWorker::takeName(bool announce)
         delete m_endpoint;
         m_endpoint = nullptr;
         if (announce)
-            emit failed(QStringLiteral("export"));
+            emit failed(m_acquireSeq, QStringLiteral("export"));
         return false;
     }
     QDBusMessage call = busCall(QStringLiteral("RequestName"));
@@ -347,7 +348,7 @@ bool ReserveWorker::takeName(bool announce)
                              << reply.errorMessage();
         unexport();
         if (announce)
-            emit failed(reply.errorName());
+            emit failed(m_acquireSeq, reply.errorName());
         return false;
     }
     const uint code = reply.arguments().value(0).toUInt();
@@ -355,14 +356,14 @@ bool ReserveWorker::takeName(bool announce)
         qInfo().noquote() << "casdap reserve:" << m_service << "kept by its owner, RequestName" << code;
         unexport();
         if (announce)
-            emit refused();
+            emit refused(m_acquireSeq);
         return false;
     }
     m_owned = true;
     setHeld(true);
     qInfo().noquote() << "casdap reserve: holding" << m_service;
     if (announce)
-        emit acquired();
+        emit acquired(m_acquireSeq);
     return true;
 }
 

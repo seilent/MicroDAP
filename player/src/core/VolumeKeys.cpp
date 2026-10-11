@@ -520,7 +520,21 @@ bool PulseSinkVolume::isBluezInput(const pa_proplist *props)
 
 void PulseSinkVolume::cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done)
 {
-    querySink(sinkIndex, QByteArray(), [this, done](const pa_sink_info *info) {
+    lookupCard(sinkIndex, QByteArray(), std::move(done));
+}
+
+void PulseSinkVolume::sinkCard(const QString &name, std::function<void(const DacCard &)> done)
+{
+    if (name.isEmpty()) {
+        QTimer::singleShot(0, this, [done] { done(DacCard{}); });
+        return;
+    }
+    lookupCard(PA_INVALID_INDEX, name.toUtf8(), std::move(done));
+}
+
+void PulseSinkVolume::lookupCard(quint32 sinkIndex, const QByteArray &name, std::function<void(const DacCard &)> done)
+{
+    querySink(sinkIndex, name, [this, done](const pa_sink_info *info) {
         if (!info || info->card == PA_INVALID_INDEX) {
             done(DacCard{});
             return;

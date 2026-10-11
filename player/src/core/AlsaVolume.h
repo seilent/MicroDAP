@@ -81,6 +81,8 @@ public:
     QString cardId() const;
     int step() const;
     double stepDb() const;
+    int hwStep() const;
+    double hwDb() const;
     double rangeDb() const;
     void setOwnedStep(int step);
     void setStep(int step);

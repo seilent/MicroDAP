@@ -141,6 +141,11 @@ target_link_libraries(tst_volumekeys PRIVATE casdapcore Qt6::Test)
 add_test(NAME volumekeys COMMAND tst_volumekeys)
 casdap_test_env(volumekeys)
 
+qt_add_executable(tst_outputmode core/tst_outputmode.cpp)
+target_link_libraries(tst_outputmode PRIVATE casdapcore Qt6::Test)
+add_test(NAME outputmode COMMAND tst_outputmode)
+casdap_test_env(outputmode)
+
 set(volume_nodes ${CMAKE_CURRENT_BINARY_DIR}/volume-nodes)
 file(MAKE_DIRECTORY ${volume_nodes})
 add_test(NAME volumekeys-screenshot

@@ -224,6 +224,11 @@ void OutputControl::unwatchCard()
     m_watchGone = false;
 }
 
+quint64 OutputControl::readsStarted() const
+{
+    return m_readsStarted;
+}
+
 void OutputControl::checkWatchedCard()
 {
     if (m_watchIndex < 0 || m_watchGone)
@@ -302,13 +307,15 @@ void OutputControl::readJack(Handler done)
 
 void OutputControl::readSinks(Handler done)
 {
+    const quint64 read = ++m_readsStarted;
     run(m_sinkList, pactlPath(), {QStringLiteral("list"), QStringLiteral("sinks"), QStringLiteral("short")},
-        [this, done](bool ok, const QByteArray &out) {
+        [this, done, read](bool ok, const QByteArray &out) {
         if (ok) {
             m_sinks = parseSinks(QString::fromUtf8(out));
             const QString usb = usbSinkIn(m_sinks);
             if (!usb.isEmpty() || m_held == HeldState::None)
                 setUsbSink(usb);
+            emit sinksRead(usb, read);
         }
         done(ok, out);
     });

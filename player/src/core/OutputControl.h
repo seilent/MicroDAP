@@ -61,9 +61,10 @@ public:
     void setHeld(HeldState state) override;
     void watchCard(int index, const QString &id) override;
     void unwatchCard() override;
+    quint64 readsStarted() const override;
 
     Q_INVOKABLE void apply(const QString &output);
-    Q_INVOKABLE void refresh();
+    Q_INVOKABLE void refresh() override;
     Q_INVOKABLE void setHeadphone(const QString &gain, const QString &amp);
     Q_INVOKABLE void setSpkGain(int step);
 
@@ -79,6 +80,7 @@ signals:
     void spkGainChanged();
     void applied(const QString &output, bool ok);
     void cardGone(int index);
+    void sinksRead(const QString &usbSink, quint64 read);
 
 private:
     using Handler = std::function<void(bool ok, const QByteArray &out)>;
@@ -117,6 +119,7 @@ private:
     int m_watchIndex = -1;
     QString m_watchId;
     bool m_watchGone = false;
+    quint64 m_readsStarted = 0;
     QStringList m_words;
     QTimer m_pollTimer;
     QProcess *m_apply = nullptr;

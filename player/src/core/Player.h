@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Eq.h"
+#include "OutputPorts.h"
 #include "Queue.h"
 
 #include <QList>
@@ -24,7 +25,7 @@ class OutputPolicy;
 
 void initGStreamer(int &argc, char **argv);
 
-class Player : public QObject
+class Player : public QObject, public PlayerPort
 {
     Q_OBJECT
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
@@ -43,14 +44,6 @@ public:
         Paused,
     };
     Q_ENUM(Status)
-
-    enum class OutputChain {
-        None,
-        Pw,
-        Bp,
-        Ex,
-    };
-    Q_ENUM(OutputChain)
 
     struct PendingBuild
     {
@@ -87,15 +80,17 @@ public:
     GstElement *audioSink() const;
     void applyEq(const casdap::EqProfile &profile);
     void setPolicy(OutputPolicy *policy);
-    OutputChain builtChain() const;
-    bool parked() const;
+    OutputChain builtChain() const override;
+    bool parked() const override;
     std::optional<PendingBuild> pendingBuild() const;
-    QVariantMap sourceFormat() const;
-    QVariantMap sinkFormat() const;
-    void buildPending(OutputChain chain);
-    void rebuildAt(qint64 positionMs, GstState state);
-    void resumeFrom();
-    void park(qint64 positionMs);
+    QVariantMap sourceFormat() const override;
+    QVariantMap sinkFormat() const override;
+    void buildPending(OutputChain chain) override;
+    void rebuildAt(qint64 positionMs, GstState state) override;
+    void resumeFrom() override;
+    void park(qint64 positionMs) override;
+    PlayState playState() const override;
+    qint64 positionMs() const override;
 
     void play(const QList<QueueEntry> &entries, int start = 0);
     Q_INVOKABLE int playSource(const QString &kind, qint64 id, const QString &mode, qint64 startId = -1);

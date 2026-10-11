@@ -52,7 +52,7 @@ public:
     static QString pathFor(const QString &reserveName);
     static QString applicationName();
 
-    void acquire(const QString &reserveName, const QString &cardId) override;
+    void acquire(const QString &reserveName, const QString &cardId, quint64 seq) override;
     void grantRelease() override;
     void release() override;
     void markGone() override;
@@ -60,9 +60,9 @@ public:
     void quitAndJoin(int ms) override;
 
 signals:
-    void acquired();
-    void refused();
-    void failed(const QString &reason);
+    void acquired(quint64 seq);
+    void refused(quint64 seq);
+    void failed(quint64 seq, const QString &reason);
     void releaseRequested(int priority);
     void releaseTimedOut();
     void nameLost(bool requested);
@@ -131,16 +131,16 @@ public:
     bool onRequest(int priority, ReserveEndpoint *endpoint);
 
 public slots:
-    void acquire(const QString &reserveName, const QString &cardId);
+    void acquire(const QString &reserveName, const QString &cardId, quint64 seq);
     void grant(quint64 upTo);
     void release(quint64 seq);
     void markGone();
     void quit(quint64 seq);
 
 signals:
-    void acquired();
-    void refused();
-    void failed(const QString &reason);
+    void acquired(quint64 seq);
+    void refused(quint64 seq);
+    void failed(quint64 seq, const QString &reason);
     void releaseRequested(quint64 id, int priority);
     void releaseTimedOut();
     void nameLost(bool requested);
@@ -185,6 +185,7 @@ private:
     QString m_cardId;
     int m_card = -1;
     quint64 m_generation = 0;
+    quint64 m_acquireSeq = 0;
     quint64 m_nextCall = 0;
     quint64 m_expired = 0;
     quint64 m_holdStart = 0;

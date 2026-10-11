@@ -55,6 +55,8 @@ add_library(casdapcore STATIC
     src/core/Mpris.h
     src/core/OutputControl.cpp
     src/core/OutputControl.h
+    src/core/OutputMode.cpp
+    src/core/OutputMode.h
     src/core/OutputPorts.h
     src/core/OutputWatch.cpp
     src/core/OutputWatch.h
