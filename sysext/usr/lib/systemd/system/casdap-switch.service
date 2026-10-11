@@ -3,4 +3,5 @@ Description=Switch display session to CASDAP
 
 [Service]
 Type=oneshot
+TimeoutStartSec=150
 ExecStart=/usr/libexec/armada/session-control switch-casdap

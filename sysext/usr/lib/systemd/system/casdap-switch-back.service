@@ -3,4 +3,5 @@ Description=Switch display session back to game mode
 
 [Service]
 Type=oneshot
+TimeoutStartSec=150
 ExecStart=/usr/libexec/armada/session-control switch-gamemode
