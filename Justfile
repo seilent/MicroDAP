@@ -46,6 +46,7 @@ test:
     bash tests/overlay-unit-test.sh
     bash tests/bt-test.sh
     bash tests/usb-audio-test.sh
+    bash tests/fiio-unit-test.sh
     just test-player
 
 test-player:

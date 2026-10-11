@@ -1,0 +1,6 @@
+[Unit]
+Description=CASDAP FiiO bypass on plug in
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/casdap/casdap-fiio reset

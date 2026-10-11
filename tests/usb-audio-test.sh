@@ -256,6 +256,7 @@ for f in "${helper}" "${rules}" "${unit}" "${wants}"; do
 done
 grep -qxF 'ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/libexec/casdap/casdap-usb-audio %S%p"' "${rules}" || fail "rules lack the usb_device line"
 grep -qxF 'ACTION=="bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", DRIVER=="usbhid", RUN+="/usr/libexec/casdap/casdap-usb-audio %S%p/.."' "${rules}" || fail "rules lack the usbhid interface line"
+grep -qxF 'ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2972", ATTR{idProduct}=="0149", GROUP="audio", MODE="0660", TAG+="systemd"' "${rules}" || fail "rules lack the fiio node line"
 grep -qxF 'ExecStart=/usr/libexec/casdap/casdap-usb-audio --scan' "${unit}" || fail "unit lacks the scan"
 grep -qxF 'RemainAfterExit=yes' "${unit}" || fail "unit lacks RemainAfterExit=yes"
 grep -qxF 'Wants=casdap-usb-audio.service' "${wants}" || fail "multi-user drop in lacks the Wants line"
