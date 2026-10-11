@@ -202,6 +202,34 @@ target_link_libraries(tst_fiio PRIVATE casdapcore Qt6::Test)
 add_test(NAME fiio COMMAND tst_fiio)
 casdap_test_env(fiio)
 
+set(fiio_cli_script [=[
+set -eu
+bin=$1
+stub=$2
+root=$(dirname "$CASDAP_SYS_ROOT")
+mkdir -p "$root/empty"
+out=$(CASDAP_SYS_ROOT="$root/empty" "$bin" reset 2>&1)
+case $out in
+*"casdap-fiio: no supported dac"*) ;;
+*) printf '%s\n' "$out"; exit 1 ;;
+esac
+dev=$root/fixture/devices/3-1
+mkdir -p "$dev/3-1:1.0/ep_05" "$dev/3-1:1.0/ep_86" "$root/fixture/bus/usb/devices" "$CASDAP_RUN_DIR/systemd"
+printf '2972\n' >"$dev/idVendor"
+printf '0149\n' >"$dev/idProduct"
+printf '03\n' >"$dev/3-1:1.0/bInterfaceClass"
+ln -sfn "$dev" "$root/fixture/bus/usb/devices/3-1"
+: >"$CASDAP_RUN_DIR/systemd/private"
+out=$(CASDAP_SYS_ROOT="$root/fixture" CASDAP_SYSTEMCTL_BIN="$stub" "$bin" reset 2>&1)
+case $out in
+*"casdap-fiio: casdap session active, skipped"*) ;;
+*) printf '%s\n' "$out"; exit 1 ;;
+esac
+]=])
+add_test(NAME fiio-cli COMMAND sh -c "${fiio_cli_script}" sh $<TARGET_FILE:casdap-fiio>
+         ${CMAKE_CURRENT_SOURCE_DIR}/stub_systemctl.sh)
+casdap_test_env(fiio-cli)
+
 qt_add_executable(tst_codec core/tst_codec.cpp)
 target_link_libraries(tst_codec PRIVATE casdapcore Qt6::Test)
 add_test(NAME codec COMMAND tst_codec)

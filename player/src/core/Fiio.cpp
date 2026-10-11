@@ -1335,18 +1335,19 @@ FiioResult force(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths,
     FiioResult r = run.get(fiioCmdPreset);
     if (r.reason != FiioReason::None)
         return r;
-    const int preset = r.payload.empty() ? -1 : r.payload[0];
+    const std::vector<uint8_t> found = r.payload;
+    const int preset = found.empty() ? -1 : found[0];
     mirror.preset = preset;
     if (preset != device.model().slot)
         removeMarker(paths);
     if (preset == fiioBypass)
-        return {};
+        return {FiioReason::None, found};
     if ((r = run.set(fiioCmdPreset, presetPayload(fiioBypass))).reason != FiioReason::None)
         return r;
     mirror.preset = fiioBypass;
     removeMarker(paths);
     device.log("force from preset " + std::to_string(preset));
-    return {};
+    return {FiioReason::None, found};
 }
 
 FiioResult dump(FiioDevice &device, FiioMirror &mirror, const FiioPaths &, const FiioProfileFrames &,

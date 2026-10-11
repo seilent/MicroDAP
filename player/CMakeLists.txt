@@ -19,9 +19,16 @@ qt_standard_project_setup(REQUIRES 6.11)
 add_library(casdapfiio STATIC
     src/core/Fiio.cpp
     src/core/Fiio.h
+    src/core/FiioCli.cpp
+    src/core/FiioCli.h
 )
 set_target_properties(casdapfiio PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 target_include_directories(casdapfiio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
+add_executable(casdap-fiio src/app/fiio_main.cpp)
+set_target_properties(casdap-fiio PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_link_libraries(casdap-fiio PRIVATE casdapfiio)
+install(TARGETS casdap-fiio RUNTIME DESTINATION libexec/casdap)
 
 add_library(casdapcore STATIC
     src/core/AccentControl.cpp

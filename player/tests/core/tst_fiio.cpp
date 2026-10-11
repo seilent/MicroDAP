@@ -1,5 +1,6 @@
 #include "FakeUsbIo.h"
 #include "Fiio.h"
+#include "FiioCli.h"
 #include "FiioWorker.h"
 
 #include <QByteArray>
@@ -8,6 +9,7 @@
 #include <QFileInfo>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QThread>
@@ -17,9 +19,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include <thread>
 
+#include <time.h>
 #include <unistd.h>
 
 using namespace casdap;
@@ -417,6 +422,174 @@ struct WorkerRig
     std::unique_ptr<FiioWorker> worker;
 };
 
+class SharedUsb : public UsbIo
+{
+public:
+    explicit SharedUsb(FakeUsbIo &fake)
+        : m_fake(fake)
+    {
+    }
+
+    int open(const std::string &path) override { return m_fake.open(path); }
+    int readDescriptor(uint16_t &vid, uint16_t &pid) override { return m_fake.readDescriptor(vid, pid); }
+    int claim(int iface) override { return m_fake.claim(iface); }
+    int release(int iface) override { return m_fake.release(iface); }
+    int bulk(uint8_t ep, uint8_t *data, int len, int timeoutMs) override { return m_fake.bulk(ep, data, len, timeoutMs); }
+    int reset() override { return m_fake.reset(); }
+    void close() override { m_fake.close(); }
+
+private:
+    FakeUsbIo &m_fake;
+};
+
+int64_t bootNowMs()
+{
+    timespec ts{};
+    ::clock_gettime(CLOCK_BOOTTIME, &ts);
+    return int64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+bool stageInterface(const QString &sys, const QString &name)
+{
+    const QString stage = sys + QStringLiteral("/stage");
+    if (!hidInterface(stage, name, "03", true))
+        return false;
+    const QString from = stage + QStringLiteral("/devices/platform/xhci/") + name + QLatin1Char('/') + name
+                         + QStringLiteral(":1.0");
+    const QString to = sys + QStringLiteral("/devices/platform/xhci/") + name + QLatin1Char('/') + name
+                       + QStringLiteral(":1.0");
+    return ::rename(QFile::encodeName(from).constData(), QFile::encodeName(to).constData()) == 0;
+}
+
+struct CliRig
+{
+    explicit CliRig(bool withInterface = true)
+        : paths(pathsIn(root.path()))
+    {
+        sys = root.path() + QStringLiteral("/sys");
+        devPath = sys + QStringLiteral("/devices/platform/xhci/3-1");
+        iface = devPath + QStringLiteral("/3-1:1.0");
+        ready = usbDevice(sys, QStringLiteral("3-1"), "2972", "0149") && usbNode(devPath, "3", "2")
+                && (!withInterface || hidInterface(sys, QStringLiteral("3-1"), "03", true));
+        callsPath = root.path() + QStringLiteral("/calls");
+        stub(QStringLiteral("printf 'inactive\\n'\n"));
+    }
+
+    ~CliRig()
+    {
+        qunsetenv("CASDAP_SYSTEMCTL_BIN");
+        QCOMPARE(fake.refusedReads(), 0);
+        QCOMPARE(fake.badFrames(), 0);
+    }
+
+    bool stub(const QString &body)
+    {
+        const QString path = root.path() + QStringLiteral("/systemctl");
+        const QByteArray text = "#!/bin/sh\nprintf '%s %s\\n' \"${XDG_RUNTIME_DIR:-unset}\" \"$*\" >>'"
+                                + QFile::encodeName(callsPath) + "'\n" + body.toUtf8();
+        if (!writeFile(path, text))
+            return false;
+        qputenv("CASDAP_SYSTEMCTL_BIN", QFile::encodeName(path));
+        return QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    }
+
+    bool manager() const
+    {
+        return writeFile(root.path() + QStringLiteral("/run/systemd/private"), QByteArray());
+    }
+
+    QStringList calls() const
+    {
+        QFile file(callsPath);
+        if (!file.open(QIODevice::ReadOnly))
+            return {};
+        return QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    }
+
+    bool presetTo(uint8_t preset)
+    {
+        if (fake.open("/dev/bus/usb/003/002") != 0 || fake.claim(0) != 0)
+            return false;
+        std::vector<uint8_t> out = frameSet(1, fiioCmdPreset, {preset});
+        uint8_t in[fiioPacketSize] = {};
+        const bool ok = fake.bulk(0x05, out.data(), int(out.size()), 200) == int(out.size())
+                        && fake.bulk(0x86, in, fiioPacketSize, 200) == fiioPacketSize;
+        fake.release(0);
+        fake.close();
+        base = int(outs(fake).size());
+        return ok && fake.preset() == preset;
+    }
+
+    QStringList sent() const
+    {
+        return outs(fake, base);
+    }
+
+    int run(const QStringList &args)
+    {
+        std::vector<QByteArray> raw{QByteArrayLiteral("casdap-fiio")};
+        for (const QString &a : args)
+            raw.push_back(a.toUtf8());
+        std::vector<char *> argv;
+        for (QByteArray &a : raw)
+            argv.push_back(a.data());
+        argv.push_back(nullptr);
+        std::ostringstream errText;
+        std::ostringstream outText;
+        std::streambuf *oldErr = std::cerr.rdbuf(errText.rdbuf());
+        std::streambuf *oldOut = std::cout.rdbuf(outText.rdbuf());
+        const int64_t start = fiioNowMs();
+        const int code = runCli(int(raw.size()), argv.data(),
+                                [this] { return std::make_unique<SharedUsb>(fake); }, paths);
+        elapsed = fiioNowMs() - start;
+        std::cerr.rdbuf(oldErr);
+        std::cout.rdbuf(oldOut);
+        err = QString::fromStdString(errText.str());
+        out = QString::fromStdString(outText.str());
+        return code;
+    }
+
+    bool logged(const QString &line) const
+    {
+        return err.split(QLatin1Char('\n')).contains(QStringLiteral("casdap-fiio: ") + line);
+    }
+
+    bool bindDriver() const
+    {
+        const QString driver = sys + QStringLiteral("/bus/usb/drivers/usbhid");
+        return QDir().mkpath(driver) && link(driver, iface + QStringLiteral("/driver"));
+    }
+
+    bool secondDac() const
+    {
+        return usbDevice(sys, QStringLiteral("3-2"), "2972", "0149") && usbNode(sys + QStringLiteral("/devices/platform/xhci/3-2"), "3", "3")
+               && hidInterface(sys, QStringLiteral("3-2"), "03", true);
+    }
+
+    QString resetStamp() const
+    {
+        return root.path() + QStringLiteral("/run/casdap-fiio.reset");
+    }
+
+    InflightStamp inflight() const
+    {
+        return InflightStamp(paths, QFileInfo(devPath).canonicalFilePath().toStdString());
+    }
+
+    QTemporaryDir root;
+    FiioPaths paths;
+    FakeUsbIo fake;
+    QString sys;
+    QString devPath;
+    QString iface;
+    QString callsPath;
+    QString err;
+    QString out;
+    int64_t elapsed = 0;
+    int base = 0;
+    bool ready = false;
+};
+
 }
 
 class FiioTest : public QObject
@@ -492,6 +665,34 @@ private slots:
     void workerMirrorPerGeneration();
     void workerQuitDeadline();
     void workerUpdate();
+    void cliSessionActive();
+    void cliSessionDeactivating();
+    void cliSessionHangs();
+    void cliNoUserManager();
+    void cliSystemctlFailsWithManager();
+    void cliNoRuntimeDir();
+    void cliSessionUnderLock();
+    void cliHidBoundNoWait();
+    void cliDriverWait();
+    void cliCardLate();
+    void cliInterfaceLate();
+    void cliForcesPreset0();
+    void cliAt240();
+    void cliMarker();
+    void cliDeadlineLockHeld();
+    void cliDeadlineStampDrain();
+    void cliDeadlineDelayedReply();
+    void cliStampOnlyOnSuccess();
+    void cliStampSkip();
+    void cliDumpLocked();
+    void cliRestoreSessionActive();
+    void cliRestoreNewest();
+    void cliDeadlineSessionHangs();
+    void cliLockTimeout();
+    void cliTwoDacs();
+    void cliUsageErrors();
+    void cliRuntimeDirForChild();
+    void cliRestoreMoreThanOneDac();
 };
 
 void FiioTest::crc()
@@ -1826,7 +2027,9 @@ void FiioTest::forceOverPreset0()
     QVERIFY(rig.touchMarker());
     FiioMirror mirror;
     const int before = rig.fake.count(FakeUsbIo::Op::Out);
-    QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt).reason, FiioReason::None);
+    const FiioResult forced = FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt);
+    QCOMPARE(forced.reason, FiioReason::None);
+    QCOMPARE(forced.payload, std::vector<uint8_t>{0});
     QCOMPARE(outs(rig.fake, before), QStringList({QStringLiteral("get 16"), QStringLiteral("set 16 f0")}));
     QCOMPARE(rig.fake.preset(), fiioBypass);
     QCOMPARE(rig.fake.band(0, 3), jazzBand);
@@ -1843,7 +2046,9 @@ void FiioTest::forceAt240()
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     QVERIFY(rig.touchMarker());
     FiioMirror mirror;
-    QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt).reason, FiioReason::None);
+    const FiioResult found = FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt);
+    QCOMPARE(found.reason, FiioReason::None);
+    QCOMPARE(found.payload, std::vector<uint8_t>{fiioBypass});
     QCOMPARE(outs(rig.fake), QStringList{QStringLiteral("get 16")});
     QCOMPARE(mirror.preset, int(fiioBypass));
     QVERIFY(!rig.marker());
@@ -2823,6 +3028,524 @@ void FiioTest::workerUpdate()
                          QStringLiteral("get 30 a2"), QStringLiteral("set 17 0000")};
     expected += bandSets(changed);
     QCOMPARE(outs(*rig.fake, second), expected);
+}
+
+void FiioTest::cliSessionActive()
+{
+    for (const char *state : {"active", "activating", "reloading"}) {
+        CliRig rig;
+        QVERIFY(rig.ready);
+        QVERIFY(rig.manager());
+        QVERIFY(rig.presetTo(0));
+        QVERIFY(rig.stub(QStringLiteral("printf '%1\\n'\n").arg(QLatin1String(state))));
+        QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+        QVERIFY2(rig.logged(QStringLiteral("casdap session %1, skipped").arg(QLatin1String(state))), qPrintable(rig.err));
+        QVERIFY(rig.sent().isEmpty());
+        QCOMPARE(rig.fake.preset(), uint8_t(0));
+        const QStringList calls = rig.calls();
+        QCOMPARE(calls.size(), 1);
+        QVERIFY(calls[0].endsWith(QStringLiteral(" --user show -p ActiveState --value gamescope-session-plus@casdap.service")));
+    }
+}
+
+void FiioTest::cliSessionDeactivating()
+{
+    const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
+    qunsetenv("XDG_RUNTIME_DIR");
+    auto restore = qScopeGuard([&runtime] { qputenv("XDG_RUNTIME_DIR", runtime); });
+    for (const char *state : {"deactivating", "inactive", "failed"}) {
+        CliRig rig;
+        QVERIFY(rig.ready);
+        QVERIFY(rig.manager());
+        QVERIFY(rig.presetTo(0));
+        QVERIFY(rig.stub(QStringLiteral("printf '%1\\n'\n").arg(QLatin1String(state))));
+        QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+        QVERIFY2(rig.logged(QStringLiteral("3-1 preset 0, set 240")), qPrintable(rig.err));
+        QCOMPARE(rig.fake.preset(), fiioBypass);
+        const QStringList calls = rig.calls();
+        QCOMPARE(calls.size(), 2);
+        for (const QString &call : calls)
+            QVERIFY2(call.startsWith(QString::fromStdString(rig.paths.runDir) + QLatin1Char(' ')), qPrintable(call));
+    }
+}
+
+void FiioTest::cliSessionHangs()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(rig.stub(QStringLiteral("exec sleep 5\n")));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY2(rig.elapsed >= 490 && rig.elapsed < 800, std::to_string(rig.elapsed).c_str());
+    QVERIFY2(rig.logged(QStringLiteral("casdap session no answer, skipped")), qPrintable(rig.err));
+    QVERIFY(rig.sent().isEmpty());
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
+}
+
+void FiioTest::cliNoUserManager()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(rig.stub(QStringLiteral("printf 'active\\n'\n")));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("no user manager")));
+    QVERIFY(rig.calls().isEmpty());
+    QCOMPARE(rig.sent(), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 16 f0")}));
+}
+
+void FiioTest::cliSystemctlFailsWithManager()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(rig.stub(QStringLiteral("exit 1\n")));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("casdap session no answer, skipped")), qPrintable(rig.err));
+    QCOMPARE(rig.calls().size(), 1);
+    QVERIFY(rig.sent().isEmpty());
+}
+
+void FiioTest::cliNoRuntimeDir()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    const QString absent = rig.root.path() + QStringLiteral("/absent");
+    rig.paths.runDir = absent.toStdString();
+    rig.paths.runDirExists = false;
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("no runtime dir")));
+    QVERIFY(rig.logged(QStringLiteral("no user manager")));
+    QVERIFY(rig.calls().isEmpty());
+    QCOMPARE(rig.sent(), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 16 f0")}));
+    QVERIFY(!QFileInfo::exists(absent));
+    QVERIFY(QDir(rig.root.path() + QStringLiteral("/run")).isEmpty());
+}
+
+void FiioTest::cliSessionUnderLock()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(rig.presetTo(0));
+    const QString count = rig.root.path() + QStringLiteral("/count");
+    QVERIFY(rig.stub(QStringLiteral("n=$(cat '%1' 2>/dev/null || echo 0)\nn=$((n + 1))\necho $n >'%1'\n"
+                                    "if [ $n -ge 2 ]; then echo active; else echo inactive; fi\n")
+                         .arg(count)));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("casdap session active, skipped")), qPrintable(rig.err));
+    QCOMPARE(rig.calls().size(), 2);
+    QVERIFY(rig.sent().isEmpty());
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
+    QVERIFY(QFileInfo::exists(rig.root.path() + QStringLiteral("/run/casdap-fiio.lock")));
+}
+
+void FiioTest::cliHidBoundNoWait()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.bindDriver());
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--no-wait"), QStringLiteral("--stamp")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("3-1 hid bound, skipped")), qPrintable(rig.err));
+    QVERIFY(rig.elapsed < 200);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+}
+
+void FiioTest::cliDriverWait()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(rig.bindDriver());
+    const QString driver = rig.iface + QStringLiteral("/driver");
+    std::thread unbind([&driver] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        QFile::remove(driver);
+    });
+    const int code = rig.run({QStringLiteral("reset")});
+    unbind.join();
+    QCOMPARE(code, 0);
+    QVERIFY2(rig.elapsed >= 190 && rig.elapsed < 1000, std::to_string(rig.elapsed).c_str());
+    QVERIFY(rig.logged(QStringLiteral("3-1 preset 0, set 240")));
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+}
+
+void FiioTest::cliCardLate()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(4));
+    QVERIFY(!QFileInfo::exists(rig.sys + QStringLiteral("/class/sound")));
+    QVERIFY(!supportedModel(rig.paths.sysRoot, 1));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("3-1 preset 4, set 240")), qPrintable(rig.err));
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+}
+
+void FiioTest::cliInterfaceLate()
+{
+    {
+        CliRig rig(false);
+        QVERIFY(rig.ready);
+        QVERIFY(rig.presetTo(0));
+        const QString sys = rig.sys;
+        bool staged = false;
+        std::thread plug([&sys, &staged] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            staged = stageInterface(sys, QStringLiteral("3-1"));
+        });
+        const int code = rig.run({QStringLiteral("reset")});
+        plug.join();
+        QVERIFY(staged);
+        QCOMPARE(code, 0);
+        QVERIFY2(rig.elapsed >= 290 && rig.elapsed < 1000, std::to_string(rig.elapsed).c_str());
+        QVERIFY2(rig.logged(QStringLiteral("3-1 preset 0, set 240")), qPrintable(rig.err));
+        QCOMPARE(rig.fake.preset(), fiioBypass);
+    }
+    {
+        CliRig rig(false);
+        QVERIFY(rig.ready);
+        QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--no-wait")}), 0);
+        QVERIFY2(rig.logged(QStringLiteral("3-1 interface not ready, skipped")), qPrintable(rig.err));
+        QVERIFY(rig.elapsed < 200);
+        QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
+        QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 0);
+    }
+    {
+        CliRig rig(false);
+        QVERIFY(rig.ready);
+        QVERIFY(writeFile(rig.iface + QStringLiteral("/bInterfaceClass"), "03\n"));
+        QVERIFY(QDir().mkpath(rig.iface + QStringLiteral("/ep_05")));
+        QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--no-wait")}), 0);
+        QVERIFY2(rig.logged(QStringLiteral("3-1 unsupported interface, skipped")), qPrintable(rig.err));
+        QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
+    }
+}
+
+void FiioTest::cliForcesPreset0()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QCOMPARE(rig.sent(), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 16 f0")}));
+    QVERIFY2(rig.logged(QStringLiteral("3-1 preset 0, set 240")), qPrintable(rig.err));
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Reset), 0);
+}
+
+void FiioTest::cliAt240()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(fiioBypass));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QCOMPARE(rig.sent(), QStringList{QStringLiteral("get 16")});
+    QVERIFY2(rig.logged(QStringLiteral("3-1 bypass")), qPrintable(rig.err));
+}
+
+void FiioTest::cliMarker()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    const QString marker = QString::fromStdString(fiioMarkerPath(rig.paths));
+    QVERIFY(rig.presetTo(3));
+    QVERIFY(writeFile(marker, "2972:0149\n"));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("3-1 marker, set 240")), qPrintable(rig.err));
+    QVERIFY(!QFileInfo::exists(marker));
+
+    QVERIFY(rig.presetTo(162));
+    QVERIFY(writeFile(marker, "2972:0149\n"));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("3-1 casdap slot, set 240")), qPrintable(rig.err));
+    QVERIFY(!QFileInfo::exists(marker));
+
+    QVERIFY(rig.presetTo(162));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("3-1 casdap slot, set 240")));
+
+    QVERIFY(writeFile(marker, "2972:0149\n"));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("3-1 bypass")));
+    QVERIFY(!QFileInfo::exists(marker));
+}
+
+void FiioTest::cliDeadlineLockHeld()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    FiioLock peer(rig.paths);
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("300"),
+                      QStringLiteral("--stamp")}),
+             0);
+    QVERIFY2(rig.elapsed >= 290 && rig.elapsed < 350, std::to_string(rig.elapsed).c_str());
+    QVERIFY(rig.logged(QStringLiteral("deadline")));
+    QVERIFY(rig.sent().isEmpty());
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+}
+
+void FiioTest::cliDeadlineStampDrain()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    const InflightStamp stamp = rig.inflight();
+    QVERIFY(stamp.write(fiioNowMs(), QFileInfo(rig.devPath).canonicalFilePath().toStdString()));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("300"),
+                      QStringLiteral("--stamp")}),
+             0);
+    QVERIFY2(rig.elapsed >= 290 && rig.elapsed < 350, std::to_string(rig.elapsed).c_str());
+    QVERIFY(rig.logged(QStringLiteral("deadline")));
+    QVERIFY(rig.sent().isEmpty());
+    QVERIFY(stamp.read());
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+    QCOMPARE(rig.fake.preset(), uint8_t(0));
+}
+
+void FiioTest::cliDeadlineDelayedReply()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    rig.fake.setReplyDelayMs(1000);
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("300"),
+                      QStringLiteral("--stamp")}),
+             0);
+    QVERIFY2(rig.elapsed >= 290 && rig.elapsed < 350, std::to_string(rig.elapsed).c_str());
+    QVERIFY(rig.logged(QStringLiteral("deadline")));
+    QCOMPARE(rig.sent(), QStringList{QStringLiteral("get 16")});
+    QVERIFY(rig.inflight().read());
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+}
+
+void FiioTest::cliStampOnlyOnSuccess()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 0);
+    QFile stamp(rig.resetStamp());
+    QVERIFY(stamp.open(QIODevice::ReadOnly));
+    const qint64 written = stamp.readAll().trimmed().toLongLong();
+    stamp.close();
+    QVERIFY(written > 0 && bootNowMs() - written < 1000);
+    QVERIFY(QFile::remove(rig.resetStamp()));
+
+    QVERIFY(rig.presetTo(0));
+    rig.fake.setOutError(-EIO);
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 1);
+    QVERIFY2(rig.logged(QStringLiteral("3-1 failed device")), qPrintable(rig.err));
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+
+    QVERIFY(rig.bindDriver());
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--no-wait"), QStringLiteral("--stamp")}), 0);
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+
+    const QString empty = rig.root.path() + QStringLiteral("/empty");
+    QVERIFY(QDir().mkpath(empty));
+    rig.paths.sysRoot = empty.toStdString();
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("no supported dac")));
+    QVERIFY(QFileInfo::exists(rig.resetStamp()));
+}
+
+void FiioTest::cliStampSkip()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(writeFile(rig.resetStamp(), QByteArray::number(bootNowMs() - 2000) + '\n'));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--skip-stamped")}), 0);
+    QVERIFY2(rig.err.contains(QStringLiteral(" ms ago, skipped")), qPrintable(rig.err));
+    QVERIFY(rig.sent().isEmpty());
+    QVERIFY(rig.calls().isEmpty());
+
+    QVERIFY(writeFile(rig.resetStamp(), QByteArray::number(bootNowMs() - 11000) + '\n'));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--skip-stamped")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("3-1 preset 0, set 240")));
+    QCOMPARE(rig.calls().size(), 2);
+
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(writeFile(rig.resetStamp(), "garbage\n"));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--skip-stamped")}), 0);
+    QVERIFY(rig.logged(QStringLiteral("3-1 preset 0, set 240")));
+}
+
+void FiioTest::cliDumpLocked()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    FiioLock peer(rig.paths);
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    std::thread releaser([&peer] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        peer.release();
+    });
+    const int code = rig.run({QStringLiteral("dump")});
+    releaser.join();
+    QCOMPARE(code, 0);
+    QVERIFY2(rig.elapsed >= 290 && rig.elapsed < 1000, std::to_string(rig.elapsed).c_str());
+    QStringList expected{QStringLiteral("device=") + rig.devPath, QStringLiteral("firmware=1.3.0"),
+                         QStringLiteral("preset=240"), QStringLiteral("name=FH3"), QStringLiteral("preamp=0014")};
+    for (int i = 0; i < fiioBandCount; ++i)
+        expected.append(QStringLiteral("band%1=").arg(i) + QStringLiteral("%1").arg(i, 2, 16, QLatin1Char('0'))
+                        + QStringLiteral("00000000000000"));
+    QCOMPARE(rig.out.split(QLatin1Char('\n'), Qt::SkipEmptyParts), expected);
+    QVERIFY(rig.calls().isEmpty());
+}
+
+void FiioTest::cliRestoreSessionActive()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(writeBackup(rig.paths.configDir, tinyModel(), sampleBackup()));
+    QVERIFY(rig.stub(QStringLiteral("printf 'active\\n'\n")));
+    QCOMPARE(rig.run({QStringLiteral("restore-slot")}), 1);
+    QVERIFY2(rig.logged(QStringLiteral("casdap session active, refused")), qPrintable(rig.err));
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 0);
+}
+
+void FiioTest::cliRestoreNewest()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(writeBackup(rig.paths.configDir, tinyModel(), sampleBackup()));
+    FiioBackup second = sampleBackup();
+    second.name = "FH5";
+    second.bands[4] = bytes("04001e03e8006400");
+    const std::optional<std::string> newest = writeBackup(rig.paths.configDir, tinyModel(), second);
+    QVERIFY(newest);
+    QVERIFY(QString::fromStdString(*newest).endsWith(QStringLiteral("-2.txt")));
+    QCOMPARE(rig.run({QStringLiteral("restore-slot")}), 0);
+    QVERIFY2(rig.logged(QStringLiteral("3-1 restored, verified ") + QString::fromStdString(*newest)), qPrintable(rig.err));
+    QCOMPARE(rig.fake.name(162), std::string("FH5"));
+    QCOMPARE(rig.fake.band(162, 4), second.bands[4]);
+    QCOMPARE(rig.fake.band(162, 9), second.bands[9]);
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(rig.calls().size(), 2);
+}
+
+void FiioTest::cliDeadlineSessionHangs()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(rig.presetTo(0));
+    QVERIFY(rig.stub(QStringLiteral("exec sleep 5\n")));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("200"),
+                      QStringLiteral("--stamp")}),
+             0);
+    QVERIFY2(rig.elapsed >= 190 && rig.elapsed < 250, std::to_string(rig.elapsed).c_str());
+    QVERIFY2(rig.logged(QStringLiteral("deadline")), qPrintable(rig.err));
+    QVERIFY(rig.sent().isEmpty());
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+}
+
+void FiioTest::cliLockTimeout()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.presetTo(0));
+    FiioLock peer(rig.paths);
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 1);
+    QVERIFY2(rig.elapsed >= 1990 && rig.elapsed < 2500, std::to_string(rig.elapsed).c_str());
+    QVERIFY2(rig.logged(QStringLiteral("3-1 failed lock")), qPrintable(rig.err));
+    QVERIFY(rig.sent().isEmpty());
+    QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+}
+
+void FiioTest::cliTwoDacs()
+{
+    {
+        CliRig rig;
+        QVERIFY(rig.ready);
+        QVERIFY(rig.secondDac());
+        const QString second = rig.sys + QStringLiteral("/devices/platform/xhci/3-2/3-2:1.0");
+        QVERIFY(link(rig.sys + QStringLiteral("/bus/usb/drivers/usbhid"), second + QStringLiteral("/driver")));
+        QVERIFY(rig.presetTo(0));
+        QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--no-wait"), QStringLiteral("--stamp")}), 0);
+        QVERIFY2(rig.logged(QStringLiteral("3-1 preset 0, set 240")), qPrintable(rig.err));
+        QVERIFY(rig.logged(QStringLiteral("3-2 hid bound, skipped")));
+        QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+    }
+    {
+        CliRig rig;
+        QVERIFY(rig.ready);
+        QVERIFY(rig.secondDac());
+        QVERIFY(rig.manager());
+        QVERIFY(rig.presetTo(0));
+        const QString count = rig.root.path() + QStringLiteral("/count");
+        QVERIFY(rig.stub(QStringLiteral("n=$(cat '%1' 2>/dev/null || echo 0)\nn=$((n + 1))\necho $n >'%1'\n"
+                                        "if [ $n -ge 2 ]; then echo active; else echo inactive; fi\n")
+                             .arg(count)));
+        QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 0);
+        QVERIFY2(rig.logged(QStringLiteral("casdap session active, skipped")), qPrintable(rig.err));
+        QCOMPARE(rig.calls().size(), 2);
+        QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
+        QVERIFY(!QFileInfo::exists(rig.resetStamp()));
+    }
+}
+
+void FiioTest::cliUsageErrors()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline")}), 1);
+    QVERIFY(rig.logged(QStringLiteral("missing deadline")));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("-1")}), 1);
+    QVERIFY(rig.logged(QStringLiteral("bad deadline -1")));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("99999999999999999999")}), 1);
+    QVERIFY(rig.logged(QStringLiteral("bad deadline 99999999999999999999")));
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("")}), 1);
+    QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--bogus")}), 1);
+    QCOMPARE(rig.run({QStringLiteral("dump"), QStringLiteral("x")}), 1);
+    QVERIFY(rig.err.contains(QStringLiteral("casdap-fiio: usage: ")));
+    QCOMPARE(rig.run({}), 1);
+    QCOMPARE(rig.run({QStringLiteral("restore-slot"), QStringLiteral("a"), QStringLiteral("b")}), 1);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
+    QVERIFY(rig.calls().isEmpty());
+}
+
+void FiioTest::cliRuntimeDirForChild()
+{
+    const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
+    auto restore = qScopeGuard([&runtime] { qputenv("XDG_RUNTIME_DIR", runtime); });
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.manager());
+    QVERIFY(rig.presetTo(0));
+    qputenv("XDG_RUNTIME_DIR", QFile::encodeName(rig.root.path() + QStringLiteral("/elsewhere")));
+    QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
+    const QStringList calls = rig.calls();
+    QCOMPARE(calls.size(), 2);
+    for (const QString &call : calls)
+        QVERIFY2(call.startsWith(QString::fromStdString(rig.paths.runDir) + QLatin1Char(' ')), qPrintable(call));
+    QCOMPARE(qgetenv("XDG_RUNTIME_DIR"), QFile::encodeName(rig.root.path() + QStringLiteral("/elsewhere")));
+}
+
+void FiioTest::cliRestoreMoreThanOneDac()
+{
+    CliRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.secondDac());
+    QVERIFY(writeBackup(rig.paths.configDir, tinyModel(), sampleBackup()));
+    QCOMPARE(rig.run({QStringLiteral("restore-slot")}), 1);
+    QVERIFY2(rig.logged(QStringLiteral("more than one dac, refused")), qPrintable(rig.err));
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
+    QVERIFY(rig.calls().isEmpty());
 }
 
 QTEST_GUILESS_MAIN(FiioTest)
