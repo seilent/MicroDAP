@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -148,6 +149,8 @@ public:
         std::unique_lock<std::mutex> lock(m_mutex);
         const bool in = ep & 0x80;
         pause(in ? Op::In : Op::Out, lock);
+        if (!in && m_outCheck && !m_outCheck())
+            ++m_outCheckFailures;
         if (in) {
             const int result = readIn(lock, data, len, timeoutMs);
             std::vector<uint8_t> got;
@@ -245,6 +248,24 @@ public:
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_outError = error;
+    }
+
+    void setOutCheck(std::function<bool()> check)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_outCheck = std::move(check);
+    }
+
+    int outCheckFailures() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_outCheckFailures;
+    }
+
+    void setIgnoreBandSets(bool ignore)
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_ignoreBandSets = ignore;
     }
 
     void setResetError(int error)
@@ -535,7 +556,7 @@ private:
             if (payload.size() != std::size_t(fiioBandPayloadSize))
                 return payload;
             const std::vector<uint8_t> stored = storedBand(payload);
-            if (stored[0] < fiioBandCount && m_preset != fiioBypass)
+            if (stored[0] < fiioBandCount && m_preset != fiioBypass && !m_ignoreBandSets)
                 m_presets.at(m_preset).bands[stored[0]] = stored;
             return stored;
         }
@@ -570,6 +591,9 @@ private:
     int m_claimError = 0;
     int m_resetError = 0;
     int m_outError = 0;
+    int m_outCheckFailures = 0;
+    std::function<bool()> m_outCheck;
+    bool m_ignoreBandSets = false;
     int m_refusedReads = 0;
     int m_badFrames = 0;
     bool m_open = false;

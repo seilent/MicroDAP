@@ -7,12 +7,15 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QThread>
 
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstring>
-#include <chrono>
 #include <thread>
+
+#include <unistd.h>
 
 using namespace casdap;
 
@@ -90,14 +93,57 @@ const FiioModel &tinyModel()
     return *fiioModel(0x2972, 0x0149);
 }
 
+FiioPaths pathsIn(const QString &root)
+{
+    FiioPaths paths;
+    paths.runDir = (root + QStringLiteral("/run")).toStdString();
+    paths.runDirExists = QDir().mkpath(root + QStringLiteral("/run"));
+    paths.stateDir = (root + QStringLiteral("/state/casdap")).toStdString();
+    paths.configDir = (root + QStringLiteral("/config/casdap")).toStdString();
+    paths.sysRoot = (root + QStringLiteral("/sys")).toStdString();
+    paths.asoundDir = (root + QStringLiteral("/asound")).toStdString();
+    return paths;
+}
+
 struct Rig
 {
-    Rig()
-        : device(fake, tinyModel(), FiioDevice::Bounds{})
+    explicit Rig(FiioDevice::Bounds bounds = {})
+        : paths(pathsIn(root.path()))
+        , device(fake, tinyModel(), bounds, paths)
     {
         sysPath = (root.path() + QStringLiteral("/3-1")).toStdString();
         nodeReady = usbNode(root.path() + QStringLiteral("/3-1"), "3", "2");
         device.setLog([this](const std::string &line) { log.push_back(line); });
+        fake.setOutCheck([this] { return raw || !checkStamp || stamped(); });
+    }
+
+    bool rawOut(const std::vector<uint8_t> &frame)
+    {
+        std::vector<uint8_t> out = frame;
+        raw = true;
+        const bool ok = fake.bulk(0x05, out.data(), int(out.size()), 200) == int(out.size());
+        raw = false;
+        return ok;
+    }
+
+    InflightStamp stamp() const
+    {
+        return InflightStamp(paths, sysPath);
+    }
+
+    bool marker() const
+    {
+        return QFileInfo::exists(QString::fromStdString(fiioMarkerPath(paths)));
+    }
+
+    bool touchMarker() const
+    {
+        return writeFile(QString::fromStdString(fiioMarkerPath(paths)), "2972:0149\n");
+    }
+
+    bool stamped() const
+    {
+        return QFileInfo::exists(QString::fromStdString(stamp().path()));
     }
 
     ~Rig()
@@ -106,6 +152,7 @@ struct Rig
             return;
         QCOMPARE(fake.refusedReads(), 0);
         QCOMPARE(fake.badFrames(), 0);
+        QCOMPARE(fake.outCheckFailures(), 0);
     }
 
     FiioResult get(uint8_t cmd, const std::vector<uint8_t> &payload = {})
@@ -125,14 +172,72 @@ struct Rig
     }
 
     QTemporaryDir root;
+    FiioPaths paths;
     FakeUsbIo fake;
     FiioDevice device;
     std::string sysPath;
     std::vector<std::string> log;
     bool nodeReady = false;
     bool fakeErrorsExpected = false;
+    bool checkStamp = true;
+    bool raw = false;
     uint16_t seq = 0;
 };
+
+QStringList outs(const FakeUsbIo &fake, int skip = 0)
+{
+    QStringList out;
+    for (const FakeUsbIo::Call &call : fake.calls()) {
+        if (call.op != FakeUsbIo::Op::Out || call.data.size() < 9)
+            continue;
+        if (skip > 0) {
+            --skip;
+            continue;
+        }
+        QString line = QLatin1String(call.data[1] == 0xAA ? "set " : "get ")
+                       + QString::asprintf("%02x", call.data[5]);
+        const std::vector<uint8_t> payload(call.data.begin() + 7, call.data.begin() + 7 + call.data[6]);
+        if (!payload.empty())
+            line += QLatin1Char(' ') + QString::fromLatin1(hexOf(payload));
+        out.append(line);
+    }
+    return out;
+}
+
+FiioProfileFrames testFrames(double shift = 0.0)
+{
+    FiioProfileFrames frames;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        FiioBand band;
+        band.index = i;
+        band.gain = (i % 5) - 2 + shift;
+        band.freq = 31.25 * (1 << i);
+        band.q = i == 0 ? 0.71 : 1.0;
+        frames.bands[i] = bandPayload(tinyModel(), band);
+    }
+    return frames;
+}
+
+QString bandSet(const std::vector<uint8_t> &payload)
+{
+    return QStringLiteral("set 15 ") + QString::fromLatin1(hexOf(payload));
+}
+
+QStringList bandReads()
+{
+    QStringList out;
+    for (int i = 0; i < fiioBandCount; ++i)
+        out.append(QStringLiteral("get 15 %1").arg(i, 2, 10, QLatin1Char('0')));
+    return out;
+}
+
+QStringList bandSets(const FiioProfileFrames &frames)
+{
+    QStringList out;
+    for (const std::vector<uint8_t> &band : frames.bands)
+        out.append(bandSet(band));
+    return out;
+}
 
 int inReadsAfterLastOut(const std::vector<FakeUsbIo::Call> &calls)
 {
@@ -196,6 +301,31 @@ private slots:
     void qRounding();
     void holdRelease();
     void usbfsNoDevice();
+    void pathsFromEnv();
+    void takeOrder();
+    void takeKnownSlot();
+    void numberedBackups();
+    void backupFailure();
+    void updateDiff();
+    void updateNotSelected();
+    void abandonBetween();
+    void killMidTransaction();
+    void bypassDeletesMarker();
+    void forceOverPreset0();
+    void forceAt240();
+    void dumpReads();
+    void stampDrain();
+    void stampPerDevice();
+    void restoreAbandon();
+    void restoreForeignAbandon();
+    void noStampDrain();
+    void stampUnparsable();
+    void drainOverflowTerminal();
+    void drainCap();
+    void deadlines();
+    void lockPeer();
+    void restoreSlotVerified();
+    void driverWaitNeedsInterface();
 };
 
 void FiioTest::crc()
@@ -663,7 +793,7 @@ void FiioTest::fakeRejectsShortRead()
 
     std::vector<uint8_t> bad = frameGet(1, fiioCmdPreset);
     bad[7] ^= 0xFF;
-    QCOMPARE(rig.fake.bulk(0x05, bad.data(), int(bad.size()), 200), int(bad.size()));
+    QVERIFY(rig.rawOut(bad));
     QCOMPARE(rig.fake.badFrames(), 1);
     QCOMPARE(rig.fake.pending(), 0);
 
@@ -740,7 +870,7 @@ void FiioTest::delayedReply()
     QCOMPARE(preset.payload, std::vector<uint8_t>{fiioBypass});
     QVERIFY2(elapsed >= 990 && elapsed < 1400, std::to_string(elapsed).c_str());
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 1);
-    QCOMPARE(rig.fake.count(FakeUsbIo::Op::In), 2);
+    QCOMPARE(inReadsAfterLastOut(rig.fake.calls()), 2);
     for (const FakeUsbIo::Call &call : rig.fake.calls()) {
         if (call.op != FakeUsbIo::Op::In)
             continue;
@@ -806,11 +936,14 @@ void FiioTest::deadline()
 
 void FiioTest::outErrors()
 {
-    Rig rig;
+    FiioDevice::Bounds bounds;
+    bounds.stampWindowMs = 300;
+    Rig rig(bounds);
     QVERIFY(rig.nodeReady);
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     rig.fake.setOutError(-ETIMEDOUT);
     QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Timeout);
+    QVERIFY(rig.stamped());
     QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Refused);
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 1);
 
@@ -825,6 +958,9 @@ void FiioTest::outErrors()
     rig.fake.setOutError(-EPIPE);
     QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Device);
     QCOMPARE(rig.logged("out failed"), 1);
+    QVERIFY(rig.stamped());
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Refused);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     const FiioResult preset = rig.get(fiioCmdPreset);
     QCOMPARE(preset.reason, FiioReason::None);
     QCOMPARE(preset.payload, std::vector<uint8_t>{fiioBypass});
@@ -852,6 +988,8 @@ void FiioTest::inErrorDuringWait()
     QCOMPARE(rig.fake.calls().back().op, FakeUsbIo::Op::In);
     QCOMPARE(rig.fake.calls().back().result, -ENODEV);
     QCOMPARE(rig.logged("in failed"), 1);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Refused);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 1);
 }
 
 void FiioTest::discardCounted()
@@ -904,7 +1042,9 @@ void FiioTest::descriptorMismatch()
     rig.fake.setDescriptor(0x2972, 0x0149);
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     QVERIFY(rig.fake.claimed());
-    QCOMPARE(rig.fake.calls().back().len, 0);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Claim), 1);
+    QCOMPARE(rig.fake.calls().back().op, FakeUsbIo::Op::In);
+    QCOMPARE(rig.fake.calls().back().timeoutMs, 40);
     rig.device.releaseClose();
     QVERIFY(!rig.fake.claimed());
     QVERIFY(!rig.fake.isOpen());
@@ -936,7 +1076,7 @@ void FiioTest::overflow()
     QVERIFY(rig.nodeReady);
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     std::vector<uint8_t> unread = frameGet(40, fiioCmdBand, {1});
-    QCOMPARE(rig.fake.bulk(0x05, unread.data(), int(unread.size()), 200), int(unread.size()));
+    QVERIFY(rig.rawOut(unread));
 
     const int64_t start = fiioNowMs();
     const FiioResult result = rig.get(fiioCmdPreset);
@@ -950,8 +1090,7 @@ void FiioTest::overflow()
     QCOMPARE(reasonText(result.reason), std::string_view("overflow"));
 
     rig.device.releaseClose();
-    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
-    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Overflow);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::Overflow);
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Reset), 0);
 }
 
@@ -1056,7 +1195,9 @@ void FiioTest::bandsZeroUnderBypass()
 
 void FiioTest::replugPersistence()
 {
-    Rig rig;
+    FiioDevice::Bounds bounds;
+    bounds.stampWindowMs = 300;
+    Rig rig(bounds);
     QVERIFY(rig.nodeReady);
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     QCOMPARE(rig.set(fiioCmdPreset, presetPayload(162)).reason, FiioReason::None);
@@ -1165,6 +1306,912 @@ void FiioTest::usbfsNoDevice()
     QVERIFY(io.claim(0) < 0);
     io.close();
     QCOMPARE(io.claim(0), -EBADF);
+}
+
+void FiioTest::pathsFromEnv()
+{
+    const char *names[] = {"CASDAP_RUN_DIR", "HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "CASDAP_SYS_ROOT",
+                           "CASDAP_ASOUND_DIR"};
+    struct Saved
+    {
+        ~Saved()
+        {
+            for (std::size_t i = 0; i < values.size(); ++i) {
+                if (set[i])
+                    qputenv(keys[i], values[i]);
+                else
+                    qunsetenv(keys[i]);
+            }
+        }
+        std::vector<const char *> keys;
+        std::vector<QByteArray> values;
+        std::vector<bool> set;
+    } saved;
+    for (const char *name : names) {
+        saved.keys.push_back(name);
+        saved.set.push_back(qEnvironmentVariableIsSet(name));
+        saved.values.push_back(qgetenv(name));
+    }
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QByteArray r = root.path().toUtf8();
+    qputenv("CASDAP_RUN_DIR", r + "/run");
+    qputenv("HOME", r + "/home");
+    qputenv("XDG_STATE_HOME", r + "/xstate");
+    qputenv("XDG_CONFIG_HOME", r + "/xconfig");
+    qputenv("CASDAP_SYS_ROOT", r + "/sys");
+    qputenv("CASDAP_ASOUND_DIR", r + "/asound");
+    FiioPaths paths = fiioPathsFromEnv();
+    QCOMPARE(paths.runDir, (r + "/run").toStdString());
+    QVERIFY(!paths.runDirExists);
+    QCOMPARE(paths.stateDir, (r + "/xstate/casdap").toStdString());
+    QCOMPARE(paths.configDir, (r + "/xconfig/casdap").toStdString());
+    QCOMPARE(paths.sysRoot, (r + "/sys").toStdString());
+    QCOMPARE(paths.asoundDir, (r + "/asound").toStdString());
+    QCOMPARE(fiioMarkerPath(paths), (r + "/xstate/casdap/fiio-taking").toStdString());
+    QVERIFY(QDir().mkpath(root.path() + QStringLiteral("/run")));
+    QVERIFY(fiioPathsFromEnv().runDirExists);
+
+    qunsetenv("CASDAP_RUN_DIR");
+    qunsetenv("XDG_STATE_HOME");
+    qputenv("XDG_CONFIG_HOME", "");
+    qunsetenv("CASDAP_SYS_ROOT");
+    qunsetenv("CASDAP_ASOUND_DIR");
+    paths = fiioPathsFromEnv();
+    QCOMPARE(paths.runDir, "/run/user/" + std::to_string(::getuid()));
+    QCOMPARE(paths.stateDir, (r + "/home/.local/state/casdap").toStdString());
+    QCOMPARE(paths.configDir, (r + "/home/.config/casdap").toStdString());
+    QCOMPARE(paths.sysRoot, std::string("/sys"));
+    QCOMPARE(paths.asoundDir, std::string("/proc/asound"));
+}
+
+void FiioTest::takeOrder()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const FiioProfileFrames frames = testFrames();
+    FiioMirror mirror;
+    const FiioResult result = FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt);
+    QCOMPARE(result.reason, FiioReason::None);
+
+    QStringList expected{QStringLiteral("get 0b"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
+                         QStringLiteral("set 16 a2"), QStringLiteral("get 17")};
+    expected += bandReads();
+    expected += QStringLiteral("set 30 a24341534441500000");
+    expected += QStringLiteral("set 17 0000");
+    expected += bandSets(frames);
+    QCOMPARE(outs(rig.fake), expected);
+
+    QCOMPARE(rig.fake.preset(), uint8_t(162));
+    QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+    QCOMPARE(rig.fake.preamp(162), bytes("0000"));
+    QCOMPARE(hexOf(rig.fake.band(162, 0)), hexOf(frames.bands[0]).replace("0047", "0046"));
+    for (int i = 1; i < fiioBandCount; ++i)
+        QCOMPARE(rig.fake.band(162, i), frames.bands[i]);
+    QVERIFY(mirror.valid);
+    QCOMPARE(mirror.preset, 162);
+    QCOMPARE(mirror.name, std::string("CASDAP"));
+    QCOMPARE(mirror.firmware, std::string("1.3.0"));
+    QCOMPARE(mirror.preamp, bytes("0000"));
+    QVERIFY(mirror.bands == frames.bands);
+    QVERIFY(!rig.marker());
+    QVERIFY(!rig.stamped());
+
+    const std::optional<std::string> newest = newestBackup(rig.paths.configDir, tinyModel());
+    QVERIFY(newest);
+    QVERIFY(QString::fromStdString(*newest).endsWith(QStringLiteral("/fiio-2972-0149-slot162-1.txt")));
+    const std::optional<FiioBackup> backup = readBackup(*newest);
+    QVERIFY(backup);
+    QCOMPARE(backup->name, std::string("FH3"));
+    QCOMPARE(backup->firmware, std::string("1.3.0"));
+    QCOMPARE(backup->preamp, bytes("0050"));
+    QCOMPARE(backup->bands[9], bytes("0900003e80004600"));
+    QCOMPARE(rig.logged("backup "), 1);
+    QCOMPARE(rig.logged("take"), 1);
+}
+
+void FiioTest::takeKnownSlot()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const FiioProfileFrames frames = testFrames();
+    FiioMirror mirror;
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    const int before = rig.fake.count(FakeUsbIo::Op::Out);
+
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QStringList expected{QStringLiteral("get 16"), QStringLiteral("get 30 a2"), QStringLiteral("set 17 0000")};
+    expected += bandSets(frames);
+    QCOMPARE(outs(rig.fake, before), expected);
+    QVERIFY(!QFileInfo::exists(QString::fromStdString(rig.paths.configDir)
+                               + QStringLiteral("/fiio-2972-0149-slot162-2.txt")));
+
+    QVERIFY(rig.touchMarker());
+    FiioMirror fresh;
+    const int second = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::take(rig.device, fresh, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QCOMPARE(outs(rig.fake, second).mid(0, 3),
+             QStringList({QStringLiteral("get 0b"), QStringLiteral("get 16"), QStringLiteral("get 30 a2")}));
+    QCOMPARE(outs(rig.fake, second).size(), 14);
+    QVERIFY(!rig.marker());
+    QCOMPARE(rig.logged("backup "), 1);
+
+    FiioProfileFrames bad = frames;
+    bad.bands[4][0] = 5;
+    const int third = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::take(rig.device, fresh, rig.paths, bad, {}, std::nullopt).reason, FiioReason::Refused);
+    QVERIFY(!fresh.valid);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), third);
+}
+
+void FiioTest::numberedBackups()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const FiioProfileFrames frames = testFrames();
+    FiioMirror mirror;
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    const QString dir = QString::fromStdString(rig.paths.configDir);
+    QVERIFY(QFileInfo::exists(dir + QStringLiteral("/fiio-2972-0149-slot162-1.txt")));
+
+    QCOMPARE(rig.set(fiioCmdName, namePayload(162, "FH3")).reason, FiioReason::None);
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QVERIFY(QFileInfo::exists(dir + QStringLiteral("/fiio-2972-0149-slot162-2.txt")));
+    const std::optional<FiioBackup> second = readBackup((dir + QStringLiteral("/fiio-2972-0149-slot162-2.txt")).toStdString());
+    QVERIFY(second);
+    QCOMPARE(second->name, std::string("FH3"));
+    QCOMPARE(second->preamp, bytes("0000"));
+    QCOMPARE(second->bands[3], frames.bands[3]);
+
+    QCOMPARE(rig.set(fiioCmdName, namePayload(162, "FH3")).reason, FiioReason::None);
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QVERIFY(!QFileInfo::exists(dir + QStringLiteral("/fiio-2972-0149-slot162-3.txt")));
+    QCOMPARE(QString::fromStdString(*newestBackup(rig.paths.configDir, tinyModel())),
+             dir + QStringLiteral("/fiio-2972-0149-slot162-2.txt"));
+    QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+}
+
+void FiioTest::backupFailure()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QVERIFY(writeFile(rig.root.path() + QStringLiteral("/blocked"), "file\n"));
+    rig.paths.configDir = (rig.root.path() + QStringLiteral("/blocked/casdap")).toStdString();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    FiioMirror mirror;
+    const FiioResult result = FiioBatch::take(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt);
+    QCOMPARE(result.reason, FiioReason::Backup);
+    QCOMPARE(reasonText(result.reason), std::string_view("backup"));
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(rig.fake.name(162), std::string("FH3"));
+    QVERIFY(!rig.marker());
+    QVERIFY(!mirror.valid);
+    QCOMPARE(outs(rig.fake).last(), QStringLiteral("set 16 f0"));
+    QCOMPARE(outs(rig.fake).filter(QStringLiteral("set 30")).size(), 0);
+    QCOMPARE(rig.logged("backup failed"), 1);
+    QCOMPARE(rig.logged("bypass acked"), 1);
+}
+
+void FiioTest::updateDiff()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    FiioProfileFrames frames = testFrames();
+    FiioMirror mirror;
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+
+    int before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::update(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QCOMPARE(outs(rig.fake, before), QStringList{QStringLiteral("get 16")});
+
+    const FiioProfileFrames moved = testFrames(1.5);
+    frames.bands[2] = moved.bands[2];
+    frames.bands[7] = moved.bands[7];
+    before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::update(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QCOMPARE(outs(rig.fake, before),
+             QStringList({QStringLiteral("get 16"), bandSet(frames.bands[2]), bandSet(frames.bands[7])}));
+    QCOMPARE(rig.fake.band(162, 2), frames.bands[2]);
+    QCOMPARE(rig.fake.band(162, 7), frames.bands[7]);
+    QVERIFY(mirror.valid);
+    QVERIFY(mirror.bands == frames.bands);
+    QCOMPARE(rig.logged("update 2"), 1);
+}
+
+void FiioTest::updateNotSelected()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const FiioProfileFrames frames = testFrames();
+    FiioMirror mirror;
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+
+    QCOMPARE(rig.set(fiioCmdPreset, presetPayload(0)).reason, FiioReason::None);
+    int before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::update(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QStringList expected{QStringLiteral("get 16"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
+                         QStringLiteral("set 16 a2"), QStringLiteral("set 17 0000")};
+    expected += bandSets(frames);
+    QCOMPARE(outs(rig.fake, before), expected);
+    QCOMPARE(rig.fake.preset(), uint8_t(162));
+    QVERIFY(mirror.valid);
+
+    mirror.valid = false;
+    before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::update(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    expected = QStringList{QStringLiteral("get 16"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
+                           QStringLiteral("set 17 0000")};
+    expected += bandSets(frames);
+    QCOMPARE(outs(rig.fake, before), expected);
+    QVERIFY(mirror.valid);
+}
+
+void FiioTest::abandonBetween()
+{
+    const FiioProfileFrames frames = testFrames();
+    for (int k = 0; k <= 27; ++k) {
+        Rig rig;
+        QVERIFY(rig.nodeReady);
+        QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+        FiioMirror mirror;
+        const auto abandoned = [&rig, k] { return rig.fake.count(FakeUsbIo::Op::Out) >= k; };
+        const FiioResult result = FiioBatch::take(rig.device, mirror, rig.paths, frames, abandoned, std::nullopt);
+        const QByteArray at = QByteArray::number(k);
+        QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), k);
+        QVERIFY2(result.reason == (k < 27 ? FiioReason::Abandoned : FiioReason::None), at);
+        QVERIFY2(mirror.valid == (k == 27), at);
+        QVERIFY2(rig.fake.preset() != 162 || rig.fake.name(162) == "CASDAP" || rig.marker(), at);
+        QVERIFY2(rig.fake.name(162) != "CASDAP"
+                     || readBackup(newestBackup(rig.paths.configDir, tinyModel()).value_or(""))->name == "FH3",
+                 at);
+        if (k == 3)
+            QVERIFY(rig.marker() && rig.fake.preset() == fiioBypass);
+        if (k == 16)
+            QVERIFY(!rig.marker() && rig.fake.name(162) == "CASDAP");
+        QVERIFY2(!rig.stamped(), at);
+
+        QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        QCOMPARE(rig.fake.preset(), fiioBypass);
+        QVERIFY2(!rig.marker(), at);
+        QVERIFY(!rig.fake.wedged());
+        QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+        QVERIFY(mirror.valid);
+    }
+}
+
+void FiioTest::killMidTransaction()
+{
+    const FiioProfileFrames frames = testFrames();
+    FiioDevice::Bounds dying;
+    dying.replyWindowMs = 100;
+    dying.readMs = 50;
+    FiioDevice::Bounds next;
+    next.stampWindowMs = 400;
+    next.readMs = 100;
+    for (int k : {0, 2, 3, 4, 15, 16, 17, 26}) {
+        Rig rig(dying);
+        QVERIFY(rig.nodeReady);
+        QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+        FiioMirror mirror;
+        const auto killAt = [&rig, k] {
+            if (rig.fake.count(FakeUsbIo::Op::Out) == k)
+                rig.fake.setReplyDelayMs(250);
+            return false;
+        };
+        const QByteArray at = QByteArray::number(k);
+        QVERIFY2(FiioBatch::take(rig.device, mirror, rig.paths, frames, killAt, std::nullopt).reason
+                     == FiioReason::Timeout,
+                 at);
+        QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), k + 1);
+        QVERIFY2(rig.stamped(), at);
+        rig.device.releaseClose();
+        rig.fake.setReplyDelayMs(0);
+        QVERIFY2(rig.fake.preset() != 162 || rig.fake.name(162) == "CASDAP" || rig.marker(), at);
+
+        QVERIFY2(rig.fake.name(162) != "CASDAP"
+                     || readBackup(newestBackup(rig.paths.configDir, tinyModel()).value_or(""))->name == "FH3",
+                 at);
+        FiioDevice after(rig.fake, tinyModel(), next, rig.paths);
+        QCOMPARE(after.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+        QVERIFY2(!rig.stamped(), at);
+        QCOMPARE(rig.fake.pending(), 0);
+        FiioMirror reset;
+        QCOMPARE(FiioBatch::force(after, reset, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        QVERIFY2(!rig.fake.wedged(), at);
+        QCOMPARE(rig.fake.preset(), fiioBypass);
+        QVERIFY2(!rig.marker(), at);
+    }
+}
+
+void FiioTest::bypassDeletesMarker()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QCOMPARE(rig.set(fiioCmdPreset, presetPayload(162)).reason, FiioReason::None);
+    QVERIFY(rig.touchMarker());
+    FiioMirror mirror;
+    mirror.valid = true;
+    const int before = rig.fake.count(FakeUsbIo::Op::Out);
+    const FiioResult result = FiioBatch::bypass(rig.device, mirror, rig.paths, testFrames(), [] { return true; },
+                                                std::nullopt);
+    QCOMPARE(result.reason, FiioReason::None);
+    QCOMPARE(outs(rig.fake, before), QStringList{QStringLiteral("set 16 f0")});
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(mirror.preset, int(fiioBypass));
+    QVERIFY(!rig.marker());
+    QCOMPARE(rig.logged("bypass acked"), 1);
+}
+
+void FiioTest::forceOverPreset0()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QCOMPARE(rig.set(fiioCmdPreset, presetPayload(0)).reason, FiioReason::None);
+    const std::vector<uint8_t> jazzBand = rig.fake.band(0, 3);
+    const std::vector<uint8_t> jazzPreamp = rig.fake.preamp(0);
+    QVERIFY(rig.touchMarker());
+    FiioMirror mirror;
+    const int before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt).reason, FiioReason::None);
+    QCOMPARE(outs(rig.fake, before), QStringList({QStringLiteral("get 16"), QStringLiteral("set 16 f0")}));
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(rig.fake.band(0, 3), jazzBand);
+    QCOMPARE(rig.fake.preamp(0), jazzPreamp);
+    QCOMPARE(mirror.preset, int(fiioBypass));
+    QVERIFY(!rig.marker());
+    QCOMPARE(rig.logged("force from preset 0"), 1);
+}
+
+void FiioTest::forceAt240()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(rig.touchMarker());
+    FiioMirror mirror;
+    QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt).reason, FiioReason::None);
+    QCOMPARE(outs(rig.fake), QStringList{QStringLiteral("get 16")});
+    QCOMPARE(mirror.preset, int(fiioBypass));
+    QVERIFY(!rig.marker());
+
+    QCOMPARE(rig.set(fiioCmdPreset, presetPayload(162)).reason, FiioReason::None);
+    QVERIFY(rig.touchMarker());
+    const int before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, testFrames(), [&rig, before] {
+                 return rig.fake.count(FakeUsbIo::Op::Out) > before;
+             }, std::nullopt).reason,
+             FiioReason::Abandoned);
+    QVERIFY(rig.marker());
+    QCOMPARE(rig.fake.preset(), uint8_t(162));
+}
+
+void FiioTest::dumpReads()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const FiioProfileFrames frames = testFrames();
+    FiioMirror taken;
+    QCOMPARE(FiioBatch::take(rig.device, taken, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    FiioMirror mirror;
+    const int before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::dump(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+    QStringList expected{QStringLiteral("get 0b"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
+                         QStringLiteral("get 17")};
+    expected += bandReads();
+    QCOMPARE(outs(rig.fake, before), expected);
+    QCOMPARE(mirror.preset, 162);
+    QCOMPARE(mirror.name, std::string("CASDAP"));
+    QCOMPARE(mirror.preamp, bytes("0000"));
+    QCOMPARE(mirror.firmware, std::string("1.3.0"));
+    QCOMPARE(mirror.bands[0], rig.fake.band(162, 0));
+    QCOMPARE(mirror.bands[9], frames.bands[9]);
+    QVERIFY(!mirror.valid);
+}
+
+void FiioTest::stampDrain()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    rig.fake.setReplyDelayMs(1500);
+    QVERIFY(rig.rawOut(frameGet(70, fiioCmdBand, {1})));
+    QVERIFY(rig.stamp().write(fiioNowMs(), rig.sysPath));
+    rig.device.releaseClose();
+    rig.fake.setReplyDelayMs(0);
+    QCOMPARE(rig.fake.pending(), 1);
+
+    const int64_t start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const int64_t elapsed = fiioNowMs() - start;
+    QVERIFY2(elapsed >= 2990 && elapsed < 3600, std::to_string(elapsed).c_str());
+    QCOMPARE(rig.logged("drained 07bb0b00001508"), 1);
+    QVERIFY(!rig.stamped());
+    QCOMPARE(rig.fake.pending(), 0);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::None);
+    QVERIFY(!rig.fake.wedged());
+
+}
+
+void FiioTest::stampPerDevice()
+{
+    FiioDevice::Bounds bounds;
+    bounds.replyWindowMs = 50;
+    bounds.readMs = 50;
+    bounds.stampWindowMs = 300;
+    Rig rig(bounds);
+    QVERIFY(rig.nodeReady);
+    const QString otherDir = rig.root.path() + QStringLiteral("/devices/4-1");
+    QVERIFY(usbNode(otherDir, "4", "5"));
+    QVERIFY(link(otherDir, rig.root.path() + QStringLiteral("/bus/4-1")));
+    const std::string otherLink = (rig.root.path() + QStringLiteral("/bus/4-1")).toStdString();
+    FakeUsbIo otherFake;
+    FiioDevice other(otherFake, tinyModel(), bounds, rig.paths);
+    const InflightStamp otherStamp(rig.paths, otherLink);
+    otherFake.setOutCheck([&otherStamp] { return QFileInfo::exists(QString::fromStdString(otherStamp.path())); });
+
+    QVERIFY(rig.stamp().path() != otherStamp.path());
+    QVERIFY(QString::fromStdString(rig.stamp().path()).endsWith(QStringLiteral("/run/casdap-fiio.inflight.3-1")));
+    QVERIFY(QString::fromStdString(otherStamp.path()).endsWith(QStringLiteral("/run/casdap-fiio.inflight.4-1")));
+
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QCOMPARE(other.openClaimed(otherLink, std::nullopt), FiioReason::None);
+    QCOMPARE(otherFake.calls().front().path, std::string("/dev/bus/usb/004/005"));
+    rig.fake.setReplyDelayMs(200);
+    otherFake.setReplyDelayMs(200);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Timeout);
+    QCOMPARE(other.transact(frameGet(1, fiioCmdPreset), std::nullopt).reason, FiioReason::Timeout);
+    const std::optional<InflightStamp::Entry> mine = rig.stamp().read();
+    const std::optional<InflightStamp::Entry> theirs = otherStamp.read();
+    QVERIFY(mine && mine->parsed && theirs && theirs->parsed);
+    QCOMPARE(mine->device, QFileInfo(QString::fromStdString(rig.sysPath)).canonicalFilePath().toStdString());
+    QCOMPARE(theirs->device, QFileInfo(otherDir).canonicalFilePath().toStdString());
+
+    rig.device.releaseClose();
+    rig.fake.setReplyDelayMs(0);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(!rig.stamped());
+    QVERIFY(otherStamp.read());
+    QCOMPARE(otherStamp.read()->ms, theirs->ms);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::None);
+    QVERIFY(otherStamp.read());
+    QCOMPARE(otherFake.outCheckFailures(), 0);
+}
+
+void FiioTest::noStampDrain()
+{
+    FiioDevice::Bounds bounds;
+    bounds.replyWindowMs = 50;
+    bounds.readMs = 50;
+    Rig rig(bounds);
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(rig.rawOut(frameGet(71, fiioCmdBand, {2})));
+    rig.device.releaseClose();
+    QCOMPARE(rig.fake.pending(), 1);
+    const int64_t start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(fiioNowMs() - start < 300);
+    QCOMPARE(rig.logged("drained "), 1);
+    QCOMPARE(inReadsAfterLastOut(rig.fake.calls()), 2);
+    QCOMPARE(rig.fake.calls().back().timeoutMs, 40);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::None);
+    QVERIFY(!rig.fake.wedged());
+
+    rig.fake.setReplyDelayMs(200);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Timeout);
+    QVERIFY(rig.stamped());
+    const std::optional<InflightStamp::Entry> entry = rig.stamp().read();
+    QVERIFY(entry && entry->parsed);
+    QCOMPARE(entry->device, rig.sysPath);
+    QVERIFY(fiioNowMs() - entry->ms < 1000);
+    rig.stamp().remove();
+
+    rig.device.releaseClose();
+    FiioPaths noRun = rig.paths;
+    noRun.runDirExists = false;
+    FiioDevice bare(rig.fake, tinyModel(), bounds, noRun);
+    rig.checkStamp = false;
+    QThread::msleep(250);
+    QCOMPARE(bare.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QCOMPARE(bare.transact(frameGet(1, fiioCmdPreset), std::nullopt).reason, FiioReason::Timeout);
+    QVERIFY(!rig.stamped());
+}
+
+void FiioTest::stampUnparsable()
+{
+    FiioDevice::Bounds bounds;
+    bounds.stampWindowMs = 400;
+    bounds.readMs = 100;
+    Rig rig(bounds);
+    QVERIFY(rig.nodeReady);
+    const QString path = QString::fromStdString(rig.stamp().path());
+    for (const QByteArray &junk : {QByteArray("junk\n"), QByteArray(""), QByteArray("123\n"), QByteArray(" /sys/x\n"),
+                                   QByteArray("12a4 /sys/x\n"), QByteArray("123 /sys/x trailing\n"),
+                                   QByteArray("123 /sys/x\n\n"), QByteArray("123 /sys/x\nmore\n"),
+                                   QByteArray("123  /sys/x\n")}) {
+        QVERIFY(writeFile(path, junk));
+        const std::optional<InflightStamp::Entry> entry = rig.stamp().read();
+        QVERIFY2(entry && !entry->parsed, junk.constData());
+        QVERIFY(std::abs(fiioNowMs() - entry->ms) < 50);
+    }
+    const int64_t start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    const int64_t elapsed = fiioNowMs() - start;
+    QVERIFY2(elapsed >= 390 && elapsed < 800, std::to_string(elapsed).c_str());
+    QVERIFY(!rig.stamped());
+
+    QVERIFY(rig.stamp().write(fiioNowMs() - 10000, "/sys/devices/elsewhere"));
+    const int64_t foreign = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(fiioNowMs() - foreign >= 390);
+    QVERIFY(!rig.stamped());
+
+    QVERIFY(rig.stamp().write(fiioNowMs() + 60000, rig.sysPath));
+    const int64_t future = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(fiioNowMs() - future < 800);
+    QVERIFY(!rig.stamp().read());
+}
+
+void FiioTest::drainOverflowTerminal()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QVERIFY(rig.rawOut(frameGet(72, fiioCmdBand, {3})));
+    QVERIFY(rig.rawOut(frameGet(73, fiioCmdBand, {4})));
+    QVERIFY(rig.fake.wedged());
+    QVERIFY(rig.stamp().write(fiioNowMs(), rig.sysPath));
+    rig.device.releaseClose();
+
+    const int64_t start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::Overflow);
+    QVERIFY(fiioNowMs() - start < 200);
+    QCOMPARE(inReadsAfterLastOut(rig.fake.calls()), 1);
+    QCOMPARE(rig.logged("drain overflow"), 1);
+    QVERIFY(!rig.fake.isOpen());
+    QVERIFY(rig.stamped());
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Reset), 0);
+
+    const int reads = rig.fake.count(FakeUsbIo::Op::In);
+    QCOMPARE(rig.device.openClaimedNoDrain(rig.sysPath), FiioReason::None);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::In), reads);
+    const int outsBefore = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(rig.get(fiioCmdPreset).reason, FiioReason::Refused);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), outsBefore);
+    QCOMPARE(rig.device.resetAndClose(), FiioReason::ResetDone);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Reset), 1);
+    const std::vector<FakeUsbIo::Call> calls = rig.fake.calls();
+    QCOMPARE(calls[calls.size() - 3].op, FakeUsbIo::Op::Release);
+    QCOMPARE(calls[calls.size() - 2].op, FakeUsbIo::Op::Reset);
+    QCOMPARE(calls[calls.size() - 1].op, FakeUsbIo::Op::Close);
+    QVERIFY(!rig.fake.wedged());
+    QVERIFY(!rig.stamped());
+    QCOMPARE(rig.logged("reset"), 1);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    QCOMPARE(rig.get(fiioCmdPreset).payload, std::vector<uint8_t>{fiioBypass});
+
+    const InflightStamp otherStamp(rig.paths, (rig.root.path() + QStringLiteral("/9-9")).toStdString());
+    QVERIFY(otherStamp.write(fiioNowMs(), "/sys/devices/9-9"));
+    QCOMPARE(rig.device.openClaimedNoDrain(rig.sysPath), FiioReason::None);
+    QCOMPARE(rig.device.resetAndClose(), FiioReason::ResetDone);
+    QVERIFY(otherStamp.read());
+    QCOMPARE(rig.device.openClaimedNoDrain(rig.sysPath), FiioReason::None);
+    rig.fake.setResetError(-ENODEV);
+    QCOMPARE(rig.device.resetAndClose(), FiioReason::Device);
+    QVERIFY(!rig.fake.isOpen());
+    QCOMPARE(rig.device.resetAndClose(), FiioReason::Device);
+}
+
+void FiioTest::drainCap()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    rig.fake.strayBeforeReply(std::vector<std::vector<uint8_t>>(20, bytes("07bb0b00931508090014319c00640075ee")));
+    QVERIFY(rig.rawOut(frameGet(74, fiioCmdBand, {9})));
+    rig.device.releaseClose();
+    QCOMPARE(rig.fake.pending(), 21);
+
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::Device);
+    QCOMPARE(inReadsAfterLastOut(rig.fake.calls()), 4);
+    QCOMPARE(rig.logged("drain cap 4"), 1);
+    QCOMPARE(rig.fake.pending(), 17);
+
+    QVERIFY(rig.stamp().write(fiioNowMs(), rig.sysPath));
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::Device);
+    QCOMPARE(inReadsAfterLastOut(rig.fake.calls()), 4 + 16);
+    QCOMPARE(rig.logged("drain cap 16"), 1);
+    QCOMPARE(rig.fake.pending(), 1);
+    QVERIFY(rig.stamped());
+    QVERIFY(!rig.fake.isOpen());
+}
+
+void FiioTest::deadlines()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    FiioLock peer(rig.paths);
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    FiioLock lock(rig.paths);
+    int64_t start = fiioNowMs();
+    QVERIFY(!lock.acquire(1000, start + 100, {}));
+    int64_t elapsed = fiioNowMs() - start;
+    QVERIFY2(elapsed >= 90 && elapsed < 400, std::to_string(elapsed).c_str());
+    QVERIFY(!lock.held());
+    peer.release();
+
+    QVERIFY(rig.stamp().write(fiioNowMs(), rig.sysPath));
+    start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, start + 200), FiioReason::Deadline);
+    elapsed = fiioNowMs() - start;
+    QVERIFY2(elapsed >= 190 && elapsed < 500, std::to_string(elapsed).c_str());
+    QVERIFY(rig.stamped());
+    QVERIFY(!rig.fake.isOpen());
+    for (const FakeUsbIo::Call &call : rig.fake.calls()) {
+        if (call.op == FakeUsbIo::Op::In)
+            QVERIFY(call.timeoutMs <= 200);
+    }
+    rig.stamp().remove();
+
+    start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, start + 20), FiioReason::Deadline);
+    QVERIFY(rig.fake.calls().back().timeoutMs <= 20);
+    QVERIFY(!rig.stamped());
+    QVERIFY(rig.stamp().write(fiioNowMs() - 3100, rig.sysPath));
+    start = fiioNowMs();
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, start + 30), FiioReason::Deadline);
+    QVERIFY(fiioNowMs() - start < 200);
+    QVERIFY(rig.stamped());
+    rig.stamp().remove();
+
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    rig.fake.setReplyDelayMs(100);
+    FiioMirror mirror;
+    start = fiioNowMs();
+    const FiioResult result = FiioBatch::take(rig.device, mirror, rig.paths, testFrames(), {}, start + 250);
+    elapsed = fiioNowMs() - start;
+    QCOMPARE(result.reason, FiioReason::Deadline);
+    QVERIFY2(elapsed >= 240 && elapsed < 500, std::to_string(elapsed).c_str());
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 3);
+    QVERIFY(rig.stamped());
+    QVERIFY(!mirror.valid);
+    QCOMPARE(FiioBatch::bypass(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt).reason,
+             FiioReason::Refused);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 3);
+}
+
+void FiioTest::lockPeer()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const FiioPaths paths = pathsIn(root.path());
+    FiioLock a(paths);
+    FiioLock b(paths);
+    QVERIFY(a.acquire(0, std::nullopt, {}));
+    QVERIFY(a.held());
+    QVERIFY(a.acquire(0, std::nullopt, {}));
+    QVERIFY(QFileInfo::exists(root.path() + QStringLiteral("/run/casdap-fiio.lock")));
+    int64_t start = fiioNowMs();
+    QVERIFY(!b.acquire(150, std::nullopt, {}));
+    QVERIFY(fiioNowMs() - start >= 140);
+    start = fiioNowMs();
+    QVERIFY(!b.acquire(1000, std::nullopt, [] { return true; }));
+    QVERIFY(fiioNowMs() - start < 100);
+    std::thread releaser([&a] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        a.release();
+    });
+    start = fiioNowMs();
+    const bool got = b.acquire(1000, std::nullopt, {});
+    const int64_t waited = fiioNowMs() - start;
+    releaser.join();
+    QVERIFY(got);
+    QVERIFY2(waited >= 90 && waited < 400, std::to_string(waited).c_str());
+    QVERIFY(!a.acquire(0, std::nullopt, {}));
+    b.release();
+    QVERIFY(a.acquire(0, std::nullopt, {}));
+
+    FiioPaths noRun = paths;
+    noRun.runDir = (root.path() + QStringLiteral("/absent")).toStdString();
+    noRun.runDirExists = false;
+    FiioLock c(noRun);
+    FiioLock d(noRun);
+    QVERIFY(c.acquire(0, std::nullopt, {}));
+    QVERIFY(d.acquire(0, std::nullopt, {}));
+    QVERIFY(!QFileInfo::exists(root.path() + QStringLiteral("/absent")));
+}
+
+void FiioTest::restoreSlotVerified()
+{
+    Rig rig;
+    QVERIFY(rig.nodeReady);
+    QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+    FiioMirror mirror;
+    QCOMPARE(FiioBatch::restoreSlot(rig.device, mirror, rig.paths, {}, {}, std::nullopt).reason, FiioReason::Backup);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 0);
+
+    QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt).reason, FiioReason::None);
+    FiioBackup backup = sampleBackup();
+    const std::optional<std::string> file = writeBackup(rig.paths.configDir, tinyModel(), backup);
+    QVERIFY(file);
+
+    const QString broken = rig.root.path() + QStringLiteral("/broken.txt");
+    QFile good(QString::fromStdString(*file));
+    QVERIFY(good.open(QIODevice::ReadOnly));
+    const QByteArray text = good.readAll();
+    QVERIFY(text.contains("band3=03"));
+    QVERIFY(writeFile(broken, QByteArray(text).replace("band3=03", "band3=05")));
+    int before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::restoreSlot(rig.device, mirror, rig.paths, {}, {}, std::nullopt, broken.toStdString()).reason,
+             FiioReason::Backup);
+    QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), before);
+    FiioBackup misnumbered = backup;
+    misnumbered.bands[3][0] = 5;
+    misnumbered.name = "OTHER";
+    QVERIFY(!writeBackup(rig.paths.configDir, tinyModel(), misnumbered));
+
+    rig.fake.setIgnoreBandSets(true);
+    QCOMPARE(FiioBatch::restoreSlot(rig.device, mirror, rig.paths, {}, {}, std::nullopt).reason, FiioReason::Ack);
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+    QCOMPARE(rig.logged("restore band 0 reads "), 1);
+    QCOMPARE(outs(rig.fake).filter(QStringLiteral("set 30")).size(), 1);
+    rig.fake.setIgnoreBandSets(false);
+
+    QVERIFY(rig.touchMarker());
+    before = rig.fake.count(FakeUsbIo::Op::Out);
+    QCOMPARE(FiioBatch::restoreSlot(rig.device, mirror, rig.paths, {}, {}, std::nullopt).reason, FiioReason::None);
+    QStringList expected{QStringLiteral("get 30 a2"), QStringLiteral("set 16 a2"), QStringLiteral("set 17 0050")};
+    for (const std::vector<uint8_t> &band : backup.bands)
+        expected.append(bandSet(band));
+    expected += bandReads();
+    expected += QStringLiteral("set 30 a2464833") + QStringLiteral("0000000000");
+    expected += QStringLiteral("set 16 f0");
+    QCOMPARE(outs(rig.fake, before), expected);
+    QCOMPARE(rig.fake.preset(), fiioBypass);
+    QCOMPARE(rig.fake.name(162), std::string("FH3"));
+    QCOMPARE(rig.fake.preamp(162), bytes("0050"));
+    for (int i = 0; i < fiioBandCount; ++i)
+        QCOMPARE(rig.fake.band(162, i), backup.bands[i]);
+    QVERIFY(!rig.marker());
+    QCOMPARE(rig.logged("restored, verified " + *file), 1);
+}
+
+void FiioTest::restoreAbandon()
+{
+    const FiioProfileFrames frames = testFrames();
+    for (int k = 0; k <= 24; ++k) {
+        Rig rig;
+        QVERIFY(rig.nodeReady);
+        QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+        FiioMirror mirror;
+        QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        const std::optional<std::string> good = newestBackup(rig.paths.configDir, tinyModel());
+        QVERIFY(good);
+        const int start = rig.fake.count(FakeUsbIo::Op::Out);
+        const auto abandoned = [&rig, start, k] { return rig.fake.count(FakeUsbIo::Op::Out) - start >= k; };
+        const FiioResult result = FiioBatch::restoreSlot(rig.device, mirror, rig.paths, frames, abandoned,
+                                                         std::nullopt);
+        const QByteArray at = QByteArray::number(k);
+        QVERIFY2(result.reason == (k < 24 ? FiioReason::Abandoned : FiioReason::None), at);
+        QVERIFY2(rig.fake.name(162) == (k < 24 ? "CASDAP" : "FH3"), at);
+
+        QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        QCOMPARE(newestBackup(rig.paths.configDir, tinyModel()), good);
+        QVERIFY2(!QFileInfo::exists(QString::fromStdString(rig.paths.configDir)
+                                    + QStringLiteral("/fiio-2972-0149-slot162-2.txt")),
+                 at);
+        QCOMPARE(readBackup(*good)->name, std::string("FH3"));
+    }
+}
+
+void FiioTest::restoreForeignAbandon()
+{
+    const FiioProfileFrames frames = testFrames();
+    const std::vector<uint8_t> userBand = bytes("04ffc407d0008d01");
+    for (int k = 0; k <= 37; ++k) {
+        Rig rig;
+        QVERIFY(rig.nodeReady);
+        QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
+        FiioMirror taken;
+        QCOMPARE(FiioBatch::take(rig.device, taken, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        const std::optional<std::string> good = newestBackup(rig.paths.configDir, tinyModel());
+        QVERIFY(good);
+        const std::optional<FiioBackup> goodBackup = readBackup(*good);
+        QCOMPARE(rig.set(fiioCmdName, namePayload(162, "USER")).reason, FiioReason::None);
+        QCOMPARE(rig.set(fiioCmdBand, userBand).reason, FiioReason::None);
+        QCOMPARE(rig.set(fiioCmdPreset, presetPayload(fiioBypass)).reason, FiioReason::None);
+        std::array<std::vector<uint8_t>, fiioBandCount> userBands;
+        for (int i = 0; i < fiioBandCount; ++i)
+            userBands[i] = rig.fake.band(162, i);
+        const std::vector<uint8_t> userPreamp = rig.fake.preamp(162);
+
+        FiioMirror mirror;
+        const int start = rig.fake.count(FakeUsbIo::Op::Out);
+        const auto abandoned = [&rig, start, k] { return rig.fake.count(FakeUsbIo::Op::Out) - start >= k; };
+        const FiioResult result = FiioBatch::restoreSlot(rig.device, mirror, rig.paths, frames, abandoned,
+                                                         std::nullopt);
+        const QByteArray at = QByteArray::number(k);
+        QVERIFY2(result.reason == (k < 37 ? FiioReason::Abandoned : FiioReason::None), at);
+        const std::string name = rig.fake.name(162);
+        QVERIFY2(name == "CASDAP" || name == "USER" || (k == 37 && name == "FH3"), at);
+        if (name == "USER") {
+            QVERIFY2(k <= 15, at);
+            for (int i = 0; i < fiioBandCount; ++i)
+                QVERIFY2(rig.fake.band(162, i) == userBands[i], at);
+        }
+        if (k > 15 && k < 37)
+            QVERIFY2(name == "CASDAP", at);
+        QVERIFY2(rig.fake.preset() != 162 || name == "CASDAP" || rig.marker() || k == 37, at);
+        if (k == 37) {
+            QCOMPARE(rig.fake.preset(), fiioBypass);
+            QCOMPARE(name, std::string("FH3"));
+        }
+
+        QCOMPARE(FiioBatch::take(rig.device, taken, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
+        bool userSaved = false;
+        for (int n = 1; n <= 4; ++n) {
+            const std::string file = rig.paths.configDir + "/" + backupName(tinyModel(), n);
+            const std::optional<FiioBackup> saved = readBackup(file);
+            if (!saved)
+                continue;
+            QVERIFY2(saved->name == "FH3" || saved->name == "USER", (at + " " + QByteArray::number(n)).constData());
+            if (saved->name == "FH3") {
+                QVERIFY2(saved->bands == goodBackup->bands && saved->preamp == goodBackup->preamp, at);
+            } else {
+                QVERIFY2(saved->bands == userBands && saved->preamp == userPreamp, at);
+                userSaved = true;
+            }
+        }
+        QVERIFY2(userSaved, at);
+    }
+}
+
+void FiioTest::driverWaitNeedsInterface()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const QString dev = root.path() + QStringLiteral("/devices/3-1");
+    QVERIFY(QDir().mkpath(dev));
+    const std::string path = dev.toStdString();
+    int64_t start = fiioNowMs();
+    QCOMPARE(waitDriverFree(path, 100, std::nullopt, {}), FiioReason::HidBound);
+    QVERIFY(fiioNowMs() - start >= 90);
+    QCOMPARE(waitDriverFree(path, 0, std::nullopt, {}), FiioReason::HidBound);
+
+    const QString iface = dev + QStringLiteral("/3-1:1.0");
+    QVERIFY(QDir().mkpath(iface));
+    QVERIFY(QDir().mkpath(root.path() + QStringLiteral("/drivers/usbhid")));
+    QVERIFY(link(root.path() + QStringLiteral("/drivers/usbhid"), iface + QStringLiteral("/driver")));
+    QCOMPARE(waitDriverFree(path, 60, std::nullopt, {}), FiioReason::HidBound);
+    start = fiioNowMs();
+    QCOMPARE(waitDriverFree(path, 1000, start + 80, {}), FiioReason::Deadline);
+    QVERIFY(fiioNowMs() - start < 300);
+    QCOMPARE(waitDriverFree(path, 1000, std::nullopt, [] { return true; }), FiioReason::Abandoned);
+
+    std::thread unbind([&iface] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        QFile::remove(iface + QStringLiteral("/driver"));
+    });
+    start = fiioNowMs();
+    const FiioReason freed = waitDriverFree(path, 2000, std::nullopt, {});
+    const int64_t waited = fiioNowMs() - start;
+    unbind.join();
+    QCOMPARE(freed, FiioReason::None);
+    QVERIFY2(waited >= 90 && waited < 500, std::to_string(waited).c_str());
+    QCOMPARE(waitDriverFree(path, 0, std::nullopt, {}), FiioReason::None);
+    QVERIFY(link(root.path() + QStringLiteral("/absent-driver"), iface + QStringLiteral("/driver")));
+    QCOMPARE(waitDriverFree(path, 0, std::nullopt, {}), FiioReason::HidBound);
 }
 
 QTEST_GUILESS_MAIN(FiioTest)

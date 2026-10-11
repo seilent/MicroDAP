@@ -3,16 +3,20 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <thread>
 #include <utility>
 
 #include <fcntl.h>
 #include <linux/usbdevice_fs.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -130,6 +134,20 @@ bool syncDir(const std::string &dir)
         return false;
     const bool ok = ::fsync(fd) == 0;
     return ::close(fd) == 0 && ok;
+}
+
+bool ensureDir(const fs::path &dir)
+{
+    std::error_code ec;
+    if (dir.empty() || fs::is_directory(dir, ec))
+        return true;
+    const fs::path parent = dir.parent_path();
+    if (parent != dir && !ensureDir(parent))
+        return false;
+    fs::create_directory(dir, ec);
+    if (!fs::is_directory(dir, ec))
+        return false;
+    return syncDir(parent.empty() ? std::string(".") : parent.string());
 }
 
 std::optional<FiioMatch> matchDevice(const fs::path &dev)
@@ -496,7 +514,7 @@ std::optional<FiioBackup> readBackup(const std::string &path)
             preamp = true;
         } else if (key.size() == 5 && key.compare(0, 4, "band") == 0 && std::isdigit(uint8_t(key[4]))) {
             std::optional<std::vector<uint8_t>> bytes = unhex(value, fiioBandPayloadSize);
-            if (!bytes)
+            if (!bytes || (*bytes)[0] != key[4] - '0')
                 return std::nullopt;
             backup.bands[key[4] - '0'] = *bytes;
             bands[key[4] - '0'] = true;
@@ -514,9 +532,11 @@ std::optional<std::string> writeBackup(const std::string &dir, const FiioModel &
         || std::any_of(backup.bands.begin(), backup.bands.end(),
                        [](const std::vector<uint8_t> &b) { return b.size() != std::size_t(fiioBandPayloadSize); }))
         return std::nullopt;
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-    if (ec)
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if (backup.bands[i][0] != i)
+            return std::nullopt;
+    }
+    if (!ensureDir(dir))
         return std::nullopt;
     const int highest = highestBackup(dir, model);
     if (highest > 0) {
@@ -660,10 +680,252 @@ void UsbfsIo::close()
     m_fd = -1;
 }
 
-FiioDevice::FiioDevice(UsbIo &io, const FiioModel &model, Bounds bounds)
+namespace {
+
+std::string envOr(const char *name, const std::string &fallback)
+{
+    const char *value = std::getenv(name);
+    return value && *value ? std::string(value) : fallback;
+}
+
+std::string isoNow()
+{
+    const time_t now = ::time(nullptr);
+    tm parts{};
+    ::gmtime_r(&now, &parts);
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &parts);
+    return buf;
+}
+
+std::string firmwareText(const std::vector<uint8_t> &payload)
+{
+    std::string out;
+    for (std::size_t i = 0; i < payload.size() && i < 3; ++i)
+        out += (i ? "." : "") + std::to_string(payload[i]);
+    return out;
+}
+
+bool writeMarker(const FiioPaths &paths, const FiioModel &model)
+{
+    if (!ensureDir(paths.stateDir))
+        return false;
+    const std::string path = fiioMarkerPath(paths);
+    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    const bool ok = writeFully(fd, modelKey(model) + "\n") && ::fsync(fd) == 0;
+    if (::close(fd) != 0 || !ok)
+        return false;
+    return syncDir(paths.stateDir);
+}
+
+void removeMarker(const FiioPaths &paths)
+{
+    ::unlink(fiioMarkerPath(paths).c_str());
+}
+
+bool validFrames(const FiioProfileFrames &frames)
+{
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if (frames.bands[i].size() != std::size_t(fiioBandPayloadSize) || frames.bands[i][0] != i)
+            return false;
+    }
+    return true;
+}
+
+struct Run
+{
+    FiioResult get(uint8_t cmd, const std::vector<uint8_t> &payload = {})
+    {
+        return step(frameGet(device.nextSeq(), cmd, payload));
+    }
+
+    FiioResult set(uint8_t cmd, const std::vector<uint8_t> &payload)
+    {
+        return step(frameSet(device.nextSeq(), cmd, payload));
+    }
+
+    FiioResult step(const std::vector<uint8_t> &frame)
+    {
+        if (abandoned && abandoned())
+            return {FiioReason::Abandoned, {}};
+        return device.transact(frame, deadline);
+    }
+
+    FiioDevice &device;
+    const FiioBatch::Abandoned &abandoned;
+    std::optional<int64_t> deadline;
+};
+
+}
+
+FiioPaths fiioPathsFromEnv()
+{
+    FiioPaths paths;
+    paths.runDir = envOr("CASDAP_RUN_DIR", "/run/user/" + std::to_string(::getuid()));
+    std::error_code ec;
+    paths.runDirExists = fs::is_directory(paths.runDir, ec);
+    const std::string home = envOr("HOME", "");
+    paths.stateDir = envOr("XDG_STATE_HOME", home + "/.local/state") + "/casdap";
+    paths.configDir = envOr("XDG_CONFIG_HOME", home + "/.config") + "/casdap";
+    paths.sysRoot = envOr("CASDAP_SYS_ROOT", "/sys");
+    paths.asoundDir = envOr("CASDAP_ASOUND_DIR", "/proc/asound");
+    return paths;
+}
+
+std::string fiioMarkerPath(const FiioPaths &paths)
+{
+    return paths.stateDir + "/fiio-taking";
+}
+
+FiioLock::FiioLock(const FiioPaths &paths)
+    : m_path(paths.runDir + "/casdap-fiio.lock")
+    , m_none(!paths.runDirExists)
+{
+}
+
+FiioLock::~FiioLock()
+{
+    release();
+}
+
+bool FiioLock::acquire(int timeoutMs, std::optional<int64_t> deadline, const std::function<bool()> &abandoned)
+{
+    if (m_held)
+        return true;
+    if (m_none) {
+        m_held = true;
+        return true;
+    }
+    m_fd = ::open(m_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (m_fd < 0)
+        return false;
+    int64_t end = fiioNowMs() + std::max(timeoutMs, 0);
+    if (deadline)
+        end = std::min(end, *deadline);
+    for (;;) {
+        if (::flock(m_fd, LOCK_EX | LOCK_NB) == 0) {
+            m_held = true;
+            return true;
+        }
+        if (errno != EWOULDBLOCK && errno != EINTR)
+            break;
+        if (abandoned && abandoned())
+            break;
+        const int64_t now = fiioNowMs();
+        if (now >= end)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min<int64_t>(10, end - now)));
+    }
+    ::close(m_fd);
+    m_fd = -1;
+    return false;
+}
+
+void FiioLock::release()
+{
+    if (m_fd >= 0) {
+        ::flock(m_fd, LOCK_UN);
+        ::close(m_fd);
+    }
+    m_fd = -1;
+    m_held = false;
+}
+
+bool FiioLock::held() const
+{
+    return m_held;
+}
+
+InflightStamp::InflightStamp(const FiioPaths &paths, const std::string &sysPath)
+{
+    std::error_code ec;
+    const fs::path device = fs::canonical(sysPath, ec);
+    m_path = paths.runDir + "/casdap-fiio.inflight." + (ec ? fs::path(sysPath) : device).filename().string();
+}
+
+bool InflightStamp::write(int64_t ms, const std::string &device) const
+{
+    const std::string temp = m_path + ".tmp" + std::to_string(::getpid());
+    const int fd = ::open(temp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return false;
+    const bool ok = writeFully(fd, std::to_string(ms) + " " + device + "\n");
+    if (::close(fd) != 0 || !ok || ::rename(temp.c_str(), m_path.c_str()) != 0) {
+        ::unlink(temp.c_str());
+        return false;
+    }
+    return true;
+}
+
+std::optional<InflightStamp::Entry> InflightStamp::read() const
+{
+    std::error_code ec;
+    if (!fs::exists(fs::symlink_status(m_path, ec)))
+        return std::nullopt;
+    std::ifstream in(m_path);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    Entry entry;
+    if (!text.empty() && text.back() == '\n')
+        text.pop_back();
+    const std::size_t space = text.find(' ');
+    const auto digit = [](char c) { return std::isdigit(uint8_t(c)); };
+    const auto blank = [](char c) { return std::isspace(uint8_t(c)) || uint8_t(c) < 0x20; };
+    if (space != std::string::npos && space > 0 && space <= 18 && space + 1 < text.size()
+        && std::all_of(text.begin(), text.begin() + space, digit)
+        && std::none_of(text.begin() + space + 1, text.end(), blank)) {
+        entry.ms = std::stoll(text.substr(0, space));
+        entry.device = text.substr(space + 1);
+        entry.parsed = true;
+        return entry;
+    }
+    entry.ms = fiioNowMs();
+    return entry;
+}
+
+void InflightStamp::remove() const
+{
+    ::unlink(m_path.c_str());
+}
+
+const std::string &InflightStamp::path() const
+{
+    return m_path;
+}
+
+FiioReason waitDriverFree(const std::string &sysPath, int ms, std::optional<int64_t> deadline,
+                          const std::function<bool()> &abandoned)
+{
+    const fs::path dev(sysPath);
+    const fs::path iface = dev / (dev.filename().string() + ":1.0");
+    int64_t end = fiioNowMs() + std::max(ms, 0);
+    bool capped = false;
+    if (deadline && *deadline < end) {
+        end = *deadline;
+        capped = true;
+    }
+    for (;;) {
+        std::error_code ec;
+        std::error_code linkEc;
+        if (fs::is_directory(iface, ec) && !fs::exists(fs::symlink_status(iface / "driver", linkEc)))
+            return FiioReason::None;
+        if (abandoned && abandoned())
+            return FiioReason::Abandoned;
+        const int64_t now = fiioNowMs();
+        if (now >= end)
+            return capped ? FiioReason::Deadline : FiioReason::HidBound;
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min<int64_t>(20, end - now)));
+    }
+}
+
+FiioDevice::FiioDevice(UsbIo &io, const FiioModel &model, Bounds bounds, FiioPaths paths)
     : m_io(io)
     , m_model(model)
-    , m_bounds{std::max(bounds.outMs, 1), std::max(bounds.readMs, 1), std::max(bounds.replyWindowMs, 1)}
+    , m_bounds{std::max(bounds.outMs, 1),         std::max(bounds.readMs, 1),        std::max(bounds.replyWindowMs, 1),
+               std::max(bounds.drainReadMs, 1),   std::max(bounds.drainReads, 1),    std::max(bounds.stampWindowMs, 1),
+               std::max(bounds.drainCap, 1)}
+    , m_paths(std::move(paths))
 {
 }
 
@@ -673,6 +935,24 @@ FiioDevice::~FiioDevice()
 }
 
 FiioReason FiioDevice::openClaimed(const std::string &sysPath, std::optional<int64_t> deadline)
+{
+    FiioReason reason = openOnly(sysPath, deadline);
+    if (reason != FiioReason::None)
+        return reason;
+    reason = drain(deadline);
+    if (reason != FiioReason::None)
+        releaseClose();
+    return reason;
+}
+
+FiioReason FiioDevice::openClaimedNoDrain(const std::string &sysPath)
+{
+    const FiioReason reason = openOnly(sysPath, std::nullopt);
+    m_noDrain = reason == FiioReason::None;
+    return reason;
+}
+
+FiioReason FiioDevice::openOnly(const std::string &sysPath, std::optional<int64_t> deadline)
 {
     releaseClose();
     if (deadline && fiioNowMs() >= *deadline)
@@ -688,6 +968,13 @@ FiioReason FiioDevice::openClaimed(const std::string &sysPath, std::optional<int
         return openReason(opened);
     }
     m_open = true;
+    std::error_code ec;
+    const fs::path canonical = fs::canonical(sysPath, ec);
+    m_sysPath = ec ? sysPath : canonical.string();
+    if (m_paths.runDirExists)
+        m_stamp.emplace(m_paths, m_sysPath);
+    else
+        m_stamp.reset();
     uint16_t vid = 0;
     uint16_t pid = 0;
     const int described = m_io.readDescriptor(vid, pid);
@@ -715,9 +1002,56 @@ FiioReason FiioDevice::openClaimed(const std::string &sysPath, std::optional<int
     return FiioReason::None;
 }
 
+FiioReason FiioDevice::drain(std::optional<int64_t> deadline)
+{
+    std::optional<InflightStamp::Entry> entry;
+    if (m_stamp) {
+        entry = m_stamp->read();
+        if (entry && entry->parsed && entry->device != m_sysPath)
+            entry->ms = fiioNowMs();
+    }
+    const int cap = entry ? m_bounds.drainCap : std::min(m_bounds.drainReads, m_bounds.drainCap);
+    const int64_t start = fiioNowMs();
+    const int64_t windowEnd = entry ? std::min(entry->ms, start) + m_bounds.stampWindowMs : start;
+    uint8_t in[fiioPacketSize];
+    for (int i = 0; i < cap; ++i) {
+        const int64_t now = fiioNowMs();
+        if (deadline && now >= *deadline)
+            return FiioReason::Deadline;
+        const int64_t uncapped = now < windowEnd ? std::min<int64_t>(m_bounds.readMs, windowEnd - now)
+                                                 : m_bounds.drainReadMs;
+        const int64_t wait = deadline ? std::min<int64_t>(uncapped, *deadline - now) : uncapped;
+        std::fill(std::begin(in), std::end(in), 0);
+        const int n = m_io.bulk(m_model.epIn, in, fiioPacketSize, int(wait));
+        if (n == -ETIMEDOUT) {
+            if (wait < uncapped)
+                return FiioReason::Deadline;
+            if (fiioNowMs() < windowEnd)
+                continue;
+            if (entry)
+                m_stamp->remove();
+            return FiioReason::None;
+        }
+        if (n == -EOVERFLOW) {
+            log("drain overflow");
+            return FiioReason::Overflow;
+        }
+        if (n < 0) {
+            log("drain failed " + std::to_string(-n));
+            return FiioReason::Device;
+        }
+        std::vector<uint8_t> raw(in, in + n);
+        if (const std::optional<FiioReply> reply = parseReply(raw.data(), raw.size(), m_model.reportId))
+            raw.resize(std::min(raw.size(), reply->payload.size() + 9));
+        log("drained " + hex(raw));
+    }
+    log("drain cap " + std::to_string(cap));
+    return FiioReason::Device;
+}
+
 FiioResult FiioDevice::transact(const std::vector<uint8_t> &cmdFrame, std::optional<int64_t> deadline)
 {
-    if (m_replyPending)
+    if (m_replyPending || m_noDrain)
         return {FiioReason::Refused, {}};
     if (!m_claimed || cmdFrame.empty())
         return {FiioReason::Device, {}};
@@ -727,15 +1061,18 @@ FiioResult FiioDevice::transact(const std::vector<uint8_t> &cmdFrame, std::optio
     int64_t now = fiioNowMs();
     if (deadline && now >= *deadline)
         return {FiioReason::Deadline, {}};
+    if (m_stamp && !m_stamp->write(now, m_sysPath)) {
+        log("stamp write failed");
+        return {FiioReason::Device, {}};
+    }
     int outMs = m_bounds.outMs;
     if (deadline)
         outMs = int(std::min<int64_t>(outMs, *deadline - now));
     std::vector<uint8_t> out = cmdFrame;
     const int written = m_io.bulk(m_model.epOut, out.data(), int(out.size()), outMs);
-    if (written == -ETIMEDOUT) {
-        m_replyPending = true;
+    m_replyPending = true;
+    if (written == -ETIMEDOUT)
         return {outMs < m_bounds.outMs ? FiioReason::Deadline : FiioReason::Timeout, {}};
-    }
     if (written != int(out.size())) {
         log("out failed " + std::to_string(written));
         return {FiioReason::Device, {}};
@@ -744,14 +1081,10 @@ FiioResult FiioDevice::transact(const std::vector<uint8_t> &cmdFrame, std::optio
     uint8_t in[fiioPacketSize];
     for (;;) {
         now = fiioNowMs();
-        if (deadline && now >= *deadline && *deadline < end) {
-            m_replyPending = true;
+        if (deadline && now >= *deadline && *deadline < end)
             return {FiioReason::Deadline, {}};
-        }
-        if (now >= end) {
-            m_replyPending = true;
+        if (now >= end)
             return {FiioReason::Timeout, {}};
-        }
         int64_t wait = std::min<int64_t>(m_bounds.readMs, end - now);
         if (deadline)
             wait = std::min<int64_t>(wait, *deadline - now);
@@ -772,17 +1105,45 @@ FiioResult FiioDevice::transact(const std::vector<uint8_t> &cmdFrame, std::optio
         if (reply)
             raw.resize(std::min(raw.size(), reply->payload.size() + 9));
         if (reply && matches(cmdFrame, *reply)) {
+            m_replyPending = false;
+            if (m_stamp)
+                m_stamp->remove();
             if (!reply->crcValid && reply->cmd != fiioCmdVersion)
                 log("reply crc mismatch " + hex(raw));
             return {FiioReason::None, reply->payload};
         }
         if (reply && sent->set && reply->set && reply->cmd == sent->cmd) {
+            if (m_stamp)
+                m_stamp->remove();
             log("ack mismatch " + hex(raw));
             return {FiioReason::Ack, {}};
         }
         ++m_discarded;
         log("discarded " + hex(raw));
     }
+}
+
+FiioReason FiioDevice::resetAndClose()
+{
+    if (!m_open)
+        return FiioReason::Device;
+    if (m_claimed)
+        m_io.release(m_model.interface);
+    m_claimed = false;
+    const int reset = m_io.reset();
+    if (reset < 0) {
+        log("reset failed " + std::to_string(-reset));
+        releaseClose();
+        return FiioReason::Device;
+    }
+    if (m_stamp) {
+        const std::optional<InflightStamp::Entry> entry = m_stamp->read();
+        if (entry && (!entry->parsed || entry->device == m_sysPath))
+            m_stamp->remove();
+    }
+    releaseClose();
+    log("reset");
+    return FiioReason::ResetDone;
 }
 
 void FiioDevice::releaseClose()
@@ -794,6 +1155,7 @@ void FiioDevice::releaseClose()
     m_claimed = false;
     m_open = false;
     m_replyPending = false;
+    m_noDrain = false;
 }
 
 void FiioDevice::setLog(Log log)
@@ -806,10 +1168,270 @@ int FiioDevice::discarded() const
     return m_discarded;
 }
 
+uint16_t FiioDevice::nextSeq()
+{
+    m_seq = m_seq >= 32767 ? 0 : uint16_t(m_seq + 1);
+    return m_seq;
+}
+
+const FiioModel &FiioDevice::model() const
+{
+    return m_model;
+}
+
 void FiioDevice::log(const std::string &line) const
 {
     if (m_log)
         m_log(line);
+}
+
+namespace FiioBatch {
+
+namespace {
+
+constexpr std::string_view casdapName = "CASDAP";
+
+FiioResult claimSlot(Run &run, FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths,
+                     std::optional<int64_t> deadline)
+{
+    const FiioModel &model = device.model();
+    const uint8_t slot = model.slot;
+    if (!writeMarker(paths, model)) {
+        device.log("marker failed");
+        bypass(device, mirror, paths, {}, {}, deadline);
+        return {FiioReason::Backup, {}};
+    }
+    FiioResult r;
+    if ((r = run.set(fiioCmdPreset, presetPayload(slot))).reason != FiioReason::None)
+        return r;
+    mirror.preset = slot;
+    FiioBackup backup;
+    backup.model = modelKey(model);
+    backup.firmware = mirror.firmware;
+    backup.date = isoNow();
+    backup.name = mirror.name;
+    if ((r = run.get(fiioCmdPreamp)).reason != FiioReason::None)
+        return r;
+    backup.preamp = r.payload;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if ((r = run.get(fiioCmdBand, {uint8_t(i)})).reason != FiioReason::None)
+            return r;
+        backup.bands[i] = r.payload;
+    }
+    const std::optional<std::string> written = writeBackup(paths.configDir, model, backup);
+    if (!written) {
+        device.log("backup failed");
+        bypass(device, mirror, paths, {}, {}, deadline);
+        return {FiioReason::Backup, {}};
+    }
+    device.log("backup " + *written);
+    if ((r = run.set(fiioCmdName, namePayload(slot, casdapName))).reason != FiioReason::None)
+        return r;
+    mirror.name = casdapName;
+    removeMarker(paths);
+    return {};
+}
+
+}
+
+FiioResult take(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                Abandoned abandoned, std::optional<int64_t> deadline)
+{
+    mirror.valid = false;
+    if (!validFrames(frames))
+        return {FiioReason::Refused, {}};
+    const FiioModel &model = device.model();
+    const uint8_t slot = model.slot;
+    Run run{device, abandoned, deadline};
+    FiioResult r;
+    if (mirror.firmware.empty()) {
+        if ((r = run.get(fiioCmdVersion)).reason != FiioReason::None)
+            return r;
+        mirror.firmware = firmwareText(r.payload);
+        if (mirror.firmware != model.firmware)
+            device.log("firmware " + mirror.firmware + ", verified " + std::string(model.firmware));
+    }
+    if ((r = run.get(fiioCmdPreset)).reason != FiioReason::None)
+        return r;
+    mirror.preset = r.payload.empty() ? -1 : r.payload[0];
+    if ((r = run.get(fiioCmdName, {slot})).reason != FiioReason::None)
+        return r;
+    mirror.name = nameOfPayload(r.payload);
+    if (mirror.name == casdapName) {
+        removeMarker(paths);
+    } else {
+        if ((r = claimSlot(run, device, mirror, paths, deadline)).reason != FiioReason::None)
+            return r;
+    }
+    if (mirror.preset != slot) {
+        if ((r = run.set(fiioCmdPreset, presetPayload(slot))).reason != FiioReason::None)
+            return r;
+        mirror.preset = slot;
+    }
+    const std::vector<uint8_t> preamp = preampPayload(model, 0.0);
+    if ((r = run.set(fiioCmdPreamp, preamp)).reason != FiioReason::None)
+        return r;
+    mirror.preamp = preamp;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if ((r = run.set(fiioCmdBand, frames.bands[i])).reason != FiioReason::None)
+            return r;
+        mirror.bands[i] = frames.bands[i];
+    }
+    mirror.valid = true;
+    device.log("take");
+    return {};
+}
+
+FiioResult update(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                  Abandoned abandoned, std::optional<int64_t> deadline)
+{
+    if (!validFrames(frames)) {
+        mirror.valid = false;
+        return {FiioReason::Refused, {}};
+    }
+    const uint8_t slot = device.model().slot;
+    Run run{device, abandoned, deadline};
+    FiioResult r = run.get(fiioCmdPreset);
+    if (r.reason != FiioReason::None) {
+        mirror.valid = false;
+        return r;
+    }
+    mirror.preset = r.payload.empty() ? -1 : r.payload[0];
+    if (mirror.preset != slot || !mirror.valid)
+        return take(device, mirror, paths, frames, abandoned, deadline);
+    int sets = 0;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if (frames.bands[i] == mirror.bands[i])
+            continue;
+        if ((r = run.set(fiioCmdBand, frames.bands[i])).reason != FiioReason::None) {
+            mirror.valid = false;
+            return r;
+        }
+        mirror.bands[i] = frames.bands[i];
+        ++sets;
+    }
+    device.log("update " + std::to_string(sets));
+    return {};
+}
+
+FiioResult bypass(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &,
+                  Abandoned, std::optional<int64_t> deadline)
+{
+    const Abandoned never;
+    Run run{device, never, deadline};
+    const FiioResult r = run.set(fiioCmdPreset, presetPayload(fiioBypass));
+    if (r.reason != FiioReason::None)
+        return r;
+    mirror.preset = fiioBypass;
+    removeMarker(paths);
+    device.log("bypass acked");
+    return {};
+}
+
+FiioResult force(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &,
+                 Abandoned abandoned, std::optional<int64_t> deadline)
+{
+    Run run{device, abandoned, deadline};
+    FiioResult r = run.get(fiioCmdPreset);
+    if (r.reason != FiioReason::None)
+        return r;
+    const int preset = r.payload.empty() ? -1 : r.payload[0];
+    mirror.preset = preset;
+    if (preset != device.model().slot)
+        removeMarker(paths);
+    if (preset == fiioBypass)
+        return {};
+    if ((r = run.set(fiioCmdPreset, presetPayload(fiioBypass))).reason != FiioReason::None)
+        return r;
+    mirror.preset = fiioBypass;
+    removeMarker(paths);
+    device.log("force from preset " + std::to_string(preset));
+    return {};
+}
+
+FiioResult dump(FiioDevice &device, FiioMirror &mirror, const FiioPaths &, const FiioProfileFrames &,
+                Abandoned abandoned, std::optional<int64_t> deadline)
+{
+    mirror.valid = false;
+    Run run{device, abandoned, deadline};
+    FiioResult r;
+    if ((r = run.get(fiioCmdVersion)).reason != FiioReason::None)
+        return r;
+    mirror.firmware = firmwareText(r.payload);
+    if ((r = run.get(fiioCmdPreset)).reason != FiioReason::None)
+        return r;
+    mirror.preset = r.payload.empty() ? -1 : r.payload[0];
+    if ((r = run.get(fiioCmdName, {device.model().slot})).reason != FiioReason::None)
+        return r;
+    mirror.name = nameOfPayload(r.payload);
+    if ((r = run.get(fiioCmdPreamp)).reason != FiioReason::None)
+        return r;
+    mirror.preamp = r.payload;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if ((r = run.get(fiioCmdBand, {uint8_t(i)})).reason != FiioReason::None)
+            return r;
+        mirror.bands[i] = r.payload;
+    }
+    return {};
+}
+
+FiioResult restoreSlot(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths,
+                       const FiioProfileFrames &frames, Abandoned abandoned, std::optional<int64_t> deadline,
+                       const std::string &file)
+{
+    mirror.valid = false;
+    const FiioModel &model = device.model();
+    const std::optional<std::string> path = file.empty() ? newestBackup(paths.configDir, model)
+                                                         : std::optional<std::string>(file);
+    const std::optional<FiioBackup> backup = path ? readBackup(*path) : std::nullopt;
+    if (!backup || backup->model != modelKey(model)) {
+        device.log("no backup " + path.value_or(paths.configDir));
+        return {FiioReason::Backup, {}};
+    }
+    const uint8_t slot = model.slot;
+    Run run{device, abandoned, deadline};
+    FiioResult r;
+    if ((r = run.get(fiioCmdName, {slot})).reason != FiioReason::None)
+        return r;
+    mirror.name = nameOfPayload(r.payload);
+    mirror.preset = -1;
+    if (mirror.name != casdapName) {
+        if (mirror.firmware.empty()) {
+            if ((r = run.get(fiioCmdVersion)).reason != FiioReason::None)
+                return r;
+            mirror.firmware = firmwareText(r.payload);
+        }
+        if ((r = claimSlot(run, device, mirror, paths, deadline)).reason != FiioReason::None)
+            return r;
+    } else if ((r = run.set(fiioCmdPreset, presetPayload(slot))).reason == FiioReason::None) {
+        mirror.preset = slot;
+    } else {
+        return r;
+    }
+    if ((r = run.set(fiioCmdPreamp, backup->preamp)).reason != FiioReason::None)
+        return r;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if ((r = run.set(fiioCmdBand, backup->bands[i])).reason != FiioReason::None)
+            return r;
+    }
+    for (int i = 0; i < fiioBandCount; ++i) {
+        if ((r = run.get(fiioCmdBand, {uint8_t(i)})).reason != FiioReason::None)
+            return r;
+        if (!sameBand(backup->bands[i], r.payload)) {
+            device.log("restore band " + std::to_string(i) + " reads " + hex(r.payload));
+            bypass(device, mirror, paths, frames, {}, deadline);
+            return {FiioReason::Ack, {}};
+        }
+    }
+    if ((r = run.set(fiioCmdName, namePayload(slot, backup->name))).reason != FiioReason::None)
+        return r;
+    mirror.name = backup->name;
+    if ((r = bypass(device, mirror, paths, frames, {}, deadline)).reason != FiioReason::None)
+        return r;
+    device.log("restored, verified " + *path);
+    return {};
+}
+
 }
 
 }

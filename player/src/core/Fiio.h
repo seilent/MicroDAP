@@ -158,6 +158,62 @@ private:
     int m_fd = -1;
 };
 
+struct FiioPaths
+{
+    std::string runDir;
+    bool runDirExists = false;
+    std::string stateDir;
+    std::string configDir;
+    std::string sysRoot;
+    std::string asoundDir;
+};
+
+FiioPaths fiioPathsFromEnv();
+std::string fiioMarkerPath(const FiioPaths &paths);
+
+class FiioLock
+{
+public:
+    explicit FiioLock(const FiioPaths &paths);
+    ~FiioLock();
+    FiioLock(const FiioLock &) = delete;
+    FiioLock &operator=(const FiioLock &) = delete;
+
+    bool acquire(int timeoutMs, std::optional<int64_t> deadline, const std::function<bool()> &abandoned);
+    void release();
+    bool held() const;
+
+private:
+    std::string m_path;
+    bool m_none = false;
+    bool m_held = false;
+    int m_fd = -1;
+};
+
+class InflightStamp
+{
+public:
+    struct Entry
+    {
+        int64_t ms = 0;
+        std::string device;
+        bool parsed = false;
+    };
+
+    InflightStamp(const FiioPaths &paths, const std::string &sysPath);
+
+    bool write(int64_t ms, const std::string &device) const;
+    std::optional<Entry> read() const;
+    void remove() const;
+    const std::string &path() const;
+
+private:
+    std::string m_path;
+};
+
+FiioReason waitDriverFree(const std::string &sysPath, int ms, std::optional<int64_t> deadline,
+                          const std::function<bool()> &abandoned);
+
 class FiioDevice
 {
 public:
@@ -166,30 +222,82 @@ public:
         int outMs = 200;
         int readMs = 500;
         int replyWindowMs = 3000;
+        int drainReadMs = 40;
+        int drainReads = 4;
+        int stampWindowMs = 3000;
+        int drainCap = 16;
     };
 
     using Log = std::function<void(const std::string &)>;
 
-    FiioDevice(UsbIo &io, const FiioModel &model, Bounds bounds);
+    FiioDevice(UsbIo &io, const FiioModel &model, Bounds bounds, FiioPaths paths);
     ~FiioDevice();
 
     FiioReason openClaimed(const std::string &sysPath, std::optional<int64_t> deadline);
+    FiioReason openClaimedNoDrain(const std::string &sysPath);
     FiioResult transact(const std::vector<uint8_t> &cmdFrame, std::optional<int64_t> deadline);
+    FiioReason resetAndClose();
     void releaseClose();
     void setLog(Log log);
+    void log(const std::string &line) const;
     int discarded() const;
+    uint16_t nextSeq();
+    const FiioModel &model() const;
 
 private:
-    void log(const std::string &line) const;
+    FiioReason openOnly(const std::string &sysPath, std::optional<int64_t> deadline);
+    FiioReason drain(std::optional<int64_t> deadline);
 
     UsbIo &m_io;
     const FiioModel &m_model;
     Bounds m_bounds;
+    FiioPaths m_paths;
     Log m_log;
+    std::optional<InflightStamp> m_stamp;
+    std::string m_sysPath;
     bool m_open = false;
     bool m_claimed = false;
     bool m_replyPending = false;
+    bool m_noDrain = false;
     int m_discarded = 0;
+    uint16_t m_seq = 0;
 };
+
+struct FiioMirror
+{
+    std::string cardId;
+    uint64_t generation = 0;
+    int preset = -1;
+    std::string name;
+    std::vector<uint8_t> preamp;
+    std::array<std::vector<uint8_t>, fiioBandCount> bands;
+    std::string firmware;
+    bool valid = false;
+};
+
+struct FiioProfileFrames
+{
+    std::array<std::vector<uint8_t>, fiioBandCount> bands;
+};
+
+namespace FiioBatch {
+
+using Abandoned = std::function<bool()>;
+
+FiioResult take(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                Abandoned abandoned, std::optional<int64_t> deadline);
+FiioResult update(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                  Abandoned abandoned, std::optional<int64_t> deadline);
+FiioResult bypass(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                  Abandoned abandoned, std::optional<int64_t> deadline);
+FiioResult force(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                 Abandoned abandoned, std::optional<int64_t> deadline);
+FiioResult dump(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, const FiioProfileFrames &frames,
+                Abandoned abandoned, std::optional<int64_t> deadline);
+FiioResult restoreSlot(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths,
+                       const FiioProfileFrames &frames, Abandoned abandoned, std::optional<int64_t> deadline,
+                       const std::string &file = {});
+
+}
 
 }
