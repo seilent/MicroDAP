@@ -21,7 +21,7 @@ udevadm trigger --settle --action=change --subsystem-match=usb --attr-match=idVe
 /usr/libexec/casdap/casdap-usb-audio --scan
 if [[ -n "${input}" ]] || grep -q 'usr/share/inputplumber/' <<<"${changed}"; then
     systemctl restart inputplumber.service
-    systemctl start armada-controller-type.service
+    /usr/libexec/armada/controller-type apply || echo "device-apply: controller-type apply failed" >&2
 fi
 if grep -qE 'usr/share/pipewire/|usr/share/wireplumber/|usr/lib64/spa-0\.2/|usr/lib64/libfreeaptx' <<<"${changed}"; then
     : > /tmp/casdap-restart-audio

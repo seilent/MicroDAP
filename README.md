@@ -630,7 +630,7 @@ is any podman with arm64 binfmt (SePC); `ghcr.io/seilent/armada` pulls without a
 | `just base` | Reads `IMAGE_VERSION`, `VERSION_ID` and the booted image digest from the device into `build/base.env`. |
 | `just dist` | Builds the builder image and runs `build/build.sh`: copies `sysext/`, generates the patched files and hashes, installs the Selawik 1.01 TTFs (`build/fonts.sh`, sha256 pinned, cached in `build/cache/`) to `usr/share/fonts/casdap/`, runs `build/aptx.sh` (the aptX codec rpms, sha256 pinned, cached in `build/cache/aptx/`, into `usr/lib64/`), writes `version` and `build-manifest`. |
 | `just build` | `dist` plus `casdap-<ver>-armada<VERSION_ID>-arm64.raw` (squashfs, zstd). |
-| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/` and `build/device-apply` to `/tmp/casdap-apply`, runs it as root (refusing unless the user's `gamescope-session-plus@steam.service` is active, `CASDAP_DEPLOY_ANY_SESSION=1` overrides; `systemd-sysext refresh`, restarts polkit and `casdap-guard`, `udevadm control --reload`, `udevadm trigger --settle --action=change` on the USB devices `2972:0149`, `casdap-usb-audio --scan`, restarts inputplumber plus `armada-controller-type.service` when a file under `usr/share/inputplumber/` changed, touches `/tmp/casdap-restart-audio` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed), then as the user `systemctl --user daemon-reload`, restarts `casdap-hotkeyd.service` and, with the marker present, the user `pipewire pipewire-pulse wireplumber`. |
+| `just dev` | Refuses when the device `IMAGE_VERSION`, `VERSION_ID` or digest differ from `dist/usr/share/casdap/build-manifest` (no force flag, run `just base && just dist`). Then rsyncs `dist/` to `/var/lib/extensions/casdap/` and `build/device-apply` to `/tmp/casdap-apply`, runs it as root (refusing unless the user's `gamescope-session-plus@steam.service` is active, `CASDAP_DEPLOY_ANY_SESSION=1` overrides; `systemd-sysext refresh`, restarts polkit and `casdap-guard`, `udevadm control --reload`, `udevadm trigger --settle --action=change` on the USB devices `2972:0149`, `casdap-usb-audio --scan`, restarts inputplumber and runs `controller-type apply` when a file under `usr/share/inputplumber/` changed, touches `/tmp/casdap-restart-audio` when a file under `usr/share/pipewire/`, `usr/share/wireplumber/`, `usr/lib64/spa-0.2/` or `usr/lib64/libfreeaptx*` changed), then as the user `systemctl --user daemon-reload`, restarts `casdap-hotkeyd.service` and, with the marker present, the user `pipewire pipewire-pulse wireplumber`. |
 | `just dev --input` / `just dev-input` | `dev` with the inputplumber restart forced. |
 | `just test-player` | ctest of `build/player` inside the builder (after `just dist`); prints `skip: no builder image` where the image is absent. |
 | `just off` | Unmerge, remove `/var/lib/extensions/casdap`, restart polkit and inputplumber, re-apply the controller type. |
@@ -768,7 +768,7 @@ rebuilt. A second `keepInBackground()` or `closeAndSwitch()` while a release or 
 tracked is logged and does nothing.
 
 Polkit boundary: any process running as `armada` may start `casdap-switch.service`,
-`casdap-switch-back.service`, `casdap-priv@<verb>.service` and `armada-controller-type.service`.
+`casdap-switch-back.service` and `casdap-priv@<verb>.service`.
 The verbs are fixed words (`bt-class-headphones`, `bt-class-default`, `backlight-off`, `backlight-on`,
 `cpu-dap`, `cpu-off`, `cpu-resave`, `cpu-restore`, `hp-gain-low`, `hp-gain-normal`, `hp-gain-high`, `hp-amp-lohifi`,
 `hp-amp-ulp`, `hp-amp-hifi`, `spk-gain-84`, `spk-gain-90`, `spk-gain-96`, `spk-gain-99`, `spk-gain-102`,
@@ -881,7 +881,8 @@ not running and Steam owns the key.
 
 Pad target: `casdap-pad.service` (user unit, `BindsTo=` the casdap session) sets every InputPlumber
 composite device to `xb360` plus `keyboard` through `SetTargetDevices`, so SDL players see an Xbox
-pad. On session stop it starts `armada-controller-type.service`, which restores the configured type.
+pad. Leaving casdap for game mode or Plasma, Armada's `session-control` runs `controller-type apply`, which
+sets the configured type again.
 InputPlumber's own polkit rule grants its actions to group `wheel`, which `armada` is in.
 
 ## Input
@@ -1327,7 +1328,7 @@ Install: pick the asset matching `VERSION_ID` in `/etc/os-release`, write it to
 inputplumber casdap-guard`, `udevadm control --reload`, `udevadm trigger --settle --action=change
 --subsystem-match=usb --attr-match=idVendor=2972 --attr-match=idProduct=0149`,
 `/usr/libexec/casdap/casdap-usb-audio --scan`,
-`systemctl start armada-controller-type.service`, then as the user
+`/usr/libexec/armada/controller-type apply`, then as the user
 `systemctl --user restart pipewire pipewire-pulse wireplumber` (or log in again). The inputplumber
 restart drops the controller for a moment; run it outside a game. Uninstall: delete the file, run the
 same commands without the scan. Nothing under `/etc` to clean.

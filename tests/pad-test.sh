@@ -79,12 +79,7 @@ run xb360
 [[ "$(count "^busctl")" == 0 ]] || fail "xb360 with no device called busctl: $(cat "${STATE}")"
 [[ "$(count "^logger -t casdap-pad no composite device")" == 1 ]] || fail "xb360 with no device did not log: $(cat "${STATE}")"
 
-reset
-run restore
-[[ "${rc}" == 0 ]] || fail "restore exit ${rc}"
-[[ "$(cat "${STATE}")" == "systemctl start armada-controller-type.service" ]] || fail "restore ran $(cat "${STATE}")"
-
-for verb in bogus "" "xb360;id" "restore --help"; do
+for verb in bogus "" "xb360;id" restore "restore --help"; do
     reset
     run "${verb}"
     [[ "${rc}" == 1 ]] || fail "verb '${verb}' exit ${rc}, expected 1"

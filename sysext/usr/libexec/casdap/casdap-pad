@@ -20,7 +20,6 @@ set_target() {
 }
 
 case "${1:-}" in
-    xb360)   set_target ;;
-    restore) systemctl start armada-controller-type.service ;;
+    xb360) set_target ;;
     *) exit 1 ;;
 esac
