@@ -31,6 +31,7 @@ Window {
     property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
     property var codecFragment: root.screenshot || typeof CodecFragment === "undefined" ? null : CodecFragment
+    property var outputMode: root.screenshot || typeof OutputMode === "undefined" ? null : OutputMode
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var accentControl: root.screenshot || typeof Accent === "undefined" ? null : Accent
     property var outputs: root.shotState === "orientation-external" ? externalShotOutputs
@@ -1172,6 +1173,7 @@ Window {
             audioInfo: root.audioInfo
             outputControl: root.outputControl
             codecFragment: root.codecFragment
+            outputMode: root.outputMode
             library: root.library
             rgbControl: root.rgbControl
             bridge: root.bridge

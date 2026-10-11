@@ -357,9 +357,16 @@ A enters no edit mode while `OutputControl.activeOutput` is `usb`), `SPEAKER DIG
 (84 to 108 on `Settings.spkGain`, shown as dB from 84: `0 DB`, `+6 DB`, `+12 DB`, `+15 DB`, `+18 DB`, `+21 DB`,
 `+24 DB`; the hardware takes the value when playback restarts), `VOLUME STEP` (`2%`, `5%`, `10%` on
 `Settings.volumeStep`), `BLUETOOTH CODEC` (`AUTO`, `APTX`, `AAC`,
-`LDAC`, `SBC` on `Settings.btCodec`; `<CODEC> (PENDING)` while `CodecFragment.pending`), `SAMPLE RATE FOLLOW` (read only, `ON <AudioInfo.graphRate>`, `ON`
-without a rate), `REPLAYGAIN` (read only `OFF`), `EQ` (the `Eq.activeOutput` profile: `OFF`, the file name
-upper case, `CUSTOM`, `<NAME> (MISSING)`; left/right inert, A emits `openEq` and Main pushes `EqScreen`, in
+`LDAC`, `SBC` on `Settings.btCodec`; `<CODEC> (PENDING)` while `CodecFragment.pending`), `BIT PERFECT` (`OFF`, `ON`,
+`EXCLUSIVE` on `Settings.outputLevel`; `OFF` on every output for the level `off`; with USB active `OutputMode.levelStatus`,
+the word plus the first broken status suffix such as `ON (RESAMPLED)` or `EXCLUSIVE (PHONE)`; `USB ONLY` on the speaker
+and the headphones; read only `DAP ONLY` in overlay mode; without `OutputMode` the word alone), `SAMPLE RATE` (`AUTO`
+or a rate on `Settings.sampleRate`: `AUTO <AudioInfo.hwRate>`, `AUTO` without a rate, the fixed `<RATE>`, `<RATE> (NOT
+SUPPORTED)` when `OutputMode.rates` lacks it; the edit steps `AUTO` then `OutputMode.rates` (the USB card's
+`stream0` rates, else 44100, 48000, 88200, 96000, 176400, 192000), a saved rate the output lacks stepping from the
+nearest listed rate, and an edit open when the row turns read only closes without a write; read only `AUTO <AudioInfo.hwRate>` while
+`OutputMode.rateReadOnly` (a level effective); read only `DAP ONLY` in overlay mode), `REPLAYGAIN` (read only `OFF`), `EQ` (the `Eq.activeOutput` profile: `OFF`, the file name
+upper case, `CUSTOM`, `<NAME> (MISSING)`; `BYPASSED` while `OutputMode.effective`; left/right inert, A emits `openEq` and Main pushes `EqScreen`, in
 overlay mode as well), `PAIR A PHONE` (A emits `pairPhone`, Main pushes
 `Bluetooth` on its PAIRING pivot; in overlay mode the value reads `PAIR IN DAP MODE` and A does nothing).
 LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in `Settings.candidateRoots()` (`~/Music`,
@@ -394,11 +401,13 @@ the sheet `close player`, T12; accepting emits `closePlayerRequested` and calls 
 read only lines in the value role: `ARMADA <IMAGE_VERSION>` and `IMAGE <digest>` from `Env.manifest` (the
 `key=value` head of `/usr/share/casdap/build-manifest`, `CASDAP_MANIFEST_FILE` overrides), `DRIFT N FILES`
 while `PowerBridge.driftPaths` is not empty, `TRACK 44100 HZ 16 BIT` from `Player.current.sampleRate` and
-`bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. Value rows (OUTPUT, HEADPHONE GAIN, HEADPHONE AMP,
-SPEAKER DIGITAL GAIN, VOLUME STEP, BLUETOOTH CODEC, ACCENT, ACCENT FROM ART, ORIENTATION, SCALE, SAVER, RGB, TOASTS
+`bitDepth`, `OUTPUT 44100 S24_LE` from `AudioInfo.pcmFormat`. The page calls `AudioInfo.refresh()` when it opens.
+Value rows (OUTPUT, HEADPHONE GAIN, HEADPHONE AMP,
+SPEAKER DIGITAL GAIN, VOLUME STEP, BLUETOOTH CODEC, BIT PERFECT, SAMPLE RATE, ACCENT, ACCENT FROM ART, ORIENTATION, SCALE, SAVER, RGB, TOASTS
 IN GAME, SCREEN OFF AFTER, SUSPEND AFTER, WI-FI WHEN OFF) change only in edit mode: A enters it (`editing`, `editKey`; the
 value text turns `Ui.accent`, the title stays), left/right step the value live (lists stop at their ends), A
-confirms, B writes back the value the row had when edit mode began (ORIENTATION as above) and leaves edit mode without popping; up,
+confirms, B writes back the value the row had when edit mode began (ORIENTATION, BIT PERFECT and SAMPLE RATE as
+ORIENTATION: left/right step the value text only, A writes it once, B leaves it) and leaves edit mode without popping; up,
 down, LT, RT, LB, RB, X, Y, Start and Back/View are taken and do nothing while editing; leaving the page, the
 screen turning off or the overlay hiding confirms. Outside edit mode left/right do nothing on every row. The
 other rows keep A as their action, read only rows take A and do nothing. A changed value text runs F7 (opacity 1
@@ -565,7 +574,12 @@ AUTO ROTATE with it OFF, `auto-rotate-edit` opens its edit and steps to ON; the 
 `pressed` sets `pressed` on the `hub`, `album`, `queue`, `home`, `quickplay` and `nowplaying` page so the focused
 item shows its F3 scale (on `hub` a focused divider or letter tile first moves down or right to a song row or album cell),
 `touch-scrolled` sets the `hub` or `queue` list `contentY` to one and a half rows and runs `clampFocusToView()`,
-`touch` focuses TOUCH on `settings`, `touch-edit` also opens its edit with OFF drafted; the `settings` sample reads TOUCH ON),
+`touch` focuses TOUCH on `settings`, `touch-edit` also opens its edit with OFF drafted; the `settings` sample reads TOUCH ON;
+`bit-perfect` focuses BIT PERFECT ON on a USB output, `bit-perfect-edit` opens its edit with EXCLUSIVE drafted,
+`bit-perfect-phone` and `bit-perfect-unavailable` read EXCLUSIVE (PHONE) and EXCLUSIVE (UNAVAILABLE),
+`bit-perfect-usb-only` reads USB ONLY on the headphones, `sample-rate-edit` drafts 352800 on the FiiO rates,
+`sample-rate-unsupported` reads 96000 (NOT SUPPORTED) on the Apple dongle rate, `sample-rate-locked` focuses EQ
+BYPASSED under SAMPLE RATE read only AUTO 96000; the USB states set OUTPUT to USB),
 offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),
@@ -998,8 +1012,9 @@ without the binary it is the `hw_params` rate. `hw_params` is the first open `su
 else the first open one, else none (speaker and headphones are PCMs of card 0, a USB DAC its own card).
 `pcmFormat` is read every 2 s while `active` (in DAP mode from start while the screen is on, in overlay mode while the
 overlay is mapped and the screen is on), and each read updates `graphRate` while no `pw-dump` rate is held;
-`refreshGraphRate()`, which the settings page calls when it opens, runs `pw-dump` and falls back to the latest
-`hw_params` rate when `pw-dump` is absent, fails or is killed after its timeout.
+`refreshGraphRate()` runs `pw-dump` and falls back to the latest `hw_params` rate when `pw-dump` is absent, fails or
+is killed after its timeout. The settings page calls `refresh()` when it opens, so SAMPLE RATE and the BIT PERFECT
+status read the live `hw_params`.
 
 `OutputControl` (context property, DAP mode only, null under `--overlay`) applies `Settings.output`
 (`auto`, `speaker`, `headphones`, `usb`) at start and on every change. Every apply reads the jack and the sink

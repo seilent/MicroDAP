@@ -57,6 +57,8 @@ TestCase {
         property string orientation: "portrait"
         property bool autoRotate: false
         property bool touch: true
+        property string outputLevel: "off"
+        property string sampleRate: "auto"
     }
 
     QtObject {
@@ -134,7 +136,21 @@ TestCase {
         id: fakeAudio
 
         property string pcmFormat: "44100 S24_LE"
-        property int graphRate: 44100
+        property int hwRate: 44100
+        property int refreshes: 0
+
+        function refresh() {
+            fakeAudio.refreshes++
+        }
+    }
+
+    QtObject {
+        id: fakeMode
+
+        property string levelStatus: "off"
+        property bool effective: false
+        property var rates: [44100, 48000, 88200, 96000, 176400, 192000]
+        property bool rateReadOnly: false
     }
 
     QtObject {
@@ -183,6 +199,7 @@ TestCase {
             player: fakePlayer
             audioInfo: fakeAudio
             outputControl: fakeOutput
+            outputMode: fakeMode
             rgbControl: fakeRgb
             folders: ["/home/armada/Music", "/run/media/armada/SD"]
             onPairPhone: counters.pair++
@@ -216,14 +233,14 @@ TestCase {
     }
 
     readonly property var expectedKeys: [
-        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
+        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
         "label-display", "accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts",
         "label-power", "screenOff", "suspend", "wifi",
         "about"
     ]
     readonly property var overlayKeys: [
-        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "rate", "replaygain", "eq", "pair",
+        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
         "label-display", "accent", "accentArt", "scale", "saver", "toasts",
         "label-power", "screenOff", "suspend", "wifi", "closePlayer",
@@ -266,6 +283,8 @@ TestCase {
         fakeSettings.orientation = "portrait"
         fakeSettings.autoRotate = false
         fakeSettings.touch = true
+        fakeSettings.outputLevel = "off"
+        fakeSettings.sampleRate = "auto"
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -277,7 +296,12 @@ TestCase {
         fakeLibrary.rescans = 0
         fakeCodec.pending = false
         fakeAudio.pcmFormat = "44100 S24_LE"
-        fakeAudio.graphRate = 44100
+        fakeAudio.hwRate = 44100
+        fakeAudio.refreshes = 0
+        fakeMode.levelStatus = "off"
+        fakeMode.effective = false
+        fakeMode.rates = [44100, 48000, 88200, 96000, 176400, 192000]
+        fakeMode.rateReadOnly = false
         fakeOutput.jackPresent = true
         fakeOutput.usbPresent = false
         fakeOutput.activeOutput = "headphones"
@@ -418,7 +442,7 @@ TestCase {
         const page = open()
         compare(router.dispatch("up", false), false)
         compare(page.focusIndex, 1)
-        for (let i = 0; i < 9; i++)
+        for (let i = 0; i < 10; i++)
             verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "pair"))
         verify(router.dispatch("down", false))
@@ -591,7 +615,7 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(page.aboutOpen, true)
         compare(page.editing, false)
-        for (const key of ["rate", "replaygain"]) {
+        for (const key of ["replaygain"]) {
             tc.focusKey(page, key)
             verify(router.dispatch("a", false))
             compare(page.editing, false)
@@ -872,22 +896,27 @@ TestCase {
 
     function test_audio_rows_read_only() {
         const page = open()
-        compare(tc.rowOf(page, "rate").title, "sample rate follow")
-        compare(tc.rowOf(page, "rate").value, "on 44100")
+        compare(tc.rowOf(page, "rate").title, "sample rate")
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
+        compare(tc.rowOf(page, "rate").readOnly, false)
+        fakeAudio.hwRate = 96000
+        compare(tc.rowOf(page, "rate").value, "auto 96000")
+        fakeAudio.hwRate = 0
+        compare(tc.rowOf(page, "rate").value, "auto")
+        fakeAudio.hwRate = 44100
+        fakeMode.effective = true
+        fakeMode.rateReadOnly = true
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
         compare(tc.rowOf(page, "rate").readOnly, true)
-        compare(tc.rowOf(page, "replaygain").title, "replaygain")
-        compare(tc.rowOf(page, "replaygain").value, "off")
-        compare(tc.rowOf(page, "replaygain").readOnly, true)
         tc.focusKey(page, "rate")
         compare(router.dispatch("right", false), false)
         compare(router.dispatch("left", false), false)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
-        compare(tc.rowOf(page, "rate").value, "on 44100")
-        fakeAudio.graphRate = 96000
-        compare(tc.rowOf(page, "rate").value, "on 96000")
-        fakeAudio.graphRate = 0
-        compare(tc.rowOf(page, "rate").value, "on")
+        compare(fakeSettings.sampleRate, "auto")
+        compare(tc.rowOf(page, "replaygain").title, "replaygain")
+        compare(tc.rowOf(page, "replaygain").value, "off")
+        compare(tc.rowOf(page, "replaygain").readOnly, true)
         tc.focusKey(page, "replaygain")
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
@@ -897,6 +926,357 @@ TestCase {
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
         compare(item.valueItem.font.styleName, "Light")
         compare(item.valueItem.font.capitalization, Font.AllUppercase)
+    }
+
+    function useUsb() {
+        fakeOutput.usbPresent = true
+        fakeOutput.activeOutput = "usb"
+    }
+
+    function test_bit_perfect_rows_order() {
+        const page = open()
+        compare(tc.keyIndex(page, "level"), tc.keyIndex(page, "codec") + 1)
+        compare(tc.keyIndex(page, "rate"), tc.keyIndex(page, "level") + 1)
+        compare(tc.keyIndex(page, "replaygain"), tc.keyIndex(page, "rate") + 1)
+        compare(tc.rowOf(page, "level").title, "bit perfect")
+        compare(tc.itemOf(page, "level").titleItem.text, "bit perfect")
+        compare(tc.rowOf(page, "level").readOnly, false)
+        compare(tc.rowOf(page, "rate").title, "sample rate")
+        for (const r of page.rows)
+            verify(r.title !== "sample rate follow")
+    }
+
+    function test_bit_perfect_status_suffixes() {
+        tc.useUsb()
+        const page = open()
+        compare(tc.rowOf(page, "level").value, "off")
+        fakeSettings.outputLevel = "bitperfect"
+        fakeMode.levelStatus = "on"
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "level").value, "on")
+        for (const suffix of ["pending", "volume", "resampled", "converted", "mixed"]) {
+            fakeMode.levelStatus = "on (" + suffix + ")"
+            compare(tc.rowOf(page, "level").value, "on (" + suffix + ")")
+        }
+        fakeSettings.outputLevel = "exclusive"
+        fakeMode.levelStatus = "exclusive"
+        compare(tc.rowOf(page, "level").value, "exclusive")
+        for (const suffix of ["pending", "volume", "resampled", "converted", "phone", "released", "unavailable", "no volume"]) {
+            fakeMode.levelStatus = "exclusive (" + suffix + ")"
+            compare(tc.rowOf(page, "level").value, "exclusive (" + suffix + ")")
+        }
+        fakeMode.levelStatus = "exclusive (unavailable)"
+        const item = tc.itemOf(page, "level")
+        compare(item.valueItem.text, "exclusive (unavailable)")
+        compare(item.valueItem.font.capitalization, Font.AllUppercase)
+        verify(item.titleItem.contentWidth <= item.titleItem.width)
+        verify(item.titleItem.x + item.titleItem.width <= item.valueItem.x)
+        fuzzyCompare(item.valueItem.x + item.valueItem.width, page.width - Ui.px(20), 0.01)
+    }
+
+    function test_bit_perfect_g3_outputs() {
+        for (const output of ["speaker", "headphones"]) {
+            fakeOutput.activeOutput = output
+            const page = open()
+            fakeSettings.outputLevel = "off"
+            fakeMode.levelStatus = "off"
+            compare(tc.rowOf(page, "level").value, "off")
+            fakeSettings.outputLevel = "bitperfect"
+            fakeMode.levelStatus = "usb only"
+            compare(tc.rowOf(page, "level").value, "usb only")
+            fakeSettings.outputLevel = "exclusive"
+            compare(tc.rowOf(page, "level").value, "usb only")
+            compare(tc.rowOf(page, "level").readOnly, false)
+        }
+        tc.useUsb()
+        const usb = open()
+        fakeSettings.outputLevel = "off"
+        fakeMode.levelStatus = "off"
+        compare(tc.rowOf(usb, "level").value, "off")
+    }
+
+    function test_bit_perfect_overlay() {
+        for (const level of ["off", "bitperfect", "exclusive"]) {
+            fakeSettings.outputLevel = level
+            const page = open({ overlay: true, bridge: fakeBridge, outputMode: null })
+            compare(tc.rowOf(page, "level").value, "dap only")
+            compare(tc.rowOf(page, "level").readOnly, true)
+            compare(tc.rowOf(page, "rate").value, "dap only")
+            compare(tc.rowOf(page, "rate").readOnly, true)
+            for (const key of ["level", "rate"]) {
+                tc.focusKey(page, key)
+                verify(router.dispatch("a", false))
+                compare(page.editing, false)
+                compare(router.dispatch("right", false), false)
+            }
+            compare(fakeSettings.outputLevel, level)
+            compare(fakeSettings.sampleRate, "auto")
+        }
+    }
+
+    function test_bit_perfect_without_output_mode() {
+        tc.useUsb()
+        const page = open({ outputMode: null })
+        fakeSettings.outputLevel = "bitperfect"
+        compare(tc.rowOf(page, "level").value, "on")
+        fakeSettings.outputLevel = "exclusive"
+        compare(tc.rowOf(page, "level").value, "exclusive")
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
+        compare(tc.rowOf(page, "rate").readOnly, false)
+        fakeSettings.sampleRate = "96000"
+        compare(tc.rowOf(page, "rate").value, "96000")
+        compare(tc.rowOf(page, "eq").value, "off")
+    }
+
+    function test_bit_perfect_draft_edit() {
+        tc.useUsb()
+        const page = open()
+        const spy = spyComponent.createObject(tc, { target: fakeSettings, signalName: "outputLevelChanged" })
+        tc.edit(page, "level")
+        verify(Qt.colorEqual(tc.itemOf(page, "level").valueItem.color, Ui.accent))
+        compare(tc.rowOf(page, "level").value, "off")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "level").value, "on")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "level").value, "exclusive")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "level").value, "exclusive")
+        verify(Qt.colorEqual(tc.itemOf(page, "level").valueItem.color, Ui.accent))
+        compare(fakeSettings.outputLevel, "off")
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.outputLevel, "off")
+        compare(tc.rowOf(page, "level").value, "off")
+        compare(pages.depth, 2)
+        compare(spy.count, 0)
+        tc.edit(page, "level")
+        verify(router.dispatch("right", false))
+        verify(router.dispatch("right", false))
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.outputLevel, "off")
+        compare(spy.count, 0)
+        tc.confirm(page)
+        compare(fakeSettings.outputLevel, "bitperfect")
+        compare(spy.count, 1)
+        fakeMode.levelStatus = "on (pending)"
+        compare(tc.rowOf(page, "level").value, "on (pending)")
+        tc.edit(page, "level")
+        compare(tc.rowOf(page, "level").value, "on")
+        verify(router.dispatch("left", false))
+        tc.confirm(page)
+        compare(fakeSettings.outputLevel, "off")
+        compare(spy.count, 2)
+        spy.destroy()
+    }
+
+    function test_bit_perfect_edit_dropped_on_leave() {
+        const page = open()
+        tc.edit(page, "level")
+        router.dispatch("right", false)
+        pages.push(blankComponent, {})
+        compare(page.editing, false)
+        compare(fakeSettings.outputLevel, "off")
+    }
+
+    function test_sample_rate_values() {
+        tc.useUsb()
+        fakeMode.rates = [44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000]
+        const page = open()
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
+        fakeSettings.sampleRate = "352800"
+        compare(tc.rowOf(page, "rate").value, "352800")
+        fakeMode.rates = [48000]
+        compare(tc.rowOf(page, "rate").value, "352800 (not supported)")
+        fakeSettings.sampleRate = "48000"
+        compare(tc.rowOf(page, "rate").value, "48000")
+        fakeSettings.sampleRate = "96000"
+        compare(tc.rowOf(page, "rate").value, "96000 (not supported)")
+        compare(fakeSettings.sampleRate, "96000")
+        fakeSettings.outputLevel = "bitperfect"
+        fakeMode.levelStatus = "on"
+        fakeMode.effective = true
+        fakeMode.rateReadOnly = true
+        fakeAudio.hwRate = 48000
+        compare(tc.rowOf(page, "rate").value, "auto 48000")
+        compare(tc.rowOf(page, "rate").readOnly, true)
+        fakeMode.effective = false
+        fakeMode.rateReadOnly = false
+        compare(tc.rowOf(page, "rate").value, "96000 (not supported)")
+        compare(tc.rowOf(page, "rate").readOnly, false)
+    }
+
+    function test_sample_rate_draft_edit() {
+        tc.useUsb()
+        fakeMode.rates = [44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000]
+        const page = open()
+        const spy = spyComponent.createObject(tc, { target: fakeSettings, signalName: "sampleRateChanged" })
+        tc.edit(page, "rate")
+        verify(Qt.colorEqual(tc.itemOf(page, "rate").valueItem.color, Ui.accent))
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
+        const seen = []
+        for (let i = 0; i < 9; i++) {
+            verify(router.dispatch("right", false))
+            seen.push(tc.rowOf(page, "rate").value)
+        }
+        compare(JSON.stringify(seen), JSON.stringify(["44100", "48000", "88200", "96000", "176400", "192000", "352800", "384000", "384000"]))
+        compare(fakeSettings.sampleRate, "auto")
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.sampleRate, "auto")
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
+        compare(spy.count, 0)
+        tc.edit(page, "rate")
+        for (let i = 0; i < 7; i++)
+            router.dispatch("right", false)
+        compare(tc.rowOf(page, "rate").value, "352800")
+        compare(spy.count, 0)
+        tc.confirm(page)
+        compare(fakeSettings.sampleRate, "352800")
+        compare(spy.count, 1)
+        compare(tc.rowOf(page, "rate").value, "352800")
+        tc.edit(page, "rate")
+        for (let i = 0; i < 8; i++)
+            router.dispatch("left", false)
+        compare(tc.rowOf(page, "rate").value, "auto")
+        tc.confirm(page)
+        compare(fakeSettings.sampleRate, "auto")
+        compare(spy.count, 2)
+        fakeMode.rates = [48000]
+        tc.edit(page, "rate")
+        const dongle = []
+        for (let i = 0; i < 2; i++) {
+            router.dispatch("right", false)
+            dongle.push(tc.rowOf(page, "rate").value)
+        }
+        compare(JSON.stringify(dongle), JSON.stringify(["48000", "48000"]))
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.sampleRate, "auto")
+        spy.destroy()
+    }
+
+    function test_sample_rate_built_in_rates() {
+        const page = open({ outputMode: null })
+        tc.edit(page, "rate")
+        const seen = []
+        for (let i = 0; i < 7; i++) {
+            router.dispatch("right", false)
+            seen.push(tc.rowOf(page, "rate").value)
+        }
+        compare(JSON.stringify(seen), JSON.stringify(["44100", "48000", "88200", "96000", "176400", "192000", "192000"]))
+        verify(router.dispatch("b", false))
+    }
+
+    function test_sample_rate_unsupported_saved_steps_from_nearest() {
+        fakeSettings.sampleRate = "352800"
+        const page = open()
+        compare(tc.rowOf(page, "rate").value, "352800 (not supported)")
+        tc.edit(page, "rate")
+        compare(tc.rowOf(page, "rate").value, "352800 (not supported)")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "rate").value, "192000")
+        verify(router.dispatch("b", false))
+        tc.edit(page, "rate")
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "rate").value, "176400")
+        tc.confirm(page)
+        compare(fakeSettings.sampleRate, "176400")
+    }
+
+    function test_sample_rate_edit_dropped_when_locked() {
+        tc.useUsb()
+        const page = open()
+        const spy = spyComponent.createObject(tc, { target: fakeSettings, signalName: "sampleRateChanged" })
+        tc.edit(page, "rate")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "rate").value, "44100")
+        fakeSettings.outputLevel = "bitperfect"
+        fakeMode.levelStatus = "on"
+        fakeMode.effective = true
+        fakeMode.rateReadOnly = true
+        compare(page.editing, false)
+        compare(tc.rowOf(page, "rate").value, "auto 44100")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(fakeSettings.sampleRate, "auto")
+        compare(spy.count, 0)
+        spy.destroy()
+    }
+
+    function test_level_editable_on_speaker() {
+        fakeOutput.activeOutput = "speaker"
+        const page = open()
+        compare(tc.rowOf(page, "level").value, "off")
+        compare(tc.rowOf(page, "level").readOnly, false)
+        tc.edit(page, "level")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "level").value, "on")
+        tc.confirm(page)
+        compare(fakeSettings.outputLevel, "bitperfect")
+        compare(tc.rowOf(page, "level").value, "usb only")
+    }
+
+    function test_touch_level_halves_draft() {
+        tc.useUsb()
+        const page = open()
+        tc.tapRow(page, "level")
+        compare(page.editKey, "level")
+        tc.tapRow(page, "level", 0.75)
+        compare(tc.rowOf(page, "level").value, "on")
+        tc.tapRow(page, "level", 0.75)
+        compare(tc.rowOf(page, "level").value, "exclusive")
+        tc.tapRow(page, "level", 0.25)
+        compare(tc.rowOf(page, "level").value, "on")
+        compare(fakeSettings.outputLevel, "off")
+        compare(page.editing, true)
+        const item = tc.itemOf(page, "volumeStep")
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(page.editing, false)
+        compare(fakeSettings.outputLevel, "bitperfect")
+    }
+
+    function test_touch_rate_halves_draft() {
+        const page = open()
+        tc.tapRow(page, "rate")
+        compare(page.editKey, "rate")
+        tc.tapRow(page, "rate", 0.75)
+        compare(tc.rowOf(page, "rate").value, "44100")
+        tc.tapRow(page, "rate", 0.75)
+        compare(tc.rowOf(page, "rate").value, "48000")
+        tc.tapRow(page, "rate", 0.25)
+        compare(tc.rowOf(page, "rate").value, "44100")
+        compare(fakeSettings.sampleRate, "auto")
+        tc.tapHeaderWord(page)
+        compare(page.editing, false)
+        compare(fakeSettings.sampleRate, "auto")
+        tc.tapRow(page, "rate")
+        tc.tapRow(page, "rate", 0.75)
+        const item = tc.itemOf(page, "volumeStep")
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(page.editing, false)
+        compare(fakeSettings.sampleRate, "44100")
+    }
+
+    function test_eq_bypassed_under_level() {
+        tc.useUsb()
+        const page = open({ eq: fakeEq })
+        fakeEq.activeOutput = "usb"
+        compare(tc.rowOf(page, "eq").value, "custom")
+        fakeSettings.outputLevel = "bitperfect"
+        fakeMode.levelStatus = "on"
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "eq").value, "bypassed")
+        compare(tc.rowOf(page, "eq").readOnly, true)
+        tc.focusKey(page, "eq")
+        verify(router.dispatch("a", false))
+        compare(counters.eq, 1)
+        compare(page.editing, false)
+        fakeMode.effective = false
+        compare(tc.rowOf(page, "eq").value, "custom")
+    }
+
+    function test_audio_info_refresh_on_open() {
+        open()
+        compare(fakeAudio.refreshes, 1)
     }
 
     function test_eq_row() {

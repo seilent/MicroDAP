@@ -8,12 +8,29 @@ Item {
     property string orientation: "portrait"
     property string fixture: "browse"
 
+    readonly property bool levelShot: root.fixture.startsWith("bit-perfect")
+    readonly property bool rateShot: root.fixture.startsWith("sample-rate")
+    readonly property bool usbShot: (root.levelShot || root.rateShot) && root.fixture !== "bit-perfect-usb-only"
+    readonly property string levelShown: root.fixture === "bit-perfect-phone" ? "exclusive (phone)"
+        : root.fixture === "bit-perfect-unavailable" ? "exclusive (unavailable)"
+        : root.levelShot || root.fixture === "sample-rate-locked" ? "on" : "off"
+
     Rectangle {
         anchors.fill: parent
         color: Ui.bg
     }
 
     function applyFixture(): void {
+        if (root.levelShot || root.rateShot) {
+            screen.focusIndex = screen.indexOfKey(root.levelShot ? "level" : root.fixture === "sample-rate-locked" ? "eq" : "rate")
+            if (root.fixture === "bit-perfect-edit" || root.fixture === "sample-rate-edit") {
+                screen.activate()
+                for (let i = 0; i < (root.levelShot ? 1 : 7); i++)
+                    screen.step(1)
+            }
+            screen.keepFocusVisible()
+            return
+        }
         if (root.fixture === "touch" || root.fixture === "touch-edit") {
             screen.focusIndex = screen.indexOfKey("touch")
             if (root.fixture === "touch-edit") {
@@ -47,7 +64,7 @@ Item {
     QtObject {
         id: sampleSettings
 
-        property string output: "speaker"
+        property string output: root.usbShot ? "usb" : "speaker"
         property string hpGain: "normal"
         property string hpAmp: "lohifi"
         property int spkGain: 102
@@ -66,6 +83,19 @@ Item {
         property string orientation: root.orientation
         property bool autoRotate: root.fixture === "auto-rotate" || root.fixture === "auto-rotate-below"
         property bool touch: true
+        property string outputLevel: root.fixture === "bit-perfect-phone" || root.fixture === "bit-perfect-unavailable" ? "exclusive"
+            : root.levelShot || root.fixture === "sample-rate-locked" ? "bitperfect" : "off"
+        property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
+    }
+
+    QtObject {
+        id: sampleOutputMode
+
+        readonly property string levelStatus: root.levelShown
+        readonly property bool effective: root.usbShot && root.levelShown !== "off"
+        readonly property var rates: root.fixture === "sample-rate-unsupported" ? [48000]
+            : root.usbShot ? [44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000] : [44100, 48000, 88200, 96000, 176400, 192000]
+        readonly property bool rateReadOnly: sampleOutputMode.effective
     }
 
     QtObject {
@@ -90,15 +120,15 @@ Item {
         id: sampleAudio
 
         readonly property string pcmFormat: "44100 S24_LE"
-        readonly property int graphRate: 44100
+        readonly property int hwRate: root.fixture === "sample-rate-locked" ? 96000 : 44100
     }
 
     QtObject {
         id: sampleOutput
 
         readonly property bool jackPresent: true
-        readonly property bool usbPresent: false
-        readonly property string activeOutput: "headphones"
+        readonly property bool usbPresent: root.usbShot
+        readonly property string activeOutput: root.usbShot ? "usb" : "headphones"
     }
 
     QtObject {
@@ -130,6 +160,7 @@ Item {
         player: samplePlayer
         audioInfo: sampleAudio
         outputControl: sampleOutput
+        outputMode: sampleOutputMode
         rgbControl: sampleRgb
         eq: sampleEq
         sensor: sampleSensor

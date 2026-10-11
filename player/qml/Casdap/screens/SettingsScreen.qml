@@ -15,6 +15,7 @@ Page {
     property QtObject rgbControl: null
     property QtObject bridge: null
     property QtObject sensor: null
+    property QtObject outputMode: null
     property var eq: null
     property bool overlay: false
     property bool animated: true
@@ -25,6 +26,8 @@ Page {
     property string editKey: ""
     property var editOriginal: null
     property string orientationDraft: ""
+    property string levelDraft: "off"
+    property string rateDraft: "auto"
     property bool autoRotateDraft: false
     property bool touchDraft: true
     property int eqRevision: 0
@@ -47,11 +50,13 @@ Page {
     readonly property var suspendSteps: [0, 5, 10, 30, 60]
     readonly property var scaleSteps: page.buildScaleSteps()
     readonly property var orientations: ["portrait", "portrait-flipped", "landscape", "landscape-flipped"]
+    readonly property var levels: ["off", "bitperfect", "exclusive"]
+    readonly property var builtInRates: [44100, 48000, 88200, 96000, 176400, 192000]
     readonly property var editKeys: ({
         output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
-        codec: "btCodec", accent: "accentHue", accentArt: "accentFromArt", scale: "scale", saver: "saverSeconds",
-        rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds", suspend: "suspendMinutes",
-        wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate", touch: "touch"
+        codec: "btCodec", level: "outputLevel", rate: "sampleRate", accent: "accentHue", accentArt: "accentFromArt",
+        scale: "scale", saver: "saverSeconds", rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds",
+        suspend: "suspendMinutes", wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate", touch: "touch"
     })
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
@@ -80,15 +85,31 @@ Page {
     readonly property real savedScale: page.settings !== null && page.settings.scale !== undefined ? Number(page.settings.scale) : 1.0
     readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
     readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
-    readonly property int graphRate: page.audioInfo !== null && page.audioInfo.graphRate !== undefined ? Number(page.audioInfo.graphRate) : 0
+    readonly property int hwRate: page.audioInfo !== null && page.audioInfo.hwRate !== undefined ? Number(page.audioInfo.hwRate) : 0
     readonly property string outputValue: page.output === "headphones" && !page.jackPresent ? "no jack"
         : page.output === "usb" && !page.usbPresent ? "usb (not present)" : page.output
     readonly property string hpGainValue: page.usbActive ? "built in only" : page.hpGain
     readonly property string hpAmpValue: page.usbActive ? "built in only" : page.hpAmp
-    readonly property string rateValue: page.graphRate > 0 ? "on " + page.graphRate : "on"
+    readonly property string outputLevel: page.settings !== null && page.levels.indexOf(String(page.settings.outputLevel)) >= 0
+        ? String(page.settings.outputLevel) : "off"
+    readonly property string sampleRate: page.settings !== null && page.settings.sampleRate !== undefined ? String(page.settings.sampleRate) : "auto"
+    readonly property bool levelEffective: page.outputMode !== null && page.outputMode.effective === true
+    readonly property string levelStatus: page.outputMode !== null && page.outputMode.levelStatus !== undefined ? String(page.outputMode.levelStatus) : ""
+    readonly property string levelValue: page.overlay ? "dap only"
+        : page.editing && page.editKey === "level" ? page.levelWord(page.levelDraft)
+        : page.outputLevel === "off" ? "off"
+        : !page.usbActive ? "usb only"
+        : page.levelStatus !== "" ? page.levelStatus : page.levelWord(page.outputLevel)
+    readonly property var rates: page.outputMode !== null && page.outputMode.rates !== undefined && page.outputMode.rates.length > 0
+        ? page.outputMode.rates : page.builtInRates
+    readonly property var rateChoices: ["auto"].concat(page.rates.map((r) => String(r)))
+    readonly property bool rateReadOnly: page.overlay || (page.outputMode !== null && page.outputMode.rateReadOnly === true)
+    readonly property string rateValue: page.overlay ? "dap only"
+        : page.rateReadOnly ? page.autoText(true)
+        : page.rateText(page.editing && page.editKey === "rate" ? page.rateDraft : page.sampleRate)
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
     readonly property string eqOutput: page.hasEq && page.eq.activeOutput !== undefined ? String(page.eq.activeOutput) : ""
-    readonly property string eqValue: page.eqText(page.eqOutput, page.eqRevision)
+    readonly property string eqValue: page.levelEffective ? "bypassed" : page.eqText(page.eqOutput, page.eqRevision)
     readonly property int accentHue: page.settings !== null && page.settings.accentHue !== undefined ? Ui.hueOnGrid(Number(page.settings.accentHue)) : Ui.accentHueDefault
     readonly property bool accentFromArt: page.settings !== null && page.settings.accentFromArt === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
@@ -187,6 +208,20 @@ Page {
         return EqFormat.profileText(page.eq.profileMap(output))
     }
 
+    function levelWord(level: string): string {
+        return level === "bitperfect" ? "on" : level
+    }
+
+    function autoText(live: bool): string {
+        return live && page.hwRate > 0 ? "auto " + page.hwRate : "auto"
+    }
+
+    function rateText(rate: string): string {
+        if (rate === "auto")
+            return page.autoText(page.sampleRate === "auto")
+        return page.rateChoices.indexOf(rate) >= 0 ? rate : rate + " (not supported)"
+    }
+
     function label(title: string): var {
         return { kind: "label", key: "label-" + title, title: title, value: "", readOnly: true }
     }
@@ -208,7 +243,8 @@ Page {
         out.push(page.row("spkGain", "speaker digital gain", page.spkGainText(page.spkGain), false))
         out.push(page.row("volumeStep", "volume step", page.volumeStep + "%", false))
         out.push(page.row("codec", "bluetooth codec", page.codecValue, false))
-        out.push(page.row("rate", "sample rate follow", page.rateValue, true))
+        out.push(page.row("level", "bit perfect", page.levelValue, page.overlay))
+        out.push(page.row("rate", "sample rate", page.rateValue, page.rateReadOnly))
         out.push(page.row("replaygain", "replaygain", "off", true))
         out.push(page.row("eq", "eq", page.eqValue, true))
         out.push(page.row("pair", "pair a phone", page.overlay ? "pair in dap mode" : "", true))
@@ -376,12 +412,14 @@ Page {
     function cycle(list: var, value: var, delta: int): var {
         let i = list.indexOf(value)
         if (i < 0) {
-            let best = 0
+            let best = -1
             for (let k = 0; k < list.length; k++) {
-                if (Math.abs(Number(list[k]) - Number(value)) < Math.abs(Number(list[best]) - Number(value)))
+                if (isNaN(Number(list[k])))
+                    continue
+                if (best < 0 || Math.abs(Number(list[k]) - Number(value)) < Math.abs(Number(list[best]) - Number(value)))
                     best = k
             }
-            i = best
+            i = Math.max(0, best)
         }
         return list[Math.max(0, Math.min(list.length - 1, i + delta))]
     }
@@ -458,6 +496,16 @@ Page {
         case "wifi":
             page.set("wifiOffScreenOff", !page.wifiOffScreenOff)
             return true
+        case "level":
+            if (page.overlay)
+                return false
+            page.levelDraft = page.cycle(page.levels, page.levelDraft, delta)
+            return true
+        case "rate":
+            if (page.rateReadOnly)
+                return false
+            page.rateDraft = page.cycle(page.rateChoices, page.rateDraft, delta)
+            return true
         case "orientation":
             page.orientationDraft = page.cycle(page.orientations, page.orientationDraft, delta)
             return true
@@ -491,6 +539,10 @@ Page {
             return page.volumeStep
         case "codec":
             return page.codec
+        case "level":
+            return page.outputLevel
+        case "rate":
+            return page.sampleRate
         case "accent":
             return page.accentHue
         case "accentArt":
@@ -523,6 +575,8 @@ Page {
     function beginEdit(key: string): void {
         page.editOriginal = page.currentOf(key)
         page.orientationDraft = page.orientation
+        page.levelDraft = page.outputLevel
+        page.rateDraft = page.sampleRate
         page.autoRotateDraft = page.autoRotate
         page.touchDraft = page.touchEnabled
         page.editKey = key
@@ -542,7 +596,7 @@ Page {
         const original = page.editOriginal
         if (key === "scale")
             page.applyScale(Number(original))
-        else if (key !== "orientation" && key !== "autoRotate" && key !== "touch")
+        else if (["orientation", "autoRotate", "touch", "level", "rate"].indexOf(key) < 0)
             page.set(page.settingOf(key), original)
         page.confirmEdit()
     }
@@ -552,9 +606,15 @@ Page {
         const draft = page.orientationDraft
         const autoDraft = page.autoRotateDraft
         const touchDraft = page.touchDraft
+        const levelDraft = page.levelDraft
+        const rateDraft = page.rateDraft
         page.confirmEdit()
         if (key === "orientation")
             page.set("orientation", draft)
+        else if (key === "level")
+            page.set("outputLevel", levelDraft)
+        else if (key === "rate")
+            page.set("sampleRate", rateDraft)
         else if (key === "autoRotate")
             page.set("autoRotate", autoDraft)
         else if (key === "touch")
@@ -750,6 +810,11 @@ Page {
             page.confirmEdit()
     }
 
+    onRateReadOnlyChanged: {
+        if (page.rateReadOnly && page.editing && page.editKey === "rate")
+            page.confirmEdit()
+    }
+
     onActiveChanged: {
         if (!page.active)
             page.confirmEdit()
@@ -771,8 +836,8 @@ Page {
     }
 
     Component.onCompleted: {
-        if (page.audioInfo !== null && typeof page.audioInfo.refreshGraphRate === "function")
-            page.audioInfo.refreshGraphRate()
+        if (page.audioInfo !== null && typeof page.audioInfo.refresh === "function")
+            page.audioInfo.refresh()
         const list = page.roots.slice()
         for (const f of page.folders) {
             if (list.indexOf(f) < 0)

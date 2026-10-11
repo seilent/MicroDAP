@@ -139,6 +139,14 @@ const QStringList &states()
         QStringLiteral("touch-scrolled"),
         QStringLiteral("touch"),
         QStringLiteral("touch-edit"),
+        QStringLiteral("bit-perfect"),
+        QStringLiteral("bit-perfect-edit"),
+        QStringLiteral("bit-perfect-phone"),
+        QStringLiteral("bit-perfect-unavailable"),
+        QStringLiteral("bit-perfect-usb-only"),
+        QStringLiteral("sample-rate-edit"),
+        QStringLiteral("sample-rate-unsupported"),
+        QStringLiteral("sample-rate-locked"),
     };
     return names;
 }

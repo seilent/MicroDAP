@@ -29,6 +29,15 @@
 | settings | `touch` | `--size 640x960` and `960x640` | TOUCH reads ON after AUTO ROTATE, focus on TOUCH | pending |
 | eq | `pressed` | `--size 640x960` and `960x640` | renders as browse (EQ rows have no F3) | pending |
 | power | `pressed` | `--size 640x960` and `960x640` | renders as browse (dialog items have no F3) | pending |
+| settings | browse | `--size 640x960` | BIT PERFECT OFF under BLUETOOTH CODEC, the OUTPUT rows above unchanged | pending |
+| settings | `bit-perfect` | `--size 640x960` and `960x640` | BIT PERFECT ON on USB, focus on BIT PERFECT | pending |
+| settings | `bit-perfect-edit` | `--size 640x960` and `960x640` | BIT PERFECT draft EXCLUSIVE in accent | pending |
+| settings | `bit-perfect-phone` | `--size 640x960` and `960x640` | BIT PERFECT reads EXCLUSIVE (PHONE) | pending |
+| settings | `bit-perfect-unavailable` | `--size 640x960` and `960x640` | BIT PERFECT reads EXCLUSIVE (UNAVAILABLE), the longest value, unclipped, clear of the title | pending |
+| settings | `bit-perfect-usb-only` | `--size 640x960` and `960x640` | BIT PERFECT reads USB ONLY on the headphones | pending |
+| settings | `sample-rate-edit` | `--size 640x960` and `960x640` | SAMPLE RATE draft 352800 in accent on the FiiO rates | pending |
+| settings | `sample-rate-unsupported` | `--size 640x960` and `960x640` | SAMPLE RATE reads 96000 (NOT SUPPORTED) on the Apple dongle rate | pending |
+| settings | `sample-rate-locked` | `--size 640x960` and `960x640` | focus on EQ reading BYPASSED, SAMPLE RATE above it read only AUTO 96000 | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured
