@@ -74,6 +74,9 @@ public:
 
     static QList<int> builtInRates();
 
+    void attach();
+    int switchBoundMs() const;
+
     State state() const;
     Reason reason() const;
     QString stateName() const;

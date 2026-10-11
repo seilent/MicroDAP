@@ -1,6 +1,7 @@
 #include "PowerBridge.h"
 
 #include "Keep.h"
+#include "OutputMode.h"
 #include "OverlayBridge.h"
 #include "Player.h"
 #include "SleepInhibitor.h"
@@ -87,6 +88,13 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
 {
     m_switchTimer.setSingleShot(true);
     connect(&m_switchTimer, &QTimer::timeout, this, &PowerBridge::onSwitchTimeout);
+    m_readyTimer.setSingleShot(true);
+    connect(&m_readyTimer, &QTimer::timeout, this, [this] {
+        if (!m_awaitReady)
+            return;
+        qWarning() << "casdap power: no output release within" << m_readyTimer.interval() << "ms, switching";
+        onSwitchReady();
+    });
     reloadDrift();
     if (m_player)
         connect(m_player, &Player::statusChanged, this, &PowerBridge::notifyPlaybackStatus);
@@ -317,6 +325,16 @@ QString PowerBridge::programPath(const QString &name) const
     return dir + QLatin1Char('/') + name;
 }
 
+void PowerBridge::setOutputMode(OutputMode *mode, PlayerPort *player)
+{
+    if (m_outputMode)
+        disconnect(m_outputMode, nullptr, this, nullptr);
+    m_outputMode = mode;
+    m_switchPlayer = player;
+    if (m_outputMode)
+        connect(m_outputMode, &OutputMode::switchReady, this, &PowerBridge::onSwitchReady);
+}
+
 void PowerBridge::enableSleepWatch()
 {
     if (m_sleep || m_overlay)
@@ -343,10 +361,14 @@ void PowerBridge::onPrepareForSleep(bool start)
             m_player->pause();
         if (m_state)
             m_state->save(false);
+        if (m_outputMode)
+            m_outputMode->prepareForSleep(true);
         m_sleep->release();
         return;
     }
     runScreenOn();
+    if (m_outputMode)
+        m_outputMode->prepareForSleep(false);
     m_sleep->take();
 }
 
@@ -395,6 +417,15 @@ void PowerBridge::dropWakeProcess()
 
 bool PowerBridge::runVerb(const QString &verb)
 {
+    if (m_outputMode && m_outputMode->levelSet() && verb == QLatin1StringView("game-mode")) {
+        qInfo() << "casdap power: verb" << verb;
+        if (switching()) {
+            qInfo() << "casdap power: switch already running";
+            return false;
+        }
+        startSwitch();
+        return true;
+    }
     QStringList command = commandFor(verb);
     if (command.isEmpty()) {
         qWarning() << "casdap power: unknown verb" << verb;
@@ -455,15 +486,15 @@ void PowerBridge::keepInBackground()
         return;
     }
     if (!m_state) {
-        failSwitch(QStringLiteral("no state to hand off"));
+        failSwitch(SwitchFailure::BeforeStart, QStringLiteral("no state to hand off"));
         return;
     }
     if (!m_state->save(true)) {
-        failSwitch(QStringLiteral("cannot save the handoff state"));
+        failSwitch(SwitchFailure::BeforeStart, QStringLiteral("cannot save the handoff state"));
         return;
     }
     if (!Keep::write()) {
-        failSwitch(QStringLiteral("cannot write the keep marker"));
+        failSwitch(SwitchFailure::BeforeStart, QStringLiteral("cannot write the keep marker"));
         return;
     }
     startSwitch();
@@ -484,6 +515,39 @@ void PowerBridge::closeAndSwitch()
 
 void PowerBridge::startSwitch()
 {
+    m_switching = true;
+    emit switchingChanged();
+    if (!m_outputMode) {
+        runSwitch();
+        return;
+    }
+    m_switchPlay = m_switchPlayer ? m_switchPlayer->playState() : PlayerPort::PlayState::Stopped;
+    m_switchWasParked = m_switchPlayer && m_switchPlayer->parked();
+    m_switchReleased = false;
+    m_awaitReady = true;
+    m_outputMode->releaseForSwitch();
+    if (!m_awaitReady)
+        return;
+    m_switchReleased = true;
+    m_readyTimer.start(m_outputMode->switchBoundMs() + switchReadyMarginMs);
+    qInfo() << "casdap power: switch waits for the output release";
+}
+
+void PowerBridge::onSwitchReady()
+{
+    if (!m_awaitReady)
+        return;
+    m_awaitReady = false;
+    m_readyTimer.stop();
+    if (!m_switchReleased && m_switchPlayer && !m_switchWasParked && m_switchPlayer->parked()) {
+        m_switchReleased = true;
+        qInfo() << "casdap power: switch parked the player";
+    }
+    runSwitch();
+}
+
+void PowerBridge::runSwitch()
+{
     QStringList command = switchCommand();
     const QString program = programPath(command.takeFirst());
     qInfo() << "casdap power: switch" << program << command;
@@ -491,8 +555,6 @@ void PowerBridge::startSwitch()
     connect(m_switch, &QProcess::finished, this, &PowerBridge::onSwitchFinished);
     connect(m_switch, &QProcess::errorOccurred, this, &PowerBridge::onSwitchError);
     m_switchTimer.start(switchTimeoutMs());
-    m_switching = true;
-    emit switchingChanged();
     m_switch->start(program, command);
 }
 
@@ -503,29 +565,40 @@ void PowerBridge::onSwitchFinished(int code, QProcess::ExitStatus status)
         dropSwitchProcess();
         return;
     }
-    failSwitch(QStringLiteral("exit %1").arg(status == QProcess::NormalExit ? code : -1));
+    failSwitch(SwitchFailure::ExitCode, QStringLiteral("exit %1").arg(status == QProcess::NormalExit ? code : -1));
 }
 
 void PowerBridge::onSwitchError(QProcess::ProcessError error)
 {
     if (error != QProcess::FailedToStart)
         return;
-    failSwitch(QStringLiteral("cannot start"));
+    failSwitch(SwitchFailure::StartError, QStringLiteral("cannot start"));
 }
 
 void PowerBridge::onSwitchTimeout()
 {
-    failSwitch(QStringLiteral("no session stop within %1 ms").arg(switchTimeoutMs()));
+    failSwitch(SwitchFailure::Timeout, QStringLiteral("no session stop within %1 ms").arg(switchTimeoutMs()));
 }
 
-void PowerBridge::failSwitch(const QString &reason)
+void PowerBridge::failSwitch(SwitchFailure kind, const QString &reason)
 {
     qWarning().noquote() << "casdap power: switch failed," << reason;
     const bool wasSwitching = m_switching;
+    const bool rebuild = m_switchReleased && m_switchPlayer && m_switchPlay != PlayerPort::PlayState::Stopped
+                         && (kind == SwitchFailure::ExitCode || kind == SwitchFailure::StartError);
     m_switching = false;
+    m_awaitReady = false;
+    m_switchReleased = false;
+    m_readyTimer.stop();
     m_switchTimer.stop();
     dropSwitchProcess();
     Keep::clear();
+    if (rebuild) {
+        const qint64 position = m_switchPlayer->positionMs();
+        const bool playing = m_switchPlay == PlayerPort::PlayState::Playing;
+        qInfo() << "casdap power: rebuild after the failed switch at" << position << (playing ? "playing" : "paused");
+        m_switchPlayer->rebuildAt(position, playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+    }
     if (m_state)
         m_state->save(false);
     if (wasSwitching)

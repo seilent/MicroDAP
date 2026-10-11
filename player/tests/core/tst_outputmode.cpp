@@ -302,6 +302,8 @@ private slots:
     void restoreWaitsForResolveAndReady();
     void restoreBoundsAlone();
     void restoreNeverWithLevelOff();
+    void restoreStaysPausedWithTransportActive();
+    void restoreDroppedByUserPlay();
     void switchWithoutLevelIsSynchronous();
     void sleepDuringReleaseWaits();
     void sleepDuringReleaseBound();
@@ -1724,6 +1726,38 @@ void OutputModeTest::restoreBoundsAlone()
     QTRY_COMPARE_WITH_TIMEOUT(second.player.status, Play::Playing, waitMs);
     QVERIFY(clock.elapsed() >= 270);
     QVERIFY(clock.elapsed() < 1000);
+}
+
+void OutputModeTest::restoreStaysPausedWithTransportActive()
+{
+    Rig rig;
+    QVERIFY(rig.enter(QStringLiteral("bitperfect")));
+    rig.bluez.setTransportState(QStringLiteral("active"));
+    QVERIFY(rig.bluez.transportActive());
+    rig.player.playPaused(1, 500);
+    rig.mode->restorePlaying(true);
+    rig.mode->onApplied(QStringLiteral("auto"), true);
+    QTest::qWait(400);
+    QCOMPARE(rig.player.status, Play::Paused);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("built bp playing")), 0);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("resume")), 0);
+}
+
+void OutputModeTest::restoreDroppedByUserPlay()
+{
+    Rig rig;
+    rig.bluez.setReady(false);
+    QVERIFY(rig.enter(QStringLiteral("bitperfect")));
+    rig.player.playPaused(1, 500);
+    rig.mode->restorePlaying(true);
+    rig.mode->onApplied(QStringLiteral("auto"), true);
+    rig.player.resume();
+    QCOMPARE(rig.player.status, Play::Playing);
+    rig.player.pause();
+    QCOMPARE(rig.player.status, Play::Paused);
+    rig.bluez.setReady(true);
+    QTest::qWait(400);
+    QCOMPARE(rig.player.status, Play::Paused);
 }
 
 void OutputModeTest::restoreNeverWithLevelOff()

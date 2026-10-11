@@ -99,6 +99,7 @@ private slots:
     void speakerGainWords();
     void missingBinaries();
     void heldKeepsUsb();
+    void heldAppliesWhenNotUsb();
     void returningPollNoApply();
     void watchedCardGone();
     void watchedCardPolled();
@@ -608,6 +609,32 @@ void OutputTest::heldKeepsUsb()
     QVERIFY(!control.usbPresent());
     QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
     QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::speakerSink())));
+}
+
+void OutputTest::heldAppliesWhenNotUsb()
+{
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
+    QFile::remove(m_log);
+
+    control.setHeld(HeldOutputPort::HeldState::Held);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QVERIFY(applied.at(1).at(1).toBool());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QVERIFY(control.usbPresent());
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
+
+    control.setHeld(HeldOutputPort::HeldState::Returning);
+    control.setHeld(HeldOutputPort::HeldState::Held);
+    QTest::qWait(300);
+    QCOMPARE(applied.count(), 2);
+
+    control.setHeld(HeldOutputPort::HeldState::None);
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
 }
 
 void OutputTest::returningPollNoApply()

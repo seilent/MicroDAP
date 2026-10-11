@@ -100,6 +100,16 @@ OutputMode::OutputMode(const Bounds &bounds, const Ports &ports, QObject *parent
 
 OutputMode::~OutputMode() = default;
 
+void OutputMode::attach()
+{
+    m_lastPlay = m_ports.player->playState();
+}
+
+int OutputMode::switchBoundMs() const
+{
+    return m_bounds.reservation.callMs + m_bounds.switchMs;
+}
+
 QList<int> OutputMode::builtInRates()
 {
     return {44100, 48000, 88200, 96000, 176400, 192000};
@@ -458,7 +468,8 @@ void OutputMode::onActiveOutputChanged(const QString &active, const QString &usb
         return;
     const bool was = effective();
     m_active = active;
-    log(QStringLiteral("active output ") + active);
+    if (m_level != off)
+        log(QStringLiteral("active output ") + active);
     if (active == usb) {
         if (m_cardGone && (m_card.id.isEmpty() || cardPresent()))
             m_cardGone = false;
@@ -530,6 +541,12 @@ void OutputMode::onStatusChanged()
     if (m_driving > 0 || m_quitting || play == previous) {
         updateAll();
         return;
+    }
+    if (m_restoreWanted) {
+        log(QStringLiteral("restore dropped, the player moved"));
+        m_restoreWanted = false;
+        m_resolveTimer.stop();
+        m_readyTimer.stop();
     }
     if (play == PlayerPort::PlayState::Playing) {
         m_park.stop();
@@ -954,7 +971,8 @@ void OutputMode::prepareForSleep(bool sleeping)
     m_asleep = false;
     const bool present = cardPresent();
     const bool newer = generation() != m_sleepGeneration;
-    log(QStringLiteral("resume, card %1, generation %2").arg(present ? "present" : "gone", newer ? "newer" : "same"));
+    if (m_level != off || m_sleepHeld || m_sleepReturn)
+        log(QStringLiteral("resume, card %1, generation %2").arg(present ? "present" : "gone", newer ? "newer" : "same"));
     if (m_sleepHeld) {
         m_sleepHeld = false;
         m_r = Release{};
@@ -1814,6 +1832,10 @@ void OutputMode::resumeRestore()
         return;
     m_restoreWanted = false;
     m_readyTimer.stop();
+    if (m_ports.bluez && m_ports.bluez->transportActive()) {
+        log(QStringLiteral("restore stays paused, phone transport active"));
+        return;
+    }
     log(QStringLiteral("restore resumes"));
     ++m_driving;
     m_ports.player->resumeFrom();

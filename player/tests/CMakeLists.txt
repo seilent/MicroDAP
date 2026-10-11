@@ -46,6 +46,13 @@ casdap_test_env(player)
 set_property(TEST player APPEND PROPERTY ENVIRONMENT "CASDAP_AUDIO_SINK=fakesink sync=false"
              "CASDAP_EXCLUSIVE_SINK=fakesink sync=false")
 
+qt_add_executable(tst_state core/tst_state.cpp)
+target_link_libraries(tst_state PRIVATE casdapcore Qt6::Test)
+add_test(NAME state COMMAND tst_state)
+casdap_test_env(state)
+set_property(TEST state APPEND PROPERTY ENVIRONMENT "CASDAP_AUDIO_SINK=fakesink sync=false"
+             "CASDAP_EXCLUSIVE_SINK=fakesink sync=false")
+
 qt_add_executable(tst_scale_queue core/tst_scale_queue.cpp)
 target_link_libraries(tst_scale_queue PRIVATE casdapcore Qt6::Test)
 add_test(NAME scale-queue COMMAND tst_scale_queue)

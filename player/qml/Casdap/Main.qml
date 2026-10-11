@@ -753,6 +753,15 @@ Window {
     }
 
     Connections {
+        target: typeof OutputMode === "undefined" ? null : OutputMode
+        ignoreUnknownSignals: true
+
+        function onNotice(text) {
+            overlays.toast.show("", text)
+        }
+    }
+
+    Connections {
         target: root.player
         ignoreUnknownSignals: true
 

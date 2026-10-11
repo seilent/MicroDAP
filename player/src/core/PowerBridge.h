@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OutputPorts.h"
+
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
 #include <QDBusContext>
@@ -13,6 +15,7 @@
 
 namespace casdap {
 
+class OutputMode;
 class OverlayBridge;
 class Player;
 class PowerBridge;
@@ -74,6 +77,7 @@ public:
     static QStringList wakeCommand();
     void runScreenOn();
     static int switchTimeoutMs();
+    static constexpr int switchReadyMarginMs = 500;
     static QString driftFile();
 
     bool isRegistered() const;
@@ -83,6 +87,7 @@ public:
     bool overlayMode() const;
     State *state() const;
     void setState(State *state);
+    void setOutputMode(OutputMode *mode, PlayerPort *player);
     void enableSleepWatch();
     SleepInhibitor *sleep() const;
     bool waking() const;
@@ -127,10 +132,14 @@ private slots:
     void onWakeError(QProcess::ProcessError error);
 
 private:
+    enum class SwitchFailure { BeforeStart, ExitCode, StartError, Timeout };
+
     bool rejectWithoutOverlay(const char *member);
     QString programPath(const QString &name) const;
     void startSwitch();
-    void failSwitch(const QString &reason);
+    void onSwitchReady();
+    void runSwitch();
+    void failSwitch(SwitchFailure kind, const QString &reason);
     void dropSwitchProcess();
     void dropWakeProcess();
     void notifyPlaybackStatus();
@@ -143,11 +152,18 @@ private:
     PowerBridgeAdaptor *m_adaptor;
     OverlayBridge *m_overlay = nullptr;
     State *m_state = nullptr;
+    OutputMode *m_outputMode = nullptr;
+    PlayerPort *m_switchPlayer = nullptr;
+    PlayerPort::PlayState m_switchPlay = PlayerPort::PlayState::Stopped;
     SleepInhibitor *m_sleep = nullptr;
     QProcess *m_switch = nullptr;
     QProcess *m_wake = nullptr;
     QTimer m_switchTimer;
+    QTimer m_readyTimer;
     bool m_switching = false;
+    bool m_awaitReady = false;
+    bool m_switchReleased = false;
+    bool m_switchWasParked = false;
     bool m_registered = false;
     bool m_screenOff = false;
     int m_volume = 0;

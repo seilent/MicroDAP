@@ -485,8 +485,8 @@ bool State::restoreLegacy(const QJsonObject &object)
     applyModes(object);
     const int index = object.value(QStringLiteral("index")).toInt(0);
     const qint64 position = static_cast<qint64>(object.value(QStringLiteral("position")).toDouble(0));
-    m_player->restore(entries, index, position, handoffPlaying(object),
-                      parseOrder(object.value(QStringLiteral("order")).toArray()));
+    restorePlayer(entries, index, position, handoffPlaying(object),
+                  parseOrder(object.value(QStringLiteral("order")).toArray()));
     return true;
 }
 
@@ -524,13 +524,26 @@ bool State::restoreQueue(const QJsonObject &state, bool hasState)
     }
     const bool match = hasState && state.value(QStringLiteral("queueRev")).toInteger(-1) == rev;
     if (match) {
-        m_player->restore(entries, state.value(QStringLiteral("index")).toInt(0),
-                          static_cast<qint64>(state.value(QStringLiteral("position")).toDouble(0)),
-                          handoffPlaying(state), order);
+        restorePlayer(entries, state.value(QStringLiteral("index")).toInt(0),
+                      static_cast<qint64>(state.value(QStringLiteral("position")).toDouble(0)),
+                      handoffPlaying(state), order);
     } else {
-        m_player->restore(entries, queue.value(QStringLiteral("index")).toInt(0), 0, false, order);
+        restorePlayer(entries, queue.value(QStringLiteral("index")).toInt(0), 0, false, order);
     }
     return true;
+}
+
+void State::restorePlayer(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing,
+                          const QList<int> &order)
+{
+    if (!m_restore || !m_restore->levelSet()) {
+        m_player->restore(entries, index, positionMs, playing, order);
+        return;
+    }
+    m_player->restore(entries, index, positionMs, false, order);
+    m_player->park(positionMs);
+    if (playing)
+        m_restore->restorePlaying(true);
 }
 
 bool State::load()
@@ -547,6 +560,11 @@ bool State::load()
         save(false);
     }
     return ok;
+}
+
+void State::setRestore(RestorePort *restore)
+{
+    m_restore = restore;
 }
 
 void State::installSignalHandlers()

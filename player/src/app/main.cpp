@@ -1,7 +1,9 @@
 #include "AccentControl.h"
+#include "AlsaVolume.h"
 #include "FakeBluezModel.h"
 #include "CodecFragment.h"
 #include "DbusPad.h"
+#include "DeviceReservation.h"
 #include "Eq.h"
 #include "Gamescope.h"
 #include "GuideChord.h"
@@ -13,6 +15,7 @@
 #include "Models.h"
 #include "Mpris.h"
 #include "OutputControl.h"
+#include "OutputMode.h"
 #include "OutputWatch.h"
 #include "OverlayBridge.h"
 #include "Pad.h"
@@ -204,7 +207,39 @@ int main(int argc, char *argv[])
     QObject::connect(&settings, &casdap::Settings::rootsChanged, eqControl.get(), &casdap::EqControl::relist);
     if (overlayMode)
         eqControl->startSinkPoll();
+    std::unique_ptr<casdap::OutputControl> outputControl;
+    std::unique_ptr<casdap::CodecFragment> codecFragment;
+    std::unique_ptr<casdap::AlsaVolume> alsaVolume;
+    std::unique_ptr<casdap::DeviceReservation> reservation;
+    std::unique_ptr<casdap::VolumeKeys> volumeKeys;
+    std::unique_ptr<casdap::OutputMode> outputMode;
+    casdap::PulseSinkVolume *pulseVolume = nullptr;
+    casdap::RoutedSinkVolume *routedVolume = nullptr;
+    if (!overlayMode) {
+        const casdap::OutputMode::Bounds bounds{};
+        outputControl = std::make_unique<casdap::OutputControl>();
+        codecFragment = std::make_unique<casdap::CodecFragment>();
+        alsaVolume = std::make_unique<casdap::AlsaVolume>(std::make_unique<casdap::SndMixer>(), bounds.pacingMs);
+        reservation = std::make_unique<casdap::DeviceReservation>(bounds.reservation);
+        pulseVolume = new casdap::PulseSinkVolume;
+        routedVolume = new casdap::RoutedSinkVolume(pulseVolume, pulseVolume, alsaVolume.get(), bounds.storeDelayMs);
+        casdap::OutputMode::Ports ports;
+        ports.player = &player;
+        ports.reservation = reservation.get();
+        ports.output = outputControl.get();
+        ports.dac = pulseVolume;
+        ports.volume = routedVolume;
+        ports.mixer = alsaVolume.get();
+        ports.codec = codecFragment.get();
+        ports.bluez = bluez.get();
+        ports.eq = eqControl.get();
+        outputMode = std::make_unique<casdap::OutputMode>(bounds, ports);
+        outputMode->setLevel(settings.outputLevel());
+        outputMode->setSampleRate(settings.sampleRate());
+        player.setPolicy(outputMode.get());
+    }
     casdap::State state(&player);
+    state.setRestore(outputMode.get());
     state.installSignalHandlers();
     state.load();
     casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
@@ -217,6 +252,7 @@ int main(int argc, char *argv[])
         casdap::Keep::clear();
         power.runScreenOn();
         power.setState(&state);
+        power.setOutputMode(outputMode.get(), &player);
         power.enableSleepWatch();
     }
     std::unique_ptr<casdap::LibraryWatcher> libraryWatcher;
@@ -241,11 +277,8 @@ int main(int argc, char *argv[])
     QObject::connect(bluez.get(), &casdap::BluezModel::transportActiveChanged, &accent,
                      [&accent, model = bluez.get()] { accent.setPhoneActive(model->transportActive()); });
     QObject::connect(&library, &casdap::Library::albumsChanged, &accent, &casdap::AccentControl::clearCache);
-    std::unique_ptr<casdap::OutputControl> outputControl;
-    std::unique_ptr<casdap::CodecFragment> codecFragment;
     std::unique_ptr<casdap::RgbControl> rgbControl;
     if (!overlayMode) {
-        outputControl = std::make_unique<casdap::OutputControl>();
         outputControl->setHeadphone(settings.hpGain(), settings.hpAmp());
         outputControl->setSpkGain(settings.spkGain());
         outputControl->apply(settings.output());
@@ -259,7 +292,6 @@ int main(int argc, char *argv[])
         QObject::connect(&settings, &casdap::Settings::hpAmpChanged, outputControl.get(), applyHeadphone);
         QObject::connect(&settings, &casdap::Settings::spkGainChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->setSpkGain(settings.spkGain()); });
-        codecFragment = std::make_unique<casdap::CodecFragment>();
         codecFragment->setBluez(bluez.get());
         codecFragment->apply(settings.btCodec());
         QObject::connect(&settings, &casdap::Settings::btCodecChanged, codecFragment.get(),
@@ -299,17 +331,16 @@ int main(int argc, char *argv[])
         applyActive();
     } else {
         outputControl->setActive(true);
+        audioInfo.setActive(!power.screenOff());
     }
     QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, pad.get(),
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
     std::unique_ptr<casdap::GuideChord> guide;
     std::unique_ptr<casdap::OutputWatch> outputs;
     std::unique_ptr<QObject> sensor;
-    std::unique_ptr<casdap::VolumeKeys> volumeKeys;
     if (!overlayMode) {
         guide = std::make_unique<casdap::GuideChord>();
-        volumeKeys = std::make_unique<casdap::VolumeKeys>(new casdap::EvdevKeys, new casdap::PulseSinkVolume,
-                                                          &settings);
+        volumeKeys = std::make_unique<casdap::VolumeKeys>(new casdap::EvdevKeys, routedVolume, &settings);
         QObject::connect(volumeKeys.get(), &casdap::VolumeKeys::levelChanged, &power, &casdap::PowerBridge::setVolume);
         const QString backend = qEnvironmentVariable("CASDAP_SENSOR_BACKEND");
         if (backend == QLatin1StringView("ssc")
@@ -321,6 +352,55 @@ int main(int argc, char *argv[])
         outputs->setScreenOff(power.screenOff());
         QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, outputs.get(),
                          [&power, watch = outputs.get()] { watch->setScreenOff(power.screenOff()); });
+    }
+    if (outputMode) {
+        casdap::OutputMode *mode = outputMode.get();
+        casdap::OutputControl *control = outputControl.get();
+        casdap::DeviceReservation *reserve = reservation.get();
+        QObject::connect(&settings, &casdap::Settings::outputLevelChanged, mode,
+                         [&settings, mode] { mode->setLevel(settings.outputLevel()); });
+        QObject::connect(&settings, &casdap::Settings::sampleRateChanged, mode,
+                         [&settings, mode] { mode->setSampleRate(settings.sampleRate()); });
+        auto activeOutput = [control, mode] { mode->onActiveOutputChanged(control->activeOutput(), control->usbSink()); };
+        QObject::connect(control, &casdap::OutputControl::activeOutputChanged, mode, activeOutput);
+        QObject::connect(control, &casdap::OutputControl::usbSinkChanged, mode, activeOutput);
+        QObject::connect(control, &casdap::OutputControl::applied, mode, &casdap::OutputMode::onApplied);
+        QObject::connect(control, &casdap::OutputControl::cardGone, mode, &casdap::OutputMode::onCardGone);
+        QObject::connect(control, &casdap::OutputControl::sinksRead, mode, &casdap::OutputMode::onSinksRead);
+        QObject::connect(&player, &casdap::Player::statusChanged, mode, &casdap::OutputMode::onStatusChanged);
+        QObject::connect(&player, &casdap::Player::endOfStream, mode, &casdap::OutputMode::onEndOfStream);
+        QObject::connect(&player, &casdap::Player::formatChanged, mode, &casdap::OutputMode::onFormatChanged);
+        QObject::connect(&audioInfo, &casdap::AudioInfo::hwRateChanged, mode,
+                         [&audioInfo, mode] { mode->onHwRateChanged(audioInfo.hwRate()); });
+        QObject::connect(alsaVolume.get(), &casdap::AlsaVolume::disconnected, mode,
+                         &casdap::OutputMode::onMixerDisconnected);
+        QObject::connect(alsaVolume.get(), &casdap::AlsaVolume::levelChanged, mode,
+                         &casdap::OutputMode::onVolumePressed);
+        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::sinkAppeared, mode,
+                         &casdap::OutputMode::onSinkAppeared);
+        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::sinkChanged, mode, &casdap::OutputMode::onSinkChanged);
+        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::cardRemoved, mode, &casdap::OutputMode::onCardRemoved);
+        QObject::connect(bluez.get(), &casdap::BluezModel::connectedChanged, mode,
+                         &casdap::OutputMode::onBluezConnectedChanged);
+        QObject::connect(bluez.get(), &casdap::BluezModel::readyChanged, mode, &casdap::OutputMode::onBluezReadyChanged);
+        QObject::connect(bluez.get(), &casdap::BluezModel::transportStateChanged, mode,
+                         &casdap::OutputMode::onTransportStateChanged);
+        QObject::connect(codecFragment.get(), &casdap::CodecFragment::restartFinished, mode,
+                         &casdap::OutputMode::onCodecRestartFinished);
+        QObject::connect(reserve, &casdap::DeviceReservation::acquired, mode, &casdap::OutputMode::onAcquired);
+        QObject::connect(reserve, &casdap::DeviceReservation::refused, mode, &casdap::OutputMode::onRefused);
+        QObject::connect(reserve, &casdap::DeviceReservation::failed, mode, &casdap::OutputMode::onFailed);
+        QObject::connect(reserve, &casdap::DeviceReservation::releaseRequested, mode,
+                         &casdap::OutputMode::onReleaseRequested);
+        QObject::connect(reserve, &casdap::DeviceReservation::releaseTimedOut, mode,
+                         &casdap::OutputMode::onReleaseTimedOut);
+        QObject::connect(reserve, &casdap::DeviceReservation::nameLost, mode, &casdap::OutputMode::onNameLost);
+        QObject::connect(reserve, &casdap::DeviceReservation::connectionLost, mode,
+                         &casdap::OutputMode::onConnectionLost);
+        QObject::connect(reserve, &casdap::DeviceReservation::released, mode, &casdap::OutputMode::onReleased);
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, mode, &casdap::OutputMode::aboutToQuit);
+        mode->onHwRateChanged(audioInfo.hwRate());
+        mode->attach();
     }
 
     QQmlApplicationEngine engine;
@@ -365,6 +445,8 @@ int main(int argc, char *argv[])
         engine.rootContext()->setContextProperty(QStringLiteral("Outputs"), outputs.get());
     if (sensor)
         engine.rootContext()->setContextProperty(QStringLiteral("Sensor"), sensor.get());
+    if (outputMode)
+        engine.rootContext()->setContextProperty(QStringLiteral("OutputMode"), outputMode.get());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Casdap", "Main");
@@ -406,5 +488,7 @@ int main(int argc, char *argv[])
                                 << (image.save(grabOut, "PNG") ? " saved " : " failed ") << grabOut << '\n';
         });
     }
-    return app.exec();
+    const int code = app.exec();
+    player.setPolicy(nullptr);
+    return code;
 }

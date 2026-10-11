@@ -205,8 +205,12 @@ void OutputControl::setHeld(HeldState state)
             << (released ? "none" : state == HeldState::Held ? "held" : "returning");
     if (usb != usbPresent())
         emit usbSinkChanged();
-    if (released)
+    if (released && m_everApplied && m_activeOutput == QLatin1StringView("usb") && m_usbSink.isEmpty())
+        apply(m_output);
+    else if (released)
         refresh();
+    else if (state == HeldState::Held && m_everApplied && m_activeOutput != QLatin1StringView("usb"))
+        apply(m_output);
 }
 
 void OutputControl::watchCard(int index, const QString &id)

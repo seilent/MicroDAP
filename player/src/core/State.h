@@ -1,5 +1,6 @@
 #pragma once
 
+#include "OutputPorts.h"
 #include "Queue.h"
 
 #include <QJsonArray>
@@ -52,6 +53,7 @@ public:
     void writeQueueLater();
     void quit(bool handoff = true);
     bool load();
+    void setRestore(RestorePort *restore);
     void installSignalHandlers();
 
     Q_INVOKABLE QVariantList stack() const;
@@ -73,9 +75,12 @@ private:
     bool restoreLegacy(const QJsonObject &object);
     bool restoreQueue(const QJsonObject &state, bool hasState);
     void applyModes(const QJsonObject &state);
+    void restorePlayer(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing,
+                       const QList<int> &order);
     QList<QueueEntry> resolveEntries(const QList<qint64> &ids, const QStringList &paths) const;
 
     Player *m_player;
+    RestorePort *m_restore = nullptr;
     QString m_path;
     QString m_queuePath;
     QTimer m_timer;

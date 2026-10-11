@@ -1,4 +1,7 @@
+#include "AlsaVolume.h"
 #include "Keep.h"
+#include "OutputFakes.h"
+#include "OutputMode.h"
 #include "Player.h"
 #include "PowerBridge.h"
 #include "Settings.h"
@@ -17,6 +20,7 @@
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -60,6 +64,115 @@ QVariant savedValue(const QString &path, const QString &key)
     return object.value(key).toVariant();
 }
 
+const QString fiioSink = QStringLiteral("alsa_output.usb-FIIO_SNOWSKY_TINY_B_000000000000-01.analog-stereo");
+
+QStringList *capturedMessages = nullptr;
+QtMessageHandler previousHandler = nullptr;
+
+void captureMessage(QtMsgType type, const QMessageLogContext &context, const QString &text)
+{
+    if (capturedMessages)
+        capturedMessages->append(text);
+    if (previousHandler)
+        previousHandler(type, context, text);
+}
+
+int countOf(const QStringList &log, const QString &prefix)
+{
+    int n = 0;
+    for (const QString &line : log) {
+        if (line.startsWith(prefix))
+            ++n;
+    }
+    return n;
+}
+
+int indexOf(const QStringList &log, const QString &prefix)
+{
+    for (int i = 0; i < log.size(); ++i) {
+        if (log.at(i).startsWith(prefix))
+            return i;
+    }
+    return -1;
+}
+
+OutputMode::Bounds rigBounds()
+{
+    OutputMode::Bounds b;
+    b.pcmFreeMs = 150;
+    b.pcmPollMs = 5;
+    b.acquireMs = 400;
+    b.parkMs = 400;
+    b.netFirstMs = 120;
+    b.netSecondMs = 150;
+    b.switchMs = 100;
+    b.pcmWatchMs = 250;
+    b.resolveMs = 150;
+    b.readyMs = 150;
+    b.quitMs = 50;
+    b.sleepReleaseMs = 120;
+    b.pacingMs = 10;
+    b.storeDelayMs = 30;
+    return b;
+}
+
+class OutputRig
+{
+public:
+    OutputRig()
+        : mixer(new FakeMixer(&log))
+        , alsa(std::unique_ptr<MixerBackend>(mixer), rigBounds().pacingMs)
+    {
+        dac.card.cardIndex = 7;
+        dac.card.alsaCard = 1;
+        dac.card.reserveName = QStringLiteral("Audio1");
+        dac.volumeDb = -20.0;
+        OutputMode::Ports ports;
+        ports.player = &player;
+        ports.reservation = &reservation;
+        ports.output = &output;
+        ports.dac = &dac;
+        ports.volume = &volume;
+        ports.mixer = &alsa;
+        mode = std::make_unique<OutputMode>(rigBounds(), ports);
+        player.policy = mode.get();
+        player.onStatus = [this] { mode->onStatusChanged(); };
+        reservation.onAcquire = [this](quint64 seq) {
+            QTimer::singleShot(0, &context, [this, seq] { mode->onAcquired(seq); });
+        };
+        reservation.onRelease = [this] { QTimer::singleShot(0, &context, [this] { mode->onReleased(); }); };
+        output.onRefresh = [this](quint64 read) { mode->onSinksRead(fiioSink, read); };
+    }
+
+    bool enter()
+    {
+        mode->setLevel(QStringLiteral("exclusive"));
+        mode->onActiveOutputChanged(QStringLiteral("usb"), fiioSink);
+        return QTest::qWaitFor([this] { return volume.route == DacVolumePort::Route::Alsa; }, busTimeoutMs);
+    }
+
+    bool hold()
+    {
+        if (!enter())
+            return false;
+        player.play(1);
+        return QTest::qWaitFor([this] {
+            return mode->state() == OutputMode::State::ExHeld && player.chain == PlayerPort::OutputChain::Ex;
+        }, busTimeoutMs);
+    }
+
+    QStringList log;
+    FakeMixer *mixer;
+    AlsaVolume alsa;
+    FakePlayer player{&log};
+    FakeReservation reservation{&log};
+    FakeHeldOutput output{&log};
+    FakeDacSink dac{&log};
+    FakeDacVolume volume{&log};
+    std::unique_ptr<OutputMode> mode;
+    QObject context;
+};
+
 }
 
 class PowerTest : public QObject
@@ -97,6 +210,15 @@ private slots:
     void settingsOutputLevel();
     void statusSysfs();
     void clockFormat();
+    void switchHeldOrder();
+    void switchExitCodeRebuilds();
+    void switchBeforeStartRebuildsNothing();
+    void switchLevelOffStartsAtOnce();
+    void switchDroppedAcquireRebuilds();
+    void switchReadyFallback();
+    void gameModeVerbByLevel();
+    void sleepStopsParkTimer();
+    void sleepReleasesInhibitorAfterWait();
 
 private:
     bool sawChange(const QString &name, const QVariant &value) const;
@@ -229,6 +351,10 @@ void PowerTest::initTestCase()
     qputenv("CASDAP_KEEP_FILE", m_keepFile.toUtf8());
     qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
     qputenv("CASDAP_SWITCH_TIMEOUT_MS", QByteArrayLiteral("400"));
+    const QString asound = m_dir.path() + QStringLiteral("/asound/card1");
+    QVERIFY(writeFile(asound + QStringLiteral("/id"), QStringLiteral("B\n")));
+    QVERIFY(writeFile(asound + QStringLiteral("/pcm0p/sub0/status"), QStringLiteral("closed\n")));
+    qputenv("CASDAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
     qputenv("PATH", m_stubDir.toUtf8() + ':' + qgetenv("PATH"));
     m_login1Running = startLogin1();
     if (m_login1Running)
@@ -965,6 +1091,275 @@ void PowerTest::clockFormat()
     QCOMPARE(StatusModel::formatClock(QTime(7, 13)), QStringLiteral("7:13"));
     QCOMPARE(StatusModel::formatClock(QTime(0, 5)), QStringLiteral("0:05"));
     QCOMPARE(StatusModel::formatClock(QTime(19, 30, 59)), QStringLiteral("19:30"));
+}
+
+void PowerTest::switchHeldOrder()
+{
+    OutputRig rig;
+    QVERIFY(rig.hold());
+    QFile::remove(m_log);
+    QFile::remove(m_stateFile);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    rig.reservation.onRelease = [this, &rig] {
+        rig.log.append(QStringLiteral("release seen, handoff %1, service lines %2")
+                           .arg(savedState(QStringLiteral("handoff")).toBool() ? 1 : 0)
+                           .arg(logLines()));
+        QTimer::singleShot(300, &rig.context, [&rig] { rig.mode->onReleased(); });
+    };
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    QElapsedTimer timer;
+    timer.start();
+
+    m_bridge->keepInBackground();
+    QVERIFY(m_bridge->switching());
+    QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 1);
+    QCOMPARE(rig.log.at(indexOf(rig.log, QStringLiteral("release seen"))),
+             QStringLiteral("release seen, handoff 1, service lines 0"));
+    QVERIFY(indexOf(rig.log, QStringLiteral("player park")) < indexOf(rig.log, QStringLiteral("reserve release")));
+
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: keep in background");
+    QTest::ignoreMessage(QtInfoMsg, "casdap power: switch already running");
+    m_bridge->keepInBackground();
+    QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 1);
+    QTest::qWait(150);
+    QCOMPARE(logLines(), 0);
+
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    const qint64 started = timer.elapsed();
+    QVERIFY(started >= 300);
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(failed.count(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QVERIFY(timer.elapsed() >= 300 + PowerBridge::switchTimeoutMs());
+    QVERIFY(!m_bridge->switching());
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("rebuild")), 0);
+    QVERIFY(rig.player.isParked);
+    QCOMPARE(rig.mode->reason(), OutputMode::Reason::Switch);
+}
+
+void PowerTest::switchExitCodeRebuilds()
+{
+    OutputRig rig;
+    QVERIFY(rig.hold());
+    rig.player.seek(2500);
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl"), QStringLiteral("1")));
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] {
+        m_bridge->setOutputMode(nullptr, nullptr);
+        writeStub(QStringLiteral("systemctl"));
+    });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+
+    m_bridge->closeAndSwitch();
+    QVERIFY(m_bridge->switching());
+    QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QCOMPARE(logLines(), 1);
+    QVERIFY(!m_bridge->switching());
+    QVERIFY(indexOf(rig.log, QStringLiteral("player park 2500")) >= 0);
+    QVERIFY(indexOf(rig.log, QStringLiteral("player park 2500"))
+            < indexOf(rig.log, QStringLiteral("player rebuild 2500 playing")));
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("rebuild")), 1);
+    QVERIFY(QTest::qWaitFor([&rig] {
+        return rig.mode->state() == OutputMode::State::ExHeld && rig.player.chain == PlayerPort::OutputChain::Ex;
+    }, busTimeoutMs));
+    QCOMPARE(rig.player.positionMs(), qint64(2500));
+}
+
+void PowerTest::switchBeforeStartRebuildsNothing()
+{
+    OutputRig rig;
+    QVERIFY(rig.hold());
+    QFile::remove(m_log);
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    qputenv("CASDAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/missing")).toUtf8());
+    auto detach = qScopeGuard([this] {
+        m_bridge->setOutputMode(nullptr, nullptr);
+        qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
+    });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    const int calls = rig.player.calls.size();
+
+    m_bridge->keepInBackground();
+    QCOMPARE(failed.count(), 1);
+    QVERIFY(!m_bridge->switching());
+    QTest::qWait(200);
+    QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 0);
+    QCOMPARE(rig.player.calls.size(), calls);
+    QCOMPARE(rig.mode->state(), OutputMode::State::ExHeld);
+    QCOMPARE(logLines(), 0);
+}
+
+void PowerTest::switchLevelOffStartsAtOnce()
+{
+    OutputRig rig;
+    rig.mode->onActiveOutputChanged(QStringLiteral("usb"), fiioSink);
+    rig.player.play(1);
+    QCOMPARE(rig.player.chain, PlayerPort::OutputChain::Pw);
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    QStringList messages;
+    capturedMessages = &messages;
+    previousHandler = qInstallMessageHandler(captureMessage);
+    auto detach = qScopeGuard([this] {
+        qInstallMessageHandler(previousHandler);
+        capturedMessages = nullptr;
+        m_bridge->setOutputMode(nullptr, nullptr);
+    });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+
+    m_bridge->closeAndSwitch();
+    QVERIFY(m_bridge->switching());
+    QCOMPARE(countOf(messages, QStringLiteral("casdap power: switch ")), 1);
+    QCOMPARE(countOf(messages, QStringLiteral("casdap power: switch waits")), 0);
+    QCOMPARE(countOf(messages, QStringLiteral("casdap output:")), 0);
+    QVERIFY(rig.reservation.calls.isEmpty());
+    QVERIFY(!rig.player.isParked);
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("rebuild")), 0);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("park")), 0);
+    QCOMPARE(countOf(messages, QStringLiteral("casdap output:")), 0);
+    QCOMPARE(rig.player.status, PlayerPort::PlayState::Playing);
+}
+
+void PowerTest::switchDroppedAcquireRebuilds()
+{
+    OutputRig rig;
+    QVERIFY(rig.enter());
+    rig.reservation.onAcquire = nullptr;
+    rig.player.play(1);
+    rig.player.seek(1500);
+    QTRY_COMPARE_WITH_TIMEOUT(countOf(rig.reservation.calls, QStringLiteral("acquire")), 1, busTimeoutMs);
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl"), QStringLiteral("1")));
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] {
+        m_bridge->setOutputMode(nullptr, nullptr);
+        writeStub(QStringLiteral("systemctl"));
+    });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+
+    m_bridge->closeAndSwitch();
+    QVERIFY(rig.player.isParked);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("rebuild 1500 playing")), 1);
+}
+
+void PowerTest::switchReadyFallback()
+{
+    OutputRig rig;
+    QVERIFY(rig.hold());
+    rig.reservation.onRelease = nullptr;
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    const int bound = rig.mode->switchBoundMs() + PowerBridge::switchReadyMarginMs;
+    QElapsedTimer timer;
+    timer.start();
+
+    QTest::ignoreMessage(QtWarningMsg,
+                         qPrintable(QStringLiteral("casdap power: no output release within %1 ms, switching").arg(bound)));
+    m_bridge->keepInBackground();
+    QVERIFY(m_bridge->switching());
+    QTest::qWait(bound - 300);
+    QCOMPARE(logLines(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QVERIFY(timer.elapsed() >= bound);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("rebuild")), 0);
+}
+
+void PowerTest::gameModeVerbByLevel()
+{
+    OutputRig rig;
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+
+    QVERIFY(m_bridge->runVerb(QStringLiteral("game-mode")));
+    QVERIFY(!m_bridge->switching());
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+
+    rig.mode->setLevel(QStringLiteral("bitperfect"));
+    QVERIFY(m_bridge->runVerb(QStringLiteral("game-mode")));
+    QVERIFY(m_bridge->switching());
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 2, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QVERIFY(!m_bridge->switching());
+}
+
+void PowerTest::sleepStopsParkTimer()
+{
+    if (!m_login1Running)
+        QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
+    m_bridge->enableSleepWatch();
+    QVERIFY(m_bridge->sleep() != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(m_bridge->sleep()->held(), busTimeoutMs);
+    OutputRig rig;
+    QVERIFY(rig.hold());
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    rig.player.pause();
+    QVERIFY(!rig.player.isParked);
+
+    login1(QStringLiteral("EmitPrepareForSleep"), {true});
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->sleep()->held(), busTimeoutMs);
+    QVERIFY(rig.player.isParked);
+    QVERIFY(!rig.alsa.isOpen());
+    QTest::qWait(rigBounds().parkMs + 300);
+    QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 0);
+    QCOMPARE(rig.mode->state(), OutputMode::State::ExHeld);
+
+    login1(QStringLiteral("EmitPrepareForSleep"), {false});
+    QTRY_VERIFY_WITH_TIMEOUT(m_bridge->sleep()->held(), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(countOf(rig.log, QStringLiteral("reserve release")), 1, busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), busTimeoutMs);
+}
+
+void PowerTest::sleepReleasesInhibitorAfterWait()
+{
+    if (!m_login1Running)
+        QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
+    m_bridge->enableSleepWatch();
+    QVERIFY(m_bridge->sleep() != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(m_bridge->sleep()->held(), busTimeoutMs);
+    OutputRig rig;
+    QVERIFY(rig.hold());
+    rig.reservation.onRelease = nullptr;
+    rig.reservation.releaseCompletes = false;
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    const QMetaObject::Connection held = connect(m_bridge->sleep(), &SleepInhibitor::heldChanged, this,
+                                                 [this, &rig] {
+        if (!m_bridge->sleep()->held())
+            rig.log.append(QStringLiteral("inhibitor released"));
+    });
+    auto detach = qScopeGuard([this, held] {
+        disconnect(held);
+        m_bridge->setOutputMode(nullptr, nullptr);
+    });
+    rig.player.stop();
+    QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 1);
+    QVERIFY(rig.mode->releasing());
+
+    login1(QStringLiteral("EmitPrepareForSleep"), {true});
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->sleep()->held(), busTimeoutMs);
+    const int waited = indexOf(rig.log, QStringLiteral("reserve wait released 120"));
+    QVERIFY(waited >= 0);
+    QVERIFY(waited < indexOf(rig.log, QStringLiteral("inhibitor released")));
+
+    rig.mode->onReleased();
+    login1(QStringLiteral("EmitPrepareForSleep"), {false});
+    QTRY_VERIFY_WITH_TIMEOUT(m_bridge->sleep()->held(), busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), busTimeoutMs);
 }
 
 QTEST_GUILESS_MAIN(PowerTest)
