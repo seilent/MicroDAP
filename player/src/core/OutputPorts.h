@@ -99,6 +99,15 @@ public:
     virtual bool parked() const = 0;
 };
 
+class DacEqPort
+{
+public:
+    virtual ~DacEqPort() = default;
+
+    virtual void startRelease(std::function<void()> released) = 0;
+    virtual void quitAndJoin(int ms) = 0;
+};
+
 class RestorePort
 {
 public:

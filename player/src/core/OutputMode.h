@@ -46,6 +46,8 @@ public:
         int readyMs = 3000;
         int quitMs = 1000;
         int sleepReleaseMs = 1000;
+        int dacReleaseMs = 500;
+        int dacQuitMs = 500;
         double minRangeDb = 40.0;
         double volumeToleranceDb = 0.05;
         DeviceReservation::Bounds reservation;
@@ -64,6 +66,7 @@ public:
         CodecFragment *codec = nullptr;
         BluezModel *bluez = nullptr;
         EqControl *eq = nullptr;
+        DacEqPort *dacEq = nullptr;
     };
 
     enum class State { Pw, Bp, ExIdle, ExAcquiring, ExHeld };
@@ -89,6 +92,9 @@ public:
     bool releasing() const;
     quint64 generation() const;
     QString cardId() const;
+    int alsaCard() const;
+    bool exHeld() const;
+    bool switchStoppedStream() const;
 
     Player::OutputChain chainFor(GstState target) const override;
     Admit admit(const Player::PendingBuild &build) override;
@@ -138,6 +144,10 @@ signals:
     void ratesChanged();
     void switchReady();
     void notice(const QString &text);
+    void cardChanged(const QString &id, int alsa);
+    void generationChanged(const QString &id, quint64 generation, bool present);
+    void cardGoneChanged(bool gone);
+    void exHeldChanged(bool held);
 
 private:
     enum class Phase { None, WaitReleased, WaitNameLost, Sink, Read, Restart, Second };
@@ -166,6 +176,9 @@ private:
         quint64 readAfter = 0;
     };
 
+    void setState(State state);
+    void setCardGone(bool gone);
+    void emitSwitchReady();
     bool exclusive() const;
     bool blocked() const;
     Reason blockReason() const;
@@ -230,6 +243,11 @@ private:
     Release m_r;
     Acquire m_acq = Acquire::None;
     bool m_cardGone = false;
+    bool m_switchR = false;
+    bool m_switchDac = false;
+    bool m_switchDone = false;
+    bool m_switchStopped = false;
+    quint64 m_switchSeq = 0;
     bool m_nameOwned = false;
     bool m_volumeBlock = false;
     bool m_noVolume = false;
@@ -279,6 +297,7 @@ private:
     QTimer m_netTimer;
     QTimer m_resolveTimer;
     QTimer m_readyTimer;
+    QTimer m_dacTimer;
 };
 
 }

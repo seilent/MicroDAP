@@ -610,6 +610,54 @@ private:
     QObject m_context;
 };
 
+class FakeDacEqPort : public DacEqPort
+{
+public:
+    enum class Answer { Now, Delayed, Never };
+
+    explicit FakeDacEqPort(QStringList *log = nullptr)
+        : m_log(log)
+    {
+    }
+
+    void startRelease(std::function<void()> released) override
+    {
+        record(QStringLiteral("release"));
+        switch (answer) {
+        case Answer::Now:
+            released();
+            return;
+        case Answer::Delayed:
+            QTimer::singleShot(delayMs, &m_context, released);
+            return;
+        case Answer::Never:
+            pending.append(released);
+            return;
+        }
+    }
+
+    void quitAndJoin(int ms) override
+    {
+        record(QStringLiteral("quit %1").arg(ms));
+    }
+
+    QStringList calls;
+    QList<std::function<void()>> pending;
+    Answer answer = Answer::Now;
+    int delayMs = 200;
+
+private:
+    void record(const QString &call)
+    {
+        calls.append(call);
+        if (m_log)
+            m_log->append(QStringLiteral("daceq ") + call);
+    }
+
+    QStringList *m_log;
+    QObject m_context;
+};
+
 class FakeDacVolume : public DacVolumePort
 {
 public:

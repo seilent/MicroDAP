@@ -87,6 +87,15 @@ OutputMode::OutputMode(const Bounds &bounds, const Ports &ports, QObject *parent
         if (m_restoreWanted)
             waitReady();
     });
+    m_dacTimer.setSingleShot(true);
+    m_dacTimer.setInterval(bounds.dacReleaseMs);
+    connect(&m_dacTimer, &QTimer::timeout, this, [this] {
+        if (m_switchDone || m_switchDac)
+            return;
+        log(QStringLiteral("switch bound reached, dac eq not released"));
+        m_switchDac = true;
+        emitSwitchReady();
+    });
     m_readyTimer.setSingleShot(true);
     m_readyTimer.setInterval(bounds.readyMs);
     connect(&m_readyTimer, &QTimer::timeout, this, [this] {
@@ -107,7 +116,7 @@ void OutputMode::attach()
 
 int OutputMode::switchBoundMs() const
 {
-    return m_bounds.reservation.callMs + m_bounds.switchMs;
+    return m_bounds.reservation.callMs + m_bounds.switchMs + (m_ports.dacEq ? m_bounds.dacReleaseMs : 0);
 }
 
 QList<int> OutputMode::builtInRates()
@@ -209,6 +218,37 @@ quint64 OutputMode::generation() const
 QString OutputMode::cardId() const
 {
     return m_card.id;
+}
+
+int OutputMode::alsaCard() const
+{
+    return m_card.alsa;
+}
+
+bool OutputMode::exHeld() const
+{
+    return m_state == State::ExHeld;
+}
+
+bool OutputMode::switchStoppedStream() const
+{
+    return m_switchStopped;
+}
+
+void OutputMode::setState(State state)
+{
+    const bool was = m_state == State::ExHeld;
+    m_state = state;
+    if (was != (state == State::ExHeld))
+        emit exHeldChanged(!was);
+}
+
+void OutputMode::setCardGone(bool gone)
+{
+    if (gone == m_cardGone)
+        return;
+    m_cardGone = gone;
+    emit cardGoneChanged(gone);
 }
 
 bool OutputMode::exclusive() const
@@ -423,7 +463,8 @@ void OutputMode::refreshCard(const QString &sink)
             self->m_volumeBlock = false;
         }
         self->m_card = Card{card.alsaCard, card.cardIndex, card.reserveName, id, sink};
-        self->m_cardGone = false;
+        self->setCardGone(false);
+        emit self->cardChanged(id, card.alsaCard);
         self->log(QStringLiteral("dac card hw:CARD=") + id);
         if (!was && self->effective()) {
             if (!self->m_r.running && self->m_acq == Acquire::None) {
@@ -472,7 +513,7 @@ void OutputMode::onActiveOutputChanged(const QString &active, const QString &usb
         log(QStringLiteral("active output ") + active);
     if (active == usb) {
         if (m_cardGone && (m_card.id.isEmpty() || cardPresent()))
-            m_cardGone = false;
+            setCardGone(false);
         else if (m_cardGone)
             refreshCard(m_usbSink);
     } else {
@@ -761,7 +802,7 @@ void OutputMode::onFailed(quint64 seq, const QString &reason)
     m_acq = Acquire::None;
     ++m_acqSeq;
     if (!cardPresent()) {
-        m_state = State::ExIdle;
+        setState(State::ExIdle);
         disconnectEvent("card gone at acquire");
         return;
     }
@@ -785,7 +826,7 @@ void OutputMode::onReleaseRequested(int priority)
     m_r = Release{};
     m_r.running = true;
     m_r.reason = Reason::Released;
-    m_state = State::ExIdle;
+    setState(State::ExIdle);
     m_reason = Reason::Released;
     const PlayerPort::PlayState play = m_ports.player->playState();
     if (play != PlayerPort::PlayState::Stopped && !m_ports.player->parked())
@@ -815,7 +856,7 @@ void OutputMode::onNameLost(bool requested)
         }
         log(QStringLiteral("name taken by the requester"));
         m_r.phase = Phase::None;
-        m_state = State::ExIdle;
+        setState(State::ExIdle);
         m_reason = Reason::Released;
         m_ports.output->setHeld(HeldOutputPort::HeldState::None);
         m_ports.output->unwatchCard();
@@ -874,6 +915,24 @@ void OutputMode::onFormatChanged()
 
 void OutputMode::releaseForSwitch()
 {
+    const quint64 seq = ++m_switchSeq;
+    m_switchR = false;
+    m_switchDac = false;
+    m_switchDone = false;
+    m_switchStopped = false;
+    if (m_ports.dacEq) {
+        m_dacTimer.start();
+        QPointer<OutputMode> self(this);
+        m_ports.dacEq->startRelease([self, seq] {
+            if (!self || seq != self->m_switchSeq || self->m_switchDone || self->m_switchDac)
+                return;
+            self->m_dacTimer.stop();
+            self->m_switchDac = true;
+            self->emitSwitchReady();
+        });
+    } else {
+        m_switchDac = true;
+    }
     m_park.stop();
     if (m_codecWaiting) {
         log(QStringLiteral("switch drops the build waiting for the codec restart"));
@@ -882,11 +941,13 @@ void OutputMode::releaseForSwitch()
         m_waiting = false;
         drivePark(m_ports.player->positionMs());
         updateAll();
-        emit switchReady();
+        m_switchR = true;
+        emitSwitchReady();
         return;
     }
     if (m_r.running) {
         log(QStringLiteral("switch joins the release"));
+        m_switchStopped = true;
         m_r.switching = true;
         m_r.net = false;
         m_reason = Reason::Switch;
@@ -894,6 +955,7 @@ void OutputMode::releaseForSwitch()
             m_netTimer.start(qMin(m_netTimer.remainingTime() < 0 ? m_bounds.switchMs : m_netTimer.remainingTime(),
                                   m_bounds.switchMs));
         } else if (m_r.phase == Phase::Restart || m_r.phase == Phase::Second) {
+            m_switchStopped = false;
             endReturn();
         }
         return;
@@ -914,9 +976,20 @@ void OutputMode::releaseForSwitch()
             ++m_acqSeq;
             m_waiting = false;
         }
+        m_switchStopped = true;
         startRelease(Reason::Switch, Build::Park, false, true);
         return;
     }
+    m_switchR = true;
+    emitSwitchReady();
+}
+
+void OutputMode::emitSwitchReady()
+{
+    if (m_switchDone || !m_switchR || !m_switchDac)
+        return;
+    m_switchDone = true;
+    m_dacTimer.stop();
     emit switchReady();
 }
 
@@ -952,7 +1025,7 @@ void OutputMode::prepareForSleep(bool sleeping)
                 m_acq = Acquire::None;
                 ++m_acqSeq;
             }
-            m_state = State::ExHeld;
+            setState(State::ExHeld);
             m_sleepHeld = true;
             if (m_ports.player->playState() != PlayerPort::PlayState::Stopped && !m_ports.player->parked())
                 drivePark(m_ports.player->positionMs());
@@ -979,7 +1052,7 @@ void OutputMode::prepareForSleep(bool sleeping)
         m_r.running = true;
         m_r.reason = Reason::Idle;
         m_r.net = present;
-        m_state = State::ExIdle;
+        setState(State::ExIdle);
         m_reason = Reason::Idle;
         releaseName();
         updateAll();
@@ -1012,6 +1085,7 @@ void OutputMode::aboutToQuit()
     m_netTimer.stop();
     m_resolveTimer.stop();
     m_readyTimer.stop();
+    m_dacTimer.stop();
     if (m_nameOwned) {
         log(QStringLiteral("quit with the name held"));
         if (m_ports.player->playState() != PlayerPort::PlayState::Stopped && !m_ports.player->parked())
@@ -1019,6 +1093,8 @@ void OutputMode::aboutToQuit()
         m_nameOwned = false;
     }
     m_ports.reservation->quitAndJoin(m_bounds.quitMs);
+    if (m_ports.dacEq)
+        m_ports.dacEq->quitAndJoin(m_bounds.dacQuitMs);
 }
 
 void OutputMode::bump()
@@ -1041,7 +1117,8 @@ void OutputMode::disconnectEvent(const char *source)
     log(QStringLiteral("disconnect event, ") + QLatin1StringView(source)
         + QStringLiteral(", generation %1, card %2").arg(generation()).arg(present ? "present" : "gone"));
     if (!present)
-        m_cardGone = true;
+        setCardGone(true);
+    emit generationChanged(m_card.id, generation(), present);
     if (m_nameOwned) {
         m_ports.reservation->markGone();
         if (m_asleep) {
@@ -1116,6 +1193,7 @@ void OutputMode::enterLevel(bool adopt)
             self->m_noVolume = false;
         }
         self->m_card = Card{card.alsaCard, card.cardIndex, card.reserveName, id, self->m_usbSink};
+        emit self->cardChanged(id, card.alsaCard);
         AlsaVolume *mixer = self->m_ports.mixer;
         const int owned = self->m_ports.volume->ownedStep(id);
         if (mixer->open(id)) {
@@ -1152,7 +1230,7 @@ void OutputMode::cardReturn(const QString &sink, bool release)
 {
     if (m_card.id.isEmpty())
         return;
-    m_cardGone = false;
+    setCardGone(false);
     AlsaVolume *mixer = m_ports.mixer;
     if (mixer->open(m_card.id)) {
         const int owned = m_ports.volume->ownedStep(m_card.id);
@@ -1236,13 +1314,13 @@ void OutputMode::settle()
     if (m_acq != Acquire::None || m_nameOwned)
         return;
     if (!effective()) {
-        m_state = State::Pw;
+        setState(State::Pw);
         m_reason = Reason::None;
     } else if (m_level == bitperfect) {
-        m_state = State::Bp;
+        setState(State::Bp);
         m_reason = Reason::None;
     } else if (m_state != State::ExIdle) {
-        m_state = State::ExIdle;
+        setState(State::ExIdle);
     }
 }
 
@@ -1365,7 +1443,7 @@ void OutputMode::schedulePark()
 
 void OutputMode::startAcquire()
 {
-    m_state = State::ExAcquiring;
+    setState(State::ExAcquiring);
     m_acq = Acquire::Card;
     m_nameOwned = false;
     const quint64 seq = ++m_acqSeq;
@@ -1388,7 +1466,7 @@ void OutputMode::acquireCard(const DacCard &card)
         m_acquireTimer.stop();
         m_acq = Acquire::None;
         ++m_acqSeq;
-        m_state = State::ExIdle;
+        setState(State::ExIdle);
         if (!m_card.id.isEmpty() && !cardPresent()) {
             disconnectEvent("card gone at acquire");
             return;
@@ -1407,6 +1485,7 @@ void OutputMode::acquireCard(const DacCard &card)
         m_noVolume = false;
     }
     m_card = Card{card.alsaCard, card.cardIndex, card.reserveName, id, m_usbSink};
+    emit cardChanged(id, card.alsaCard);
     AlsaVolume *mixer = m_ports.mixer;
     if (!mixer->open(id) || mixer->rangeDb() < m_bounds.minRangeDb) {
         log(QStringLiteral("hw:CARD=%1 has no %2 dB volume, exclusive refused").arg(id).arg(m_bounds.minRangeDb));
@@ -1470,7 +1549,7 @@ void OutputMode::acquireDone()
     m_acquireTimer.stop();
     m_pcmPoll.stop();
     m_acq = Acquire::None;
-    m_state = State::ExHeld;
+    setState(State::ExHeld);
     m_reason = Reason::None;
     AlsaVolume *mixer = m_ports.mixer;
     const int owned = m_ports.volume->ownedStep(m_card.id);
@@ -1491,7 +1570,7 @@ void OutputMode::failBeforeReserve(Reason reason)
     m_pcmPoll.stop();
     m_acq = Acquire::None;
     ++m_acqSeq;
-    m_state = State::ExIdle;
+    setState(State::ExIdle);
     m_reason = reason;
     if (m_waiting) {
         m_waiting = false;
@@ -1510,7 +1589,7 @@ void OutputMode::acquireTimedOut()
     m_acq = Acquire::None;
     ++m_acqSeq;
     if (!cardPresent()) {
-        m_state = State::ExIdle;
+        setState(State::ExIdle);
         disconnectEvent("card gone at acquire");
         return;
     }
@@ -1531,7 +1610,7 @@ void OutputMode::abortAcquire(Reason reason, Build build)
         return;
     }
     log(QStringLiteral("acquire dropped"));
-    m_state = State::ExIdle;
+    setState(State::ExIdle);
     m_reason = reason;
     settle();
     if (m_waiting)
@@ -1545,7 +1624,7 @@ void OutputMode::dropAcquire()
     m_pcmPoll.stop();
     m_acq = Acquire::None;
     ++m_acqSeq;
-    m_state = State::ExIdle;
+    setState(State::ExIdle);
 }
 
 void OutputMode::startRelease(Reason reason, Build build, bool net, bool switching)
@@ -1556,7 +1635,7 @@ void OutputMode::startRelease(Reason reason, Build build, bool net, bool switchi
     m_r.reason = reason;
     m_r.net = net;
     m_r.switching = switching;
-    m_state = State::ExIdle;
+    setState(State::ExIdle);
     m_reason = reason;
     log(QStringLiteral("release ") + (reasonName().isEmpty() ? QStringLiteral("output") : reasonName()));
     PlayerPort *player = m_ports.player;
@@ -1589,7 +1668,7 @@ void OutputMode::releaseName()
 
 void OutputMode::startReturn()
 {
-    m_state = State::ExIdle;
+    setState(State::ExIdle);
     m_reason = m_r.reason;
     if (m_quitting)
         return;
@@ -1668,7 +1747,7 @@ void OutputMode::endReturnGone()
     log(QStringLiteral("card gone, return ended"));
     m_netTimer.stop();
     m_r.phase = Phase::None;
-    m_cardGone = true;
+    setCardGone(true);
     m_ports.mixer->close();
     m_ports.output->setHeld(HeldOutputPort::HeldState::None);
     m_ports.output->unwatchCard();
@@ -1787,8 +1866,10 @@ void OutputMode::finishRelease()
     }
     m_reconcile = false;
     updateAll();
-    if (switching)
-        emit switchReady();
+    if (switching) {
+        m_switchR = true;
+        emitSwitchReady();
+    }
 }
 
 void OutputMode::decideWaiting()

@@ -120,6 +120,7 @@ OutputMode::Bounds shortBounds()
     b.readyMs = 150;
     b.quitMs = 50;
     b.sleepReleaseMs = 120;
+    b.dacReleaseMs = 250;
     b.pacingMs = 10;
     b.storeDelayMs = 30;
     return b;
@@ -133,7 +134,7 @@ using Reason = OutputMode::Reason;
 class Rig
 {
 public:
-    explicit Rig(const OutputMode::Bounds &bounds = shortBounds())
+    explicit Rig(const OutputMode::Bounds &bounds = shortBounds(), bool withDacEq = false)
         : mixer(new FakeMixer(&log))
         , alsa(std::unique_ptr<MixerBackend>(mixer), bounds.pacingMs)
     {
@@ -153,6 +154,8 @@ public:
         ports.mixer = &alsa;
         ports.codec = &codec;
         ports.bluez = &bluez;
+        if (withDacEq)
+            ports.dacEq = &dacEq;
         mode = std::make_unique<OutputMode>(bounds, ports);
         player.policy = mode.get();
         player.onStatus = [this] { mode->onStatusChanged(); };
@@ -200,6 +203,7 @@ public:
     FakeHeldOutput output{&log};
     FakeDacSink dac{&log};
     FakeDacVolume volume{&log};
+    FakeDacEqPort dacEq{&log};
     FakeBluezModel bluez;
     CodecFragment codec;
     std::unique_ptr<OutputMode> mode;
@@ -311,6 +315,18 @@ private slots:
     void ratesAndFixedRate();
     void exclusiveSinkFormat();
     void eqBypassFollowsLevel();
+    void cardChangedAtAssignments();
+    void generationAfterGoneDecision();
+    void cardGoneOnlyOnChange();
+    void exHeldChangedOnTransitions();
+    void switchReadyDacNow();
+    void switchReadyDacDelayed();
+    void switchReadyDacNever();
+    void switchReadyLateCallback();
+    void switchRetryJoinsWithDac();
+    void switchReadyNoDacEq();
+    void switchBoundIncludesDac();
+    void quitOrder();
 
 private:
     void setCard(int index, const QByteArray &id, const char *stream = fiioStream);
@@ -318,6 +334,8 @@ private:
     void setPcm(int index, const QByteArray &status);
     void setRestartDelay(const QString &seconds);
     int restarts() const;
+    bool enterSwitchPath(Rig &rig, int path);
+    void finishSwitchPath(Rig &rig, int path);
 
     QTemporaryDir m_dir;
     QString m_asound;
@@ -1917,6 +1935,358 @@ void OutputModeTest::eqBypassFollowsLevel()
     mode.onActiveOutputChanged(QStringLiteral("speaker"), QString());
     QVERIFY(!eq.bypassed());
     base.player.policy = base.mode.get();
+}
+
+bool OutputModeTest::enterSwitchPath(Rig &rig, int path)
+{
+    if (path == 0) {
+        setRestartDelay(QStringLiteral("0.3"));
+        if (!rig.enter(QStringLiteral("exclusive")) || !rig.codec.restartForNet(QStringLiteral("test")))
+            return false;
+        rig.player.play(1);
+        return rig.player.pending.has_value();
+    }
+    if (path == 1) {
+        if (!rig.enter(QStringLiteral("bitperfect")))
+            return false;
+        rig.player.play(1);
+        return rig.player.chain == Chain::Bp;
+    }
+    return rig.enter(QStringLiteral("exclusive")) && rig.hold();
+}
+
+void OutputModeTest::finishSwitchPath(Rig &rig, int path)
+{
+    if (path == 0)
+        QTRY_VERIFY_WITH_TIMEOUT(!rig.codec.restarting(), waitMs);
+    setRestartDelay(QStringLiteral("0"));
+}
+
+void OutputModeTest::cardChangedAtAssignments()
+{
+    Rig rig;
+    QStringList events;
+    QObject::connect(rig.mode.get(), &OutputMode::cardChanged, rig.mode.get(), [&events](const QString &id, int alsa) {
+        events.append(QStringLiteral("card %1 %2").arg(id).arg(alsa));
+    });
+    QObject::connect(rig.mode.get(), &OutputMode::cardGoneChanged, rig.mode.get(), [&events](bool gone) {
+        events.append(QStringLiteral("gone %1").arg(gone ? 1 : 0));
+    });
+    QVERIFY(rig.enter(QStringLiteral("exclusive")));
+    QCOMPARE(events, QStringList{QStringLiteral("card B 1")});
+    QCOMPARE(rig.mode->alsaCard(), 1);
+    QVERIFY(rig.hold());
+    QCOMPARE(events, (QStringList{QStringLiteral("card B 1"), QStringLiteral("card B 1")}));
+
+    removeCard(1);
+    rig.mode->onCardGone(1);
+    QVERIFY(rig.settled());
+    QCOMPARE(events.last(), QStringLiteral("gone 1"));
+    events.clear();
+    setCard(2, "A", dongleStream);
+    DacCard other;
+    other.cardIndex = 9;
+    other.alsaCard = 2;
+    other.reserveName = QStringLiteral("Audio2");
+    rig.dac.sinkCards.insert(dongleSink, other);
+    rig.sink = dongleSink;
+    rig.mode->onSinkAppeared(50, dongleSink, 2);
+    QTRY_VERIFY_WITH_TIMEOUT(events.size() >= 2, waitMs);
+    QCOMPARE(events.at(0), QStringLiteral("gone 0"));
+    QCOMPARE(events.at(1), QStringLiteral("card A 2"));
+    QCOMPARE(rig.mode->alsaCard(), 2);
+}
+
+void OutputModeTest::generationAfterGoneDecision()
+{
+    Rig rig;
+    QVERIFY(rig.enter(QStringLiteral("bitperfect")));
+    QStringList events;
+    OutputMode *mode = rig.mode.get();
+    QObject::connect(mode, &OutputMode::cardGoneChanged, mode, [&events](bool gone) {
+        events.append(QStringLiteral("gone %1").arg(gone ? 1 : 0));
+    });
+    QObject::connect(mode, &OutputMode::generationChanged, mode,
+                     [&events, mode](const QString &id, quint64 generation, bool present) {
+                         QCOMPARE(generation, mode->generation());
+                         QCOMPARE(mode->effective(), present);
+                         events.append(QStringLiteral("generation %1 %2 %3").arg(id).arg(generation).arg(present ? 1 : 0));
+                     });
+    rig.mode->onMixerDisconnected();
+    QCOMPARE(events, QStringList{QStringLiteral("generation B 1 1")});
+    QVERIFY(rig.mode->effective());
+
+    removeCard(1);
+    rig.mode->onCardGone(1);
+    QCOMPARE(events, (QStringList{QStringLiteral("generation B 1 1"), QStringLiteral("gone 1"),
+                                  QStringLiteral("generation B 2 0")}));
+    QVERIFY(!rig.mode->effective());
+}
+
+void OutputModeTest::cardGoneOnlyOnChange()
+{
+    Rig rig;
+    QVERIFY(rig.enter(QStringLiteral("exclusive")));
+    QVERIFY(rig.hold());
+    rig.sinkListed = false;
+    rig.player.pause();
+    QTRY_COMPARE_WITH_TIMEOUT(rig.output.held, HeldOutputPort::HeldState::Returning, waitMs);
+    QSignalSpy gone(rig.mode.get(), &OutputMode::cardGoneChanged);
+    removeCard(1);
+    rig.mode->onCardGone(1);
+    QVERIFY(!rig.mode->releasing());
+    QCOMPARE(gone.count(), 1);
+    QCOMPARE(gone.at(0).at(0).toBool(), true);
+    rig.mode->onCardGone(1);
+    QCOMPARE(gone.count(), 1);
+
+    setCard(1, "B");
+    rig.sinkListed = true;
+    rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    rig.mode->onActiveOutputChanged(QStringLiteral("usb"), fiioSink);
+    QCOMPARE(gone.count(), 2);
+    QCOMPARE(gone.at(1).at(0).toBool(), false);
+    QVERIFY(rig.settled());
+    rig.mode->onSinkAppeared(60, fiioSink, 1);
+    QTest::qWait(50);
+    QCOMPARE(gone.count(), 2);
+
+    removeCard(1);
+    rig.mode->onCardGone(1);
+    QCOMPARE(gone.count(), 3);
+    QCOMPARE(gone.at(2).at(0).toBool(), true);
+    setCard(1, "B");
+    rig.mode->onSinkAppeared(61, replugSink, 1);
+    QTRY_COMPARE_WITH_TIMEOUT(gone.count(), 4, waitMs);
+    QCOMPARE(gone.at(3).at(0).toBool(), false);
+    QTest::qWait(50);
+    QCOMPARE(gone.count(), 4);
+}
+
+void OutputModeTest::exHeldChangedOnTransitions()
+{
+    Rig rig;
+    QList<bool> events;
+    OutputMode *mode = rig.mode.get();
+    QObject::connect(mode, &OutputMode::exHeldChanged, mode, [&events, mode](bool held) {
+        QCOMPARE(mode->exHeld(), held);
+        events.append(held);
+    });
+    rig.mode->onActiveOutputChanged(QStringLiteral("usb"), fiioSink);
+    rig.mode->setLevel(QStringLiteral("bitperfect"));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.volume.route, DacVolumePort::Route::Alsa, waitMs);
+    QCOMPARE(rig.mode->state(), State::Bp);
+    rig.mode->setLevel(QStringLiteral("exclusive"));
+    QCOMPARE(rig.mode->state(), State::ExIdle);
+    QVERIFY(events.isEmpty());
+
+    QVERIFY(rig.hold());
+    QCOMPARE(events, QList<bool>{true});
+    rig.player.stop();
+    QCOMPARE(events, (QList<bool>{true, false}));
+    QVERIFY(rig.settled());
+
+    QVERIFY(rig.hold());
+    QCOMPARE(events.size(), 3);
+    rig.mode->onReleaseRequested(20);
+    QCOMPARE(events, (QList<bool>{true, false, true, false}));
+    rig.mode->onNameLost(true);
+    QVERIFY(!rig.mode->releasing());
+
+    Rig sleeper;
+    QList<bool> slept;
+    OutputMode *other = sleeper.mode.get();
+    QObject::connect(other, &OutputMode::exHeldChanged, other, [&slept](bool held) { slept.append(held); });
+    setPcm(1, "RUNNING");
+    QVERIFY(sleeper.enter(QStringLiteral("exclusive")));
+    sleeper.player.play(1);
+    QTRY_COMPARE_WITH_TIMEOUT(sleeper.output.held, HeldOutputPort::HeldState::Held, waitMs);
+    QCOMPARE(sleeper.mode->state(), State::ExAcquiring);
+    QVERIFY(slept.isEmpty());
+    sleeper.mode->prepareForSleep(true);
+    QCOMPARE(slept, QList<bool>{true});
+    sleeper.mode->prepareForSleep(false);
+    QCOMPARE(slept, (QList<bool>{true, false}));
+    QVERIFY(sleeper.settled());
+    QCOMPARE(slept.size(), 2);
+    QCOMPARE(events.size(), 4);
+
+    Rig third;
+    QList<bool> left;
+    OutputMode *mode3 = third.mode.get();
+    QObject::connect(mode3, &OutputMode::exHeldChanged, mode3, [&left](bool held) { left.append(held); });
+    setPcm(1, "closed");
+    QVERIFY(third.enter(QStringLiteral("exclusive")));
+    QVERIFY(third.hold());
+    third.player.pause();
+    third.mode->onMixerDisconnected();
+    QCOMPARE(left, (QList<bool>{true, false}));
+    QVERIFY(third.settled());
+    QVERIFY(third.hold());
+    QCOMPARE(left, (QList<bool>{true, false, true}));
+    third.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    QCOMPARE(left, (QList<bool>{true, false, true, false}));
+    QVERIFY(third.settled());
+    QCOMPARE(left.size(), 4);
+}
+
+void OutputModeTest::switchReadyDacNow()
+{
+    for (int path = 0; path < 3; ++path) {
+        Rig rig(shortBounds(), true);
+        QVERIFY(enterSwitchPath(rig, path));
+        QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
+        rig.mode->releaseForSwitch();
+        QCOMPARE(rig.dacEq.calls, QStringList{QStringLiteral("release")});
+        if (path == 2)
+            QCOMPARE(ready.count(), 0);
+        QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, waitMs);
+        QTest::qWait(shortBounds().dacReleaseMs + 50);
+        QCOMPARE(ready.count(), 1);
+        finishSwitchPath(rig, path);
+    }
+}
+
+void OutputModeTest::switchReadyDacDelayed()
+{
+    for (int path = 0; path < 3; ++path) {
+        Rig rig(shortBounds(), true);
+        rig.dacEq.answer = FakeDacEqPort::Answer::Delayed;
+        rig.dacEq.delayMs = 100;
+        QVERIFY(enterSwitchPath(rig, path));
+        QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
+        QElapsedTimer clock;
+        qint64 at = -1;
+        QObject::connect(rig.mode.get(), &OutputMode::switchReady, rig.mode.get(), [&clock, &at] { at = clock.elapsed(); });
+        clock.start();
+        rig.mode->releaseForSwitch();
+        QCOMPARE(ready.count(), 0);
+        if (path == 2) {
+            QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), waitMs);
+            QCOMPARE(ready.count(), 0);
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, waitMs);
+        QVERIFY(at >= 100);
+        QVERIFY(at < shortBounds().dacReleaseMs);
+        QTest::qWait(shortBounds().dacReleaseMs);
+        QCOMPARE(ready.count(), 1);
+        finishSwitchPath(rig, path);
+    }
+}
+
+void OutputModeTest::switchReadyDacNever()
+{
+    for (int path = 0; path < 3; ++path) {
+        Rig rig(shortBounds(), true);
+        rig.dacEq.answer = FakeDacEqPort::Answer::Never;
+        QVERIFY(enterSwitchPath(rig, path));
+        QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
+        QElapsedTimer clock;
+        clock.start();
+        QTest::ignoreMessage(QtInfoMsg, "casdap output: switch bound reached, dac eq not released");
+        rig.mode->releaseForSwitch();
+        QCOMPARE(ready.count(), 0);
+        if (path == 2) {
+            QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), waitMs);
+            QCOMPARE(ready.count(), 0);
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, waitMs);
+        QVERIFY(clock.elapsed() >= shortBounds().dacReleaseMs);
+        QCOMPARE(rig.dacEq.pending.size(), 1);
+        rig.dacEq.pending.first()();
+        QTest::qWait(50);
+        QCOMPARE(ready.count(), 1);
+        finishSwitchPath(rig, path);
+    }
+}
+
+void OutputModeTest::switchReadyLateCallback()
+{
+    Rig rig(shortBounds(), true);
+    rig.dacEq.answer = FakeDacEqPort::Answer::Never;
+    QVERIFY(enterSwitchPath(rig, 1));
+    QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
+    rig.mode->releaseForSwitch();
+    QTest::qWait(shortBounds().dacReleaseMs / 2);
+    rig.mode->releaseForSwitch();
+    QCOMPARE(rig.dacEq.pending.size(), 2);
+    rig.dacEq.pending.at(0)();
+    QCOMPARE(ready.count(), 0);
+    QTest::qWait(shortBounds().dacReleaseMs / 2 + 30);
+    QCOMPARE(ready.count(), 0);
+    rig.dacEq.pending.at(1)();
+    QCOMPARE(ready.count(), 1);
+    QTest::qWait(shortBounds().dacReleaseMs + 50);
+    QCOMPARE(ready.count(), 1);
+}
+
+void OutputModeTest::switchRetryJoinsWithDac()
+{
+    Rig rig(shortBounds(), true);
+    rig.dacEq.answer = FakeDacEqPort::Answer::Never;
+    QVERIFY(rig.enter(QStringLiteral("exclusive")));
+    QVERIFY(rig.hold());
+    QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
+    rig.mode->releaseForSwitch();
+    QVERIFY(rig.mode->releasing());
+    rig.mode->releaseForSwitch();
+    QVERIFY(rig.mode->switchStoppedStream());
+    QCOMPARE(rig.dacEq.pending.size(), 2);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), waitMs);
+    QCOMPARE(ready.count(), 0);
+    rig.dacEq.pending.at(0)();
+    QCOMPARE(ready.count(), 0);
+    rig.dacEq.pending.at(1)();
+    QCOMPARE(ready.count(), 1);
+    rig.dacEq.pending.at(1)();
+    QTest::qWait(shortBounds().dacReleaseMs + 50);
+    QCOMPARE(ready.count(), 1);
+    QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 1);
+}
+
+void OutputModeTest::switchReadyNoDacEq()
+{
+    for (int path = 0; path < 3; ++path) {
+        Rig rig;
+        QVERIFY(enterSwitchPath(rig, path));
+        QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
+        rig.mode->releaseForSwitch();
+        QCOMPARE(rig.mode->switchStoppedStream(), path == 2);
+        if (path == 2) {
+            QCOMPARE(ready.count(), 0);
+            QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, waitMs);
+        } else {
+            QCOMPARE(ready.count(), 1);
+        }
+        QTest::qWait(shortBounds().dacReleaseMs + 50);
+        QCOMPARE(ready.count(), 1);
+        QVERIFY(rig.dacEq.calls.isEmpty());
+        finishSwitchPath(rig, path);
+    }
+}
+
+void OutputModeTest::switchBoundIncludesDac()
+{
+    QCOMPARE(OutputMode::Bounds{}.dacReleaseMs, 500);
+    Rig plain;
+    Rig withDac(shortBounds(), true);
+    QCOMPARE(plain.mode->switchBoundMs(), shortBounds().reservation.callMs + shortBounds().switchMs);
+    QCOMPARE(withDac.mode->switchBoundMs(), plain.mode->switchBoundMs() + shortBounds().dacReleaseMs);
+}
+
+void OutputModeTest::quitOrder()
+{
+    Rig rig(shortBounds(), true);
+    QVERIFY(rig.enter(QStringLiteral("exclusive")));
+    QVERIFY(rig.hold());
+    rig.mode->aboutToQuit();
+    const int park = indexOf(rig.log, QStringLiteral("player park"));
+    const int reserve = indexOf(rig.log, QStringLiteral("reserve quit 50"));
+    const int dac = indexOf(rig.log, QStringLiteral("daceq quit 500"));
+    QVERIFY(park >= 0);
+    QVERIFY(park < reserve);
+    QVERIFY(reserve < dac);
+    QCOMPARE(rig.dacEq.calls, QStringList{QStringLiteral("quit 500")});
 }
 
 QTEST_GUILESS_MAIN(OutputModeTest)

@@ -528,7 +528,7 @@ void PowerBridge::startSwitch()
     m_outputMode->releaseForSwitch();
     if (!m_awaitReady)
         return;
-    m_switchReleased = true;
+    m_switchReleased = m_outputMode->switchStoppedStream();
     m_readyTimer.start(m_outputMode->switchBoundMs() + switchReadyMarginMs);
     qInfo() << "casdap power: switch waits for the output release";
 }
