@@ -424,11 +424,13 @@ aligned at W - HUB_EDGE in a slot starting `Ui.eqValueGap` (8 u) right of the ti
 `PROFILE` (`OFF`, the file name, `CUSTOM`, `<NAME> (MISSING)`; `Eq.cycleProfile(output, delta)`), then, only while
 the profile is a parsed file or CUSTOM, `PREAMP` (`-6.5 DB`, `Eq.stepPreamp(output, delta, coarse)`) and
 `BAND 1` to `BAND 10` (`PK 105 HZ +2.1 DB Q 0.70`, `LS`, `HS`, `BP`, `LP`, `HP`, `AP`, no gain field for the
-four gain free types (`LP 105 HZ Q 0.70`), `2.5 KHZ` from 1000 Hz, `OFF` for a disabled band; TYPE reads `PEAK`,
-`LOW SHELF`, `HIGH SHELF`, `BAND PASS`, `LOW PASS`, `HIGH PASS`, `ALL PASS`, `OFF`). A on a band opens the sub
-rows `TYPE`, `FREQUENCY`, `GAIN`, `Q` under it (11 u Light upper case,
+four gain free types (`LP 105 HZ Q 0.70`), `2.5 KHZ` from 1000 Hz, `OFF` for a disabled band). A on a band opens
+the sub rows `TYPE`, `FREQUENCY`, `GAIN`, `Q` under it (11 u Light upper case,
 `Eq.stepBand(output, band, field, delta, coarse)` with field `type`, `freq`, `gain`, `q`) with F12, a second A closes
-them, A on another band moves them there. PROFILE, PREAMP and the sub rows change only in edit mode, as in
+them, A on another band moves them there. TYPE cycles OFF, PEAK, LOW SHELF, HIGH SHELF, BAND PASS, LOW PASS,
+HIGH PASS, ALL PASS (wrapping, coarse the same); on the four gain free types GAIN reads `NOT USED` in the value
+style of `BUILT IN ONLY` and is inert (no edit mode, A and touch do nothing), and the stored gain applies again
+when TYPE returns to PEAK or a shelf. PROFILE, PREAMP and the sub rows change only in edit mode, as in
 `SettingsScreen`: A enters it (the value turns `Ui.accent`), left/right make the fine step (`coarse` false), LB/RB
 the coarse step on PREAMP and the sub rows (`coarse` true; nothing on PROFILE), A confirms, B cancels without
 popping, every other key is taken and does nothing; leaving the page, the screen turning off or an outside pivot
@@ -590,7 +592,10 @@ and ten tracks, track 3 playing), `settings` (sample values, two folders, a FLAC
 `jump` (the grid over the hub pivot of `--pivot`, default `albums`), `playlists` (`NOW PLAYING` and four
 sample playlists), `history` (seven recent songs and five new albums), `eq` (a parsed file on HEADPHONES with
 band 2 open, a missing file on USB; states `eq-types` (focus BAND 5) and `eq-types-end` (focus BAND 10) list
-OFF, the seven types and the longest band value with no band open),
+OFF, the seven types and the longest band value with no band open; `eq-open-hs` opens BAND 4 (HIGH SHELF)
+focused on TYPE, `eq-type-edit` opens BAND 5 (BAND PASS) with TYPE in edit mode, `eq-gain-unused` opens BAND 6
+(LOW PASS) focused on GAIN `NOT USED`, `eq-open-hp` and
+`eq-open-ap` open BAND 7 (HIGH PASS) and BAND 8 (ALL PASS) focused on TYPE),
 `components`, `overlays` (the volume box clamped to the 272 x 420 or 480 x 260 minimum canvas), `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). `--overlay` renders `home` and
 `settings` in overlay mode (CLOSE PLAYER and `PAIR IN DAP MODE` rows). CMake cache var
@@ -1180,9 +1185,10 @@ bands at grid 4, 10, 16, 22, 28, 34, 40, 46, 52, 58, gain 0, Q 1.4. `cycleProfil
 CUSTOM (wrapping); `stepPreamp` and `stepGain` move 0.1 dB (1 dB with `coarse`), `stepQ` 0.1 (1.0 with
 `coarse`, clamped 0.1 to 10), each snapping to its step grid and rounded to one decimal (gain, preamp) or two (Q),
 `stepFrequency` one grid point (1/6 octave, 6 points with `coarse`), `stepBand` passes `coarse` on, `stepType`
-cycles OFF, PEAK, LOW SHELF, HIGH SHELF; a band of another type steps into that cycle. An edit while
-the key is a file copies the parsed file into the store and sets the key to `custom` first; the `.txt` is never
-written. `CASDAP_EQ_DIR` replaces `~/.config/casdap` for both the `eq/` folder and the stores.
+cycles OFF, PEAK, LOW SHELF, HIGH SHELF, BAND PASS, LOW PASS, HIGH PASS, ALL PASS and keeps the stored gain,
+`stepGain` does nothing on an ON band of a gain free type. An edit while the key is a file copies the parsed
+file into the store and sets the key to `custom` first; the `.txt` is never written. `CASDAP_EQ_DIR` replaces
+`~/.config/casdap` for both the `eq/` folder and the stores.
 
 `RgbControl` (context property, DAP mode only, null under `--overlay`) runs `armada-rgb supported`
 (`/usr/libexec/armada/armada-rgb-env`, `CASDAP_RGB_BIN` overrides) once at start; exit 0 sets `supported`,

@@ -777,8 +777,9 @@ void EqControl::stepType(const QString &output, int band, int direction)
     EqBand *b = beginBandEdit(output, band);
     if (!b)
         return;
+    const int states = static_cast<int>(EqBand::AllPass) + 2;
     const int state = b->enabled ? static_cast<int>(b->type) + 1 : 0;
-    const int next = ((state + s) % 4 + 4) % 4;
+    const int next = ((state + s) % states + states) % states;
     b->enabled = next != 0;
     if (next != 0)
         b->type = static_cast<EqBand::Type>(next - 1);
@@ -799,7 +800,10 @@ void EqControl::stepFrequency(const QString &output, int band, int direction, bo
 
 void EqControl::stepGain(const QString &output, int band, int direction, bool coarse)
 {
-    if (sign(direction) == 0)
+    if (sign(direction) == 0 || band < 0 || band >= EqProfile::bandCount)
+        return;
+    const EqBand current = profile(output).bands[band];
+    if (current.enabled && gainFree(current.type))
         return;
     EqBand *b = beginBandEdit(output, band);
     if (!b)

@@ -149,6 +149,11 @@ const QStringList &states()
         QStringLiteral("sample-rate-locked"),
         QStringLiteral("eq-types"),
         QStringLiteral("eq-types-end"),
+        QStringLiteral("eq-open-hs"),
+        QStringLiteral("eq-type-edit"),
+        QStringLiteral("eq-gain-unused"),
+        QStringLiteral("eq-open-hp"),
+        QStringLiteral("eq-open-ap"),
     };
     return names;
 }

@@ -82,6 +82,10 @@ function bandText(b) {
     return typeShort(t) + " " + freqText(b.freq) + gain + " q " + qText(b.q)
 }
 
+function fieldInert(b, field) {
+    return b !== null && b !== undefined && field === "gain" && gainFree(String(b.type))
+}
+
 function fieldText(b, field) {
     if (b === null || b === undefined)
         return ""
@@ -90,6 +94,6 @@ function fieldText(b, field) {
     if (field === "freq")
         return freqText(b.freq)
     if (field === "gain")
-        return gainText(b.gain)
+        return fieldInert(b, field) ? "not used" : gainText(b.gain)
     return qText(b.q)
 }

@@ -45,7 +45,7 @@ Page {
     }
 
     function entry(kind: string, key: string, title: string, value: string, band: int, field: string): var {
-        return { kind: kind, key: key, title: title, value: value, band: band, field: field }
+        return { kind: kind, key: key, title: title, value: value, band: band, field: field, readOnly: false }
     }
 
     function buildRows(p: var, openBand: int): var {
@@ -60,8 +60,10 @@ Page {
                 continue
             for (let f = 0; f < EqFormat.fields.length; f++) {
                 const field = EqFormat.fields[f]
-                out.push(page.entry("sub", "band" + i + ":" + field, EqFormat.fieldTitles[f],
-                    EqFormat.fieldText(bands[i], field), i, field))
+                const sub = page.entry("sub", "band" + i + ":" + field, EqFormat.fieldTitles[f],
+                    EqFormat.fieldText(bands[i], field), i, field)
+                sub.readOnly = EqFormat.fieldInert(bands[i], field)
+                out.push(sub)
             }
         }
         return out
@@ -147,7 +149,7 @@ Page {
     }
 
     function editable(r: var): bool {
-        return r !== null && (r.kind === "sub" || r.key === "profile" || r.key === "preamp")
+        return r !== null && r.readOnly !== true && (r.kind === "sub" || r.key === "profile" || r.key === "preamp")
     }
 
     function beginEdit(): void {

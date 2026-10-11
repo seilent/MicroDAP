@@ -6,7 +6,15 @@ Item {
 
     property string fixture: "browse"
 
-    readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end"
+    readonly property var openShots: ({
+        "eq-open-hs": { band: 3, field: "type", edit: false },
+        "eq-type-edit": { band: 4, field: "type", edit: true },
+        "eq-gain-unused": { band: 5, field: "gain", edit: false },
+        "eq-open-hp": { band: 6, field: "type", edit: false },
+        "eq-open-ap": { band: 7, field: "type", edit: false }
+    })
+    readonly property var openShot: root.openShots[root.fixture] === undefined ? null : root.openShots[root.fixture]
+    readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end" || root.openShot !== null
 
     Rectangle {
         anchors.fill: parent
@@ -70,6 +78,15 @@ Item {
 
         Component.onCompleted: {
             screen.completeAll()
+            if (root.openShot !== null) {
+                const band = "band" + root.openShot.band
+                screen.headphonesPane.openBand = root.openShot.band
+                screen.focusIndex = screen.indexOfKey(band + ":" + root.openShot.field)
+                if (root.openShot.edit)
+                    screen.activate()
+                Qt.callLater(() => screen.activePane.ensureVisible(screen.indexOfKey(band + ":q"), 0))
+                return
+            }
             if (root.typesShot) {
                 screen.focusIndex = screen.indexOfKey(root.fixture === "eq-types" ? "band4" : "band9")
                 Qt.callLater(() => screen.activePane.ensureVisible(screen.focusIndex, 0))

@@ -46,7 +46,7 @@ TestCase {
         property var bandSets: ({})
         property var calls: []
         readonly property var cycle: ["off", "/eq/HD 600.txt", "/eq/Gone.txt", "custom"]
-        readonly property var types: ["off", "peak", "lowshelf", "highshelf"]
+        readonly property var types: ["off", "peak", "lowshelf", "highshelf", "bandpass", "lowpass", "highpass", "allpass"]
 
         signal profilesChanged()
 
@@ -365,6 +365,68 @@ TestCase {
         }
     }
 
+    function test_type_cycle() {
+        const page = open()
+        page.setFocus(2)
+        router.dispatch("a", false)
+        tc.edit(page, 3)
+        const long = ["low shelf", "high shelf", "band pass", "low pass", "high pass", "all pass", "off", "peak",
+            "low shelf"]
+        for (let i = 1; i < long.length; i++) {
+            verify(router.dispatch("right", false))
+            compare(page.rows[3].value, long[i])
+        }
+        for (let i = long.length - 2; i >= 0; i--) {
+            verify(router.dispatch("lb", false))
+            compare(page.rows[3].value, long[i])
+        }
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(fakeEq.bandSets.headphones[0].gain, 2.1)
+    }
+
+    function test_gain_not_used() {
+        const page = open()
+        page.setFocus(2)
+        router.dispatch("a", false)
+        tc.edit(page, 3)
+        router.dispatch("right", false)
+        router.dispatch("right", false)
+        router.dispatch("right", false)
+        compare(page.rows[3].value, "low pass")
+        router.dispatch("a", false)
+        compare(page.rows[2].value, "lp 105 hz q 0.70")
+        compare(page.rows[5].title, "gain")
+        compare(page.rows[5].value, "not used")
+        compare(page.rows[5].readOnly, true)
+        const calls = fakeEq.calls.length
+        page.setFocus(5)
+        compare(router.dispatch("a", false), true)
+        compare(page.editing, false)
+        compare(router.dispatch("left", false), false)
+        compare(router.dispatch("right", false), false)
+        compare(fakeEq.calls.length, calls)
+        const gain = tc.rowItem(page.headphonesPane, 5)
+        const q = tc.rowItem(page.headphonesPane, 6)
+        compare(gain.valueItem.font.pixelSize, q.valueItem.font.pixelSize)
+        compare(gain.isFocused, true)
+        compare(gain.editing, false)
+        compare(gain.valueAlpha, Ui.settingsValueFocused)
+        verify(!Qt.colorEqual(gain.valueItem.color, Ui.accent))
+        compare(gain.valueSlot.x + gain.valueItem.x + gain.valueItem.width,
+            q.valueSlot.x + q.valueItem.x + q.valueItem.width)
+        compare(page.touchPress("sub", 5, 10, gain), "a")
+        page.activate()
+        compare(page.editing, false)
+        tc.edit(page, 3)
+        for (let i = 0; i < 5; i++)
+            router.dispatch("right", false)
+        compare(page.rows[3].value, "low shelf")
+        router.dispatch("a", false)
+        compare(page.rows[5].value, "+2.1 db")
+        compare(page.rows[5].readOnly, false)
+    }
+
     function test_preamp_cancel_restores() {
         const page = open()
         tc.edit(page, 1)
@@ -485,8 +547,8 @@ TestCase {
         router.dispatch("right", false)
         compare(page.rows[3].value, "high shelf")
         router.dispatch("right", false)
-        compare(page.rows[3].value, "off")
-        compare(page.rows[2].value, "off")
+        compare(page.rows[3].value, "band pass")
+        compare(page.rows[2].value, "bp 105 hz q 0.70")
         verify(router.dispatch("b", false))
         compare(page.editing, false)
         compare(pages.depth, 2)

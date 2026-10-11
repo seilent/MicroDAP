@@ -41,6 +41,11 @@
 | eq | browse | `--size 640x960` and `960x640` | BAND rows PK, LS, HS text unchanged, band 2 sub rows | pending |
 | eq | `eq-types` | `--size 640x960` and `960x640` | BAND rows OFF, PK, LS, HS, BP, focus on BAND 5, gain free rows with no gain | pending |
 | eq | `eq-types-end` | `--size 640x960` and `960x640` | BAND rows LP, HP, AP, `HS 20 KHZ -24.0 DB Q 10.00` unclipped and clear of the title, focus on BAND 10 | pending |
+| eq | `eq-open-hs` | `--size 640x960` and `960x640` | BAND 4 sub rows TYPE to Q on screen, TYPE HIGH SHELF focused, GAIN +12.0 DB | pending |
+| eq | `eq-type-edit` | `--size 640x960` and `960x640` | BAND 5 sub rows TYPE to Q on screen, TYPE BAND PASS in accent (edit mode), GAIN NOT USED | pending |
+| eq | `eq-gain-unused` | `--size 640x960` and `960x640` | BAND 6 sub rows TYPE to Q on screen, TYPE LOW PASS, focus on GAIN NOT USED in the read only value style | pending |
+| eq | `eq-open-hp` | `--size 640x960` and `960x640` | BAND 7 sub rows TYPE to Q on screen, TYPE HIGH PASS focused, GAIN NOT USED | pending |
+| eq | `eq-open-ap` | `--size 640x960` and `960x640` | BAND 8 sub rows TYPE to Q on screen, TYPE ALL PASS focused, GAIN NOT USED | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

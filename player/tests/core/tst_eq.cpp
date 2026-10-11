@@ -97,6 +97,8 @@ private slots:
     void storeRoundTrip();
     void copyOnEdit();
     void steps();
+    void stepTypeEight();
+    void gainInertOnGainFree();
     void cycleProfile();
     void activeOutputPicksKey();
     void followsOutputControl();
@@ -636,12 +638,91 @@ void EqTest::steps()
     eq.stepType(out, 1, 1);
     QCOMPARE(eq.profile(out).bands[1].type, EqBand::HighShelf);
     eq.stepType(out, 1, 1);
-    QVERIFY(!eq.profile(out).bands[1].enabled);
-    eq.stepType(out, 1, 1);
     QVERIFY(eq.profile(out).bands[1].enabled);
+    QCOMPARE(eq.profile(out).bands[1].type, EqBand::BandPass);
+    eq.stepType(out, 1, -1);
+    eq.stepType(out, 1, -1);
+    eq.stepType(out, 1, -1);
     QCOMPARE(eq.profile(out).bands[1].type, EqBand::Peak);
     eq.stepType(out, 1, -1);
     QVERIFY(!eq.profile(out).bands[1].enabled);
+}
+
+void EqTest::stepTypeEight()
+{
+    EqControl eq(nullptr);
+    const QString out = QStringLiteral("usb");
+    const std::optional<EqBand::Type> cycle[] = {std::nullopt,        EqBand::Peak,     EqBand::LowShelf,
+                                                 EqBand::HighShelf,   EqBand::BandPass, EqBand::LowPass,
+                                                 EqBand::HighPass,    EqBand::AllPass};
+    constexpr int states = 8;
+    for (int from = 0; from < states; ++from) {
+        for (const int direction : {1, -1}) {
+            for (const bool coarse : {false, true}) {
+                EqProfile profile = EqProfile::flat();
+                EqBand &band = profile.bands[2];
+                band.enabled = cycle[from].has_value();
+                band.type = cycle[from].value_or(EqBand::Peak);
+                band.gain = 4.5;
+                eq.setCustom(out, profile);
+                eq.stepBand(out, 2, QStringLiteral("type"), direction, coarse);
+                const EqBand next = eq.profile(out).bands[2];
+                const std::optional<EqBand::Type> want = cycle[((from + direction) % states + states) % states];
+                const QByteArray where = QByteArray::number(from) + " " + QByteArray::number(direction);
+                QVERIFY2(next.enabled == want.has_value(), where.constData());
+                if (want)
+                    QVERIFY2(next.type == *want, where.constData());
+                QVERIFY2(next.gain == 4.5, where.constData());
+            }
+        }
+    }
+
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = -3.0;
+    eq.setCustom(out, profile);
+    for (int i = 0; i < 4; ++i)
+        eq.stepType(out, 0, 1);
+    QCOMPARE(eq.profile(out).bands[0].type, EqBand::LowPass);
+    QCOMPARE(eq.profile(out).bands[0].gain, -3.0);
+    for (int i = 0; i < 4; ++i)
+        eq.stepType(out, 0, 1);
+    QCOMPARE(eq.profile(out).bands[0].type, EqBand::Peak);
+    QCOMPARE(eq.profile(out).bands[0].gain, -3.0);
+}
+
+void EqTest::gainInertOnGainFree()
+{
+    EqControl eq(nullptr);
+    const QString out = QStringLiteral("usb");
+    const EqBand::Type types[] = {EqBand::BandPass, EqBand::LowPass, EqBand::HighPass, EqBand::AllPass};
+    for (const EqBand::Type type : types) {
+        EqProfile profile = EqProfile::flat();
+        profile.bands[1].type = type;
+        profile.bands[1].gain = 2.5;
+        eq.setCustom(out, profile);
+        QSignalSpy changed(&eq, &EqControl::profileChanged);
+        for (const bool coarse : {false, true}) {
+            eq.stepBand(out, 1, QStringLiteral("gain"), 1, coarse);
+            eq.stepBand(out, 1, QStringLiteral("gain"), -1, coarse);
+            eq.stepGain(out, 1, 1, coarse);
+        }
+        QCOMPARE(eq.profile(out).bands[1].gain, 2.5);
+        QCOMPARE(changed.count(), 0);
+    }
+
+    EqProfile profile = EqProfile::flat();
+    profile.bands[1].type = EqBand::LowPass;
+    profile.bands[1].enabled = false;
+    profile.bands[1].gain = 2.5;
+    eq.setCustom(out, profile);
+    eq.stepBand(out, 1, QStringLiteral("gain"), 1);
+    QCOMPARE(eq.profile(out).bands[1].gain, 2.6);
+
+    profile.bands[1].enabled = true;
+    profile.bands[1].type = EqBand::HighShelf;
+    eq.setCustom(out, profile);
+    eq.stepBand(out, 1, QStringLiteral("gain"), 1);
+    QCOMPARE(eq.profile(out).bands[1].gain, 2.6);
 }
 
 void EqTest::cycleProfile()
