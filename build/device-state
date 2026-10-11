@@ -21,6 +21,7 @@ fi
     || { echo "device-state: incomplete state from ${device}" >&2; exit 1; }
 
 repo=${ref##*registry:}
+repo=${repo##*docker://}
 repo=${repo%@*}
 repo=${repo%:*}
 
