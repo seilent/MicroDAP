@@ -38,14 +38,21 @@
 | settings | `sample-rate-edit` | `--size 640x960` and `960x640` | SAMPLE RATE draft 352800 in accent on the FiiO rates | pending |
 | settings | `sample-rate-unsupported` | `--size 640x960` and `960x640` | SAMPLE RATE reads 96000 (NOT SUPPORTED) on the Apple dongle rate | pending |
 | settings | `sample-rate-locked` | `--size 640x960` and `960x640` | focus on EQ reading BYPASSED, SAMPLE RATE above it read only AUTO 96000 | pending |
-| eq | browse | `--size 640x960` and `960x640` | BAND rows PK, LS, HS text unchanged, band 2 sub rows | pending |
-| eq | `eq-types` | `--size 640x960` and `960x640` | BAND rows OFF, PK, LS, HS, BP, focus on BAND 5, gain free rows with no gain | pending |
-| eq | `eq-types-end` | `--size 640x960` and `960x640` | BAND rows LP, HP, AP, `HS 20 KHZ -24.0 DB Q 10.00` unclipped and clear of the title, focus on BAND 10 | pending |
-| eq | `eq-open-hs` | `--size 640x960` and `960x640` | BAND 4 sub rows TYPE to Q on screen, TYPE HIGH SHELF focused, GAIN +12.0 DB | pending |
-| eq | `eq-type-edit` | `--size 640x960` and `960x640` | BAND 5 sub rows TYPE to Q on screen, TYPE BAND PASS in accent (edit mode), GAIN NOT USED | pending |
-| eq | `eq-gain-unused` | `--size 640x960` and `960x640` | BAND 6 sub rows TYPE to Q on screen, TYPE LOW PASS, focus on GAIN NOT USED in the read only value style | pending |
-| eq | `eq-open-hp` | `--size 640x960` and `960x640` | BAND 7 sub rows TYPE to Q on screen, TYPE HIGH PASS focused, GAIN NOT USED | pending |
-| eq | `eq-open-ap` | `--size 640x960` and `960x640` | BAND 8 sub rows TYPE to Q on screen, TYPE ALL PASS focused, GAIN NOT USED | pending |
+| eq | browse | `--size 640x960` and `960x640` | BAND rows PK, LS, HS text unchanged, band 2 sub rows | 2026-10-12 (Selawik) |
+| eq | `eq-types` | `--size 640x960` and `960x640` | BAND rows OFF, PK, LS, HS, BP, focus on BAND 5, gain free rows with no gain | 2026-10-12 (Selawik) |
+| eq | `eq-types-end` | `--size 640x960` and `960x640` | BAND rows LP, HP, AP, `HS 20 KHZ -24.0 DB Q 10.00` unclipped and clear of the title, focus on BAND 10 | 2026-10-12 (Selawik) |
+| eq | `eq-open-hs` | `--size 640x960` and `960x640` | BAND 4 sub rows TYPE to Q on screen, TYPE HIGH SHELF focused, GAIN +12.0 DB | 2026-10-12 (Selawik) |
+| eq | `eq-type-edit` | `--size 640x960` and `960x640` | BAND 5 sub rows TYPE to Q on screen, TYPE BAND PASS in accent (edit mode), GAIN NOT USED | 2026-10-12 (Selawik) |
+| eq | `eq-gain-unused` | `--size 640x960` and `960x640` | BAND 6 sub rows TYPE to Q on screen, TYPE LOW PASS, focus on GAIN NOT USED in the read only value style | 2026-10-12 (Selawik) |
+| eq | `eq-open-hp` | `--size 640x960` and `960x640` | BAND 7 sub rows TYPE to Q on screen, TYPE HIGH PASS focused, GAIN NOT USED | 2026-10-12 (Selawik) |
+| eq | `eq-open-ap` | `--size 640x960` and `960x640` | BAND 8 sub rows TYPE to Q on screen, TYPE ALL PASS focused, GAIN NOT USED | 2026-10-12 (Selawik) |
+| settings | `eq-dac` | `--size 640x960` and `960x640` | focus on EQ under BIT PERFECT ON reading `SENNHEISER HD 600 PARAMETRICEQ (DAC)`, the longest value, unclipped, clear of the title, right at W - HUB_EDGE | 2026-10-12 (Selawik) |
+| settings | `eq-dac-custom` | `--size 640x960` and `960x640` | EQ reads `CUSTOM (DAC)` | 2026-10-12 (Selawik) |
+| settings | `eq-dac-failed` | `--size 640x960` and `960x640` | EQ reads `DAC EQ FAILED` | 2026-10-12 (Selawik) |
+| settings | `eq-dac-unsupported` | `--size 640x960` and `960x640` | EQ reads `BYPASSED` | 2026-10-12 (Selawik) |
+| eq | `eq-dac-range` | `--size 640x960` and `960x640` | USB pivot, BAND 1 sub rows, focus on GAIN `-15.0 DB (DAC -12.0)`, Q `10.00 (DAC 8.00)`, PREAMP `-6.5 DB (DAC 0.0)` (portrait), band row text unchanged, values clear of the titles | 2026-10-12 (Selawik) |
+| eq | `eq-dac-preamp` | `--size 640x960` and `960x640` | focus on PREAMP `-6.5 DB (DAC 0.0)`, BAND 2 sub rows, GAIN `-24.0 DB (DAC -12.0)` (the longest value) and Q `0.10 (DAC 0.25)` on screen in portrait, landscape down to FREQUENCY | 2026-10-12 (Selawik) |
+| eq | `eq-dac-long` | `--size 640x960` and `960x640` | BAND 2 sub rows, focus on GAIN `-24.0 DB (DAC -12.0)`, the longest value, with Q `0.10 (DAC 0.25)` on screen in both orientations | 2026-10-12 (Selawik) |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

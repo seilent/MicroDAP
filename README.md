@@ -366,7 +366,10 @@ SUPPORTED)` when `OutputMode.rates` lacks it; the edit steps `AUTO` then `Output
 `stream0` rates, else 44100, 48000, 88200, 96000, 176400, 192000), a saved rate the output lacks stepping from the
 nearest listed rate, and an edit open when the row turns read only closes without a write; read only `AUTO <AudioInfo.hwRate>` while
 `OutputMode.rateReadOnly` (a level effective); read only `DAP ONLY` in overlay mode), `REPLAYGAIN` (read only `OFF`), `EQ` (the `Eq.activeOutput` profile: `OFF`, the file name
-upper case, `CUSTOM`, `<NAME> (MISSING)`; `BYPASSED` while `OutputMode.effective`; left/right inert, A emits `openEq` and Main pushes `EqScreen`, in
+upper case, `CUSTOM`, `<NAME> (MISSING)`; `DAC EQ FAILED` while `DacEq.status` reads `failed` and the active output is USB, under a
+level and with the level `off`; while `OutputMode.effective`, with `DacEq.status` `on` or `applying` a file or CUSTOM reads
+`<NAME> (DAC)` or `CUSTOM (DAC)`, with `flat` the plain name, `OFF` and `<NAME> (MISSING)` read as they are, and `none` (the card not resolved yet), `unsupported` and
+no `DacEq` (overlay mode, `--screenshot`) read `BYPASSED`; left/right inert, A emits `openEq` and Main pushes `EqScreen`, in
 overlay mode as well), `PAIR A PHONE` (A emits `pairPhone`, Main pushes
 `Bluetooth` on its PAIRING pivot; in overlay mode the value reads `PAIR IN DAP MODE` and A does nothing).
 LIBRARY: `LIBRARY FOLDERS` (`N ON`; A opens one sub row per folder in `Settings.candidateRoots()` (`~/Music`,
@@ -442,8 +445,11 @@ returns to the file). A step that hit a clamp or snapped an off grid value is no
 `profilesChanged`; a changed value swaps with F7, rows listed by a profile step arrive with F12. Outside edit mode
 up/down move through the rows, LT/RT page, LB/RB switch pivots with T5 (no wrap; the switch closes the sub rows and
 focuses PROFILE), left/right, X, Y and Back/View do nothing, B pops. Rows feather once on first show (T2a). Without
-`Eq` the page lists PROFILE `OFF` on every pivot, A enters no edit mode and nothing steps. `screenOff` or `animated`
-false lands the pivot and the rows.
+`Eq` the page lists PROFILE `OFF` on every pivot, A enters no edit mode and nothing steps. On the USB pivot with
+`DacEq.status` `on` or `applying`, a PREAMP, GAIN or Q value outside `DacEq.ranges` (rounded as shown) adds what the
+DAC gets: `-15.0 DB (DAC -12.0)`, `10.00 (DAC 8.00)`, `0.10 (DAC 0.25)`, `-6.5 DB (DAC 0.0)`; a band whose TYPE is
+OFF and GAIN `NOT USED` take no suffix, the band rows keep their text, and stored values and steps keep the software
+ranges. `screenOff` or `animated` false lands the pivot and the rows.
 
 `ArtistDetail` is the `artist` page, pushed with the turnstile (T3) by `open("artist", id)` from the hub:
 header `artist`, pivots `albums`, `songs`, the name (11 u Bold upper case) at HUB_EDGE on a baseline 15 u
@@ -583,8 +589,11 @@ item shows its F3 scale (on `hub` a focused divider or letter tile first moves d
 `bit-perfect-phone` and `bit-perfect-unavailable` read EXCLUSIVE (PHONE) and EXCLUSIVE (UNAVAILABLE),
 `bit-perfect-usb-only` reads USB ONLY on the headphones, `sample-rate-edit` drafts 352800 on the FiiO rates,
 `sample-rate-unsupported` reads 96000 (NOT SUPPORTED) on the Apple dongle rate, `sample-rate-locked` focuses EQ
-BYPASSED under SAMPLE RATE read only AUTO 96000; the USB states set OUTPUT to USB),
-offscreen, software renderer. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`
+BYPASSED under SAMPLE RATE read only AUTO 96000, `eq-dac` focuses EQ under BIT PERFECT ON reading
+`SENNHEISER HD 600 PARAMETRICEQ (DAC)`, `eq-dac-custom` `CUSTOM (DAC)`, `eq-dac-failed` `DAC EQ FAILED` and
+`eq-dac-unsupported` `BYPASSED`; the USB states set OUTPUT to USB),
+offscreen, software renderer; the fonts come from `CASDAP_FONT_DIR` as in the player, and a grab with no Selawik
+prints `casdap-player: warning: Selawik not loaded, set CASDAP_FONT_DIR` and still writes the file. Screens: `blank`, `home`, `quickplay` (`--bluez off|connected`), `prompt` (the switch prompt over home), `power` (the power menu over home), `saver` and `saver-dim` (the saver with the clock fixed at 7:13, the dim variant at 0.6), `hub`
 (`--pivot artists|albums|songs|genres|playlists`, default `albums`; the `--library <dir>` models when
 given, else sample rows), `nowplaying` (sample track and queue; `--bluez active` for the Bluetooth variant),
 `queue` (a sample queue of 20 with row 3 playing), `artist` and `album` (a sample artist with two albums
@@ -595,7 +604,10 @@ band 2 open, a missing file on USB; states `eq-types` (focus BAND 5) and `eq-typ
 OFF, the seven types and the longest band value with no band open; `eq-open-hs` opens BAND 4 (HIGH SHELF)
 focused on TYPE, `eq-type-edit` opens BAND 5 (BAND PASS) with TYPE in edit mode, `eq-gain-unused` opens BAND 6
 (LOW PASS) focused on GAIN `NOT USED`, `eq-open-hp` and
-`eq-open-ap` open BAND 7 (HIGH PASS) and BAND 8 (ALL PASS) focused on TYPE),
+`eq-open-ap` open BAND 7 (HIGH PASS) and BAND 8 (ALL PASS) focused on TYPE; `eq-dac-range` opens the USB pivot under
+a `DacEq` that reads `on` with BAND 1 open at `-15.0 DB (DAC -12.0)` and `10.00 (DAC 8.00)`, focused on GAIN,
+`eq-dac-preamp` focuses PREAMP `-6.5 DB (DAC 0.0)` with BAND 2 open at `-24.0 DB (DAC -12.0)` and `0.10 (DAC 0.25)`,
+`eq-dac-long` focuses that GAIN with Q on screen),
 `components`, `overlays` (the volume box clamped to the 272 x 420 or 480 x 260 minimum canvas), `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). `--overlay` renders `home` and
 `settings` in overlay mode (CLOSE PLAYER and `PAIR IN DAP MODE` rows). CMake cache var

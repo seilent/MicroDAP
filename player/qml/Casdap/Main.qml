@@ -32,6 +32,7 @@ Window {
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
     property var codecFragment: root.screenshot || typeof CodecFragment === "undefined" ? null : CodecFragment
     property var outputMode: root.screenshot || typeof OutputMode === "undefined" ? null : OutputMode
+    property var dacEq: root.screenshot || typeof DacEq === "undefined" ? null : DacEq
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var accentControl: root.screenshot || typeof Accent === "undefined" ? null : Accent
     property var outputs: root.shotState === "orientation-external" ? externalShotOutputs
@@ -1174,6 +1175,7 @@ Window {
             outputControl: root.outputControl
             codecFragment: root.codecFragment
             outputMode: root.outputMode
+            dacEq: root.dacEq
             library: root.library
             rgbControl: root.rgbControl
             bridge: root.bridge
@@ -1192,6 +1194,7 @@ Window {
             animated: !root.hidden
             screenOff: root.off
             eq: root.eq
+            dacEq: root.dacEq
         }
     }
 

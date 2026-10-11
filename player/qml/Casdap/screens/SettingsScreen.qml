@@ -16,6 +16,7 @@ Page {
     property QtObject bridge: null
     property QtObject sensor: null
     property QtObject outputMode: null
+    property QtObject dacEq: null
     property var eq: null
     property bool overlay: false
     property bool animated: true
@@ -109,7 +110,11 @@ Page {
         : page.rateText(page.editing && page.editKey === "rate" ? page.rateDraft : page.sampleRate)
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
     readonly property string eqOutput: page.hasEq && page.eq.activeOutput !== undefined ? String(page.eq.activeOutput) : ""
-    readonly property string eqValue: page.levelEffective ? "bypassed" : page.eqText(page.eqOutput, page.eqRevision)
+    readonly property string dacStatus: page.overlay || page.dacEq === null ? "" : String(page.dacEq.status)
+    readonly property string eqValue: page.dacStatus === "failed" && page.eqOutput === "usb" ? "dac eq failed"
+        : !page.levelEffective ? page.eqText(page.eqOutput, page.eqRevision)
+        : page.dacStatus === "" || page.dacStatus === "none" || page.dacStatus === "unsupported" ? "bypassed"
+        : page.dacEqText(page.eqOutput, page.eqRevision)
     readonly property int accentHue: page.settings !== null && page.settings.accentHue !== undefined ? Ui.hueOnGrid(Number(page.settings.accentHue)) : Ui.accentHueDefault
     readonly property bool accentFromArt: page.settings !== null && page.settings.accentFromArt === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
@@ -206,6 +211,13 @@ Page {
         if (!page.hasEq || output === "" || typeof page.eq.profileMap !== "function")
             return "off"
         return EqFormat.profileText(page.eq.profileMap(output))
+    }
+
+    function dacEqText(output: string, revision: int): string {
+        const text = page.eqText(output, revision)
+        if (page.dacStatus !== "on" && page.dacStatus !== "applying" || !page.hasEq || typeof page.eq.profileMap !== "function")
+            return text
+        return EqFormat.listed(page.eq.profileMap(output)) ? text + " (dac)" : text
     }
 
     function levelWord(level: string): string {

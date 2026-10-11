@@ -129,6 +129,13 @@ TestCase {
         }
     }
 
+    QtObject {
+        id: fakeDacEq
+
+        property string status: "on"
+        readonly property var ranges: ({ gain: [-12, 12], q: [0.25, 8], preamp: [0, 0] })
+    }
+
     Component {
         id: eqComponent
 
@@ -157,6 +164,7 @@ TestCase {
         pages.clear()
         pages.animate = false
         fakeEq.reset()
+        fakeDacEq.status = "on"
     }
 
     function open(properties) {
@@ -425,6 +433,80 @@ TestCase {
         router.dispatch("a", false)
         compare(page.rows[5].value, "+2.1 db")
         compare(page.rows[5].readOnly, false)
+    }
+
+    function test_dac_suffix() {
+        const usb = fakeEq.flat()
+        usb[0] = { type: "peak", freq: 1000, gain: -15, q: 10 }
+        usb[1] = { type: "lowshelf", freq: 105, gain: -24, q: 0.1 }
+        usb[2] = { type: "lowpass", freq: 105, gain: -15, q: 10 }
+        usb[3] = { type: "off", freq: 1000, gain: -15, q: 10 }
+        usb[4] = { type: "peak", freq: 1000, gain: -12.04, q: 8.004 }
+        usb[5] = { type: "highshelf", freq: 10000, gain: 12, q: 0.25 }
+        usb[6] = { type: "peak", freq: 1000, gain: 11.96, q: 0.246 }
+        usb[7] = { type: "peak", freq: 1000, gain: -11.96, q: 0.244 }
+        const sets = Object.assign({}, fakeEq.bandSets)
+        sets.usb = usb
+        fakeEq.bandSets = sets
+        fakeEq.keys = ({ headphones: "/eq/HD 600.txt", usb: "/eq/HD 600.txt", speaker: "off" })
+        fakeEq.preamps = ({ headphones: -6.5, usb: -6.5, speaker: 0 })
+        fakeEq.activeOutput = "usb"
+        const page = open({ dacEq: fakeDacEq })
+        compare(page.pivotIndex, 1)
+        compare(page.rows[1].value, "-6.5 db (dac 0.0)")
+        compare(page.rows[2].value, "pk 1 khz -15.0 db q 10.00")
+        const want = [
+            ["peak", "1 khz", "-15.0 db (dac -12.0)", "10.00 (dac 8.00)"],
+            ["low shelf", "105 hz", "-24.0 db (dac -12.0)", "0.10 (dac 0.25)"],
+            ["low pass", "105 hz", "not used", "10.00 (dac 8.00)"],
+            ["off", "1 khz", "-15.0 db", "10.00"],
+            ["peak", "1 khz", "-12.0 db", "8.00"],
+            ["high shelf", "10 khz", "+12.0 db", "0.25"],
+            ["peak", "1 khz", "+12.0 db", "0.25"],
+            ["peak", "1 khz", "-12.0 db", "0.24 (dac 0.25)"]
+        ]
+        for (let i = 0; i < want.length; i++) {
+            page.usbPane.openBand = i
+            tryVerify(() => page.rows[i + 3].key === "band" + i + ":type", 1000)
+            for (let f = 0; f < 4; f++)
+                compare(page.rows[i + 3 + f].value, want[i][f])
+        }
+        page.usbPane.openBand = 1
+        tryVerify(() => page.rows[4].key === "band1:type", 1000)
+        const gain = tc.rowItem(page.usbPane, 6)
+        compare(gain.modelData.value, "-24.0 db (dac -12.0)")
+        compare(gain.valueSlot.x + gain.valueItem.x + gain.valueItem.width, gain.width - Ui.px(Ui.hubEdge))
+        verify(gain.valueItem.x >= 0)
+        tc.edit(page, 6)
+        verify(router.dispatch("right", false))
+        compare(tc.callAt(0), JSON.stringify(["stepBand", "usb", 1, "gain", 1, false]))
+        compare(fakeEq.bandSets.usb[1].gain, -23.9)
+        compare(page.rows[6].value, "-23.9 db (dac -12.0)")
+        verify(router.dispatch("a", false))
+        fakeDacEq.status = "applying"
+        compare(page.rows[1].value, "-6.5 db (dac 0.0)")
+        for (const s of ["none", "flat", "failed", "unsupported"]) {
+            fakeDacEq.status = s
+            compare(page.rows[1].value, "-6.5 db")
+            compare(page.rows[6].value, "-23.9 db")
+        }
+        fakeDacEq.status = "on"
+        verify(router.dispatch("lb", false))
+        compare(page.pivotIndex, 0)
+        compare(page.rows[1].value, "-6.5 db")
+        fakeEq.preamps = ({ headphones: -6.5, usb: 0, speaker: 0 })
+        fakeEq.profilesChanged()
+        verify(router.dispatch("rb", false))
+        compare(page.rows[1].value, "0.0 db")
+    }
+
+    function test_dac_suffix_without_dac_eq() {
+        fakeEq.keys = ({ headphones: "/eq/HD 600.txt", usb: "/eq/HD 600.txt", speaker: "off" })
+        fakeEq.preamps = ({ headphones: -6.5, usb: -6.5, speaker: 0 })
+        fakeEq.activeOutput = "usb"
+        const page = open()
+        compare(page.pivotIndex, 1)
+        compare(page.rows[1].value, "-6.5 db")
     }
 
     function test_preamp_cancel_restores() {

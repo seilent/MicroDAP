@@ -97,3 +97,16 @@ function fieldText(b, field) {
         return fieldInert(b, field) ? "not used" : gainText(b.gain)
     return qText(b.q)
 }
+
+var dacFields = ["gain", "q", "preamp"]
+
+function dacSuffix(field, value, ranges) {
+    if (ranges === null || ranges === undefined || dacFields.indexOf(field) < 0 || ranges[field] === undefined)
+        return ""
+    var range = ranges[field]
+    var v = field === "q" ? Number(qText(value)) : Number(signed(value, false))
+    var c = Math.min(Number(range[1]), Math.max(Number(range[0]), v))
+    if (c === v)
+        return ""
+    return " (dac " + (field === "q" ? qText(c) : signed(c, field === "gain")) + ")"
+}

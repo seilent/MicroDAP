@@ -176,6 +176,12 @@ TestCase {
     }
 
     QtObject {
+        id: fakeDacEq
+
+        property string status: "none"
+    }
+
+    QtObject {
         id: fakeEq
 
         property string activeOutput: "headphones"
@@ -316,6 +322,7 @@ TestCase {
         fakeEq.activeOutput = "headphones"
         fakeEq.keys = ({ headphones: "/home/armada/.config/casdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
         fakeEq.missing = false
+        fakeDacEq.status = "none"
     }
 
     function cleanup() {
@@ -1272,6 +1279,86 @@ TestCase {
         compare(page.editing, false)
         fakeMode.effective = false
         compare(tc.rowOf(page, "eq").value, "custom")
+    }
+
+    function test_eq_row_dac() {
+        tc.useUsb()
+        const file = "/home/armada/.config/casdap/eq/HD 600.txt"
+        fakeEq.activeOutput = "usb"
+        fakeEq.keys = ({ headphones: file, usb: file, speaker: "off" })
+        const page = open({ eq: fakeEq, dacEq: fakeDacEq })
+        const value = () => tc.rowOf(page, "eq").value
+        compare(value(), "HD 600")
+        for (const s of ["none", "unsupported", "applying", "on", "flat"]) {
+            fakeDacEq.status = s
+            compare(value(), "HD 600")
+        }
+        fakeDacEq.status = "failed"
+        compare(value(), "dac eq failed")
+        fakeEq.activeOutput = "headphones"
+        compare(value(), "HD 600")
+        fakeEq.activeOutput = "speaker"
+        compare(value(), "off")
+        fakeEq.activeOutput = "usb"
+        compare(value(), "dac eq failed")
+        fakeSettings.outputLevel = "bitperfect"
+        fakeMode.levelStatus = "on"
+        fakeMode.effective = true
+        compare(value(), "dac eq failed")
+        fakeDacEq.status = "none"
+        compare(value(), "bypassed")
+        fakeDacEq.status = "unsupported"
+        compare(value(), "bypassed")
+        fakeDacEq.status = "applying"
+        compare(value(), "HD 600 (dac)")
+        fakeDacEq.status = "on"
+        compare(value(), "HD 600 (dac)")
+        fakeDacEq.status = "flat"
+        compare(value(), "HD 600")
+        fakeDacEq.status = "on"
+        fakeEq.keys = ({ headphones: file, usb: "custom", speaker: "off" })
+        fakeEq.profilesChanged()
+        compare(value(), "custom (dac)")
+        fakeEq.keys = ({ headphones: file, usb: "off", speaker: "off" })
+        fakeEq.profilesChanged()
+        compare(value(), "off")
+        fakeDacEq.status = "flat"
+        compare(value(), "off")
+        fakeEq.keys = ({ headphones: file, usb: file, speaker: "off" })
+        fakeEq.missing = true
+        fakeEq.profilesChanged()
+        compare(value(), "HD 600 (missing)")
+        fakeDacEq.status = "on"
+        compare(value(), "HD 600 (missing)")
+        fakeEq.missing = false
+        fakeEq.profilesChanged()
+        compare(value(), "HD 600 (dac)")
+        compare(tc.rowOf(page, "eq").readOnly, true)
+        tc.focusKey(page, "eq")
+        compare(router.dispatch("left", false), false)
+        verify(router.dispatch("a", false))
+        compare(counters.eq, 1)
+        compare(page.editing, false)
+        fakeDacEq.status = "failed"
+        fakeSettings.outputLevel = "off"
+        fakeMode.levelStatus = "off"
+        fakeMode.effective = false
+        compare(value(), "dac eq failed")
+        fakeEq.activeOutput = "headphones"
+        compare(value(), "HD 600")
+        fakeEq.activeOutput = "usb"
+        fakeDacEq.status = "flat"
+        compare(value(), "HD 600")
+    }
+
+    function test_eq_row_dac_overlay() {
+        fakeDacEq.status = "failed"
+        const page = open({ overlay: true, bridge: fakeBridge, eq: fakeEq, dacEq: fakeDacEq })
+        compare(tc.rowOf(page, "eq").value, "HD 600")
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "eq").value, "bypassed")
+        fakeDacEq.status = "on"
+        compare(tc.rowOf(page, "eq").value, "bypassed")
     }
 
     function test_audio_info_refresh_on_open() {

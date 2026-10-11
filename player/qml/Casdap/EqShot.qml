@@ -15,6 +15,7 @@ Item {
     })
     readonly property var openShot: root.openShots[root.fixture] === undefined ? null : root.openShots[root.fixture]
     readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end" || root.openShot !== null
+    readonly property bool dacShot: root.fixture === "eq-dac-range" || root.fixture === "eq-dac-preamp" || root.fixture === "eq-dac-long"
 
     Rectangle {
         anchors.fill: parent
@@ -24,7 +25,7 @@ Item {
     QtObject {
         id: sampleEq
 
-        readonly property string activeOutput: "headphones"
+        readonly property string activeOutput: root.dacShot ? "usb" : "headphones"
         readonly property var sources: [{ name: "SENNHEISER HD 600 PARAMETRICEQ", path: "/home/armada/.config/casdap/eq/Sennheiser HD 600 ParametricEQ.txt" }]
         readonly property var headphones: ({
             key: "/home/armada/.config/casdap/eq/Sennheiser HD 600 ParametricEQ.txt",
@@ -58,15 +59,35 @@ Item {
             { type: "highshelf", freq: 20000, gain: -24, q: 10 }
         ]
 
+        readonly property var dacLow: ({
+            key: "/home/armada/.config/casdap/eq/DQ LOW.txt",
+            name: "DQ LOW",
+            missing: false,
+            preamp: -6.5,
+            bands: [
+                { type: "peak", freq: 1000, gain: -15, q: 10 },
+                { type: "lowshelf", freq: 105, gain: -24, q: 0.1 }
+            ].concat(sampleEq.autoEq.slice(2))
+        })
+
         signal profilesChanged()
 
         function profileMap(output) {
             if (output === "headphones")
                 return sampleEq.headphones
+            if (output === "usb" && root.dacShot)
+                return sampleEq.dacLow
             if (output === "usb")
                 return { key: "/run/media/armada/SD/Music/EQ/Apple Dongle.txt", name: "Apple Dongle", missing: true, preamp: 0, bands: [] }
             return { key: "off", name: "", missing: false, preamp: 0, bands: [] }
         }
+    }
+
+    QtObject {
+        id: sampleDacEq
+
+        readonly property string status: "on"
+        readonly property var ranges: ({ gain: [-12, 12], q: [0.25, 8], preamp: [0, 0] })
     }
 
     EqScreen {
@@ -75,9 +96,20 @@ Item {
         anchors.fill: parent
         animated: false
         eq: sampleEq
+        dacEq: root.dacShot ? sampleDacEq : null
 
         Component.onCompleted: {
             screen.completeAll()
+            if (root.dacShot) {
+                const band = root.fixture === "eq-dac-range" ? 0 : 1
+                screen.usbPane.openBand = band
+                screen.focusIndex = screen.indexOfKey(root.fixture === "eq-dac-preamp" ? "preamp" : "band" + band + ":gain")
+                Qt.callLater(() => {
+                    screen.activePane.ensureVisible(screen.indexOfKey("band" + band + ":q"), 0)
+                    screen.activePane.ensureVisible(screen.focusIndex, 0)
+                })
+                return
+            }
             if (root.openShot !== null) {
                 const band = "band" + root.openShot.band
                 screen.headphonesPane.openBand = root.openShot.band

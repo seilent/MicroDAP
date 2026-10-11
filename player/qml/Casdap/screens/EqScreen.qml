@@ -6,6 +6,7 @@ Page {
     id: page
 
     property var eq: null
+    property QtObject dacEq: null
     property bool animated: true
     property bool screenOff: false
     property int pivotIndex: 0
@@ -19,6 +20,8 @@ Page {
     readonly property bool live: page.animated && !page.screenOff
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
+    readonly property bool dacOn: page.dacEq !== null && (page.dacEq.status === "on" || page.dacEq.status === "applying")
+    readonly property var dacRanges: page.dacOn && page.dacEq.ranges !== undefined ? page.dacEq.ranges : null
     readonly property var pivots: EqFormat.outputs
     readonly property var panes: [headphonesPane, usbPane, speakerPane]
     readonly property var activePane: page.panes[page.pivotIndex]
@@ -48,11 +51,12 @@ Page {
         return { kind: kind, key: key, title: title, value: value, band: band, field: field, readOnly: false }
     }
 
-    function buildRows(p: var, openBand: int): var {
+    function buildRows(p: var, openBand: int, ranges: var): var {
         const out = [page.entry("row", "profile", "profile", EqFormat.profileText(p), -1, "")]
         if (!EqFormat.listed(p))
             return out
-        out.push(page.entry("row", "preamp", "preamp", EqFormat.preampText(p.preamp === undefined ? 0 : p.preamp), -1, ""))
+        const preamp = p.preamp === undefined ? 0 : p.preamp
+        out.push(page.entry("row", "preamp", "preamp", EqFormat.preampText(preamp) + EqFormat.dacSuffix("preamp", preamp, ranges), -1, ""))
         const bands = p.bands === undefined || p.bands === null ? [] : p.bands
         for (let i = 0; i < bands.length; i++) {
             out.push(page.entry("row", "band" + i, "band " + (i + 1), EqFormat.bandText(bands[i]), i, ""))
@@ -60,9 +64,11 @@ Page {
                 continue
             for (let f = 0; f < EqFormat.fields.length; f++) {
                 const field = EqFormat.fields[f]
+                const inert = EqFormat.fieldInert(bands[i], field)
+                const dac = inert || String(bands[i].type) === "off" ? "" : EqFormat.dacSuffix(field, bands[i][field], ranges)
                 const sub = page.entry("sub", "band" + i + ":" + field, EqFormat.fieldTitles[f],
-                    EqFormat.fieldText(bands[i], field), i, field)
-                sub.readOnly = EqFormat.fieldInert(bands[i], field)
+                    EqFormat.fieldText(bands[i], field) + dac, i, field)
+                sub.readOnly = inert
                 out.push(sub)
             }
         }
@@ -611,7 +617,7 @@ Page {
         readonly property string output: page.pivots[pane.pivot]
         readonly property var profile: page.profileOf(pane.output, page.revision)
         readonly property bool listed: EqFormat.listed(pane.profile)
-        readonly property var rows: page.buildRows(pane.profile, pane.listed ? pane.openBand : -1)
+        readonly property var rows: page.buildRows(pane.profile, pane.listed ? pane.openBand : -1, pane.output === "usb" ? page.dacRanges : null)
         readonly property bool scrolling: scrollAnim.running
         readonly property real scrollTarget: scrollAnim.to
         readonly property Repeater repeater: rowRepeater

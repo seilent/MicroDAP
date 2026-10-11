@@ -10,10 +10,11 @@ Item {
 
     readonly property bool levelShot: root.fixture.startsWith("bit-perfect")
     readonly property bool rateShot: root.fixture.startsWith("sample-rate")
-    readonly property bool usbShot: (root.levelShot || root.rateShot) && root.fixture !== "bit-perfect-usb-only"
+    readonly property bool dacShot: root.fixture.startsWith("eq-dac")
+    readonly property bool usbShot: (root.levelShot || root.rateShot || root.dacShot) && root.fixture !== "bit-perfect-usb-only"
     readonly property string levelShown: root.fixture === "bit-perfect-phone" ? "exclusive (phone)"
         : root.fixture === "bit-perfect-unavailable" ? "exclusive (unavailable)"
-        : root.levelShot || root.fixture === "sample-rate-locked" ? "on" : "off"
+        : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" ? "on" : "off"
 
     Rectangle {
         anchors.fill: parent
@@ -21,8 +22,8 @@ Item {
     }
 
     function applyFixture(): void {
-        if (root.levelShot || root.rateShot) {
-            screen.focusIndex = screen.indexOfKey(root.levelShot ? "level" : root.fixture === "sample-rate-locked" ? "eq" : "rate")
+        if (root.levelShot || root.rateShot || root.dacShot) {
+            screen.focusIndex = screen.indexOfKey(root.levelShot ? "level" : root.dacShot || root.fixture === "sample-rate-locked" ? "eq" : "rate")
             if (root.fixture === "bit-perfect-edit" || root.fixture === "sample-rate-edit") {
                 screen.activate()
                 for (let i = 0; i < (root.levelShot ? 1 : 7); i++)
@@ -84,7 +85,7 @@ Item {
         property bool autoRotate: root.fixture === "auto-rotate" || root.fixture === "auto-rotate-below"
         property bool touch: true
         property string outputLevel: root.fixture === "bit-perfect-phone" || root.fixture === "bit-perfect-unavailable" ? "exclusive"
-            : root.levelShot || root.fixture === "sample-rate-locked" ? "bitperfect" : "off"
+            : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" ? "bitperfect" : "off"
         property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
     }
 
@@ -138,13 +139,22 @@ Item {
     }
 
     QtObject {
+        id: sampleDacEq
+
+        readonly property string status: root.fixture === "eq-dac-failed" ? "failed"
+            : root.fixture === "eq-dac-unsupported" ? "unsupported" : "on"
+    }
+
+    QtObject {
         id: sampleEq
 
-        readonly property string activeOutput: "headphones"
+        readonly property string activeOutput: root.dacShot ? "usb" : "headphones"
 
         signal profilesChanged()
 
         function profileMap(output) {
+            if (root.fixture === "eq-dac-custom")
+                return { key: "custom", name: "", missing: false, preamp: 0, bands: [] }
             return { key: "/home/armada/.config/casdap/eq/Sennheiser HD 600 ParametricEQ.txt", name: "Sennheiser HD 600 ParametricEQ", missing: false, preamp: -6.5, bands: [] }
         }
     }
@@ -163,6 +173,7 @@ Item {
         outputMode: sampleOutputMode
         rgbControl: sampleRgb
         eq: sampleEq
+        dacEq: root.dacShot ? sampleDacEq : null
         sensor: sampleSensor
         folders: ["/home/armada/Music", "/run/media/armada/SD"]
 

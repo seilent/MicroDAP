@@ -11,6 +11,8 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontInfo>
 #include <QImage>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -57,6 +59,8 @@ bool parseSize(const QString &size, int &width, int &height)
 
 void grab(QQuickWindow *window, const QString &out)
 {
+    if (QFontInfo(QFont(QStringLiteral("Selawik"))).family() != QLatin1StringView("Selawik"))
+        fail(QStringLiteral("warning: Selawik not loaded, set CASDAP_FONT_DIR"));
     const QImage image = window->grabWindow();
     if (image.isNull()) {
         fail(QStringLiteral("grabWindow returned no image"));
@@ -154,6 +158,13 @@ const QStringList &states()
         QStringLiteral("eq-gain-unused"),
         QStringLiteral("eq-open-hp"),
         QStringLiteral("eq-open-ap"),
+        QStringLiteral("eq-dac"),
+        QStringLiteral("eq-dac-custom"),
+        QStringLiteral("eq-dac-failed"),
+        QStringLiteral("eq-dac-unsupported"),
+        QStringLiteral("eq-dac-range"),
+        QStringLiteral("eq-dac-preamp"),
+        QStringLiteral("eq-dac-long"),
     };
     return names;
 }
