@@ -260,7 +260,9 @@ grep -qxF 'ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{
 grep -qxF 'ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2972", ATTR{idProduct}=="0149", ENV{SYSTEMD_USER_WANTS}+="casdap-fiio-reset.service"' "${rules}" || fail "rules lack the fiio plug in line"
 grep -qxF 'ExecStart=/usr/libexec/casdap/casdap-usb-audio --scan' "${unit}" || fail "unit lacks the scan"
 grep -qxF 'RemainAfterExit=yes' "${unit}" || fail "unit lacks RemainAfterExit=yes"
-grep -qxF 'Wants=casdap-usb-audio.service' "${wants}" || fail "multi-user drop in lacks the Wants line"
+grep -qxF 'Upholds=casdap-guard.service casdap-usb-audio.service' "${wants}" || fail "multi-user drop in lacks the Upholds line"
+grep -qxF 'EXTENSION_RELOAD_MANAGER=1' "${repo}/sysext/usr/lib/extension-release.d/extension-release.casdap" \
+    || fail "extension-release does not ask for a manager reload"
 
 if (( failures )); then
     echo "usb-audio-test: ${failures} failure(s)" >&2

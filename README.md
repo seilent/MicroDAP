@@ -1175,7 +1175,7 @@ PCM closes, and its HID media buttons stop working. Gamepads with audio (DualSen
 mice and audio only devices are left alone, and a device with no HID interface bound writes nothing.
 `70-casdap-usb-audio.rules` runs it on a `usb_device` add or bind and on the parent of a `usbhid` interface
 bind; `--scan` walks every device under `/sys/bus/usb/devices`, from `casdap-usb-audio.service` at boot
-(`Wants=` from `multi-user.target.d`) and from `device-apply`. `CASDAP_SYS_ROOT` replaces `/sys`. Journal lines:
+(`Upholds=` from `multi-user.target.d`, see Guard) and from `device-apply`. `CASDAP_SYS_ROOT` replaces `/sys`. Journal lines:
 `casdap-usb-audio: <dev> <vid>:<pid> hid <intf> unbound` (or `unbind failed`), `<dev> autosuspend on`,
 `<dev> skipped, generic desktop hid`, `<dev> power/control write failed`. Undo as root:
 `echo <intf> > /sys/bus/usb/drivers/usbhid/bind`.
@@ -1299,6 +1299,9 @@ bluez5 codecs; the user audio stack has to restart once after the merge.
 ## Guard
 
 `casdap-guard.service` runs at boot (`Upholds=` from `multi-user.target.d`) and after every dev loop.
+`systemd-sysext.service` merges after systemd has loaded its units and reloads the manager only for an
+extension whose `extension-release` sets `EXTENSION_RELOAD_MANAGER=1`; `extension-release.casdap` does, so
+the drop-in applies on that boot.
 It resolves the booted deployment from `ostree=` on the kernel command line and compares each file
 in `shadow-base.sha256`; a mismatch logs one warning per file and lists the path in
 `/run/casdap/drift`. Without a resolvable deployment it compares `IMAGE_VERSION` instead. When
