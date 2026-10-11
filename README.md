@@ -21,9 +21,11 @@ Open: the power measurement run and the release image.
 | `tests/` | bash tests with stubbed `sudo`, `systemctl`, `loginctl`, `btmgmt`, `evtest`, `busctl`, `amixer`, `armada-rgb`. `bt-test.sh` runs `bt-test.py` under `dbus-run-session` with a fake `org.bluez` (needs `dbus-python` and `python3-gobject`). `keep-test.sh` drives `casdap-keep` through `CASDAP_KEEP_FILE` and `CASDAP_BOOT_ID_FILE`; `power-test.sh` drives `casdap-power` with stubbed `busctl`, `systemctl`, `systemd-run`, `nmcli` and `CASDAP_RUNTIME_DIR`, `CASDAP_SETTINGS_FILE`, `CASDAP_CPU_BEFORE_FILE`; `powerd-test.sh` replays `evtest` lines and profile reads into `casdap-powerd`; `wait-x-test.sh` drives `casdap-wait-x` with a stubbed `xprop` and `CASDAP_X_SOCKET_DIR`; `overlay-unit-test.sh` greps `casdap-overlay.service` and its drop in under `sysext/` and runs `systemd-analyze --user verify` where the image units and the player binary exist (`skip:` otherwise); `fiio-unit-test.sh` checks the exact lines of `casdap-fiio-reset.service`, `05-casdap-fiio.conf` and `40-casdap-fiio.conf` and that `05-casdap-fiio.conf` sorts first in the casdap session drop ins. Player tests live in `player/tests/` (QTest, offscreen, generated FLAC and MP3 fixtures; `tst_mpris`, `tst_power`, `tst_systembluez`, `tst_dbuspad`, `tst_overlay`, `tst_sensor` and `tst_ssc` run under `dbus-run-session`, `tst_dbuspad` and `tst_overlay` against `fake_inputplumber.py`, `tst_sensor` against `fake_sensorproxy.py`, `tst_overlay`, `tst_power` and `tst_ssc` against `fake_login1.py` (a fake `org.freedesktop.login1` with `Inhibit` and `PrepareForSleep` on the private bus, `CASDAP_LOGIN1_BUS`), `tst_overlay` also against a unix datagram `NOTIFY_SOCKET`; `tst_ssc` drives `SscRotation` through a `FakeLink` that records sent datagrams and injects received ones, so no test opens an `AF_QIPCRTR` socket; each `player/tests/qml/tst_*.qml` is its own ctest entry `qml-<name>` running `tst_qml -input <file>`). |
 | `dist/` | Build output, the sysext tree. Not committed. |
 
-The patched file (`/usr/share/inputplumber/capability_maps/ayaneo_pocket_micro2.yaml`) is never checked in whole.
-`build.sh` copies each base file out of the pinned image, records its sha256 in
-`usr/share/casdap/shadow-base.sha256`, applies the patch with `patch -p1` and fails on any reject.
+No Armada file is checked in whole or shadowed. A patch's `--- a/` header names the base file in the pinned image,
+its `+++ b/` header the output path, which is the patch's own path under `patches/<class>/`. `build.sh` copies the
+base to the output path, records the base's sha256 in `usr/share/casdap/shadow-base.sha256`, applies the patch and
+fails on any reject. The one patch builds `zz-casdap-ayaneo_pocket_micro2.yaml` from Armada's
+`ayaneo_pocket_micro2.yaml`.
 
 ## Player UI
 
@@ -887,8 +889,10 @@ InputPlumber's own polkit rule grants its actions to group `wheel`, which `armad
 
 ## Input
 
-The pad guide button (`BTN_MODE`) maps to `KeyF13` in the Pocket MICRO 2 capability map and reaches
-only the `InputPlumber Keyboard` node; Steam does not see it (the front Home key keeps Guide). F13
+The pad guide button (`BTN_MODE`) maps to `KeyF13` in `zz-casdap-ayaneo_pocket_micro2.yaml`, Armada's Pocket
+MICRO 2 capability map plus that entry under the same `id`. InputPlumber reads maps sorted by file name and the
+last map with an `id` wins, so this one replaces Armada's while merged; maps load when a composite device is
+created, so a merge or unmerge needs an inputplumber restart. F13 reaches only the `InputPlumber Keyboard` node; Steam does not see it (the front Home key keeps Guide). F13
 does not flow during stick calibration.
 
 `casdap-hotkeyd` (user unit, `Upholds=` from `default.target.d`) reads that node with `evtest` and
@@ -1304,8 +1308,8 @@ in `shadow-base.sha256`; a mismatch logs one warning per file and lists the path
 ## Rebuild per Armada release
 
 Every Armada release (new digest, `VERSION_ID` or pipewire minor) needs a casdap rebuilt against
-it: `just base && just build`. A casdap built against an older image hides later changes to the
-patched files while merged; the guard warns about it.
+it: `just base && just build`. A casdap built against an older image hides later changes to
+Armada's Pocket MICRO 2 capability map while merged (its `zz-casdap-` copy wins the `id`); the guard warns about it.
 
 ## Known limits
 

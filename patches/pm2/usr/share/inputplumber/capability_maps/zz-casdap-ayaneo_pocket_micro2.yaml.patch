@@ -1,5 +1,5 @@
 --- a/usr/share/inputplumber/capability_maps/ayaneo_pocket_micro2.yaml
-+++ b/usr/share/inputplumber/capability_maps/ayaneo_pocket_micro2.yaml
++++ b/usr/share/inputplumber/capability_maps/zz-casdap-ayaneo_pocket_micro2.yaml
 @@ -220,3 +220,12 @@
      target_event:
        gamepad:

@@ -25,11 +25,15 @@ cp -a sysext/. "${dist}/"
 for p in $(find patches -type f -name '*.patch' | sort); do
     path=${p#patches/*/}
     path=/${path%.patch}
-    [[ -f "${root}${path}" ]] || fail "base file ${path} is not in the builder image"
+    base=$(sed -n '1s|^--- a/\([^[:space:]]*\).*|/\1|p' "${p}")
+    [[ -n "${base}" ]] || fail "${p} has no --- a/ header"
+    [[ "$(grep -c '^+++ ' "${p}")" == 1 ]] || fail "${p} must have exactly one +++ header"
+    [[ "$(sed -n '2s|^+++ b/\([^[:space:]]*\).*|/\1|p' "${p}")" == "${path}" ]] || fail "${p} does not patch ${path}"
+    [[ -f "${root}${base}" ]] || fail "base file ${base} is not in the builder image"
     mkdir -p "${dist}$(dirname "${path}")"
-    cp -a "${root}${path}" "${dist}${path}"
-    echo "$(sha256sum "${root}${path}" | cut -d' ' -f1)  ${path}" >> "${share}/shadow-base.sha256"
-    (cd "${dist}" && patch --no-backup-if-mismatch -p1 < "../${p}")
+    cp -a "${root}${base}" "${dist}${path}"
+    echo "$(sha256sum "${root}${base}" | cut -d' ' -f1)  ${base}" >> "${share}/shadow-base.sha256"
+    patch --no-backup-if-mismatch "${dist}${path}" < "${p}"
 done
 
 build/fonts.sh build/cache/fonts "${dist}"
