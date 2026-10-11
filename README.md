@@ -6,8 +6,8 @@ shipped as a systemd-sysext overlay for [Armada](https://github.com/armada-os/ar
 Status: prototype, runs on an AYANEO Pocket MICRO 2. The session, the switch units, the guide button
 mapping, the hold daemon, the pad target, the boot guard, the Bluetooth receiver with codec choice and
 aptX, the in game overlay, the power key daemon with the screen off state and the CPU floor, USB DAC
-output and the player (home, hub, artist and album detail, now playing, queue, playlists, history, jump
-grid, settings, saver, power menu) are written. The session runs native portrait with runtime orientation.
+output with BIT PERFECT and EXCLUSIVE levels for USB DACs and the player (home, hub, artist and album detail, now
+playing, queue, playlists, history, jump grid, settings, saver, power menu) are written. The session runs native portrait with runtime orientation.
 Open: the power measurement run and the release image.
 
 ## Layout
