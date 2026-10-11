@@ -651,6 +651,7 @@ private slots:
     void driverWaitNeedsInterface();
     void workerLatestWins();
     void workerAbandon();
+    void workerCancel();
     void workerAbandonInWaits();
     void workerDriverWait();
     void workerLockRetry();
@@ -2651,6 +2652,28 @@ void FiioTest::workerAbandon()
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 2);
 }
 
+void FiioTest::workerCancel()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    const std::shared_ptr<FakeUsbIo::Hold> first = rig.fake->hold(FakeUsbIo::Op::Out);
+    const quint64 a = rig.post(FiioWorker::Kind::Take);
+    QVERIFY(first->waitEntered(3000));
+    rig.worker->cancel();
+    first->release();
+    QVERIFY(rig.waitDone(a, 3000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Abandoned);
+    QVERIFY(!rig.result(a)->ok);
+    QCOMPARE(outs(*rig.fake), QStringList{QStringLiteral("get 0b")});
+    QVERIFY(!rig.fake->isOpen());
+    QCOMPARE(rig.done.size(), std::size_t(1));
+
+    const quint64 b = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(b, 3000));
+    QVERIFY(rig.result(b)->ok);
+    QCOMPARE(outs(*rig.fake), (QStringList{QStringLiteral("get 0b"), QStringLiteral("get 16")}));
+}
+
 void FiioTest::workerAbandonInWaits()
 {
     WorkerRig rig(workerBounds(2000, 1000, 500));
@@ -2782,7 +2805,7 @@ void FiioTest::workerResetPcmOpen()
     QVERIFY(rig.pcmStatus("state: RUNNING\nowner_pid   : 4242\n"));
     const quint64 a = rig.post(FiioWorker::Kind::Reset);
     QVERIFY(rig.waitDone(a, 3000));
-    QCOMPARE(rig.result(a)->reason, FiioReason::Overflow);
+    QCOMPARE(rig.result(a)->reason, FiioReason::Refused);
     QVERIFY(!rig.result(a)->ok);
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 0);
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::In), 0);
@@ -2791,7 +2814,7 @@ void FiioTest::workerResetPcmOpen()
     QFile::remove(rig.root.path() + QStringLiteral("/asound/card1/pcm0p/sub0/status"));
     const quint64 b = rig.post(FiioWorker::Kind::Reset);
     QVERIFY(rig.waitDone(b, 3000));
-    QCOMPARE(rig.result(b)->reason, FiioReason::Overflow);
+    QCOMPARE(rig.result(b)->reason, FiioReason::Refused);
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 0);
 }
 

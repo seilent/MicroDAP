@@ -43,6 +43,8 @@ add_library(casdapcore STATIC
     src/core/BluezModel.h
     src/core/CodecFragment.cpp
     src/core/CodecFragment.h
+    src/core/DacEq.cpp
+    src/core/DacEq.h
     src/core/DbusPad.cpp
     src/core/DbusPad.h
     src/core/DeviceReservation.cpp

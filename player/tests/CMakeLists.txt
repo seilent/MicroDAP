@@ -202,6 +202,11 @@ target_link_libraries(tst_fiio PRIVATE casdapcore Qt6::Test)
 add_test(NAME fiio COMMAND tst_fiio)
 casdap_test_env(fiio)
 
+qt_add_executable(tst_daceq core/tst_daceq.cpp)
+target_link_libraries(tst_daceq PRIVATE casdapcore Qt6::Test)
+add_test(NAME daceq COMMAND tst_daceq)
+casdap_test_env(daceq)
+
 set(fiio_cli_script [=[
 set -eu
 bin=$1

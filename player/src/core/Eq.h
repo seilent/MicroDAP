@@ -149,6 +149,8 @@ public:
     int revision() const;
     bool bypassed() const;
     void setBypassed(bool on);
+    bool dacHeld() const;
+    void setDacHeld(bool on);
 
     EqProfile profile(const QString &output) const;
     void setCustom(const QString &output, const EqProfile &profile);
@@ -187,7 +189,8 @@ private:
     EqBand *beginBandEdit(const QString &output, int band);
     void endEdit(const QString &output);
     void changed(const QString &output);
-    void applyActive();
+    void applyActive(const QString &cause = QStringLiteral("profile"));
+    void emitApplied(const QString &cause);
     void pollSink();
     void dropSinkProcess();
 
@@ -205,8 +208,11 @@ private:
     QSet<QString> m_dirty;
     QTimer m_syncTimer;
     EqProfile m_applied = EqProfile::off();
+    EqProfile m_emitted = EqProfile::off();
     bool m_appliedOnce = false;
+    bool m_emittedOnce = false;
     bool m_bypassed = false;
+    bool m_dacHeld = false;
     bool m_editing = false;
     int m_revision = 0;
 };

@@ -52,6 +52,7 @@ public:
 
     void post(const Target &target);
     void postFinal(const Target &target, int ms);
+    void cancel();
     bool quitAndJoin(int ms);
 
 signals:

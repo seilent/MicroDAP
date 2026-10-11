@@ -62,6 +62,44 @@ bool near(double a, double b)
     return std::abs(a - b) < 1e-6;
 }
 
+QStringList *capturedLines = nullptr;
+QtMessageHandler previousHandler = nullptr;
+
+void captureLine(QtMsgType type, const QMessageLogContext &context, const QString &message)
+{
+    if (capturedLines)
+        capturedLines->append(message);
+    if (previousHandler)
+        previousHandler(type, context, message);
+}
+
+struct LogCapture
+{
+    LogCapture()
+    {
+        capturedLines = &messages;
+        previousHandler = qInstallMessageHandler(captureLine);
+    }
+
+    ~LogCapture()
+    {
+        qInstallMessageHandler(previousHandler);
+        capturedLines = nullptr;
+    }
+
+    QStringList lines(const QString &prefix) const
+    {
+        QStringList out;
+        for (const QString &line : messages) {
+            if (line.startsWith(prefix))
+                out.append(line);
+        }
+        return out;
+    }
+
+    QStringList messages;
+};
+
 QString filters(int count)
 {
     QString text;
@@ -102,7 +140,10 @@ private slots:
     void cycleProfile();
     void activeOutputPicksKey();
     void followsOutputControl();
-    void bypass();
+    void bypassedFlattensAll();
+    void dacHeldFlattensUsbOnly();
+    void dacHeldSpeakerSwitch();
+    void applyLogLine();
     void missingFile();
     void sinkPoll();
 
@@ -836,7 +877,7 @@ void EqTest::followsOutputControl()
     QVERIFY(last == EqProfile::off());
 }
 
-void EqTest::bypass()
+void EqTest::bypassedFlattensAll()
 {
     Settings settings(m_dir + QStringLiteral("/settings.ini"));
     settings.setRoots({m_dir + QStringLiteral("/music")});
@@ -844,6 +885,9 @@ void EqTest::bypass()
     EqProfile custom = EqProfile::flat();
     custom.bands[1].gain = 2.0;
     eq.setCustom(QStringLiteral("usb"), custom);
+    EqProfile speaker = EqProfile::flat();
+    speaker.bands[2].gain = -1.0;
+    eq.setCustom(QStringLiteral("speaker"), speaker);
     EqProfile last;
     int count = 0;
     connect(&eq, &EqControl::profileApplied, this, [&last, &count](const EqProfile &profile) {
@@ -861,25 +905,147 @@ void EqTest::bypass()
     QVERIFY(last == custom);
 
     eq.setBypassed(true);
+    QCOMPARE(count, 2);
+    QVERIFY(last == EqProfile::off());
     eq.setBypassed(true);
-    QCOMPARE(count, 1);
+    QCOMPARE(count, 2);
     eq.stepGain(QStringLiteral("usb"), 1, 1);
-    eq.setActiveOutput(QStringLiteral("speaker"));
-    eq.setActiveOutput(QStringLiteral("usb"));
-    QCOMPARE(count, 1);
+    QCOMPARE(count, 2);
     QVERIFY(near(eq.activeProfile().bands[1].gain, 2.1));
+    eq.setActiveOutput(QStringLiteral("speaker"));
+    QCOMPARE(count, 2);
+    QVERIFY(eq.activeProfile() == speaker);
+    eq.setActiveOutput(QStringLiteral("headphones"));
+    QCOMPARE(count, 2);
+    eq.setActiveOutput(QStringLiteral("usb"));
+    QCOMPARE(count, 2);
 
     eq.setBypassed(false);
     QVERIFY(!eq.bypassed());
-    QCOMPARE(count, 2);
+    QCOMPARE(count, 3);
     QVERIFY(near(last.bands[1].gain, 2.1));
     eq.setBypassed(false);
+    QCOMPARE(count, 3);
+
+    eq.setActiveOutput(QStringLiteral("speaker"));
+    QCOMPARE(count, 4);
+    QVERIFY(last == speaker);
+    eq.setBypassed(true);
+    QCOMPARE(count, 5);
+    QVERIFY(last == EqProfile::off());
+    eq.setBypassed(false);
+    QCOMPARE(count, 6);
+    QVERIFY(last == speaker);
+}
+
+void EqTest::dacHeldFlattensUsbOnly()
+{
+    Settings settings(m_dir + QStringLiteral("/settings.ini"));
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    EqProfile custom = EqProfile::flat();
+    custom.bands[1].gain = 2.0;
+    eq.setCustom(QStringLiteral("usb"), custom);
+    EqProfile headphones = EqProfile::flat();
+    headphones.bands[4].gain = 1.5;
+    eq.setCustom(QStringLiteral("headphones"), headphones);
+    EqProfile last;
+    int count = 0;
+    connect(&eq, &EqControl::profileApplied, this, [&last, &count](const EqProfile &profile) {
+        last = profile;
+        ++count;
+    });
+    eq.setActiveOutput(QStringLiteral("headphones"));
+    QCOMPARE(count, 1);
+    QVERIFY(last == headphones);
+    QVERIFY(!eq.dacHeld());
+    eq.setDacHeld(true);
+    QVERIFY(eq.dacHeld());
+    QCOMPARE(count, 1);
+    QVERIFY(last == headphones);
+
+    eq.setActiveOutput(QStringLiteral("usb"));
+    QCOMPARE(count, 2);
+    QVERIFY(last == EqProfile::off());
+    eq.stepGain(QStringLiteral("usb"), 1, 1);
+    QCOMPARE(count, 2);
+    eq.setDacHeld(true);
     QCOMPARE(count, 2);
 
-    eq.setBypassed(true);
-    eq.setBypassed(false);
+    eq.setDacHeld(false);
     QCOMPARE(count, 3);
-    QVERIFY(last == eq.activeProfile());
+    QVERIFY(near(last.bands[1].gain, 2.1));
+
+    eq.setBypassed(true);
+    eq.setDacHeld(true);
+    QCOMPARE(count, 4);
+    QVERIFY(last == EqProfile::off());
+    eq.setBypassed(false);
+    QCOMPARE(count, 4);
+    eq.setDacHeld(false);
+    QCOMPARE(count, 5);
+    QVERIFY(near(last.bands[1].gain, 2.1));
+}
+
+void EqTest::dacHeldSpeakerSwitch()
+{
+    Settings settings(m_dir + QStringLiteral("/settings.ini"));
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    EqProfile custom = EqProfile::flat();
+    custom.bands[1].gain = 2.0;
+    eq.setCustom(QStringLiteral("usb"), custom);
+    EqProfile speaker = EqProfile::flat();
+    speaker.bands[2].gain = -1.0;
+    eq.setCustom(QStringLiteral("speaker"), speaker);
+    EqProfile last;
+    int count = 0;
+    connect(&eq, &EqControl::profileApplied, this, [&last, &count](const EqProfile &profile) {
+        last = profile;
+        ++count;
+    });
+    eq.setDacHeld(true);
+    eq.setActiveOutput(QStringLiteral("usb"));
+    QCOMPARE(count, 1);
+    QVERIFY(last == EqProfile::off());
+
+    eq.setActiveOutput(QStringLiteral("speaker"));
+    QCOMPARE(count, 2);
+    QVERIFY(last == speaker);
+    QVERIFY(eq.dacHeld());
+
+    eq.setActiveOutput(QStringLiteral("usb"));
+    QCOMPARE(count, 3);
+    QVERIFY(last == EqProfile::off());
+}
+
+void EqTest::applyLogLine()
+{
+    Settings settings(m_dir + QStringLiteral("/settings.ini"));
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    EqProfile custom = EqProfile::flat();
+    custom.bands[1].gain = 2.0;
+    eq.setCustom(QStringLiteral("usb"), custom);
+    {
+        const LogCapture capture;
+        eq.setActiveOutput(QStringLiteral("usb"));
+        eq.setBypassed(true);
+        eq.setBypassed(false);
+        eq.setDacHeld(true);
+        eq.setDacHeld(false);
+        eq.stepGain(QStringLiteral("usb"), 1, 1);
+        const QStringList expected{
+            QStringLiteral("casdap eq: apply usb CUSTOM (output)"),
+            QStringLiteral("casdap eq: apply usb off (bypassed)"),
+            QStringLiteral("casdap eq: apply usb CUSTOM (profile)"),
+            QStringLiteral("casdap eq: apply usb off (dac held)"),
+            QStringLiteral("casdap eq: apply usb CUSTOM (profile)"),
+            QStringLiteral("casdap eq: apply usb CUSTOM (profile)"),
+        };
+        QCOMPARE(capture.lines(QStringLiteral("casdap eq: apply ")), expected);
+        QCOMPARE(capture.lines(QStringLiteral("casdap eq: load ")).size(), 2);
+    }
 }
 
 void EqTest::missingFile()

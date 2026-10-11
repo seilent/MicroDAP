@@ -602,7 +602,7 @@ void EqControl::setActiveOutput(const QString &output)
     qInfo() << "casdap eq: active output" << output << "key" << key(output);
     emit activeOutputChanged();
     emit activeProfileChanged();
-    applyActive();
+    applyActive(QStringLiteral("output"));
 }
 
 QString EqControl::activeName() const
@@ -636,8 +636,21 @@ void EqControl::setBypassed(bool on)
         return;
     m_bypassed = on;
     qInfo() << "casdap eq: bypass" << (on ? "on" : "off");
-    if (!on && m_appliedOnce)
-        emit profileApplied(m_applied);
+    emitApplied(QStringLiteral("profile"));
+}
+
+bool EqControl::dacHeld() const
+{
+    return m_dacHeld;
+}
+
+void EqControl::setDacHeld(bool on)
+{
+    if (m_dacHeld == on)
+        return;
+    m_dacHeld = on;
+    qInfo() << "casdap eq: dac held" << (on ? "on" : "off");
+    emitApplied(QStringLiteral("profile"));
 }
 
 EqProfile EqControl::profile(const QString &output) const
@@ -930,19 +943,35 @@ void EqControl::changed(const QString &output)
         applyActive();
 }
 
-void EqControl::applyActive()
+void EqControl::applyActive(const QString &cause)
 {
     if (m_activeOutput.isEmpty())
         return;
     const EqProfile next = profile(m_activeOutput);
-    if (m_appliedOnce && next == m_applied)
+    if (!m_appliedOnce || next != m_applied) {
+        m_applied = next;
+        m_appliedOnce = true;
+        qInfo() << "casdap eq: load" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
+        emit activeProfileChanged();
+    }
+    emitApplied(cause);
+}
+
+void EqControl::emitApplied(const QString &cause)
+{
+    if (!m_appliedOnce || m_activeOutput.isEmpty())
         return;
-    m_applied = next;
-    m_appliedOnce = true;
-    qInfo() << "casdap eq: apply" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
-    emit activeProfileChanged();
-    if (!m_bypassed)
-        emit profileApplied(m_applied);
+    const bool held = m_dacHeld && m_activeOutput == QLatin1StringView("usb");
+    const QString reason = m_bypassed ? QStringLiteral("bypassed") : held ? QStringLiteral("dac held") : cause;
+    const bool flat = m_bypassed || held;
+    const EqProfile target = flat ? EqProfile::off() : m_applied;
+    if (m_emittedOnce && target == m_emitted)
+        return;
+    m_emitted = target;
+    m_emittedOnce = true;
+    qInfo().noquote() << "casdap eq: apply" << m_activeOutput << (flat ? QStringLiteral("off") : name(m_activeOutput))
+                      << QStringLiteral("(%1)").arg(reason);
+    emit profileApplied(target);
 }
 
 void EqControl::stepBand(const QString &output, int band, const QString &field, int direction, bool coarse)

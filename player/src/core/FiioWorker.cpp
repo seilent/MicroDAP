@@ -103,6 +103,11 @@ void FiioWorker::postFinal(const Target &target, int ms)
     quit();
 }
 
+void FiioWorker::cancel()
+{
+    m_runner->latestSeq.fetch_add(1);
+}
+
 bool FiioWorker::quitAndJoin(int ms)
 {
     if (!m_quitting) {
@@ -234,7 +239,7 @@ FiioReason FiioRunner::reset(const FiioWorker::Target &target, FiioDevice &devic
     if (state != "closed") {
         logLine("pcm " + (state.isEmpty() ? std::string("unreadable") : state.toStdString()) + ", no reset");
         device.releaseClose();
-        return FiioReason::Overflow;
+        return FiioReason::Refused;
     }
     const FiioReason reason = device.resetAndClose();
     if (reason == FiioReason::ResetDone) {
