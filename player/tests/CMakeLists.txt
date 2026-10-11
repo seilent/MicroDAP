@@ -192,6 +192,11 @@ target_link_libraries(tst_eq PRIVATE casdapcore Qt6::Test)
 add_test(NAME eq COMMAND tst_eq)
 casdap_test_env(eq)
 
+qt_add_executable(tst_biquad core/tst_biquad.cpp)
+target_link_libraries(tst_biquad PRIVATE casdapcore Qt6::Test)
+add_test(NAME biquad COMMAND tst_biquad)
+casdap_test_env(biquad)
+
 qt_add_executable(tst_codec core/tst_codec.cpp)
 target_link_libraries(tst_codec PRIVATE casdapcore Qt6::Test)
 add_test(NAME codec COMMAND tst_codec)

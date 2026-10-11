@@ -23,6 +23,8 @@ add_library(casdapcore STATIC
     src/core/AlsaVolume.h
     src/core/ArtColor.cpp
     src/core/ArtColor.h
+    src/core/Biquad.cpp
+    src/core/Biquad.h
     src/core/BluezModel.cpp
     src/core/BluezModel.h
     src/core/CodecFragment.cpp
