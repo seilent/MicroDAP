@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -101,5 +102,94 @@ std::string backupName(const FiioModel &model, int number);
 std::optional<std::string> newestBackup(const std::string &dir, const FiioModel &model);
 std::optional<FiioBackup> readBackup(const std::string &path);
 std::optional<std::string> writeBackup(const std::string &dir, const FiioModel &model, const FiioBackup &backup);
+
+enum class FiioReason {
+    None,
+    HidBound,
+    Lock,
+    Claim,
+    Timeout,
+    Overflow,
+    Ack,
+    Permission,
+    Backup,
+    Device,
+    Abandoned,
+    Deadline,
+    ResetDone,
+    Refused,
+};
+
+std::string_view reasonText(FiioReason reason);
+int64_t fiioNowMs();
+
+struct FiioResult
+{
+    FiioReason reason = FiioReason::None;
+    std::vector<uint8_t> payload;
+};
+
+class UsbIo
+{
+public:
+    virtual ~UsbIo() = default;
+    virtual int open(const std::string &path) = 0;
+    virtual int readDescriptor(uint16_t &vid, uint16_t &pid) = 0;
+    virtual int claim(int iface) = 0;
+    virtual int release(int iface) = 0;
+    virtual int bulk(uint8_t ep, uint8_t *data, int len, int timeoutMs) = 0;
+    virtual int reset() = 0;
+    virtual void close() = 0;
+};
+
+class UsbfsIo : public UsbIo
+{
+public:
+    ~UsbfsIo() override;
+    int open(const std::string &path) override;
+    int readDescriptor(uint16_t &vid, uint16_t &pid) override;
+    int claim(int iface) override;
+    int release(int iface) override;
+    int bulk(uint8_t ep, uint8_t *data, int len, int timeoutMs) override;
+    int reset() override;
+    void close() override;
+
+private:
+    int m_fd = -1;
+};
+
+class FiioDevice
+{
+public:
+    struct Bounds
+    {
+        int outMs = 200;
+        int readMs = 500;
+        int replyWindowMs = 3000;
+    };
+
+    using Log = std::function<void(const std::string &)>;
+
+    FiioDevice(UsbIo &io, const FiioModel &model, Bounds bounds);
+    ~FiioDevice();
+
+    FiioReason openClaimed(const std::string &sysPath, std::optional<int64_t> deadline);
+    FiioResult transact(const std::vector<uint8_t> &cmdFrame, std::optional<int64_t> deadline);
+    void releaseClose();
+    void setLog(Log log);
+    int discarded() const;
+
+private:
+    void log(const std::string &line) const;
+
+    UsbIo &m_io;
+    const FiioModel &m_model;
+    Bounds m_bounds;
+    Log m_log;
+    bool m_open = false;
+    bool m_claimed = false;
+    bool m_replyPending = false;
+    int m_discarded = 0;
+};
 
 }

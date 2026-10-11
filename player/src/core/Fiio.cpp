@@ -8,9 +8,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <utility>
 
 #include <fcntl.h>
+#include <linux/usbdevice_fs.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 namespace casdap {
@@ -18,6 +23,11 @@ namespace casdap {
 namespace {
 
 namespace fs = std::filesystem;
+
+static_assert(USBDEVFS_CLAIMINTERFACE == 0x8004550F);
+static_assert(USBDEVFS_RELEASEINTERFACE == 0x80045510);
+static_assert(USBDEVFS_BULK == 0xC0185502);
+static_assert(USBDEVFS_RESET == 0x5514);
 
 constexpr uint8_t setHead1 = 0xAA;
 constexpr uint8_t setHead2 = 0x0A;
@@ -29,6 +39,7 @@ constexpr int gainFreeFirst = 3;
 constexpr int typeLast = 6;
 constexpr std::size_t maxPayload = 255;
 constexpr int qSlack = 5;
+constexpr std::size_t descriptorSize = 18;
 
 std::vector<uint8_t> frame(uint8_t reportId, uint8_t head1, uint8_t head2, uint16_t seq, uint8_t cmd,
                            const std::vector<uint8_t> &payload)
@@ -218,6 +229,36 @@ bool writeFully(int fd, const std::string &text)
         done += std::size_t(n);
     }
     return true;
+}
+
+std::optional<int> readDecimal(const fs::path &path)
+{
+    const std::string text = readText(path);
+    if (text.empty() || !std::all_of(text.begin(), text.end(), [](char c) { return std::isdigit(uint8_t(c)); })
+        || text.size() > 3)
+        return std::nullopt;
+    return std::stoi(text);
+}
+
+std::optional<std::string> devNode(const std::string &sysPath)
+{
+    const std::optional<int> bus = readDecimal(fs::path(sysPath) / "busnum");
+    const std::optional<int> dev = readDecimal(fs::path(sysPath) / "devnum");
+    if (!bus || !dev)
+        return std::nullopt;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "/dev/bus/usb/%03d/%03d", *bus, *dev);
+    return std::string(buf);
+}
+
+FiioReason openReason(int error)
+{
+    return error == -EACCES || error == -EPERM ? FiioReason::Permission : FiioReason::Device;
+}
+
+int errnoResult(int result)
+{
+    return result < 0 ? -errno : result;
 }
 
 }
@@ -501,6 +542,274 @@ std::optional<std::string> writeBackup(const std::string &dir, const FiioModel &
     if (!written || !sameSlot(*written, backup) || written->date != backup.date)
         return std::nullopt;
     return target;
+}
+
+std::string_view reasonText(FiioReason reason)
+{
+    switch (reason) {
+    case FiioReason::None:
+        return "none";
+    case FiioReason::HidBound:
+        return "hid bound";
+    case FiioReason::Lock:
+        return "lock";
+    case FiioReason::Claim:
+        return "claim";
+    case FiioReason::Timeout:
+        return "timeout";
+    case FiioReason::Overflow:
+        return "overflow";
+    case FiioReason::Ack:
+        return "ack";
+    case FiioReason::Permission:
+        return "permission";
+    case FiioReason::Backup:
+        return "backup";
+    case FiioReason::Device:
+        return "device";
+    case FiioReason::Abandoned:
+        return "abandoned";
+    case FiioReason::Deadline:
+        return "deadline";
+    case FiioReason::ResetDone:
+        return "reset done";
+    case FiioReason::Refused:
+        return "refused";
+    }
+    return "none";
+}
+
+int64_t fiioNowMs()
+{
+    timespec ts{};
+    ::clock_gettime(CLOCK_MONOTONIC, &ts);
+    return int64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+UsbfsIo::~UsbfsIo()
+{
+    close();
+}
+
+int UsbfsIo::open(const std::string &path)
+{
+    close();
+    const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+        return -errno;
+    m_fd = fd;
+    return 0;
+}
+
+int UsbfsIo::readDescriptor(uint16_t &vid, uint16_t &pid)
+{
+    if (m_fd < 0)
+        return -EBADF;
+    uint8_t desc[descriptorSize];
+    const ssize_t n = ::pread(m_fd, desc, sizeof desc, 0);
+    if (n < 0)
+        return -errno;
+    if (std::size_t(n) != descriptorSize || desc[0] != descriptorSize || desc[1] != 1)
+        return -EIO;
+    vid = uint16_t(desc[8] | (desc[9] << 8));
+    pid = uint16_t(desc[10] | (desc[11] << 8));
+    return 0;
+}
+
+int UsbfsIo::claim(int iface)
+{
+    if (m_fd < 0)
+        return -EBADF;
+    unsigned int value = unsigned(iface);
+    return errnoResult(::ioctl(m_fd, USBDEVFS_CLAIMINTERFACE, &value));
+}
+
+int UsbfsIo::release(int iface)
+{
+    if (m_fd < 0)
+        return -EBADF;
+    unsigned int value = unsigned(iface);
+    return errnoResult(::ioctl(m_fd, USBDEVFS_RELEASEINTERFACE, &value));
+}
+
+int UsbfsIo::bulk(uint8_t ep, uint8_t *data, int len, int timeoutMs)
+{
+    if (m_fd < 0)
+        return -EBADF;
+    if (!data || len <= 0)
+        return -EINVAL;
+    usbdevfs_bulktransfer transfer{};
+    transfer.ep = ep;
+    transfer.len = unsigned(len);
+    transfer.timeout = unsigned(std::max(timeoutMs, 1));
+    transfer.data = data;
+    return errnoResult(::ioctl(m_fd, USBDEVFS_BULK, &transfer));
+}
+
+int UsbfsIo::reset()
+{
+    if (m_fd < 0)
+        return -EBADF;
+    return errnoResult(::ioctl(m_fd, USBDEVFS_RESET, 0));
+}
+
+void UsbfsIo::close()
+{
+    if (m_fd >= 0)
+        ::close(m_fd);
+    m_fd = -1;
+}
+
+FiioDevice::FiioDevice(UsbIo &io, const FiioModel &model, Bounds bounds)
+    : m_io(io)
+    , m_model(model)
+    , m_bounds{std::max(bounds.outMs, 1), std::max(bounds.readMs, 1), std::max(bounds.replyWindowMs, 1)}
+{
+}
+
+FiioDevice::~FiioDevice()
+{
+    releaseClose();
+}
+
+FiioReason FiioDevice::openClaimed(const std::string &sysPath, std::optional<int64_t> deadline)
+{
+    releaseClose();
+    if (deadline && fiioNowMs() >= *deadline)
+        return FiioReason::Deadline;
+    const std::optional<std::string> node = devNode(sysPath);
+    if (!node) {
+        log("no device node for " + sysPath);
+        return FiioReason::Device;
+    }
+    const int opened = m_io.open(*node);
+    if (opened < 0) {
+        log("open " + *node + " failed " + std::to_string(-opened));
+        return openReason(opened);
+    }
+    m_open = true;
+    uint16_t vid = 0;
+    uint16_t pid = 0;
+    const int described = m_io.readDescriptor(vid, pid);
+    if (described < 0) {
+        log("descriptor read failed " + std::to_string(-described));
+        releaseClose();
+        return FiioReason::Device;
+    }
+    if (vid != m_model.vid || pid != m_model.pid) {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "descriptor %04x:%04x, not %04x:%04x", vid, pid, m_model.vid, m_model.pid);
+        log(buf);
+        releaseClose();
+        return FiioReason::Device;
+    }
+    const int claimed = m_io.claim(m_model.interface);
+    if (claimed < 0) {
+        log("claim failed " + std::to_string(-claimed));
+        releaseClose();
+        if (claimed == -EBUSY)
+            return FiioReason::Claim;
+        return openReason(claimed);
+    }
+    m_claimed = true;
+    return FiioReason::None;
+}
+
+FiioResult FiioDevice::transact(const std::vector<uint8_t> &cmdFrame, std::optional<int64_t> deadline)
+{
+    if (m_replyPending)
+        return {FiioReason::Refused, {}};
+    if (!m_claimed || cmdFrame.empty())
+        return {FiioReason::Device, {}};
+    const std::optional<FiioReply> sent = parseReply(cmdFrame.data(), cmdFrame.size(), cmdFrame[0]);
+    if (!sent)
+        return {FiioReason::Device, {}};
+    int64_t now = fiioNowMs();
+    if (deadline && now >= *deadline)
+        return {FiioReason::Deadline, {}};
+    int outMs = m_bounds.outMs;
+    if (deadline)
+        outMs = int(std::min<int64_t>(outMs, *deadline - now));
+    std::vector<uint8_t> out = cmdFrame;
+    const int written = m_io.bulk(m_model.epOut, out.data(), int(out.size()), outMs);
+    if (written == -ETIMEDOUT) {
+        m_replyPending = true;
+        return {outMs < m_bounds.outMs ? FiioReason::Deadline : FiioReason::Timeout, {}};
+    }
+    if (written != int(out.size())) {
+        log("out failed " + std::to_string(written));
+        return {FiioReason::Device, {}};
+    }
+    const int64_t end = fiioNowMs() + m_bounds.replyWindowMs;
+    uint8_t in[fiioPacketSize];
+    for (;;) {
+        now = fiioNowMs();
+        if (deadline && now >= *deadline && *deadline < end) {
+            m_replyPending = true;
+            return {FiioReason::Deadline, {}};
+        }
+        if (now >= end) {
+            m_replyPending = true;
+            return {FiioReason::Timeout, {}};
+        }
+        int64_t wait = std::min<int64_t>(m_bounds.readMs, end - now);
+        if (deadline)
+            wait = std::min<int64_t>(wait, *deadline - now);
+        std::fill(std::begin(in), std::end(in), 0);
+        const int n = m_io.bulk(m_model.epIn, in, fiioPacketSize, int(wait));
+        if (n == -ETIMEDOUT)
+            continue;
+        if (n == -EOVERFLOW) {
+            log("in overflow");
+            return {FiioReason::Overflow, {}};
+        }
+        if (n < 0) {
+            log("in failed " + std::to_string(-n));
+            return {FiioReason::Device, {}};
+        }
+        std::vector<uint8_t> raw(in, in + n);
+        const std::optional<FiioReply> reply = parseReply(raw.data(), raw.size(), m_model.reportId);
+        if (reply)
+            raw.resize(std::min(raw.size(), reply->payload.size() + 9));
+        if (reply && matches(cmdFrame, *reply)) {
+            if (!reply->crcValid && reply->cmd != fiioCmdVersion)
+                log("reply crc mismatch " + hex(raw));
+            return {FiioReason::None, reply->payload};
+        }
+        if (reply && sent->set && reply->set && reply->cmd == sent->cmd) {
+            log("ack mismatch " + hex(raw));
+            return {FiioReason::Ack, {}};
+        }
+        ++m_discarded;
+        log("discarded " + hex(raw));
+    }
+}
+
+void FiioDevice::releaseClose()
+{
+    if (m_claimed)
+        m_io.release(m_model.interface);
+    if (m_open)
+        m_io.close();
+    m_claimed = false;
+    m_open = false;
+    m_replyPending = false;
+}
+
+void FiioDevice::setLog(Log log)
+{
+    m_log = std::move(log);
+}
+
+int FiioDevice::discarded() const
+{
+    return m_discarded;
+}
+
+void FiioDevice::log(const std::string &line) const
+{
+    if (m_log)
+        m_log(line);
 }
 
 }
