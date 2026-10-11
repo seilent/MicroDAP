@@ -225,6 +225,9 @@ private slots:
     void switchReadyFallback();
     void bpLevelAsyncDacExitCodeNoRebuild();
     void switchJoinedRestartAsyncDacNoRebuild();
+    void switchDacOrder();
+    void switchDacNeverAnswers();
+    void switchDacFirstReleaseLater();
     void gameModeVerbByLevel();
     void sleepStopsParkTimer();
     void sleepReleasesInhibitorAfterWait();
@@ -1365,6 +1368,105 @@ void PowerTest::switchJoinedRestartAsyncDacNoRebuild()
         QTRY_VERIFY_WITH_TIMEOUT(!rig.codec.restarting(), busTimeoutMs);
     }
     QCOMPARE(rebuilds, (QList<int>{0, 0}));
+}
+
+void PowerTest::switchDacOrder()
+{
+    OutputRig rig(true);
+    rig.dacEq.answer = FakeDacEqPort::Answer::Never;
+    QVERIFY(rig.hold());
+    QFile::remove(m_log);
+    QFile::remove(m_stateFile);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    rig.reservation.onRelease = [this, &rig] {
+        rig.log.append(QStringLiteral("release seen, handoff %1, service lines %2")
+                           .arg(savedState(QStringLiteral("handoff")).toBool() ? 1 : 0)
+                           .arg(logLines()));
+        QTimer::singleShot(100, &rig.context, [&rig] { rig.mode->onReleased(); });
+    };
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    QElapsedTimer timer;
+    timer.start();
+
+    m_bridge->keepInBackground();
+    QVERIFY(m_bridge->switching());
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
+    QCOMPARE(rig.dacEq.calls, QStringList{QStringLiteral("release")});
+    QCOMPARE(rig.log.at(indexOf(rig.log, QStringLiteral("release seen"))),
+             QStringLiteral("release seen, handoff 1, service lines 0"));
+    QVERIFY(indexOf(rig.log, QStringLiteral("daceq release")) >= 0);
+    QTest::qWait(300);
+    QCOMPARE(logLines(), 0);
+    QCOMPARE(rig.dacEq.pending.size(), 1);
+
+    rig.dacEq.pending.takeFirst()();
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QVERIFY(timer.elapsed() >= 300);
+    QVERIFY(timer.elapsed() < rig.mode->switchBoundMs());
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(failed.count(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+}
+
+void PowerTest::switchDacNeverAnswers()
+{
+    OutputRig rig(true);
+    rig.dacEq.answer = FakeDacEqPort::Answer::Never;
+    QVERIFY(rig.hold());
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    const int dacBound = rigBounds().dacReleaseMs;
+    QElapsedTimer timer;
+    timer.start();
+
+    m_bridge->keepInBackground();
+    QVERIFY(m_bridge->switching());
+    QCOMPARE(rig.dacEq.calls, QStringList{QStringLiteral("release")});
+    QTest::qWait(dacBound - 150);
+    QCOMPARE(logLines(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QVERIFY(timer.elapsed() >= dacBound);
+    QVERIFY(timer.elapsed() < rig.mode->switchBoundMs() + PowerBridge::switchReadyMarginMs);
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(rig.dacEq.pending.size(), 1);
+    rig.dacEq.pending.takeFirst()();
+    QTest::qWait(50);
+    QCOMPARE(logLines(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+}
+
+void PowerTest::switchDacFirstReleaseLater()
+{
+    OutputRig rig(true);
+    rig.dacEq.answer = FakeDacEqPort::Answer::Now;
+    QVERIFY(rig.hold());
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    rig.reservation.onRelease = [&rig] {
+        QTimer::singleShot(300, &rig.context, [&rig] { rig.mode->onReleased(); });
+    };
+    m_bridge->setOutputMode(rig.mode.get(), &rig.player);
+    auto detach = qScopeGuard([this] { m_bridge->setOutputMode(nullptr, nullptr); });
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    QElapsedTimer timer;
+    timer.start();
+
+    m_bridge->keepInBackground();
+    QVERIFY(m_bridge->switching());
+    QCOMPARE(rig.dacEq.calls, QStringList{QStringLiteral("release")});
+    QVERIFY(rig.dacEq.pending.isEmpty());
+    QTest::qWait(200);
+    QCOMPARE(logLines(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QVERIFY(timer.elapsed() >= 300);
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(failed.count(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 }
 
 void PowerTest::gameModeVerbByLevel()

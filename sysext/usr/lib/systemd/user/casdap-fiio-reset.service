@@ -1,5 +1,7 @@
 [Unit]
 Description=CASDAP FiiO bypass on plug in
+ConditionUser=!root
+ConditionGroup=audio
 
 [Service]
 Type=oneshot

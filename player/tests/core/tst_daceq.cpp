@@ -360,6 +360,7 @@ class DacEqTest : public QObject
 private slots:
     void startLevelOffForces();
     void startLevelSetWaitsForResolve();
+    void startLevelSetIgnoresWordApplied();
     void startDacHeldBeforeLoad();
     void takeOrder();
     void effectiveOffBypass();
@@ -432,6 +433,34 @@ void DacEqTest::startLevelOffForces()
     QVERIFY(!rig.dac->dacHeld());
     QVERIFY(!rig.eq->dacHeld());
     QCOMPARE(rig.dac->mode(), QStringLiteral("bypass"));
+}
+
+void DacEqTest::startLevelSetIgnoresWordApplied()
+{
+    Rig rig;
+    QVERIFY(rig.ready);
+    rig.eq->setCustom(usb, testProfile());
+    rig.seed(QStringLiteral("bitperfect"), false, QStringLiteral("speaker"));
+    rig.dac->start();
+    rig.dac->onApplied(QStringLiteral("spk-gain-102"), true);
+    rig.dac->onApplied(QStringLiteral("hp-gain-normal"), false);
+    QTest::qWait(150);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 0);
+    rig.dac->onEffectiveChanged(true);
+    rig.dac->onActiveOutputChanged(usb);
+    rig.dac->onCardChanged(QStringLiteral("B"), 1);
+    QTest::qWait(150);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 0);
+    rig.dac->onApplied(usb, true);
+    QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
+    const QStringList outs = rig.outs();
+    QCOMPARE(outs.value(0), QStringLiteral("get 0b"));
+    QVERIFY(!outs.contains(QStringLiteral("set 16 f0")));
+    const int opens = rig.fake->count(FakeUsbIo::Op::Open);
+    rig.dac->onApplied(usb, true);
+    rig.dac->onFirstApplied();
+    QTest::qWait(250);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), opens);
 }
 
 void DacEqTest::startLevelSetWaitsForResolve()

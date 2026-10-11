@@ -68,6 +68,7 @@ public:
 public slots:
     void setLevel(const QString &level);
     void onFirstApplied();
+    void onApplied(const QString &output, bool ok);
     void onSinkAppeared(quint32 index, const QString &name, int card);
     void onCardRemoved(quint32 cardIndex);
     void onActiveOutputChanged(const QString &active);

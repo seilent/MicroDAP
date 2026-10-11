@@ -1,6 +1,7 @@
 #include "DacEq.h"
 
 #include "Eq.h"
+#include "OutputControl.h"
 
 #include <QDebug>
 #include <QDir>
@@ -207,6 +208,13 @@ void DacEq::onFirstApplied()
     m_waitResolve = false;
     m_resolve.stop();
     plan();
+}
+
+void DacEq::onApplied(const QString &output, bool ok)
+{
+    Q_UNUSED(ok);
+    if (OutputControl::outputs().contains(output))
+        onFirstApplied();
 }
 
 void DacEq::onSinkAppeared(quint32, const QString &name, int)
