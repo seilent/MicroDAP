@@ -30,7 +30,6 @@ dev-input:
 off:
     rsync -a build/device-off {{device}}:/tmp/casdap-off
     ssh -t {{device}} sudo bash /tmp/casdap-off
-    ssh {{device}} 'export XDG_RUNTIME_DIR=/run/user/$(id -u); systemctl --user daemon-reload'
 
 test:
     CASDAP_BASE_ROOT={{base_root}} bash tests/session-control-test.sh
@@ -48,6 +47,7 @@ test:
     bash tests/bt-test.sh
     bash tests/usb-audio-test.sh
     bash tests/fiio-unit-test.sh
+    bash tests/device-off-test.sh
     just test-player
 
 test-player:
