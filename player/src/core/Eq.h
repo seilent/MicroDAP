@@ -39,14 +39,12 @@ struct EqBand
 struct EqProfile
 {
     static constexpr int bandCount = 10;
-    static constexpr double maxBandwidth = 100000.0;
 
     double preamp = 0.0;
     std::array<EqBand, bandCount> bands;
 
     static EqProfile flat();
     static EqProfile off();
-    static double bandwidth(const EqBand &band);
     double preampVolume() const;
     QVariantMap toMap() const;
 
@@ -183,8 +181,6 @@ private:
     QProcess *m_sinkProcess = nullptr;
     QTimer m_sinkTimer;
     bool m_sinkWarned = false;
-    mutable quint64 m_loads = 0;
-    QString m_clampLoad;
     QString m_activeOutput;
     QVariantList m_sources;
     QStringList m_sourcePaths;

@@ -8,6 +8,7 @@
 #include <QMutexLocker>
 #include <QRandomGenerator>
 #include <QSocketNotifier>
+#include <QStringList>
 
 #include <algorithm>
 #include <utility>
@@ -20,9 +21,6 @@ constexpr int positionIntervalMs = 250;
 constexpr int phoneHoldMs = 1000;
 constexpr qint64 restartThresholdMs = 3000;
 constexpr guint audioOnlyFlags = 0x2;
-constexpr const char *eqDescription =
-    "audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp "
-    "! equalizer-nbands name=casdap-eq num-bands=10 ! audioconvert";
 constexpr const char *bitPerfectFilter = "audioconvert ! capsfilter caps=audio/x-raw,format=F32LE";
 
 GstElement *parseBin(const QString &description, const char *what)
@@ -38,6 +36,56 @@ GstElement *parseBin(const QString &description, const char *what)
         qWarning() << "casdap player:" << what << description << (err ? err->message : "failed");
     g_clear_error(&err);
     return bin;
+}
+
+QByteArray eqDescription()
+{
+    QByteArray text = "audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp";
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        text += " ! audioiirfilter name=casdap-b" + QByteArray::number(i);
+    return text + " ! audioconvert";
+}
+
+BiquadType biquadType(EqBand::Type type)
+{
+    switch (type) {
+    case EqBand::LowShelf:
+        return BiquadType::LowShelf;
+    case EqBand::HighShelf:
+        return BiquadType::HighShelf;
+    case EqBand::Peak:
+        break;
+    }
+    return BiquadType::Peak;
+}
+
+BiquadCoeffs bandCoeffs(const EqBand &band, int rate)
+{
+    if (!band.enabled || rate <= 0)
+        return biquadUnity();
+    return biquadFor(biquadType(band.type), band.freq, band.gain,
+                     qBound(EqParser::minQ, band.q, EqParser::maxQ), rate);
+}
+
+bool sameCoeffs(const BiquadCoeffs &x, const BiquadCoeffs &y)
+{
+    return x.b == y.b && x.a == y.a;
+}
+
+void setCoeffs(GstElement *element, const char *name, const std::vector<double> &values)
+{
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GValueArray *array = g_value_array_new(guint(values.size()));
+    GValue value = G_VALUE_INIT;
+    g_value_init(&value, G_TYPE_DOUBLE);
+    for (double v : values) {
+        g_value_set_double(&value, v);
+        g_value_array_append(array, &value);
+    }
+    g_value_unset(&value);
+    g_object_set(element, name, array, nullptr);
+    g_value_array_free(array);
+    G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
 void detach(GstElement *element)
@@ -158,8 +206,16 @@ Player::~Player()
             g_signal_handler_disconnect(m_playbin, m_aboutToFinishId);
         gst_element_set_state(m_playbin, GST_STATE_NULL);
     }
-    for (GObject *band : std::as_const(m_eqBands))
-        g_object_unref(band);
+    if (m_preamp && m_eqProbeId) {
+        if (GstPad *pad = gst_element_get_static_pad(m_preamp, "sink")) {
+            gst_pad_remove_probe(pad, m_eqProbeId);
+            gst_object_unref(pad);
+        }
+    }
+    if (m_eqRateId && !m_eqBands.isEmpty())
+        g_signal_handler_disconnect(m_eqBands.first(), m_eqRateId);
+    for (GstElement *band : std::as_const(m_eqBands))
+        gst_object_unref(band);
     m_eqBands.clear();
     if (m_preamp)
         gst_object_unref(m_preamp);
@@ -245,7 +301,7 @@ bool Player::isValid() const
 void Player::buildEq()
 {
     GError *err = nullptr;
-    GstElement *filter = gst_parse_bin_from_description(eqDescription, TRUE, &err);
+    GstElement *filter = gst_parse_bin_from_description(eqDescription().constData(), TRUE, &err);
     if (!filter || err) {
         qWarning() << "casdap player: eq filter" << (err ? err->message : "failed");
         g_clear_error(&err);
@@ -254,28 +310,128 @@ void Player::buildEq()
         return;
     }
     GstElement *preamp = gst_bin_get_by_name(GST_BIN(filter), "casdap-preamp");
-    GstElement *eq = gst_bin_get_by_name(GST_BIN(filter), "casdap-eq");
-    QList<GObject *> bands;
-    if (eq) {
-        for (guint i = 0; i < guint(EqProfile::bandCount); ++i) {
-            if (GObject *band = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), i))
-                bands.append(band);
-        }
-        gst_object_unref(eq);
+    QList<GstElement *> bands;
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        const QByteArray name = "casdap-b" + QByteArray::number(i);
+        if (GstElement *band = gst_bin_get_by_name(GST_BIN(filter), name.constData()))
+            bands.append(band);
     }
-    if (!preamp || bands.size() != EqProfile::bandCount) {
+    GstPad *pad = preamp ? gst_element_get_static_pad(preamp, "sink") : nullptr;
+    if (!pad || bands.size() != EqProfile::bandCount) {
         qWarning() << "casdap player: eq filter incomplete";
-        for (GObject *band : std::as_const(bands))
-            g_object_unref(band);
+        for (GstElement *band : std::as_const(bands))
+            gst_object_unref(band);
+        if (pad)
+            gst_object_unref(pad);
         if (preamp)
             gst_object_unref(preamp);
         gst_object_unref(gst_object_ref_sink(filter));
         return;
     }
+    const BiquadCoeffs unity = biquadUnity();
+    for (GstElement *band : std::as_const(bands)) {
+        setCoeffs(band, "b", unity.b);
+        setCoeffs(band, "a", unity.a);
+    }
+    g_object_set(preamp, "volume", 1.0, nullptr);
+    m_eqSnapshot.applied.fill(unity);
     m_eqFilter = GST_ELEMENT(gst_object_ref_sink(filter));
     m_preamp = preamp;
     m_eqBands = bands;
-    applyEq(EqProfile::off());
+    m_eqRateId = g_signal_connect(bands.first(), "rate-changed", G_CALLBACK(&Player::eqRateChanged), this);
+    m_eqProbeId = gst_pad_add_probe(pad,
+                                    static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER
+                                                                 | GST_PAD_PROBE_TYPE_BUFFER_LIST
+                                                                 | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM),
+                                    &Player::eqProbe, this, nullptr);
+    gst_object_unref(pad);
+}
+
+GstPadProbeReturn Player::eqProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    auto *self = static_cast<Player *>(data);
+    if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+        GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+        if (GST_EVENT_TYPE(event) != GST_EVENT_CAPS)
+            return GST_PAD_PROBE_OK;
+        GstCaps *caps = nullptr;
+        gst_event_parse_caps(event, &caps);
+        gint rate = 0;
+        if (caps && gst_caps_get_size(caps) > 0)
+            gst_structure_get_int(gst_caps_get_structure(caps, 0), "rate", &rate);
+        self->markEq(rate);
+        return GST_PAD_PROBE_OK;
+    }
+    if (self->m_eqPending.load() != 0)
+        self->setEq();
+    return GST_PAD_PROBE_OK;
+}
+
+void Player::eqRateChanged(GstElement *, gint rate, gpointer data)
+{
+    static_cast<Player *>(data)->markEq(rate);
+}
+
+void Player::markEq(int rate)
+{
+    std::lock_guard lock(m_eqMutex);
+    if (rate > 0)
+        m_eqRate.store(rate);
+    m_eqSnapshot.marks.fill(true);
+    m_eqPending.fetch_add(1);
+}
+
+void Player::setEq()
+{
+    QStringList guards;
+    {
+        std::lock_guard lock(m_eqMutex);
+        const int count = m_eqPending.load();
+        m_eqProbeSets.fetch_add(1);
+        EqSnapshot &snapshot = m_eqSnapshot;
+        const double volume = snapshot.profile.preampVolume();
+        if (volume != snapshot.preampApplied) {
+            g_object_set(m_preamp, "volume", volume, nullptr);
+            snapshot.preampApplied = volume;
+        }
+        const int rate = m_eqRate.load();
+        for (int i = 0; rate > 0 && i < EqProfile::bandCount; ++i) {
+            if (!snapshot.marks[i])
+                continue;
+            snapshot.marks[i] = false;
+            const EqBand &band = snapshot.profile.bands[i];
+            const BiquadCoeffs coeffs = bandCoeffs(band, rate);
+            if (coeffs.guarded && !snapshot.guardLogged[i]) {
+                snapshot.guardLogged[i] = true;
+                guards.append(QStringLiteral("casdap eq: band %1 at %2 Hz above 0.49 of %3, %4")
+                                  .arg(i + 1)
+                                  .arg(band.freq)
+                                  .arg(rate)
+                                  .arg(coeffs.b.front() == 0.0 ? QStringLiteral("mute") : QStringLiteral("unity")));
+            }
+            if (sameCoeffs(coeffs, snapshot.applied[i]))
+                continue;
+            setCoeffs(m_eqBands.at(i), "b", coeffs.b);
+            setCoeffs(m_eqBands.at(i), "a", coeffs.a);
+            snapshot.applied[i] = coeffs;
+            m_eqBandSets[i].fetch_add(1);
+        }
+        m_eqPending.fetch_sub(count);
+    }
+    for (const QString &line : std::as_const(guards))
+        qInfo().noquote() << line;
+}
+
+int Player::eqProbeSets() const
+{
+    return m_eqProbeSets.load();
+}
+
+int Player::eqBandSets(int band) const
+{
+    if (band < 0 || band >= EqProfile::bandCount)
+        return 0;
+    return m_eqBandSets[band].load();
 }
 
 QString Player::sinkDescription(OutputChain chain, const QString &audioSinkEnv,
@@ -360,8 +516,11 @@ bool Player::configure(OutputChain chain)
         g_object_set(m_playbin, "audio-sink", sink, nullptr);
         m_sink = sink;
     }
-    if (chain == OutputChain::Pw)
+    if (chain == OutputChain::Pw) {
         filter = pwFilter(rate);
+        if (m_eqFilter)
+            markEq(0);
+    }
     g_object_set(m_playbin, "audio-filter", filter, nullptr);
     m_filter = filter;
     return true;
@@ -431,16 +590,18 @@ void Player::applyEq(const EqProfile &profile)
 {
     if (!m_preamp || m_eqBands.size() != EqProfile::bandCount)
         return;
-    g_object_set(m_preamp, "volume", profile.preampVolume(), nullptr);
+    std::lock_guard lock(m_eqMutex);
+    const int rate = m_eqRate.load();
     for (int i = 0; i < EqProfile::bandCount; ++i) {
         const EqBand &band = profile.bands[i];
-        g_object_set(m_eqBands.at(i),
-                     "type", static_cast<gint>(band.type),
-                     "freq", band.freq,
-                     "bandwidth", EqProfile::bandwidth(band),
-                     "gain", band.enabled ? band.gain : 0.0,
-                     nullptr);
+        if (band == m_eqSnapshot.profile.bands[i])
+            continue;
+        m_eqSnapshot.guardLogged[i] = false;
+        if (rate > 0 && !sameCoeffs(bandCoeffs(band, rate), m_eqSnapshot.applied[i]))
+            m_eqSnapshot.marks[i] = true;
     }
+    m_eqSnapshot.profile = profile;
+    m_eqPending.fetch_add(1);
 }
 
 BluezModel *Player::bluez() const

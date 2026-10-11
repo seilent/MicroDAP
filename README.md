@@ -1131,11 +1131,18 @@ bind; `--scan` walks every device under `/sys/bus/usb/devices`, from `casdap-usb
 `echo <intf> > /sys/bus/usb/drivers/usbhid/bind`.
 
 EQ: `playbin` `audio-filter` is `audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp !
-equalizer-nbands name=casdap-eq num-bands=10 ! audioconvert`, built once with the pipeline at off (every band
-gain 0, preamp volume 1.0); `CASDAP_EQ_DISABLE=1` leaves it out. `Player::applyEq` sets the preamp `volume` to
-10^(dB/20) and per band `type` (`peak`, `low-shelf`, `high-shelf`), `freq`, `bandwidth` (freq / Q, at most
-100000) and `gain` (0 for a disabled band) with `g_object_set` while playing; position and the gapless chain are
-kept. Local playback only: the phone stream and the Steam stream never pass it. `EqControl` (context property
+audioiirfilter name=casdap-b0 ! ... ! audioiirfilter name=casdap-b9 ! audioconvert`, ten RBJ biquads with no
+queue, built once with the pipeline at off (every band `b = [1]`, `a = [1]`, preamp volume 1.0);
+`CASDAP_EQ_DISABLE=1` leaves it out. `Player::applyEq` only writes the profile into a snapshot under a mutex.
+One pad probe on the sink pad of `casdap-preamp` sets the preamp `volume` (10^(dB/20)) and the coefficients of
+every marked band (`b` then `a`, computed in double at the stream rate) together on the streaming thread before
+the next buffer enters the bin, so no buffer runs a mixed profile; an apply while paused lands at the first
+buffer after resume. Only bands whose coefficients change are set (every set zeroes that band's history). A
+band is unity when OFF and when a PEAK or shelf sits at 0 dB; the bands stay unity until the first caps give a
+rate. A caps event, `rate-changed` and a relink of the PW chain mark every band for the next buffer; a band at
+or above 0.49 of the rate is unity, logged `casdap eq: band <n> at <f> Hz above 0.49 of <rate>, unity` once
+until that band changes. Position and the gapless chain are kept. Local playback only: the phone stream and
+the Steam stream never pass it. `EqControl` (context property
 `Eq`, both modes, a sample CUSTOM profile under `--screenshot`) keeps one profile per
 output in `eqHeadphones`, `eqUsb`, `eqSpeaker` (`off`, an absolute file path or `custom`, default `off`) and
 emits `profileApplied` for the key of the active output on every output change, every change of that
@@ -1150,10 +1157,11 @@ and `HS` accepted, case insensitive): the first 10 filters are taken, fewer leav
 line is skipped, a file with no valid filter is left out; clamps gain -24 to +12 dB, freq 20 to 20000 Hz, Q 0.1
 to 10, preamp -24 to 0 dB; without a `Preamp:` line the preamp is minus the sum of the positive ON gains
 (at least -24). Sources are `~/.config/casdap/eq/*.txt`, then `<root>/EQ/*.txt` per `Settings.roots`, each
-folder sorted by name case folded, named by the file name without `.txt` and a trailing ` ParametricEQ` in upper case, listed at start, when
+folder sorted by name case folded, named by the file name without `.txt` and a trailing ` ParametricEQ` in
+upper case, listed at start, when
 `Library.scanning` goes false, when the roots change and when the EQ page opens; a saved path that is gone or
-fails to parse reads `<NAME> (MISSING)` (the map carries the bare `name` and `missing`) and runs flat; a clamped
-bandwidth is logged once per loaded profile. CUSTOM lives in `~/.config/casdap/eq-<output>.ini` (`[General]` `preamp`,
+fails to parse reads `<NAME> (MISSING)` (the map carries the bare `name` and `missing`) and runs flat. CUSTOM lives in
+`~/.config/casdap/eq-<output>.ini` (`[General]` `preamp`,
 `[band1]` to `[band10]` with `type` `off`, `peak`, `lowshelf`, `highshelf`, `freqIndex` into the 61 point grid
 (0 is 20 Hz, 1 to 59 `1000 * 2^((i - 34)/6)`, 60 is 20000 Hz) or `freq` for a file value, `gain`, `q`),
 written 500 ms after the last edit and on quit, temp file then rename; a missing or unreadable store is ten PEAK

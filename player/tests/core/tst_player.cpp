@@ -1,3 +1,4 @@
+#include "Biquad.h"
 #include "FakeBluezModel.h"
 #include "Library.h"
 #include "Player.h"
@@ -13,6 +14,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QRandomGenerator>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -20,9 +22,16 @@
 #include <gst/gst.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
+#include <stop_token>
+#include <thread>
+#include <utility>
+#include <vector>
 
 using namespace casdap;
 
@@ -91,12 +100,14 @@ QList<int> startedIndexes(const QSignalSpy &spy)
     return indexes;
 }
 
-bool encodeSine(const QString &path, int seconds)
+bool encodeSine(const QString &path, int seconds, int rate = 44100)
 {
     const QString description =
-        QStringLiteral("audiotestsrc num-buffers=%1 wave=sine freq=440 ! audioconvert ! flacenc "
-                       "! filesink location=\"%2\"")
-            .arg(seconds * 44)
+        QStringLiteral("audiotestsrc num-buffers=%1 samplesperbuffer=%2 wave=sine freq=440 "
+                       "! audio/x-raw,rate=%3 ! audioconvert ! flacenc ! filesink location=\"%4\"")
+            .arg(seconds * 100)
+            .arg(rate / 100)
+            .arg(rate)
             .arg(path);
     GError *error = nullptr;
     GstElement *pipeline = gst_parse_launch(description.toUtf8().constData(), &error);
@@ -137,6 +148,15 @@ private slots:
     void stateRoundTrip();
     void stateHandoff();
     void eqFilter();
+    void eqElements();
+    void eqOffUnity();
+    void eqOneBandOneSet();
+    void eqPausedApply();
+    void eqRateChanged();
+    void eqRelinkSameRate();
+    void eqNoSetOutsideProbe();
+    void eqPreampWithBands();
+    void eqHammer();
     void queueSlots();
     void queueShuffleEdits();
     void addVerbs();
@@ -377,19 +397,153 @@ void postSinkError(Player &player, GstResourceError code)
     gst_object_unref(child);
 }
 
-double bandGain(Player &player, guint index)
+std::vector<double> coeffArray(GstElement *band, const char *name)
 {
-    GstElement *eq = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-eq");
-    if (!eq)
-        return -100.0;
-    GObject *band = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), index);
-    double gain = -100.0;
-    if (band) {
-        g_object_get(band, "gain", &gain, nullptr);
-        g_object_unref(band);
+    std::vector<double> values;
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GValueArray *array = nullptr;
+    g_object_get(band, name, &array, nullptr);
+    if (array) {
+        for (guint i = 0; i < array->n_values; ++i)
+            values.push_back(g_value_get_double(g_value_array_get_nth(array, i)));
+        g_value_array_free(array);
     }
-    gst_object_unref(eq);
-    return gain;
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    return values;
+}
+
+GstElement *eqBand(Player &player, int index)
+{
+    const QByteArray name = "casdap-b" + QByteArray::number(index);
+    return gst_bin_get_by_name(GST_BIN(player.audioFilter()), name.constData());
+}
+
+bool sameValues(const std::vector<double> &x, const std::vector<double> &y)
+{
+    if (x.size() != y.size())
+        return false;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        if (std::abs(x[i] - y[i]) > 1e-12)
+            return false;
+    }
+    return true;
+}
+
+bool bandIs(Player &player, int index, const BiquadCoeffs &want)
+{
+    GstElement *band = eqBand(player, index);
+    if (!band)
+        return false;
+    const bool same = sameValues(coeffArray(band, "b"), want.b) && sameValues(coeffArray(band, "a"), want.a);
+    gst_object_unref(band);
+    return same;
+}
+
+BiquadCoeffs bandExpected(const EqBand &band, int rate)
+{
+    if (!band.enabled)
+        return biquadUnity();
+    const BiquadType type = band.type == EqBand::LowShelf    ? BiquadType::LowShelf
+                            : band.type == EqBand::HighShelf ? BiquadType::HighShelf
+                                                             : BiquadType::Peak;
+    return biquadFor(type, band.freq, band.gain, qBound(EqParser::minQ, band.q, EqParser::maxQ), rate);
+}
+
+double preampOf(Player &player)
+{
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp");
+    double volume = -1.0;
+    if (preamp) {
+        g_object_get(preamp, "volume", &volume, nullptr);
+        gst_object_unref(preamp);
+    }
+    return volume;
+}
+
+double peakMagnitude(const EqProfile &profile, int rate)
+{
+    double peak = 0.0;
+    for (int n = 0; n <= 2000; ++n) {
+        const double f = 20.0 * std::pow(rate / 2.0 / 20.0, n / 2000.0);
+        double magnitude = 1.0;
+        for (const EqBand &band : profile.bands)
+            magnitude *= biquadMagnitude(bandExpected(band, rate), std::min(f, rate * 0.4999), rate);
+        peak = std::max(peak, magnitude);
+    }
+    return peak;
+}
+
+double impulseL1(const EqProfile &profile, int rate)
+{
+    std::vector<double> x(std::size_t(rate), 0.0);
+    x[0] = 1.0;
+    for (const EqBand &band : profile.bands) {
+        const BiquadCoeffs c = bandExpected(band, rate);
+        std::vector<double> y(x.size(), 0.0);
+        for (std::size_t n = 0; n < x.size(); ++n) {
+            double v = 0.0;
+            for (std::size_t k = 0; k < c.b.size() && k <= n; ++k)
+                v += c.b[k] * x[n - k];
+            for (std::size_t k = 1; k < c.a.size() && k <= n; ++k)
+                v -= c.a[k] * y[n - k];
+            y[n] = v;
+        }
+        x = std::move(y);
+    }
+    double sum = 0.0;
+    for (double v : x)
+        sum += std::abs(v);
+    return sum;
+}
+
+struct NotifyEvent
+{
+    QByteArray name;
+    int call = 0;
+};
+
+struct NotifyLog
+{
+    std::mutex mutex;
+    GThread *gui = nullptr;
+    Player *player = nullptr;
+    QList<NotifyEvent> events;
+    int onGui = 0;
+};
+
+using Watches = QList<std::pair<GstElement *, gulong>>;
+
+void onNotify(GObject *, GParamSpec *spec, gpointer data)
+{
+    auto *log = static_cast<NotifyLog *>(data);
+    std::lock_guard lock(log->mutex);
+    if (g_thread_self() == log->gui)
+        ++log->onGui;
+    log->events.append({QByteArray(g_param_spec_get_name(spec)), log->player ? log->player->eqProbeSets() : 0});
+}
+
+Watches watchEq(Player &player, NotifyLog &log)
+{
+    Watches watches;
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        GstElement *band = eqBand(player, i);
+        if (!band)
+            continue;
+        watches.append({band, g_signal_connect(band, "notify::b", G_CALLBACK(onNotify), &log)});
+        watches.append({GST_ELEMENT(gst_object_ref(band)),
+                        g_signal_connect(band, "notify::a", G_CALLBACK(onNotify), &log)});
+    }
+    if (GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp"))
+        watches.append({preamp, g_signal_connect(preamp, "notify::volume", G_CALLBACK(onNotify), &log)});
+    return watches;
+}
+
+void unwatchEq(const Watches &watches)
+{
+    for (const auto &[element, id] : watches) {
+        g_signal_handler_disconnect(element, id);
+        gst_object_unref(element);
+    }
 }
 
 bool reachesPlaying(Player &player)
@@ -901,25 +1055,8 @@ void PlayerTest::eqFilter()
         QVERIFY(!player.audioFilter());
     }
 
-    Player player;
-    QVERIFY(player.audioFilter());
-    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp");
-    GstElement *eq = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-eq");
-    QVERIFY(preamp);
-    QVERIFY(eq);
-    QCOMPARE(gst_child_proxy_get_children_count(GST_CHILD_PROXY(eq)), guint(EqProfile::bandCount));
-    GObject *band0 = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), 0);
-    GObject *band1 = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), 1);
-    QVERIFY(band0);
-    QVERIFY(band1);
-
-    double volume = 0.0;
-    double gain = -1.0;
-    g_object_get(preamp, "volume", &volume, nullptr);
-    g_object_get(band0, "gain", &gain, nullptr);
-    QCOMPARE(volume, 1.0);
-    QCOMPARE(gain, 0.0);
-
+    auto player = syncPlayer();
+    QVERIFY(player->audioFilter());
     EqProfile profile = EqProfile::flat();
     profile.preamp = -6.0;
     profile.bands[0].type = EqBand::LowShelf;
@@ -937,44 +1074,367 @@ void PlayerTest::eqFilter()
     for (int i = 3; i < EqProfile::bandCount; ++i)
         profile.bands[i].enabled = false;
 
-    player.play(m_tracks, 0);
-    QCOMPARE(player.status(), Player::Playing);
-    player.applyEq(profile);
-    QCOMPARE(player.status(), Player::Playing);
+    player->play({m_long}, 0);
+    QCOMPARE(player->status(), Player::Playing);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    player->applyEq(profile);
+    QCOMPARE(player->status(), Player::Playing);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(0) == 1 && player->eqBandSets(2) == 1, playTimeoutMs);
+    QCOMPARE(player->eqBandSets(1), 0);
+    QVERIFY(bandIs(*player, 0, biquadFor(BiquadType::LowShelf, 105.0, 4.5, 0.7, 44100)));
+    QVERIFY(bandIs(*player, 1, biquadUnity()));
+    QVERIFY(bandIs(*player, 2, biquadFor(BiquadType::HighShelf, 10000.0, -2.0, 0.7, 44100)));
+    QVERIFY(std::abs(preampOf(*player) - std::pow(10.0, -0.3)) < 1e-6);
+    player->stop();
+}
 
-    double freq = 0.0;
-    double bandwidth = 0.0;
-    gint type = -1;
-    g_object_get(preamp, "volume", &volume, nullptr);
-    g_object_get(band0, "gain", &gain, "freq", &freq, "bandwidth", &bandwidth, "type", &type, nullptr);
-    QVERIFY(std::abs(volume - std::pow(10.0, -0.3)) < 1e-6);
-    QVERIFY(std::abs(gain - 4.5) < 1e-6);
-    QVERIFY(std::abs(freq - 105.0) < 1e-6);
-    QVERIFY(std::abs(bandwidth - 150.0) < 1e-6);
-    QCOMPARE(type, gint(EqBand::LowShelf));
-    g_object_get(band1, "gain", &gain, nullptr);
-    QCOMPARE(gain, 0.0);
-    GObject *band2 = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), 2);
-    QVERIFY(band2);
-    g_object_get(band2, "gain", &gain, "freq", &freq, "type", &type, nullptr);
-    QVERIFY(std::abs(gain + 2.0) < 1e-6);
-    QVERIFY(std::abs(freq - 10000.0) < 1e-6);
-    QCOMPARE(type, gint(EqBand::HighShelf));
-
-    player.applyEq(EqProfile::off());
-    g_object_get(preamp, "volume", &volume, nullptr);
-    g_object_get(band0, "gain", &gain, nullptr);
-    QCOMPARE(volume, 1.0);
-    QCOMPARE(gain, 0.0);
-    g_object_get(band2, "gain", &gain, nullptr);
-    QCOMPARE(gain, 0.0);
-    player.stop();
-
-    g_object_unref(band0);
-    g_object_unref(band1);
-    g_object_unref(band2);
-    gst_object_unref(eq);
+void PlayerTest::eqElements()
+{
+    Player player;
+    QVERIFY(player.audioFilter());
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp");
+    QVERIFY(preamp);
+    GstPad *sinkPad = gst_element_get_static_pad(preamp, "sink");
+    GstPad *upstream = gst_pad_get_peer(sinkPad);
+    GstElement *before = upstream ? gst_pad_get_parent_element(upstream) : nullptr;
+    QVERIFY(before);
+    QCOMPARE(QString::fromUtf8(GST_OBJECT_NAME(gst_element_get_factory(before))), QStringLiteral("capsfilter"));
+    gst_object_unref(before);
+    gst_object_unref(upstream);
+    gst_object_unref(sinkPad);
+    QStringList chain;
+    GstElement *element = GST_ELEMENT(gst_object_ref(preamp));
+    while (element) {
+        chain.append(QString::fromUtf8(GST_OBJECT_NAME(element)));
+        GstPad *src = gst_element_get_static_pad(element, "src");
+        GstPad *peer = src ? gst_pad_get_peer(src) : nullptr;
+        GstElement *next = peer ? gst_pad_get_parent_element(peer) : nullptr;
+        if (peer)
+            gst_object_unref(peer);
+        if (src)
+            gst_object_unref(src);
+        gst_object_unref(element);
+        element = next;
+    }
+    QCOMPARE(chain.size(), EqProfile::bandCount + 2);
+    QCOMPARE(chain.first(), QStringLiteral("casdap-preamp"));
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        QCOMPARE(chain.at(i + 1), QStringLiteral("casdap-b%1").arg(i));
+        GstElement *band = gst_bin_get_by_name(GST_BIN(player.audioFilter()), chain.at(i + 1).toUtf8().constData());
+        QVERIFY(band);
+        QCOMPARE(QString::fromUtf8(GST_OBJECT_NAME(gst_element_get_factory(band))), QStringLiteral("audioiirfilter"));
+        gst_object_unref(band);
+    }
     gst_object_unref(preamp);
+}
+
+void PlayerTest::eqOffUnity()
+{
+    auto player = syncPlayer();
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        QVERIFY(bandIs(*player, i, biquadUnity()));
+    QCOMPARE(preampOf(*player), 1.0);
+
+    EqProfile profile = EqProfile::flat();
+    profile.preamp = -3.0;
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        profile.bands[i].gain = i % 2 ? 2.0 : -2.0;
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    player->applyEq(profile);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(EqProfile::bandCount - 1) == 1, playTimeoutMs);
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        QVERIFY(!bandIs(*player, i, biquadUnity()));
+
+    player->applyEq(EqProfile::off());
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(EqProfile::bandCount - 1) == 2, playTimeoutMs);
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        QVERIFY(bandIs(*player, i, biquadUnity()));
+    QCOMPARE(preampOf(*player), 1.0);
+
+    player->applyEq(profile);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(EqProfile::bandCount - 1) == 3, playTimeoutMs);
+    player->applyEq(EqProfile::flat());
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(EqProfile::bandCount - 1) == 4, playTimeoutMs);
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        QVERIFY(bandIs(*player, i, biquadUnity()));
+    QCOMPARE(preampOf(*player), 1.0);
+    player->stop();
+}
+
+void PlayerTest::eqOneBandOneSet()
+{
+    auto player = syncPlayer();
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        QCOMPARE(player->eqBandSets(i), 0);
+
+    EqProfile profile = EqProfile::off();
+    profile.bands[3].enabled = true;
+    profile.bands[3].freq = 1000.0;
+    profile.bands[3].freqIndex = -1;
+    profile.bands[3].gain = 6.0;
+    profile.bands[3].q = 1.41;
+    player->applyEq(profile);
+    QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(3), 1, playTimeoutMs);
+    QVERIFY(bandIs(*player, 3, biquadFor(BiquadType::Peak, 1000.0, 6.0, 1.41, 44100)));
+
+    profile.bands[3].gain = 3.0;
+    player->applyEq(profile);
+    QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(3), 2, playTimeoutMs);
+    QVERIFY(bandIs(*player, 3, biquadFor(BiquadType::Peak, 1000.0, 3.0, 1.41, 44100)));
+
+    const int probes = player->eqProbeSets();
+    profile.preamp = -1.0;
+    player->applyEq(profile);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > probes, playTimeoutMs);
+    QTest::qWait(200);
+    QCOMPARE(player->eqBandSets(3), 2);
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        if (i != 3)
+            QCOMPARE(player->eqBandSets(i), 0);
+    }
+    player->stop();
+}
+
+void PlayerTest::eqPausedApply()
+{
+    auto player = syncPlayer();
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    player->pause();
+    QTRY_COMPARE_WITH_TIMEOUT(player->status(), Player::Paused, playTimeoutMs);
+    QTest::qWait(200);
+
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = 6.0;
+    player->applyEq(profile);
+    QTest::qWait(300);
+    QCOMPARE(player->eqBandSets(0), 0);
+    QVERIFY(bandIs(*player, 0, biquadUnity()));
+
+    player->resume();
+    QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(0), 1, playTimeoutMs);
+    QVERIFY(bandIs(*player, 0, bandExpected(profile.bands[0], 44100)));
+    player->stop();
+}
+
+void PlayerTest::eqRateChanged()
+{
+    QueueEntry low;
+    low.path = m_dir.path() + QStringLiteral("/rate44.flac");
+    low.title = QStringLiteral("Rate 44");
+    low.durationMs = 1000;
+    QueueEntry high;
+    high.path = m_dir.path() + QStringLiteral("/rate96.flac");
+    high.title = QStringLiteral("Rate 96");
+    high.durationMs = 3000;
+    QVERIFY(encodeSine(low.path, 1, 44100));
+    QVERIFY(encodeSine(high.path, 3, 96000));
+
+    auto player = syncPlayer();
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    EqProfile profile = EqProfile::off();
+    for (int i : {2, 7}) {
+        profile.bands[i].enabled = true;
+        profile.bands[i].gain = 6.0;
+    }
+    player->applyEq(profile);
+    player->play({low, high}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(2) == 1 && player->eqBandSets(7) == 1, playTimeoutMs);
+    QVERIFY(bandIs(*player, 2, bandExpected(profile.bands[2], 44100)));
+    QVERIFY(bandIs(*player, 7, bandExpected(profile.bands[7], 44100)));
+
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(2) == 2 && player->eqBandSets(7) == 2, playTimeoutMs);
+    QVERIFY(bandIs(*player, 2, bandExpected(profile.bands[2], 96000)));
+    QVERIFY(bandIs(*player, 7, bandExpected(profile.bands[7], 96000)));
+    QCOMPARE(player->eqBandSets(0), 0);
+    player->stop();
+}
+
+void PlayerTest::eqRelinkSameRate()
+{
+    auto player = exclusivePlayer();
+    FakePolicy policy;
+    player->setPolicy(&policy);
+    player->restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(*player));
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = 4.5;
+    player->applyEq(profile);
+    policy.chain = Chain::Bp;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->builtChain(), Chain::Bp);
+    QVERIFY(player->eqBandSets(0) <= 1);
+
+    int probes = player->eqProbeSets();
+    policy.chain = Chain::Pw;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(0), 1, playTimeoutMs);
+    QVERIFY(player->eqProbeSets() > probes);
+    QVERIFY(bandIs(*player, 0, bandExpected(profile.bands[0], 44100)));
+
+    policy.chain = Chain::Bp;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    probes = player->eqProbeSets();
+    policy.chain = Chain::Pw;
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > probes, playTimeoutMs);
+    QCOMPARE(player->eqBandSets(0), 1);
+    QVERIFY(bandIs(*player, 0, bandExpected(profile.bands[0], 44100)));
+    player->stop();
+}
+
+void PlayerTest::eqNoSetOutsideProbe()
+{
+    auto player = syncPlayer();
+    NotifyLog log;
+    log.gui = g_thread_self();
+    const Watches ids = watchEq(*player, log);
+    QCOMPARE(ids.size(), 2 * EqProfile::bandCount + 1);
+
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    EqProfile profile = EqProfile::flat();
+    for (int round = 0; round < 6; ++round) {
+        profile.preamp = -0.5 * (round + 1);
+        profile.bands[round].gain = 1.0 + round;
+        player->applyEq(profile);
+        QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(round), 1, playTimeoutMs);
+    }
+    player->stop();
+    unwatchEq(ids);
+
+    std::lock_guard lock(log.mutex);
+    QCOMPARE(log.onGui, 0);
+    QVERIFY(log.events.size() >= 6 * 3);
+    int volumes = 0;
+    for (const NotifyEvent &event : log.events)
+        volumes += event.name == QByteArrayLiteral("volume") ? 1 : 0;
+    QCOMPARE(volumes, 6);
+}
+
+void PlayerTest::eqPreampWithBands()
+{
+    auto player = syncPlayer();
+    NotifyLog log;
+    log.gui = g_thread_self();
+    log.player = player.get();
+    const Watches ids = watchEq(*player, log);
+
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    EqProfile a = EqProfile::flat();
+    a.preamp = -6.0;
+    a.bands[0].gain = 6.0;
+    EqProfile b = EqProfile::flat();
+    b.preamp = -3.0;
+    b.bands[0].gain = 3.0;
+    for (int round = 0; round < 20; ++round) {
+        player->applyEq(round % 2 ? b : a);
+        QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(0), round + 1, playTimeoutMs);
+    }
+    player->stop();
+    unwatchEq(ids);
+
+    std::lock_guard lock(log.mutex);
+    QHash<int, QSet<QByteArray>> calls;
+    for (const NotifyEvent &event : log.events)
+        calls[event.call].insert(event.name);
+    QCOMPARE(calls.size(), 20);
+    const QSet<QByteArray> all = {QByteArrayLiteral("volume"), QByteArrayLiteral("b"), QByteArrayLiteral("a")};
+    for (auto it = calls.cbegin(); it != calls.cend(); ++it)
+        QCOMPARE(it.value(), all);
+}
+
+void PlayerTest::eqHammer()
+{
+    auto player = withEnv("CASDAP_AUDIO_SINK",
+                          QByteArrayLiteral("appsink name=casdap-hammer sync=true caps=audio/x-raw,format=F32LE"));
+    QVERIFY(player->audioSink());
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "casdap-hammer");
+    QVERIFY(sink);
+
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+
+    QRandomGenerator random(29);
+    QList<EqProfile> pool;
+    double worst = 0.0;
+    for (int n = 0; n < 16; ++n) {
+        EqProfile profile = EqProfile::flat();
+        for (EqBand &band : profile.bands) {
+            band.enabled = random.bounded(5) != 0;
+            band.type = static_cast<EqBand::Type>(random.bounded(3));
+            band.freqIndex = random.bounded(EqGrid::size);
+            band.freq = EqGrid::frequency(band.freqIndex);
+            band.gain = 0.1 * (random.bounded(241) - 120);
+            band.q = 0.01 * (30 + random.bounded(571));
+        }
+        profile.preamp = -20.0 * std::log10(peakMagnitude(profile, 44100));
+        pool.append(profile);
+        worst = std::max(worst, impulseL1(profile, 44100) * profile.preampVolume());
+    }
+    const double inputPeak = 0.8;
+    const double bound = inputPeak * worst * std::pow(10.0, 1.0 / 20.0);
+
+    double peak = 0.0;
+    qint64 samples = 0;
+    bool finite = true;
+    auto pull = [&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            GstSample *sample = nullptr;
+            g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(200 * GST_MSECOND), &sample);
+            if (!sample) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+            GstBuffer *buffer = gst_sample_get_buffer(sample);
+            GstMapInfo map;
+            if (buffer && gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+                const auto *data = reinterpret_cast<const float *>(map.data);
+                const gsize n = map.size / sizeof(float);
+                for (gsize i = 0; i < n; ++i) {
+                    if (!std::isfinite(data[i]))
+                        finite = false;
+                    else
+                        peak = std::max(peak, double(std::abs(data[i])));
+                }
+                samples += qint64(n);
+                gst_buffer_unmap(buffer, &map);
+            }
+            gst_sample_unref(sample);
+        }
+    };
+
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+    std::jthread puller(pull);
+    for (int n = 0; n < 1000; ++n) {
+        player->applyEq(pool.at(random.bounded(int(pool.size()))));
+        QTest::qWait(4);
+    }
+    const int probes = player->eqProbeSets();
+    player->stop();
+    puller.request_stop();
+    puller.join();
+
+    QVERIFY(finite);
+    QVERIFY2(samples > 3 * 44100, QByteArray::number(samples).constData());
+    QVERIFY2(probes > 20, QByteArray::number(probes).constData());
+    QVERIFY2(peak <= bound, QStringLiteral("peak %1 bound %2 peak / bound %3")
+                                .arg(peak)
+                                .arg(bound)
+                                .arg(peak / bound)
+                                .toUtf8()
+                                .constData());
 }
 
 void PlayerTest::queueSlots()
@@ -1778,8 +2238,12 @@ void PlayerTest::sinkDescriptionText()
 void PlayerTest::chainWithoutPolicy()
 {
     const QStringList eqFactories = {QStringLiteral("audioconvert"), QStringLiteral("audioconvert"),
-                                     QStringLiteral("capsfilter"), QStringLiteral("equalizer-nbands"),
-                                     QStringLiteral("volume")};
+                                     QStringLiteral("audioiirfilter"), QStringLiteral("audioiirfilter"),
+                                     QStringLiteral("audioiirfilter"), QStringLiteral("audioiirfilter"),
+                                     QStringLiteral("audioiirfilter"), QStringLiteral("audioiirfilter"),
+                                     QStringLiteral("audioiirfilter"), QStringLiteral("audioiirfilter"),
+                                     QStringLiteral("audioiirfilter"), QStringLiteral("audioiirfilter"),
+                                     QStringLiteral("capsfilter"), QStringLiteral("volume")};
     for (const bool withPolicy : {false, true}) {
         Player player;
         FakePolicy policy;
@@ -1841,6 +2305,9 @@ void PlayerTest::chainRoundTrip()
     QVERIFY(named);
     gst_object_unref(named);
 
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = 4.5;
+    player->applyEq(profile);
     policy.chain = Chain::Pw;
     player->rebuildAt(0, GST_STATE_PAUSED);
     QVERIFY(prerolled(*player));
@@ -1849,13 +2316,14 @@ void PlayerTest::chainRoundTrip()
     QCOMPARE(player->audioFilter(), eq);
     named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "casdap-ex");
     QVERIFY(!named);
+    QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(0), 1, playTimeoutMs);
+    QVERIFY(bandIs(*player, 0, bandExpected(profile.bands[0], 44100)));
 
-    EqProfile profile = EqProfile::flat();
-    profile.bands[0].gain = 4.5;
-    player->applyEq(profile);
-    QVERIFY(std::abs(bandGain(*player, 0) - 4.5) < 1e-6);
     player->applyEq(EqProfile::off());
-    QCOMPARE(bandGain(*player, 0), 0.0);
+    player->rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(*player));
+    QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(0), 2, playTimeoutMs);
+    QVERIFY(bandIs(*player, 0, biquadUnity()));
     player->stop();
 }
 
@@ -1867,6 +2335,9 @@ void PlayerTest::rateTail()
     GstElement *eq = player.audioFilter();
     QVERIFY(eq);
 
+    EqProfile profile = EqProfile::flat();
+    profile.bands[0].gain = 3.0;
+    player.applyEq(profile);
     policy.rate = 96000;
     player.restore(m_tracks, 0, 0);
     QVERIFY(prerolled(player));
@@ -1875,16 +2346,13 @@ void PlayerTest::rateTail()
     QVERIFY(filter != eq);
     QCOMPARE(GST_ELEMENT(GST_OBJECT_PARENT(eq)), filter);
     QVERIFY(factories(filter, true).contains(QStringLiteral("audioresample")));
-    QVERIFY(factories(filter, true).contains(QStringLiteral("equalizer-nbands")));
+    QVERIFY(factories(filter, true).contains(QStringLiteral("audioiirfilter")));
     QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), 96000);
     const int source = player.sourceFormat().value(QStringLiteral("rate")).toInt();
     QVERIFY(source > 0);
     QVERIFY(source != 96000);
-
-    EqProfile profile = EqProfile::flat();
-    profile.bands[0].gain = 3.0;
-    player.applyEq(profile);
-    QVERIFY(std::abs(bandGain(player, 0) - 3.0) < 1e-6);
+    QTRY_COMPARE_WITH_TIMEOUT(player.eqBandSets(0), 1, playTimeoutMs);
+    QVERIFY(bandIs(player, 0, bandExpected(profile.bands[0], source)));
 
     policy.rate = 0;
     player.rebuildAt(0, GST_STATE_PAUSED);
@@ -1892,7 +2360,8 @@ void PlayerTest::rateTail()
     QCOMPARE(builtFilter(player), eq);
     QVERIFY(!factories(eq, true).contains(QStringLiteral("audioresample")));
     QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), source);
-    QVERIFY(std::abs(bandGain(player, 0) - 3.0) < 1e-6);
+    QCOMPARE(player.eqBandSets(0), 1);
+    QVERIFY(bandIs(player, 0, bandExpected(profile.bands[0], source)));
 
     policy.rate = 96000;
     policy.chain = Chain::Bp;

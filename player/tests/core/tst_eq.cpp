@@ -86,7 +86,6 @@ private slots:
     void skipsMalformed();
     void zeroFiltersFails();
     void clamps();
-    void bandwidthClamp();
     void grid();
     void storeRoundTrip();
     void copyOnEdit();
@@ -246,20 +245,6 @@ void EqTest::clamps()
         QStringLiteral("Preamp: -40 dB\nFilter 1: ON PK Fc 100 Hz Gain 1 dB Q 1\n"));
     QVERIFY(low);
     QVERIFY(near(low->preamp, -24.0));
-}
-
-void EqTest::bandwidthClamp()
-{
-    EqBand band;
-    band.freq = 20000.0;
-    band.q = 0.1;
-    QVERIFY(near(EqProfile::bandwidth(band), EqProfile::maxBandwidth));
-    band.freq = 1000.0;
-    band.q = 2.0;
-    QVERIFY(near(EqProfile::bandwidth(band), 500.0));
-    EqProfile profile;
-    profile.preamp = -6.0;
-    QVERIFY(std::abs(profile.preampVolume() - std::pow(10.0, -0.3)) < 1e-9);
 }
 
 void EqTest::grid()

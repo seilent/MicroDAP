@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Biquad.h"
 #include "Eq.h"
 #include "OutputPorts.h"
 #include "Queue.h"
@@ -13,6 +14,9 @@
 
 #include <gst/gst.h>
 
+#include <array>
+#include <atomic>
+#include <mutex>
 #include <optional>
 
 class QSocketNotifier;
@@ -79,6 +83,8 @@ public:
     GstElement *audioFilter() const;
     GstElement *audioSink() const;
     void applyEq(const casdap::EqProfile &profile);
+    int eqProbeSets() const;
+    int eqBandSets(int band) const;
     void setPolicy(OutputPolicy *policy);
     OutputChain builtChain() const override;
     bool parked() const override;
@@ -137,9 +143,22 @@ private:
         bool stale = false;
     };
 
+    struct EqSnapshot
+    {
+        EqProfile profile = EqProfile::off();
+        double preampApplied = 1.0;
+        std::array<BiquadCoeffs, EqProfile::bandCount> applied;
+        std::array<bool, EqProfile::bandCount> marks{};
+        std::array<bool, EqProfile::bandCount> guardLogged{};
+    };
+
     static void aboutToFinish(GstElement *element, gpointer data);
+    static GstPadProbeReturn eqProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    static void eqRateChanged(GstElement *element, gint rate, gpointer data);
 
     void buildEq();
+    void markEq(int rate);
+    void setEq();
     bool configure(OutputChain chain);
     GstElement *pwFilter(int rate);
     void build(int index, const PendingBuild &pending, OutputChain chain, bool guard);
@@ -206,7 +225,15 @@ private:
     QVariantMap m_sourceFormat;
     QVariantMap m_sinkFormat;
     GstElement *m_preamp = nullptr;
-    QList<GObject *> m_eqBands;
+    QList<GstElement *> m_eqBands;
+    std::mutex m_eqMutex;
+    EqSnapshot m_eqSnapshot;
+    std::atomic<int> m_eqPending = 0;
+    std::atomic<int> m_eqRate = 0;
+    std::atomic<int> m_eqProbeSets = 0;
+    std::array<std::atomic<int>, EqProfile::bandCount> m_eqBandSets{};
+    gulong m_eqProbeId = 0;
+    gulong m_eqRateId = 0;
     GstBus *m_bus = nullptr;
     gulong m_aboutToFinishId = 0;
     QSocketNotifier *m_busNotifier = nullptr;

@@ -98,12 +98,6 @@ EqProfile EqProfile::off()
     return profile;
 }
 
-double EqProfile::bandwidth(const EqBand &band)
-{
-    const double q = qBound(EqParser::minQ, band.q, EqParser::maxQ);
-    return qMin(band.freq / q, maxBandwidth);
-}
-
 double EqProfile::preampVolume() const
 {
     return std::pow(10.0, preamp / 20.0);
@@ -120,7 +114,6 @@ QVariantMap EqProfile::toMap() const
             {QStringLiteral("freqIndex"), band.freqIndex},
             {QStringLiteral("gain"), band.gain},
             {QStringLiteral("q"), band.q},
-            {QStringLiteral("bandwidth"), bandwidth(band)},
         });
     }
     return {
@@ -605,7 +598,6 @@ void EqControl::setCustom(const QString &output, const EqProfile &profile)
     if (!outputs().contains(output))
         return;
     m_custom.insert(output, profile);
-    ++m_loads;
     m_editing = true;
     setKey(output, QStringLiteral("custom"));
     m_editing = false;
@@ -794,19 +786,14 @@ std::optional<EqProfile> EqControl::fileProfile(const QString &path) const
     if (!parsed)
         qWarning() << "casdap eq: profile left out," << error;
     m_files.insert(path, parsed);
-    if (path == key(m_activeOutput))
-        ++m_loads;
     return parsed;
 }
 
 EqProfile &EqControl::custom(const QString &output) const
 {
     auto it = m_custom.find(output);
-    if (it == m_custom.end()) {
+    if (it == m_custom.end())
         it = m_custom.insert(output, m_settings ? EqStore::read(storePath(output)) : EqProfile::flat());
-        if (output == m_activeOutput)
-            ++m_loads;
-    }
     return *it;
 }
 
@@ -890,16 +877,6 @@ void EqControl::applyActive()
         return;
     m_applied = next;
     m_appliedOnce = true;
-    const QString load = m_activeOutput + QLatin1Char('\n') + key(m_activeOutput) + QLatin1Char('\n')
-                         + QString::number(m_loads);
-    if (load != m_clampLoad) {
-        m_clampLoad = load;
-        for (int i = 0; i < EqProfile::bandCount; ++i) {
-            const EqBand &band = m_applied.bands[i];
-            if (band.freq / qBound(EqParser::minQ, band.q, EqParser::maxQ) > EqProfile::maxBandwidth)
-                qInfo() << "casdap eq: band" << i + 1 << "bandwidth clamped to" << EqProfile::maxBandwidth;
-        }
-    }
     qInfo() << "casdap eq: apply" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
     emit activeProfileChanged();
     if (!m_bypassed)
