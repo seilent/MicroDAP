@@ -44,6 +44,8 @@ add_library(casdapcore STATIC
     src/core/Eq.h
     src/core/FakeBluezModel.cpp
     src/core/FakeBluezModel.h
+    src/core/FiioWorker.cpp
+    src/core/FiioWorker.h
     src/core/GuideChord.cpp
     src/core/GuideChord.h
     src/core/HubModels.cpp

@@ -1,18 +1,23 @@
 #include "FakeUsbIo.h"
 #include "Fiio.h"
+#include "FiioWorker.h"
 
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QThread>
+#include <QTimer>
 
 #include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <thread>
 
 #include <unistd.h>
@@ -267,6 +272,151 @@ FiioBackup sampleBackup()
     return backup;
 }
 
+QMutex messageMutex;
+QStringList *capturedMessages = nullptr;
+QtMessageHandler previousHandler = nullptr;
+
+void captureMessage(QtMsgType type, const QMessageLogContext &context, const QString &message)
+{
+    QtMessageHandler previous = nullptr;
+    {
+        QMutexLocker locker(&messageMutex);
+        if (capturedMessages)
+            capturedMessages->append(message);
+        previous = previousHandler;
+    }
+    if (previous)
+        previous(type, context, message);
+}
+
+struct Capture
+{
+    Capture()
+    {
+        QMutexLocker locker(&messageMutex);
+        capturedMessages = &messages;
+        previousHandler = qInstallMessageHandler(captureMessage);
+    }
+
+    ~Capture()
+    {
+        QMutexLocker locker(&messageMutex);
+        qInstallMessageHandler(previousHandler);
+        capturedMessages = nullptr;
+    }
+
+    int count(const QString &line)
+    {
+        QMutexLocker locker(&messageMutex);
+        return int(messages.count(line));
+    }
+
+    QStringList messages;
+};
+
+FiioWorker::Bounds workerBounds(int driverWaitMs = 2000, int lockMs = 1000, int retryMs = 500)
+{
+    FiioWorker::Bounds bounds;
+    bounds.driverWaitMs = driverWaitMs;
+    bounds.lockMs = lockMs;
+    bounds.retryMs = retryMs;
+    return bounds;
+}
+
+struct WorkerRig
+{
+    struct Done
+    {
+        quint64 seq = 0;
+        bool ok = false;
+        FiioReason reason = FiioReason::None;
+        FiioMirror mirror;
+    };
+
+    explicit WorkerRig(FiioWorker::Bounds bounds = workerBounds())
+        : paths(pathsIn(root.path()))
+    {
+        const QString sys = root.path() + QStringLiteral("/sys");
+        devPath = sys + QStringLiteral("/devices/platform/xhci/3-1");
+        iface = devPath + QStringLiteral("/3-1:1.0");
+        ready = usbDevice(sys, QStringLiteral("3-1"), "2972", "0149") && hidInterface(sys, QStringLiteral("3-1"), "03", true)
+                && usbNode(devPath, "3", "2");
+        auto owned = std::make_unique<FakeUsbIo>();
+        fake = owned.get();
+        worker = std::make_unique<FiioWorker>(std::move(owned), bounds, paths);
+        QObject::connect(worker.get(), &FiioWorker::batchDone, worker.get(),
+                         [this](quint64 seq, bool ok, int reason, const FiioMirror &mirror) {
+                             done.push_back({seq, ok, FiioReason(reason), mirror});
+                         });
+    }
+
+    ~WorkerRig()
+    {
+        QCOMPARE(fake->refusedReads(), 0);
+        QCOMPARE(fake->badFrames(), 0);
+    }
+
+    FiioWorker::Target target(FiioWorker::Kind kind, const FiioProfileFrames &frames = testFrames())
+    {
+        FiioWorker::Target out;
+        out.cardId = QStringLiteral("B");
+        out.generation = 1;
+        out.alsaIndex = 1;
+        out.sysPath = devPath;
+        out.kind = kind;
+        out.frames = frames;
+        out.seq = ++seq;
+        return out;
+    }
+
+    quint64 post(FiioWorker::Kind kind, const FiioProfileFrames &frames = testFrames())
+    {
+        const FiioWorker::Target out = target(kind, frames);
+        worker->post(out);
+        return out.seq;
+    }
+
+    const Done *result(quint64 wanted) const
+    {
+        for (const Done &d : done) {
+            if (d.seq == wanted)
+                return &d;
+        }
+        return nullptr;
+    }
+
+    bool waitDone(quint64 wanted, int ms)
+    {
+        return QTest::qWaitFor([this, wanted] { return result(wanted) != nullptr; }, ms);
+    }
+
+    bool bindDriver() const
+    {
+        const QString driver = root.path() + QStringLiteral("/sys/bus/usb/drivers/usbhid");
+        return QDir().mkpath(driver) && link(driver, iface + QStringLiteral("/driver"));
+    }
+
+    bool unbindDriver() const
+    {
+        return QFile::remove(iface + QStringLiteral("/driver"));
+    }
+
+    bool pcmStatus(const QByteArray &text) const
+    {
+        return writeFile(root.path() + QStringLiteral("/asound/card1/pcm0p/sub0/status"), text);
+    }
+
+    QTemporaryDir root;
+    FiioPaths paths;
+    QString devPath;
+    QString iface;
+    bool ready = false;
+    quint64 seq = 0;
+    std::vector<Done> done;
+    FakeUsbIo *fake = nullptr;
+    std::unique_ptr<FiioWorker> worker;
+};
+
 }
 
 class FiioTest : public QObject
@@ -326,6 +476,22 @@ private slots:
     void lockPeer();
     void restoreSlotVerified();
     void driverWaitNeedsInterface();
+    void workerLatestWins();
+    void workerAbandon();
+    void workerAbandonInWaits();
+    void workerDriverWait();
+    void workerLockRetry();
+    void workerClaimRetry();
+    void workerResetPcmOpen();
+    void workerReset();
+    void workerResetFails();
+    void quitSendsBypass();
+    void workerQuitJoin();
+    void workerGuiNeverBlocks();
+    void workerResetExHeld();
+    void workerMirrorPerGeneration();
+    void workerQuitDeadline();
+    void workerUpdate();
 };
 
 void FiioTest::crc()
@@ -2212,6 +2378,451 @@ void FiioTest::driverWaitNeedsInterface()
     QCOMPARE(waitDriverFree(path, 0, std::nullopt, {}), FiioReason::None);
     QVERIFY(link(root.path() + QStringLiteral("/absent-driver"), iface + QStringLiteral("/driver")));
     QCOMPARE(waitDriverFree(path, 0, std::nullopt, {}), FiioReason::HidBound);
+}
+
+void FiioTest::workerLatestWins()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    const std::shared_ptr<FakeUsbIo::Hold> hold = rig.fake->hold(FakeUsbIo::Op::Open);
+    const quint64 a = rig.post(FiioWorker::Kind::Take, testFrames());
+    QVERIFY(hold->waitEntered(1000));
+    const quint64 b = rig.post(FiioWorker::Kind::Take, testFrames(1.0));
+    const FiioProfileFrames last = testFrames(2.0);
+    const quint64 c = rig.post(FiioWorker::Kind::Take, last);
+    hold->release();
+    QVERIFY(rig.waitDone(c, 5000));
+
+    QCOMPARE(rig.done.size(), std::size_t(3));
+    QCOMPARE(rig.done[0].seq, a);
+    QCOMPARE(rig.done[0].reason, FiioReason::Abandoned);
+    QVERIFY(!rig.done[0].ok);
+    QCOMPARE(rig.done[1].seq, b);
+    QCOMPARE(rig.done[1].reason, FiioReason::Abandoned);
+    QCOMPARE(rig.done[2].seq, c);
+    QCOMPARE(rig.done[2].reason, FiioReason::None);
+    QVERIFY(rig.done[2].ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 2);
+
+    const QStringList sent = outs(*rig.fake);
+    QCOMPARE(sent.size(), 27);
+    QCOMPARE(sent.first(), QStringLiteral("get 0b"));
+    QCOMPARE(sent.mid(17), bandSets(last));
+    for (int i = 1; i < fiioBandCount; ++i)
+        QCOMPARE(rig.fake->band(162, i), last.bands[i]);
+    const FiioMirror &mirror = rig.done[2].mirror;
+    QVERIFY(mirror.valid);
+    QCOMPARE(mirror.cardId, std::string("B"));
+    QCOMPARE(mirror.generation, uint64_t(1));
+    QCOMPARE(mirror.preset, 162);
+    QVERIFY(mirror.bands == last.bands);
+    QVERIFY(!rig.fake->wedged());
+}
+
+void FiioTest::workerAbandon()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    for (int i = 0; i < 3; ++i)
+        rig.fake->hold(FakeUsbIo::Op::Out)->release();
+    const std::shared_ptr<FakeUsbIo::Hold> fourth = rig.fake->hold(FakeUsbIo::Op::Out);
+    const quint64 a = rig.post(FiioWorker::Kind::Take);
+    QVERIFY(fourth->waitEntered(3000));
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Out), 3);
+    const quint64 b = rig.post(FiioWorker::Kind::Bypass);
+    fourth->release();
+    QVERIFY(rig.waitDone(b, 3000));
+
+    QCOMPARE(rig.done.size(), std::size_t(2));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Abandoned);
+    QVERIFY(!rig.result(a)->mirror.valid);
+    QVERIFY(rig.result(b)->ok);
+    QCOMPARE(rig.result(b)->mirror.preset, int(fiioBypass));
+    const QStringList sent = outs(*rig.fake);
+    QCOMPARE(sent, (QStringList{QStringLiteral("get 0b"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
+                                QStringLiteral("set 16 a2"), QStringLiteral("set 16 f0")}));
+    QCOMPARE(rig.fake->preset(), fiioBypass);
+    QVERIFY(!rig.fake->wedged());
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 2);
+}
+
+void FiioTest::workerAbandonInWaits()
+{
+    WorkerRig rig(workerBounds(2000, 1000, 500));
+    QVERIFY(rig.ready);
+
+    QVERIFY(rig.bindDriver());
+    const quint64 a = rig.post(FiioWorker::Kind::Force);
+    QTest::qWait(100);
+    int64_t start = fiioNowMs();
+    const quint64 b = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(a, 1000));
+    QVERIFY2(fiioNowMs() - start < 300, std::to_string(fiioNowMs() - start).c_str());
+    QCOMPARE(rig.result(a)->reason, FiioReason::Abandoned);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 0);
+    QVERIFY(rig.unbindDriver());
+    QVERIFY(rig.waitDone(b, 3000));
+    QVERIFY(rig.result(b)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 1);
+
+    FiioLock peer(rig.paths);
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    const quint64 c = rig.post(FiioWorker::Kind::Force);
+    QTest::qWait(100);
+    start = fiioNowMs();
+    const quint64 d = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(c, 1000));
+    QVERIFY2(fiioNowMs() - start < 300, std::to_string(fiioNowMs() - start).c_str());
+    QCOMPARE(rig.result(c)->reason, FiioReason::Abandoned);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 1);
+    peer.release();
+    QVERIFY(rig.waitDone(d, 3000));
+    QVERIFY(rig.result(d)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 2);
+
+    const int claims = rig.fake->count(FakeUsbIo::Op::Claim);
+    rig.fake->setClaimError(-EBUSY);
+    const quint64 e = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(QTest::qWaitFor([&rig, claims] { return rig.fake->count(FakeUsbIo::Op::Claim) == claims + 1; }, 2000));
+    rig.fake->setClaimError(0);
+    QTest::qWait(50);
+    start = fiioNowMs();
+    const quint64 f = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(e, 1000));
+    QVERIFY2(fiioNowMs() - start < 300, std::to_string(fiioNowMs() - start).c_str());
+    QCOMPARE(rig.result(e)->reason, FiioReason::Abandoned);
+    QVERIFY(rig.waitDone(f, 3000));
+    QVERIFY(rig.result(f)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Claim), claims + 2);
+}
+
+void FiioTest::workerDriverWait()
+{
+    WorkerRig rig(workerBounds(300));
+    QVERIFY(rig.ready);
+    QVERIFY(rig.bindDriver());
+    int64_t start = fiioNowMs();
+    const quint64 a = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(a, 2000));
+    int64_t waited = fiioNowMs() - start;
+    QCOMPARE(rig.result(a)->reason, FiioReason::HidBound);
+    QVERIFY(!rig.result(a)->ok);
+    QVERIFY2(waited >= 280 && waited < 800, std::to_string(waited).c_str());
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 0);
+
+    QTimer::singleShot(100, [&rig] { rig.unbindDriver(); });
+    start = fiioNowMs();
+    const quint64 b = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(b, 2000));
+    waited = fiioNowMs() - start;
+    QVERIFY(rig.result(b)->ok);
+    QVERIFY2(waited >= 90 && waited < 300, std::to_string(waited).c_str());
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 1);
+}
+
+void FiioTest::workerLockRetry()
+{
+    WorkerRig rig(workerBounds(2000, 200, 150));
+    QVERIFY(rig.ready);
+    FiioLock peer(rig.paths);
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    QTimer::singleShot(300, [&peer] { peer.release(); });
+    int64_t start = fiioNowMs();
+    const quint64 a = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(a, 3000));
+    int64_t waited = fiioNowMs() - start;
+    QVERIFY(rig.result(a)->ok);
+    QVERIFY2(waited >= 340 && waited < 800, std::to_string(waited).c_str());
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 1);
+
+    QVERIFY(peer.acquire(0, std::nullopt, {}));
+    start = fiioNowMs();
+    const quint64 b = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(b, 3000));
+    waited = fiioNowMs() - start;
+    QCOMPARE(rig.result(b)->reason, FiioReason::Lock);
+    QVERIFY(!rig.result(b)->ok);
+    QVERIFY2(waited >= 540 && waited < 1000, std::to_string(waited).c_str());
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 1);
+}
+
+void FiioTest::workerClaimRetry()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    rig.fake->setClaimError(-EBUSY);
+    QTimer::singleShot(300, [&rig] { rig.fake->setClaimError(0); });
+    int64_t start = fiioNowMs();
+    const quint64 a = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(a, 3000));
+    const int64_t waited = fiioNowMs() - start;
+    QVERIFY(rig.result(a)->ok);
+    QVERIFY2(waited >= 490 && waited < 1000, std::to_string(waited).c_str());
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Claim), 2);
+    QCOMPARE(rig.fake->preset(), fiioBypass);
+
+    rig.fake->setClaimError(-EBUSY);
+    start = fiioNowMs();
+    const quint64 b = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(b, 3000));
+    QCOMPARE(rig.result(b)->reason, FiioReason::Claim);
+    QVERIFY(fiioNowMs() - start >= 490);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Claim), 4);
+}
+
+void FiioTest::workerResetPcmOpen()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.pcmStatus("state: RUNNING\nowner_pid   : 4242\n"));
+    const quint64 a = rig.post(FiioWorker::Kind::Reset);
+    QVERIFY(rig.waitDone(a, 3000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Overflow);
+    QVERIFY(!rig.result(a)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 0);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::In), 0);
+    QVERIFY(!rig.fake->isOpen());
+
+    QFile::remove(rig.root.path() + QStringLiteral("/asound/card1/pcm0p/sub0/status"));
+    const quint64 b = rig.post(FiioWorker::Kind::Reset);
+    QVERIFY(rig.waitDone(b, 3000));
+    QCOMPARE(rig.result(b)->reason, FiioReason::Overflow);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 0);
+}
+
+void FiioTest::workerReset()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    QCOMPARE(rig.fake->open("/dev/bus/usb/003/002"), 0);
+    QCOMPARE(rig.fake->claim(0), 0);
+    std::vector<uint8_t> out = frameGet(1, fiioCmdBand, {1});
+    QCOMPARE(rig.fake->bulk(0x05, out.data(), int(out.size()), 200), int(out.size()));
+    QCOMPARE(rig.fake->bulk(0x05, out.data(), int(out.size()), 200), int(out.size()));
+    QCOMPARE(rig.fake->release(0), 0);
+    rig.fake->close();
+    QVERIFY(rig.fake->wedged());
+    const std::string canonical = QFileInfo(rig.devPath).canonicalFilePath().toStdString();
+    const InflightStamp stamp(rig.paths, canonical);
+    QVERIFY(stamp.write(fiioNowMs(), canonical));
+    QVERIFY(rig.pcmStatus("closed\n"));
+    const std::size_t before = rig.fake->calls().size();
+
+    Capture capture;
+    const quint64 a = rig.post(FiioWorker::Kind::Reset);
+    QVERIFY(rig.waitDone(a, 3000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::ResetDone);
+    QVERIFY(rig.result(a)->ok);
+    QVERIFY(!rig.result(a)->mirror.valid);
+    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: driver unbound after reset")), 1);
+    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: reset")), 1);
+
+    const std::vector<FakeUsbIo::Call> calls = rig.fake->calls();
+    QList<int> ops;
+    for (std::size_t i = before; i < calls.size(); ++i)
+        ops.append(int(calls[i].op));
+    const QList<int> expected{int(FakeUsbIo::Op::Open),    int(FakeUsbIo::Op::Descriptor), int(FakeUsbIo::Op::Claim),
+                              int(FakeUsbIo::Op::Release), int(FakeUsbIo::Op::Reset),      int(FakeUsbIo::Op::Close)};
+    QCOMPARE(ops, expected);
+    QVERIFY(!rig.fake->wedged());
+    QVERIFY(!QFileInfo::exists(QString::fromStdString(stamp.path())));
+    QVERIFY(!rig.fake->isOpen());
+
+    const quint64 b = rig.post(FiioWorker::Kind::Force);
+    QVERIFY(rig.waitDone(b, 3000));
+    QVERIFY(rig.result(b)->ok);
+    QCOMPARE(rig.fake->preset(), fiioBypass);
+}
+
+void FiioTest::workerResetFails()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.pcmStatus("closed\n"));
+    rig.fake->setResetError(-EIO);
+    Capture capture;
+    const quint64 a = rig.post(FiioWorker::Kind::Reset);
+    QVERIFY(rig.waitDone(a, 3000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Device);
+    QVERIFY(!rig.result(a)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 1);
+    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: driver unbound after reset")), 0);
+    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: driver bound after reset")), 0);
+    QVERIFY(!rig.fake->isOpen());
+}
+
+void FiioTest::quitSendsBypass()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    rig.fake->setReplyDelayMs(30);
+    const quint64 a = rig.post(FiioWorker::Kind::Take);
+    QVERIFY(QTest::qWaitFor([&rig] { return rig.fake->count(FakeUsbIo::Op::Out) >= 2; }, 3000));
+    const FiioWorker::Target final = rig.target(FiioWorker::Kind::Bypass);
+    const quint64 b = final.seq;
+    const int64_t start = fiioNowMs();
+    rig.worker->postFinal(final, 500);
+    QVERIFY(rig.worker->quitAndJoin(1000));
+    QVERIFY2(fiioNowMs() - start < 500, std::to_string(fiioNowMs() - start).c_str());
+    const QStringList sent = outs(*rig.fake);
+    QCOMPARE(sent.last(), QStringLiteral("set 16 f0"));
+    QCOMPARE(rig.fake->preset(), fiioBypass);
+    QVERIFY(!rig.fake->wedged());
+
+    QVERIFY(rig.waitDone(b, 1000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Abandoned);
+    QVERIFY(rig.result(b)->ok);
+    const int sentCount = rig.fake->count(FakeUsbIo::Op::Out);
+    rig.post(FiioWorker::Kind::Take);
+    QTest::qWait(100);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Out), sentCount);
+    QCOMPARE(rig.done.size(), std::size_t(2));
+}
+
+void FiioTest::workerQuitJoin()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    const std::shared_ptr<FakeUsbIo::Hold> hold = rig.fake->hold(FakeUsbIo::Op::Open);
+    const quint64 a = rig.post(FiioWorker::Kind::Take);
+    QVERIFY(hold->waitEntered(1000));
+    const int64_t start = fiioNowMs();
+    QVERIFY(!rig.worker->quitAndJoin(500));
+    const int64_t waited = fiioNowMs() - start;
+    QVERIFY2(waited >= 490 && waited < 700, std::to_string(waited).c_str());
+    hold->release();
+    QVERIFY(rig.worker->quitAndJoin(3000));
+    QVERIFY(rig.waitDone(a, 1000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Abandoned);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Out), 0);
+    QVERIFY(!rig.fake->isOpen());
+}
+
+void FiioTest::workerGuiNeverBlocks()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    const std::shared_ptr<FakeUsbIo::Hold> hold = rig.fake->hold(FakeUsbIo::Op::Out);
+    const quint64 a = rig.post(FiioWorker::Kind::Take);
+    QVERIFY(hold->waitEntered(2000));
+    int64_t start = fiioNowMs();
+    const quint64 b0 = rig.post(FiioWorker::Kind::Bypass);
+    QVERIFY(fiioNowMs() - start < 20);
+    bool fired = false;
+    QTimer::singleShot(20, [&fired] { fired = true; });
+    QVERIFY(QTest::qWaitFor([&fired] { return fired; }, 500));
+    QVERIFY(rig.done.empty());
+    const FiioWorker::Target final = rig.target(FiioWorker::Kind::Bypass);
+    const quint64 b = final.seq;
+    start = fiioNowMs();
+    rig.worker->postFinal(final, 3000);
+    QVERIFY(fiioNowMs() - start < 20);
+    hold->release();
+    QVERIFY(rig.worker->quitAndJoin(3000));
+    QVERIFY(rig.waitDone(b, 1000));
+    QCOMPARE(rig.result(a)->reason, FiioReason::Abandoned);
+    QCOMPARE(rig.result(b0)->reason, FiioReason::Abandoned);
+    QVERIFY(rig.result(b)->ok);
+    QCOMPARE(outs(*rig.fake), (QStringList{QStringLiteral("get 0b"), QStringLiteral("set 16 f0")}));
+}
+
+void FiioTest::workerResetExHeld()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.bindDriver());
+    QVERIFY(rig.pcmStatus("closed\n"));
+    FiioWorker::Target target = rig.target(FiioWorker::Kind::Reset);
+    target.exHeld = true;
+    const int64_t start = fiioNowMs();
+    rig.worker->post(target);
+    QVERIFY(rig.waitDone(target.seq, 3000));
+    QVERIFY2(fiioNowMs() - start < 200, std::to_string(fiioNowMs() - start).c_str());
+    QCOMPARE(rig.result(target.seq)->reason, FiioReason::Refused);
+    QVERIFY(!rig.result(target.seq)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 0);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 0);
+}
+
+void FiioTest::workerMirrorPerGeneration()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    const FiioProfileFrames frames = testFrames();
+    const quint64 a = rig.post(FiioWorker::Kind::Take, frames);
+    QVERIFY(rig.waitDone(a, 3000));
+    QVERIFY(rig.result(a)->ok);
+    QCOMPARE(rig.result(a)->mirror.generation, uint64_t(1));
+    const int first = int(outs(*rig.fake).size());
+
+    FiioWorker::Target next = rig.target(FiioWorker::Kind::Take, frames);
+    next.generation = 2;
+    rig.worker->post(next);
+    QVERIFY(rig.waitDone(next.seq, 3000));
+    QVERIFY(rig.result(next.seq)->ok);
+    const FiioMirror &mirror = rig.result(next.seq)->mirror;
+    QCOMPARE(mirror.generation, uint64_t(2));
+    QCOMPARE(mirror.cardId, std::string("B"));
+    QVERIFY(mirror.valid);
+    QVERIFY(mirror.bands == frames.bands);
+    QStringList expected{QStringLiteral("get 0b"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
+                         QStringLiteral("set 17 0000")};
+    expected += bandSets(frames);
+    QCOMPARE(outs(*rig.fake, first), expected);
+}
+
+void FiioTest::workerQuitDeadline()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    rig.fake->setReplyDelayMs(1000);
+    const FiioWorker::Target final = rig.target(FiioWorker::Kind::Bypass);
+    const int64_t start = fiioNowMs();
+    rig.worker->postFinal(final, 150);
+    QVERIFY(rig.worker->quitAndJoin(1000));
+    const int64_t waited = fiioNowMs() - start;
+    QVERIFY2(waited >= 140 && waited < 400, std::to_string(waited).c_str());
+    QVERIFY(rig.waitDone(final.seq, 1000));
+    QCOMPARE(rig.result(final.seq)->reason, FiioReason::Deadline);
+    QVERIFY(!rig.result(final.seq)->ok);
+    QCOMPARE(rig.fake->count(FakeUsbIo::Op::Out), 1);
+    QVERIFY(!rig.fake->isOpen());
+}
+
+void FiioTest::workerUpdate()
+{
+    WorkerRig rig;
+    QVERIFY(rig.ready);
+    const FiioProfileFrames frames = testFrames();
+    const quint64 a = rig.post(FiioWorker::Kind::Take, frames);
+    QVERIFY(rig.waitDone(a, 3000));
+    QVERIFY(rig.result(a)->ok);
+    const int first = int(outs(*rig.fake).size());
+
+    FiioProfileFrames changed = frames;
+    FiioBand band;
+    band.index = 3;
+    band.gain = 4.5;
+    band.freq = 250.0;
+    band.q = 1.0;
+    changed.bands[3] = bandPayload(tinyModel(), band);
+    const quint64 b = rig.post(FiioWorker::Kind::Update, changed);
+    QVERIFY(rig.waitDone(b, 3000));
+    QVERIFY(rig.result(b)->ok);
+    QCOMPARE(outs(*rig.fake, first), (QStringList{QStringLiteral("get 16"), bandSet(changed.bands[3])}));
+    QCOMPARE(rig.fake->band(162, 3), changed.bands[3]);
+    QVERIFY(rig.result(b)->mirror.bands == changed.bands);
+
+    FiioWorker::Target next = rig.target(FiioWorker::Kind::Update, changed);
+    next.generation = 2;
+    const int second = int(outs(*rig.fake).size());
+    rig.worker->post(next);
+    QVERIFY(rig.waitDone(next.seq, 3000));
+    QVERIFY(rig.result(next.seq)->ok);
+    QStringList expected{QStringLiteral("get 16"), QStringLiteral("get 0b"), QStringLiteral("get 16"),
+                         QStringLiteral("get 30 a2"), QStringLiteral("set 17 0000")};
+    expected += bandSets(changed);
+    QCOMPARE(outs(*rig.fake, second), expected);
 }
 
 QTEST_GUILESS_MAIN(FiioTest)
