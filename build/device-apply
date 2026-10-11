@@ -3,6 +3,14 @@ set -eu
 
 input="${1:-}"
 
+user="${SUDO_USER:-armada}"
+uid=$(id -u "${user}")
+steam=$(runuser -u "${user}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" systemctl --user is-active gamescope-session-plus@steam.service 2>/dev/null || true)
+if [[ "${steam}" != active && -z "${CASDAP_DEPLOY_ANY_SESSION:-}" ]]; then
+    echo "device-apply: game mode is not active (gamescope-session-plus@steam ${steam:-unknown}), refusing; switch to game mode first" >&2
+    exit 1
+fi
+
 mkdir -p /var/lib/extensions/casdap
 changed=$(rsync -ai --delete /tmp/casdap/ /var/lib/extensions/casdap/)
 systemd-sysext refresh
