@@ -46,24 +46,11 @@ QByteArray eqDescription()
     return text + " ! audioconvert";
 }
 
-BiquadType biquadType(EqBand::Type type)
-{
-    switch (type) {
-    case EqBand::LowShelf:
-        return BiquadType::LowShelf;
-    case EqBand::HighShelf:
-        return BiquadType::HighShelf;
-    case EqBand::Peak:
-        break;
-    }
-    return BiquadType::Peak;
-}
-
 BiquadCoeffs bandCoeffs(const EqBand &band, int rate)
 {
     if (!band.enabled || rate <= 0)
         return biquadUnity();
-    return biquadFor(biquadType(band.type), band.freq, band.gain,
+    return biquadFor(static_cast<BiquadType>(band.type), band.freq, band.gain,
                      qBound(EqParser::minQ, band.q, EqParser::maxQ), rate);
 }
 

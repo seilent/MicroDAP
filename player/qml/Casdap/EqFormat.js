@@ -57,18 +57,29 @@ function qText(q) {
     return Number(q).toFixed(2)
 }
 
+var typeCodes = ({ peak: "pk", lowshelf: "ls", highshelf: "hs", bandpass: "bp", lowpass: "lp", highpass: "hp",
+    allpass: "ap" })
+var typeNames = ({ peak: "peak", lowshelf: "low shelf", highshelf: "high shelf", bandpass: "band pass",
+    lowpass: "low pass", highpass: "high pass", allpass: "all pass" })
+
 function typeShort(t) {
-    return t === "lowshelf" ? "ls" : t === "highshelf" ? "hs" : "pk"
+    return typeCodes.hasOwnProperty(t) ? typeCodes[t] : "pk"
 }
 
 function typeLong(t) {
-    return t === "peak" ? "peak" : t === "lowshelf" ? "low shelf" : t === "highshelf" ? "high shelf" : "off"
+    return typeNames.hasOwnProperty(t) ? typeNames[t] : "off"
+}
+
+function gainFree(t) {
+    return t === "bandpass" || t === "lowpass" || t === "highpass" || t === "allpass"
 }
 
 function bandText(b) {
     if (b === null || b === undefined || b.type === undefined || String(b.type) === "off")
         return "off"
-    return typeShort(String(b.type)) + " " + freqText(b.freq) + " " + gainText(b.gain) + " q " + qText(b.q)
+    const t = String(b.type)
+    const gain = gainFree(t) ? "" : " " + gainText(b.gain)
+    return typeShort(t) + " " + freqText(b.freq) + gain + " q " + qText(b.q)
 }
 
 function fieldText(b, field) {

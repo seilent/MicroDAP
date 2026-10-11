@@ -423,8 +423,10 @@ while open leaves it), rows from CONTENT_TOP in the settings row style at SETTIN
 aligned at W - HUB_EDGE in a slot starting `Ui.eqValueGap` (8 u) right of the title, clipped at its left edge.
 `PROFILE` (`OFF`, the file name, `CUSTOM`, `<NAME> (MISSING)`; `Eq.cycleProfile(output, delta)`), then, only while
 the profile is a parsed file or CUSTOM, `PREAMP` (`-6.5 DB`, `Eq.stepPreamp(output, delta, coarse)`) and
-`BAND 1` to `BAND 10` (`PK 105 HZ +2.1 DB Q 0.70`, `LS`, `HS`, `2.5 KHZ` from 1000 Hz, `OFF` for a disabled
-band). A on a band opens the sub rows `TYPE`, `FREQUENCY`, `GAIN`, `Q` under it (11 u Light upper case,
+`BAND 1` to `BAND 10` (`PK 105 HZ +2.1 DB Q 0.70`, `LS`, `HS`, `BP`, `LP`, `HP`, `AP`, no gain field for the
+four gain free types (`LP 105 HZ Q 0.70`), `2.5 KHZ` from 1000 Hz, `OFF` for a disabled band; TYPE reads `PEAK`,
+`LOW SHELF`, `HIGH SHELF`, `BAND PASS`, `LOW PASS`, `HIGH PASS`, `ALL PASS`, `OFF`). A on a band opens the sub
+rows `TYPE`, `FREQUENCY`, `GAIN`, `Q` under it (11 u Light upper case,
 `Eq.stepBand(output, band, field, delta, coarse)` with field `type`, `freq`, `gain`, `q`) with F12, a second A closes
 them, A on another band moves them there. PROFILE, PREAMP and the sub rows change only in edit mode, as in
 `SettingsScreen`: A enters it (the value turns `Ui.accent`), left/right make the fine step (`coarse` false), LB/RB
@@ -587,7 +589,8 @@ given, else sample rows), `nowplaying` (sample track and queue; `--bluez active`
 and ten tracks, track 3 playing), `settings` (sample values, two folders, a FLAC track and `44100 S24_LE`),
 `jump` (the grid over the hub pivot of `--pivot`, default `albums`), `playlists` (`NOW PLAYING` and four
 sample playlists), `history` (seven recent songs and five new albums), `eq` (a parsed file on HEADPHONES with
-band 2 open, a missing file on USB),
+band 2 open, a missing file on USB; states `eq-types` (focus BAND 5) and `eq-types-end` (focus BAND 10) list
+OFF, the seven types and the longest band value with no band open),
 `components`, `overlays` (the volume box clamped to the 272 x 420 or 480 x 260 minimum canvas), `volume`, `specimen` (every type role in its weight, labeled
 with name and px), `motion` (30 rows mid turnstile at `--angle`, default 40). `--overlay` renders `home` and
 `settings` in overlay mode (CLOSE PLAYER and `PAIR IN DAP MODE` rows). CMake cache var
@@ -1140,8 +1143,8 @@ the next buffer enters the bin, so no buffer runs a mixed profile; an apply whil
 buffer after resume. Only bands whose coefficients change are set (every set zeroes that band's history). A
 band is unity when OFF and when a PEAK or shelf sits at 0 dB; the bands stay unity until the first caps give a
 rate. A caps event, `rate-changed` and a relink of the PW chain mark every band for the next buffer; a band at
-or above 0.49 of the rate is unity, logged `casdap eq: band <n> at <f> Hz above 0.49 of <rate>, unity` once
-until that band changes. Position and the gapless chain are kept. Local playback only: the phone stream and
+or above 0.49 of the rate is unity (HIGH PASS and BAND PASS mute), logged `casdap eq: band <n> at <f> Hz
+above 0.49 of <rate>, unity` (or `mute`) once until that band changes. Position and the gapless chain are kept. Local playback only: the phone stream and
 the Steam stream never pass it. `EqControl` (context property
 `Eq`, both modes, a sample CUSTOM profile under `--screenshot`) keeps one profile per
 output in `eqHeadphones`, `eqUsb`, `eqSpeaker` (`off`, an absolute file path or `custom`, default `off`) and
@@ -1152,24 +1155,32 @@ get-default-sink` is polled every 2 s (`CASDAP_PACTL_BIN`, async, a run still go
 and a changed mapping is applied. At start the output of `pactl get-default-sink` (`alsa_output.usb-*` usb, the
 headphones sink headphones, anything else speaker, `speaker` when the read fails) is applied before `state.json`
 is restored. Profiles are AutoEQ
-`ParametricEQ.txt` files (`Preamp: <g> dB`, `Filter <n>: ON|OFF PK|LSC|HSC Fc <f> Hz Gain <g> dB Q <q>`, `LS`
-and `HS` accepted, case insensitive): the first 10 filters are taken, fewer leave the rest OFF, a malformed
-line is skipped, a file with no valid filter is left out; clamps gain -24 to +12 dB, freq 20 to 20000 Hz, Q 0.1
-to 10, preamp -24 to 0 dB; without a `Preamp:` line the preamp is minus the sum of the positive ON gains
-(at least -24). Sources are `~/.config/casdap/eq/*.txt`, then `<root>/EQ/*.txt` per `Settings.roots`, each
+`ParametricEQ.txt` and Equalizer APO files (`Preamp: <g> dB`, `Filter[ <n>]: ON|OFF <code> Fc <f> Hz[ Gain <g>
+dB][ Q <q>]`, case insensitive). Codes: `PK` peak (Gain and Q required); `LSC`, `LS` low shelf and `HSC`, `HS`
+high shelf (Gain required, Q 0.71 when absent); `LP`, `LPQ` low pass, `HP`, `HPQ` high pass, `BP` band pass (the
+RBJ constant 0 dB peak) (Q 0.71 when absent, a Gain is read and kept but not used); `AP` all pass (Q required, a
+Gain kept). Skipped and logged, taking no slot: `NO`, `Modal`, `PEQ` and `BW Oct` forms, the `LSC <x> dB` slope
+and `LS 6dB`, `HS 12dB` corner forms, `IIR`, any other code, and a line missing a required field. An OFF line
+takes a slot (as written when it parses, else the flat default band) only with a mapped code. The first 10
+filters are taken, fewer leave the rest OFF, a file with no valid filter is left out; clamps gain -24 to +12 dB,
+freq 20 to 20000 Hz, Q 0.1 to 10, preamp -24 to 0 dB; without a `Preamp:` line the preamp is minus the sum over
+ON bands of the positive PEAK and shelf gains plus `max(0, 20 log10(Q))` for LOW PASS and HIGH PASS (at least
+-24; BAND PASS and ALL PASS add nothing). Sources are `~/.config/casdap/eq/*.txt`, then `<root>/EQ/*.txt` per
+`Settings.roots`, each
 folder sorted by name case folded, named by the file name without `.txt` and a trailing ` ParametricEQ` in
 upper case, listed at start, when
 `Library.scanning` goes false, when the roots change and when the EQ page opens; a saved path that is gone or
 fails to parse reads `<NAME> (MISSING)` (the map carries the bare `name` and `missing`) and runs flat. CUSTOM lives in
 `~/.config/casdap/eq-<output>.ini` (`[General]` `preamp`,
-`[band1]` to `[band10]` with `type` `off`, `peak`, `lowshelf`, `highshelf`, `freqIndex` into the 61 point grid
+`[band1]` to `[band10]` with `type` `off`, `peak`, `lowshelf`, `highshelf`, `bandpass`, `lowpass`,
+`highpass`, `allpass` (any other type reads the store flat), `freqIndex` into the 61 point grid
 (0 is 20 Hz, 1 to 59 `1000 * 2^((i - 34)/6)`, 60 is 20000 Hz) or `freq` for a file value, `gain`, `q`),
 written 500 ms after the last edit and on quit, temp file then rename; a missing or unreadable store is ten PEAK
 bands at grid 4, 10, 16, 22, 28, 34, 40, 46, 52, 58, gain 0, Q 1.4. `cycleProfile` steps OFF, the listed files,
 CUSTOM (wrapping); `stepPreamp` and `stepGain` move 0.1 dB (1 dB with `coarse`), `stepQ` 0.1 (1.0 with
 `coarse`, clamped 0.1 to 10), each snapping to its step grid and rounded to one decimal (gain, preamp) or two (Q),
 `stepFrequency` one grid point (1/6 octave, 6 points with `coarse`), `stepBand` passes `coarse` on, `stepType`
-cycles OFF, PEAK, LOW SHELF, HIGH SHELF. An edit while
+cycles OFF, PEAK, LOW SHELF, HIGH SHELF; a band of another type steps into that cycle. An edit while
 the key is a file copies the parsed file into the store and sets the key to `custom` first; the `.txt` is never
 written. `CASDAP_EQ_DIR` replaces `~/.config/casdap` for both the `eq/` folder and the stores.
 

@@ -335,6 +335,36 @@ TestCase {
         compare(fakeEq.calls.length, 3)
     }
 
+    function test_type_text() {
+        const bands = [
+            { type: "off", freq: 1000, gain: 3, q: 1.4 },
+            { type: "peak", freq: 1000, gain: -3, q: 1.41 },
+            { type: "lowshelf", freq: 105, gain: 2.1, q: 0.7 },
+            { type: "highshelf", freq: 10000, gain: 12, q: 0.71 },
+            { type: "bandpass", freq: 1000, gain: 6, q: 0.71 },
+            { type: "lowpass", freq: 105, gain: 6, q: 0.7 },
+            { type: "highpass", freq: 30, gain: 0, q: 0.5 },
+            { type: "allpass", freq: 20000, gain: -2, q: 0.25 },
+            { type: "highshelf", freq: 20000, gain: -24, q: 10 },
+            { type: "peak", freq: 2500, gain: 0, q: 1.4 }
+        ]
+        const sets = Object.assign({}, fakeEq.bandSets)
+        sets.headphones = bands
+        fakeEq.bandSets = sets
+        const page = open()
+        const want = ["off", "pk 1 khz -3.0 db q 1.41", "ls 105 hz +2.1 db q 0.70", "hs 10 khz +12.0 db q 0.71",
+            "bp 1 khz q 0.71", "lp 105 hz q 0.70", "hp 30 hz q 0.50", "ap 20 khz q 0.25",
+            "hs 20 khz -24.0 db q 10.00", "pk 2.5 khz 0.0 db q 1.40"]
+        for (let i = 0; i < want.length; i++)
+            compare(page.rows[i + 2].value, want[i])
+        const long = ["off", "peak", "low shelf", "high shelf", "band pass", "low pass", "high pass", "all pass"]
+        for (let i = 0; i < long.length; i++) {
+            page.headphonesPane.openBand = i
+            tryVerify(() => page.rows[i + 3].key === "band" + i + ":type", 1000)
+            compare(page.rows[i + 3].value, long[i])
+        }
+    }
+
     function test_preamp_cancel_restores() {
         const page = open()
         tc.edit(page, 1)

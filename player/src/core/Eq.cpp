@@ -13,6 +13,7 @@
 #include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringList>
 
 #include <cmath>
 #include <utility>
@@ -37,27 +38,77 @@ double clampLogged(double value, double low, double high, const char *what)
     return clamped;
 }
 
-EqBand::Type typeFor(const QString &code)
+struct FilterCode
+{
+    const char *code;
+    EqBand::Type type;
+    bool needsGain;
+    bool needsQ;
+};
+
+constexpr std::array<FilterCode, 11> filterCodes{{
+    {"pk", EqBand::Peak, true, true},
+    {"lsc", EqBand::LowShelf, true, false},
+    {"ls", EqBand::LowShelf, true, false},
+    {"hsc", EqBand::HighShelf, true, false},
+    {"hs", EqBand::HighShelf, true, false},
+    {"lp", EqBand::LowPass, false, false},
+    {"lpq", EqBand::LowPass, false, false},
+    {"hp", EqBand::HighPass, false, false},
+    {"hpq", EqBand::HighPass, false, false},
+    {"bp", EqBand::BandPass, false, false},
+    {"ap", EqBand::AllPass, false, true},
+}};
+
+constexpr std::array<std::pair<EqBand::Type, const char *>, 7> typeKeys{{
+    {EqBand::Peak, "peak"},
+    {EqBand::LowShelf, "lowshelf"},
+    {EqBand::HighShelf, "highshelf"},
+    {EqBand::BandPass, "bandpass"},
+    {EqBand::LowPass, "lowpass"},
+    {EqBand::HighPass, "highpass"},
+    {EqBand::AllPass, "allpass"},
+}};
+
+const FilterCode *codeFor(const QString &code)
 {
     const QString c = code.toLower();
-    if (c == QLatin1StringView("lsc") || c == QLatin1StringView("ls"))
-        return EqBand::LowShelf;
-    if (c == QLatin1StringView("hsc") || c == QLatin1StringView("hs"))
-        return EqBand::HighShelf;
-    return EqBand::Peak;
+    for (const FilterCode &entry : filterCodes) {
+        if (c == QLatin1StringView(entry.code))
+            return &entry;
+    }
+    return nullptr;
+}
+
+QString codePattern()
+{
+    QStringList codes;
+    for (const FilterCode &entry : filterCodes)
+        codes.append(QLatin1StringView(entry.code));
+    return QStringLiteral("(") + codes.join(QLatin1Char('|')) + QStringLiteral(")");
 }
 
 QString typeKey(EqBand::Type type)
 {
-    switch (type) {
-    case EqBand::LowShelf:
-        return QStringLiteral("lowshelf");
-    case EqBand::HighShelf:
-        return QStringLiteral("highshelf");
-    case EqBand::Peak:
-        break;
+    for (const auto &[t, name] : typeKeys) {
+        if (t == type)
+            return QLatin1StringView(name);
     }
     return QStringLiteral("peak");
+}
+
+std::optional<EqBand::Type> typeOfKey(const QString &key)
+{
+    for (const auto &[t, name] : typeKeys) {
+        if (key == QLatin1StringView(name))
+            return t;
+    }
+    return std::nullopt;
+}
+
+bool gainFree(EqBand::Type type)
+{
+    return type != EqBand::Peak && type != EqBand::LowShelf && type != EqBand::HighShelf;
 }
 
 QString formatNumber(double value)
@@ -158,12 +209,13 @@ std::optional<EqProfile> EqParser::parse(const QString &text, QString *error)
         QStringLiteral("^preamp\\s*:\\s*") + number() + QStringLiteral("\\s*db\\s*$"),
         QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression filterRe(
-        QStringLiteral("^filter\\s*(\\d+)\\s*:\\s*(on|off)\\s+(pk|lsc|hsc|ls|hs)\\s+fc\\s+") + number()
-            + QStringLiteral("\\s*hz\\s+gain\\s+") + number() + QStringLiteral("\\s*db\\s+q\\s+") + number()
-            + QStringLiteral("\\s*$"),
+        QStringLiteral("^filter(?:\\s*\\d+)?\\s*:\\s*(on|off)\\s+([a-z]+)\\s+fc\\s+") + number()
+            + QStringLiteral("\\s*hz(?:\\s+gain\\s+") + number() + QStringLiteral("\\s*db)?(?:\\s+q\\s+") + number()
+            + QStringLiteral(")?\\s*$"),
         QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression offRe(QStringLiteral("^filter\\s*\\d+\\s*:\\s*off\\b"),
-                                          QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression offRe(
+        QStringLiteral("^filter(?:\\s*\\d+)?\\s*:\\s*off\\s+") + codePattern() + QStringLiteral("\\s+fc\\b"),
+        QRegularExpression::CaseInsensitiveOption);
 
     EqProfile profile = EqProfile::flat();
     const EqProfile defaults = profile;
@@ -184,17 +236,20 @@ std::optional<EqProfile> EqParser::parse(const QString &text, QString *error)
             continue;
         }
         const QRegularExpressionMatch f = filterRe.match(line);
-        if (f.hasMatch()) {
+        const FilterCode *code = f.hasMatch() ? codeFor(f.captured(2)) : nullptr;
+        const bool hasGain = f.hasMatch() && f.capturedLength(4) > 0;
+        const bool hasQ = f.hasMatch() && f.capturedLength(5) > 0;
+        if (code && (hasGain || !code->needsGain) && (hasQ || !code->needsQ)) {
             if (count >= EqProfile::bandCount) {
                 ++dropped;
                 continue;
             }
             EqBand band;
-            band.enabled = f.captured(2).compare(QLatin1StringView("on"), Qt::CaseInsensitive) == 0;
-            band.type = typeFor(f.captured(3));
-            band.freq = clampLogged(f.captured(4).toDouble(), minFreq, maxFreq, "freq");
-            band.gain = clampLogged(f.captured(5).toDouble(), minGain, maxGain, "gain");
-            band.q = clampLogged(f.captured(6).toDouble(), minQ, maxQ, "q");
+            band.enabled = f.captured(1).compare(QLatin1StringView("on"), Qt::CaseInsensitive) == 0;
+            band.type = code->type;
+            band.freq = clampLogged(f.captured(3).toDouble(), minFreq, maxFreq, "freq");
+            band.gain = hasGain ? clampLogged(f.captured(4).toDouble(), minGain, maxGain, "gain") : 0.0;
+            band.q = hasQ ? clampLogged(f.captured(5).toDouble(), minQ, maxQ, "q") : defaultQ;
             band.freqIndex = -1;
             profile.bands[count++] = band;
             continue;
@@ -245,8 +300,12 @@ double EqParser::fallbackPreamp(const EqProfile &profile)
 {
     double sum = 0.0;
     for (const EqBand &band : profile.bands) {
-        if (band.enabled && band.gain > 0.0)
+        if (!band.enabled)
+            continue;
+        if (!gainFree(band.type) && band.gain > 0.0)
             sum += band.gain;
+        if (band.type == EqBand::LowPass || band.type == EqBand::HighPass)
+            sum += qMax(0.0, 20.0 * std::log10(qBound(minQ, band.q, maxQ)));
     }
     return sum > 0.0 ? qMax(minPreamp, -sum) : 0.0;
 }
@@ -294,11 +353,10 @@ EqProfile EqStore::read(const QString &path)
         settings.beginGroup(QStringLiteral("band") + QString::number(i + 1));
         EqBand band;
         const QString type = settings.value(QStringLiteral("type")).toString().toLower();
-        bool valid = type == QLatin1StringView("off") || type == QLatin1StringView("peak")
-                     || type == QLatin1StringView("lowshelf") || type == QLatin1StringView("highshelf");
+        const std::optional<EqBand::Type> stored = typeOfKey(type);
+        bool valid = type == QLatin1StringView("off") || stored.has_value();
         band.enabled = type != QLatin1StringView("off");
-        band.type = type == QLatin1StringView("lowshelf") ? EqBand::LowShelf
-                    : type == QLatin1StringView("highshelf") ? EqBand::HighShelf : EqBand::Peak;
+        band.type = stored.value_or(EqBand::Peak);
         if (settings.contains(QStringLiteral("freqIndex"))) {
             band.freqIndex = settings.value(QStringLiteral("freqIndex")).toInt(&ok);
             valid = valid && ok && band.freqIndex >= 0 && band.freqIndex < EqGrid::size;

@@ -85,6 +85,13 @@ private slots:
     void keepsFirstTen();
     void skipsMalformed();
     void zeroFiltersFails();
+    void apoCodes();
+    void apoSkipped();
+    void apoOffLines();
+    void autoEqUnchanged();
+    void storeRoundTripTypes();
+    void storeUnknownTypeFlat();
+    void preampResonance();
     void clamps();
     void grid();
     void storeRoundTrip();
@@ -224,6 +231,196 @@ void EqTest::zeroFiltersFails()
     QVERIFY(!EqParser::parse(QString(), &error));
     QVERIFY(!EqParser::parseFile(m_dir + QStringLiteral("/absent.txt"), &error));
     QVERIFY(!error.isEmpty());
+}
+
+void EqTest::apoCodes()
+{
+    const std::optional<EqProfile> profile = EqParser::parse(QStringLiteral(
+        "Filter: ON PK Fc 1000 Hz Gain 3 dB Q 1.41\n"
+        "Filter 2: ON LSC Fc 105 Hz Gain 6 dB\n"
+        "Filter 3: on ls fc 80 hz gain 2 db q 0.9\n"
+        "Filter 4: ON HSC Fc 8000 Hz Gain -2 dB\n"
+        "Filter 5: ON HS Fc 9000 Hz Gain 1 dB Q 0.5\n"
+        "Filter 6: ON LP Fc 15000 Hz\n"
+        "Filter 7: ON LPQ Fc 12000 Hz Q 2\n"
+        "Filter 8: ON HP Fc 30 Hz Gain 3 dB\n"
+        "Filter 9: ON HPQ Fc 40 Hz Q 0.5\n"
+        "Filter 10: ON BP Fc 1000 Hz\n"));
+    QVERIFY(profile);
+    const struct
+    {
+        EqBand::Type type;
+        double freq;
+        double gain;
+        double q;
+    } want[] = {
+        {EqBand::Peak, 1000.0, 3.0, 1.41},     {EqBand::LowShelf, 105.0, 6.0, 0.71},
+        {EqBand::LowShelf, 80.0, 2.0, 0.9},    {EqBand::HighShelf, 8000.0, -2.0, 0.71},
+        {EqBand::HighShelf, 9000.0, 1.0, 0.5}, {EqBand::LowPass, 15000.0, 0.0, 0.71},
+        {EqBand::LowPass, 12000.0, 0.0, 2.0},  {EqBand::HighPass, 30.0, 3.0, 0.71},
+        {EqBand::HighPass, 40.0, 0.0, 0.5},    {EqBand::BandPass, 1000.0, 0.0, 0.71},
+    };
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        const EqBand &band = profile->bands[i];
+        QVERIFY2(band.enabled, QByteArray::number(i).constData());
+        QCOMPARE(band.type, want[i].type);
+        QVERIFY(near(band.freq, want[i].freq));
+        QVERIFY(near(band.gain, want[i].gain));
+        QVERIFY(near(band.q, want[i].q));
+    }
+
+    const std::optional<EqProfile> allPass =
+        EqParser::parse(QStringLiteral("Filter: ON AP Fc 500 Hz Q 1.5\nFilter: ON AP Fc 600 Hz Gain 2 dB Q 0.8\n"));
+    QVERIFY(allPass);
+    QCOMPARE(allPass->bands[0].type, EqBand::AllPass);
+    QVERIFY(near(allPass->bands[0].q, 1.5));
+    QCOMPARE(allPass->bands[1].type, EqBand::AllPass);
+    QVERIFY(near(allPass->bands[1].gain, 2.0));
+    QVERIFY(!allPass->bands[2].enabled);
+}
+
+void EqTest::apoSkipped()
+{
+    const std::optional<EqProfile> profile = EqParser::parse(QStringLiteral(
+        "Filter 1: ON NO Fc 1000 Hz Q 2\n"
+        "Filter 2: ON NO Fc 1000 Hz\n"
+        "Filter 3: ON Modal Fc 100 Hz Gain 3 dB Q 5\n"
+        "Filter 4: ON PEQ Fc 100 Hz Gain 3 dB BW Oct 1.0\n"
+        "Filter 5: ON PK Fc 100 Hz Gain 3 dB BW Oct 1.0\n"
+        "Filter 6: ON LSC 12 dB Fc 300 Hz Gain 5 dB\n"
+        "Filter 7: ON LS 6dB Fc 100 Hz Gain 3 dB\n"
+        "Filter 8: ON HS 12dB Fc 8000 Hz Gain 3 dB\n"
+        "Filter 9: ON IIR Order 2 Coefficients 1 0 0 1 0 0\n"
+        "Filter 10: ON PK Fc 100 Hz Q 1\n"
+        "Filter 11: ON PK Fc 100 Hz Gain 2 dB\n"
+        "Filter 12: ON LSC Fc 100 Hz Q 0.7\n"
+        "Filter 13: ON AP Fc 100 Hz\n"
+        "Filter 14: ON XX Fc 100 Hz Gain 1 dB Q 1\n"
+        "Filter 15: ON PK Fc 250 Hz Gain 1 dB Q 1\n"));
+    QVERIFY(profile);
+    QVERIFY(profile->bands[0].enabled);
+    QCOMPARE(profile->bands[0].type, EqBand::Peak);
+    QVERIFY(near(profile->bands[0].freq, 250.0));
+    for (int i = 1; i < EqProfile::bandCount; ++i)
+        QVERIFY(!profile->bands[i].enabled);
+
+    QVERIFY(!EqParser::parse(QStringLiteral("Filter: ON NO Fc 1000 Hz Q 2\nFilter: ON IIR Order 1\n")));
+}
+
+void EqTest::apoOffLines()
+{
+    const EqProfile defaults = EqProfile::flat();
+    const std::optional<EqProfile> profile = EqParser::parse(QStringLiteral(
+        "Filter 1: OFF LP Fc 100 Hz\n"
+        "Filter 2: OFF NO Fc 100 Hz\n"
+        "Filter 3: OFF PK Fc 1000 Hz Q 1\n"
+        "Filter 4: OFF IIR Order 2\n"
+        "Filter 5: OFF\n"
+        "Filter 6: OFF LS 6dB Fc 100 Hz Gain 3 dB\n"
+        "Filter: off hpq fc 40 hz q 0.5\n"
+        "Filter 8: ON PK Fc 2000 Hz Gain 1 dB Q 1\n"));
+    QVERIFY(profile);
+    QVERIFY(!profile->bands[0].enabled);
+    QCOMPARE(profile->bands[0].type, EqBand::LowPass);
+    QVERIFY(near(profile->bands[0].freq, 100.0));
+    QVERIFY(!profile->bands[1].enabled);
+    QCOMPARE(profile->bands[1].type, EqBand::Peak);
+    QCOMPARE(profile->bands[1].freqIndex, defaults.bands[1].freqIndex);
+    QVERIFY(!profile->bands[2].enabled);
+    QCOMPARE(profile->bands[2].type, EqBand::HighPass);
+    QVERIFY(near(profile->bands[2].q, 0.5));
+    QVERIFY(profile->bands[3].enabled);
+    QVERIFY(near(profile->bands[3].freq, 2000.0));
+    for (int i = 4; i < EqProfile::bandCount; ++i)
+        QVERIFY(!profile->bands[i].enabled);
+}
+
+void EqTest::autoEqUnchanged()
+{
+    const std::optional<EqProfile> profile = EqParser::parse(QString::fromUtf8(autoEq));
+    QVERIFY(profile);
+    EqProfile want = EqProfile::flat();
+    want.preamp = -6.2;
+    const EqBand bands[] = {
+        {true, EqBand::LowShelf, 105.0, 6.3, 0.70, -1},  {true, EqBand::Peak, 1000.0, -3.2, 1.41, -1},
+        {true, EqBand::HighShelf, 10000.0, 2.0, 0.70, -1}, {false, EqBand::Peak, 200.0, 1.0, 1.00, -1},
+        {true, EqBand::Peak, 300.0, 1.0, 2.0, -1},
+    };
+    for (int i = 0; i < 5; ++i)
+        want.bands[i] = bands[i];
+    for (int i = 5; i < EqProfile::bandCount; ++i)
+        want.bands[i].enabled = false;
+    QVERIFY(*profile == want);
+}
+
+void EqTest::storeRoundTripTypes()
+{
+    EqProfile profile = EqProfile::flat();
+    const EqBand::Type types[] = {EqBand::Peak,    EqBand::LowShelf, EqBand::HighShelf, EqBand::BandPass,
+                                  EqBand::LowPass, EqBand::HighPass, EqBand::AllPass};
+    const QStringList names = {QStringLiteral("peak"),     QStringLiteral("lowshelf"), QStringLiteral("highshelf"),
+                               QStringLiteral("bandpass"), QStringLiteral("lowpass"),  QStringLiteral("highpass"),
+                               QStringLiteral("allpass")};
+    for (int i = 0; i < 7; ++i) {
+        profile.bands[i].type = types[i];
+        profile.bands[i].gain = 1.5 * (i + 1);
+    }
+    profile.bands[7].enabled = false;
+    const QString path = m_dir + QStringLiteral("/store/eq-types.ini");
+    QVERIFY(EqStore::write(path, profile));
+    const QString text = readFile(path);
+    for (int i = 0; i < 7; ++i) {
+        QCOMPARE(EqStore::typeName(profile.bands[i]), names.at(i));
+        QVERIFY(text.contains(QStringLiteral("[band%1]\ntype=%2\n").arg(i + 1).arg(names.at(i))));
+    }
+    QVERIFY(text.contains(QStringLiteral("[band8]\ntype=off\n")));
+    QVERIFY(EqStore::read(path) == profile);
+    QCOMPARE(profile.toMap().value(QStringLiteral("bands")).toList().at(4).toMap().value(QStringLiteral("type")),
+             QVariant(QStringLiteral("lowpass")));
+}
+
+void EqTest::storeUnknownTypeFlat()
+{
+    EqProfile profile = EqProfile::flat();
+    profile.preamp = -3.0;
+    profile.bands[0].gain = 4.0;
+    const QString path = m_dir + QStringLiteral("/store/eq-unknown.ini");
+    QVERIFY(EqStore::write(path, profile));
+    QVERIFY(EqStore::read(path) == profile);
+    QString text = readFile(path);
+    text.replace(QStringLiteral("[band3]\ntype=peak\n"), QStringLiteral("[band3]\ntype=notch\n"));
+    QVERIFY(writeFile(path, text));
+    QVERIFY(EqStore::read(path) == EqProfile::flat());
+}
+
+void EqTest::preampResonance()
+{
+    const std::optional<EqProfile> lowPass = EqParser::parse(QStringLiteral("Filter: ON LP Fc 1000 Hz Q 2\n"));
+    QVERIFY(lowPass);
+    QVERIFY(std::abs(lowPass->preamp + 20.0 * std::log10(2.0)) < 1e-9);
+    QVERIFY(std::abs(lowPass->preamp + 6.02) < 0.01);
+
+    const std::optional<EqProfile> highPass =
+        EqParser::parse(QStringLiteral("Filter: ON HP Fc 30 Hz Q 2\nFilter: ON HP Fc 40 Hz Q 0.5\n"));
+    QVERIFY(highPass);
+    QVERIFY(std::abs(highPass->preamp + 20.0 * std::log10(2.0)) < 1e-9);
+
+    const std::optional<EqProfile> neutral = EqParser::parse(QStringLiteral(
+        "Filter: ON BP Fc 1000 Hz Gain 6 dB Q 4\nFilter: ON AP Fc 1000 Hz Gain 6 dB Q 4\n"
+        "Filter: ON LP Fc 1000 Hz Gain 6 dB Q 0.71\n"));
+    QVERIFY(neutral);
+    QVERIFY(near(neutral->preamp, 0.0));
+
+    const std::optional<EqProfile> mixed = EqParser::parse(QStringLiteral(
+        "Filter: ON PK Fc 100 Hz Gain 3 dB Q 1\nFilter: ON LP Fc 1000 Hz Q 2\nFilter: OFF HP Fc 30 Hz Q 4\n"));
+    QVERIFY(mixed);
+    QVERIFY(std::abs(mixed->preamp + 3.0 + 20.0 * std::log10(2.0)) < 1e-9);
+
+    const std::optional<EqProfile> clamped = EqParser::parse(QStringLiteral(
+        "Filter: ON PK Fc 100 Hz Gain 12 dB Q 1\nFilter: ON PK Fc 200 Hz Gain 12 dB Q 1\n"
+        "Filter: ON LP Fc 1000 Hz Q 10\n"));
+    QVERIFY(clamped);
+    QVERIFY(near(clamped->preamp, -24.0));
 }
 
 void EqTest::clamps()

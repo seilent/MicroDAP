@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Biquad.h"
+
 #include <QHash>
 #include <QObject>
 #include <QProcess>
@@ -24,6 +26,10 @@ struct EqBand
         Peak = 0,
         LowShelf = 1,
         HighShelf = 2,
+        BandPass = 3,
+        LowPass = 4,
+        HighPass = 5,
+        AllPass = 6,
     };
 
     bool enabled = true;
@@ -35,6 +41,14 @@ struct EqBand
 
     bool operator==(const EqBand &other) const = default;
 };
+
+static_assert(int(EqBand::Peak) == int(BiquadType::Peak));
+static_assert(int(EqBand::LowShelf) == int(BiquadType::LowShelf));
+static_assert(int(EqBand::HighShelf) == int(BiquadType::HighShelf));
+static_assert(int(EqBand::BandPass) == int(BiquadType::BandPass));
+static_assert(int(EqBand::LowPass) == int(BiquadType::LowPass));
+static_assert(int(EqBand::HighPass) == int(BiquadType::HighPass));
+static_assert(int(EqBand::AllPass) == int(BiquadType::AllPass));
 
 struct EqProfile
 {
@@ -74,6 +88,7 @@ struct EqParser
     static constexpr double maxFreq = 20000.0;
     static constexpr double minQ = 0.1;
     static constexpr double maxQ = 10.0;
+    static constexpr double defaultQ = 0.71;
     static constexpr double minPreamp = -24.0;
     static constexpr double maxPreamp = 0.0;
 

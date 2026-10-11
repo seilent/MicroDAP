@@ -157,6 +157,7 @@ private slots:
     void eqNoSetOutsideProbe();
     void eqPreampWithBands();
     void eqHammer();
+    void eqTypesMapped();
     void queueSlots();
     void queueShuffleEdits();
     void addVerbs();
@@ -443,10 +444,8 @@ BiquadCoeffs bandExpected(const EqBand &band, int rate)
 {
     if (!band.enabled)
         return biquadUnity();
-    const BiquadType type = band.type == EqBand::LowShelf    ? BiquadType::LowShelf
-                            : band.type == EqBand::HighShelf ? BiquadType::HighShelf
-                                                             : BiquadType::Peak;
-    return biquadFor(type, band.freq, band.gain, qBound(EqParser::minQ, band.q, EqParser::maxQ), rate);
+    return biquadFor(static_cast<BiquadType>(band.type), band.freq, band.gain,
+                     qBound(EqParser::minQ, band.q, EqParser::maxQ), rate);
 }
 
 double preampOf(Player &player)
@@ -1435,6 +1434,38 @@ void PlayerTest::eqHammer()
                                 .arg(peak / bound)
                                 .toUtf8()
                                 .constData());
+}
+
+void PlayerTest::eqTypesMapped()
+{
+    auto player = syncPlayer();
+    player->play({m_long}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqProbeSets() > 0, playTimeoutMs);
+
+    const BiquadType types[] = {BiquadType::Peak,    BiquadType::LowShelf, BiquadType::HighShelf,
+                                BiquadType::BandPass, BiquadType::LowPass, BiquadType::HighPass,
+                                BiquadType::AllPass};
+    EqProfile profile = EqProfile::off();
+    for (int i = 0; i < 7; ++i) {
+        EqBand &band = profile.bands[i];
+        band.enabled = true;
+        band.type = static_cast<EqBand::Type>(i);
+        band.freq = 500.0 * (i + 1);
+        band.freqIndex = -1;
+        band.gain = 4.0;
+        band.q = 0.71;
+    }
+    player->applyEq(profile);
+    QTRY_VERIFY_WITH_TIMEOUT(player->eqBandSets(6) == 1, playTimeoutMs);
+    for (int i = 0; i < 7; ++i) {
+        QCOMPARE(player->eqBandSets(i), 1);
+        QVERIFY2(bandIs(*player, i, biquadFor(types[i], 500.0 * (i + 1), 4.0, 0.71, 44100)),
+                 QByteArray::number(i).constData());
+        QVERIFY(!bandIs(*player, i, biquadUnity()));
+    }
+    for (int i = 7; i < EqProfile::bandCount; ++i)
+        QCOMPARE(player->eqBandSets(i), 0);
+    player->stop();
 }
 
 void PlayerTest::queueSlots()

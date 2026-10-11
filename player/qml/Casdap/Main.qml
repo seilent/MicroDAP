@@ -1228,7 +1228,9 @@ Window {
 
     Component {
         id: eqShotComponent
-        EqShot {}
+        EqShot {
+            fixture: root.shotState
+        }
     }
 
     Component {

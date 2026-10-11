@@ -147,6 +147,8 @@ const QStringList &states()
         QStringLiteral("sample-rate-edit"),
         QStringLiteral("sample-rate-unsupported"),
         QStringLiteral("sample-rate-locked"),
+        QStringLiteral("eq-types"),
+        QStringLiteral("eq-types-end"),
     };
     return names;
 }

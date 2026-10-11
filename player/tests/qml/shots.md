@@ -38,6 +38,9 @@
 | settings | `sample-rate-edit` | `--size 640x960` and `960x640` | SAMPLE RATE draft 352800 in accent on the FiiO rates | pending |
 | settings | `sample-rate-unsupported` | `--size 640x960` and `960x640` | SAMPLE RATE reads 96000 (NOT SUPPORTED) on the Apple dongle rate | pending |
 | settings | `sample-rate-locked` | `--size 640x960` and `960x640` | focus on EQ reading BYPASSED, SAMPLE RATE above it read only AUTO 96000 | pending |
+| eq | browse | `--size 640x960` and `960x640` | BAND rows PK, LS, HS text unchanged, band 2 sub rows | pending |
+| eq | `eq-types` | `--size 640x960` and `960x640` | BAND rows OFF, PK, LS, HS, BP, focus on BAND 5, gain free rows with no gain | pending |
+| eq | `eq-types-end` | `--size 640x960` and `960x640` | BAND rows LP, HP, AP, `HS 20 KHZ -24.0 DB Q 10.00` unclipped and clear of the title, focus on BAND 10 | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured
