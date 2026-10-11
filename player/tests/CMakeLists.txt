@@ -197,6 +197,11 @@ target_link_libraries(tst_biquad PRIVATE casdapcore Qt6::Test)
 add_test(NAME biquad COMMAND tst_biquad)
 casdap_test_env(biquad)
 
+qt_add_executable(tst_fiio core/tst_fiio.cpp)
+target_link_libraries(tst_fiio PRIVATE casdapfiio Qt6::Test)
+add_test(NAME fiio COMMAND tst_fiio)
+casdap_test_env(fiio)
+
 qt_add_executable(tst_codec core/tst_codec.cpp)
 target_link_libraries(tst_codec PRIVATE casdapcore Qt6::Test)
 add_test(NAME codec COMMAND tst_codec)

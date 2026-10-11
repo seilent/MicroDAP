@@ -16,6 +16,13 @@ find_package(SDL3 REQUIRED CONFIG)
 
 qt_standard_project_setup(REQUIRES 6.11)
 
+add_library(casdapfiio STATIC
+    src/core/Fiio.cpp
+    src/core/Fiio.h
+)
+set_target_properties(casdapfiio PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(casdapfiio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+
 add_library(casdapcore STATIC
     src/core/AccentControl.cpp
     src/core/AccentControl.h
@@ -106,6 +113,7 @@ add_library(casdapcore STATIC
 target_include_directories(casdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_definitions(casdapcore PRIVATE CASDAP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(casdapcore PUBLIC
+    casdapfiio
     Qt6::Core
     Qt6::Gui
     Qt6::DBus
