@@ -60,6 +60,8 @@ Page {
     readonly property bool shuffleOn: np.queue !== null && np.queue.shuffle === true
     readonly property int repeatMode: np.queue !== null && np.queue.repeat !== undefined ? np.queue.repeat : 0
     readonly property bool rated: np.shown.rating !== undefined && np.shown.rating > 0
+    readonly property bool rateShown: np.shownVariant || np.shown.id === null || np.shown.id > 0
+    readonly property int ringLast: np.rateShown ? Ui.npRingX.length - 1 : Ui.npRingX.length - 2
     readonly property string phoneShuffle: np.bluez !== null && np.bluez.shuffle !== undefined ? np.bluez.shuffle : "off"
     readonly property string phoneRepeat: np.bluez !== null && np.bluez.repeat !== undefined ? np.bluez.repeat : "off"
     readonly property var ringGlyphs: np.shownVariant
@@ -273,7 +275,7 @@ Page {
     function moveRing(delta: int): bool {
         if (np.focusRow !== 0)
             return false
-        const target = Math.max(0, Math.min(Ui.npRingX.length - 1, np.ringIndex + delta))
+        const target = Math.max(0, Math.min(np.ringLast, np.ringIndex + delta))
         if (target === np.ringIndex)
             return false
         np.ringIndex = target
@@ -528,6 +530,7 @@ Page {
     }
 
     onDurationChanged: np.updateTimes()
+    onRingLastChanged: np.ringIndex = Math.min(np.ringIndex, np.ringLast)
     onShownVariantChanged: np.updateTimes()
 
     Component.onCompleted: {
@@ -938,6 +941,7 @@ Page {
 
                 x: Ui.px(Ui.npRingCenter(ringItem.index)) - ringItem.width / 2
                 y: np.ringY - ringItem.height / 2
+                visible: ringItem.index <= np.ringLast
                 size: Ui.npRing
                 focused: ringItem.isFocused
                 on: np.ringOn[ringItem.index]

@@ -500,7 +500,8 @@ read every 250 ms; elapsed at EDGE and remaining right aligned at the art right 
 1 Hz), title baseline H - 118, the next three rows of the play order (`Queue.upcoming(3)`, refreshed on
 `modelReset`, `currentSlotChanged`, `countChanged`, `rowsMoved`, `orderChanged` and `repeatChanged`) at EDGE + 40
 and 18 u pitch, three rings (shuffle, repeat, rate) centered at 0.13, 0.5 and 0.87 of W on y H - 40, white
-only: on at 1.0, off at 0.6, the focused one with the 4 u stroke.
+only: on at 1.0, off at 0.6, the focused one with the 4 u stroke. A track outside the library (id 0, an MPRIS
+`OpenUri` of a file `library.db` lacks) shows no rate ring and the ring focus stops at repeat.
 Landscape: back ring and art (y 72, side `min(168, H - 106)`) with the progress line 8 u under it and as
 wide as the art in the
 left column, artist 60, album 84, title 116, next rows from 140 at x 216, rings on the same fractions of

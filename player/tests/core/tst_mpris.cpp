@@ -91,6 +91,7 @@ private slots:
     void loopStatus();
     void seek();
     void openUri();
+    void openUriOutsideLibraryRate();
     void phoneGuard();
 
 private:
@@ -382,6 +383,36 @@ void MprisTest::openUri()
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QCOMPARE(m_player->queue()->count(), 1);
     QCOMPARE(m_player->queue()->entry(0).path, target.path);
+}
+
+void MprisTest::openUriOutsideLibraryRate()
+{
+    const QString outside = m_dir.path() + QStringLiteral("/outside.flac");
+    QVERIFY(QFile::copy(m_tracks.at(0).path, outside));
+    QSqlQuery count(m_library->database());
+    QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*), TOTAL(rating) FROM tracks")));
+    QVERIFY(count.next());
+    const qlonglong rows = count.value(0).toLongLong();
+    const double ratings = count.value(1).toDouble();
+
+    QDBusReply<void> reply = m_remote->call(QStringLiteral("OpenUri"),
+                                            QUrl::fromLocalFile(outside).toString());
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(playbackStatus(), QStringLiteral("Playing"), busTimeoutMs);
+    QCOMPARE(m_player->queue()->entry(0).path, outside);
+    QCOMPARE(m_player->queue()->entry(0).id, qint64(0));
+
+    QSignalSpy currentSpy(m_player.get(), &Player::currentChanged);
+    QSignalSpy ratingSpy(m_library.get(), &Library::ratingChanged);
+    m_player->rate();
+    QCOMPARE(currentSpy.count(), 0);
+    QCOMPARE(ratingSpy.count(), 0);
+
+    QVERIFY(count.exec(QStringLiteral("SELECT COUNT(*), TOTAL(rating) FROM tracks")));
+    QVERIFY(count.next());
+    QCOMPARE(count.value(0).toLongLong(), rows);
+    QCOMPARE(count.value(1).toDouble(), ratings);
+    m_player->stop();
 }
 
 void MprisTest::phoneGuard()

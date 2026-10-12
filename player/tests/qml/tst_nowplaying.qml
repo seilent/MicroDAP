@@ -468,6 +468,28 @@ TestCase {
         compare(page.shown.rating, 1)
     }
 
+    function test_rate_ring_library_only() {
+        const page = open()
+        compare(page.ring(2).visible, true)
+        compare(page.ring(2).glyph, "heart")
+        verify(router.dispatch("right", false))
+        verify(router.dispatch("right", false))
+        compare(page.ringIndex, 2)
+        fakePlayer.current = { id: 0, title: "Outside", artist: "", album: "", artPath: "", rating: 0 }
+        tryVerify(() => page.shown.id === 0, 1000)
+        compare(page.ring(2).visible, false)
+        compare(page.ringIndex, 1)
+        verify(!router.dispatch("right", false))
+        compare(page.ringIndex, 1)
+        compare(page.ring(0).visible, true)
+        compare(page.ring(1).visible, true)
+        fakePlayer.select(2)
+        tryVerify(() => page.shown.id === 3, 1000)
+        compare(page.ring(2).visible, true)
+        verify(router.dispatch("right", false))
+        compare(page.ringIndex, 2)
+    }
+
     function test_pad_map() {
         const page = open()
         verify(router.dispatch("lb", false))
