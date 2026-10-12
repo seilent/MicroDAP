@@ -105,6 +105,7 @@ public:
 
     bool levelSet() const override;
     void restorePlaying(bool playing) override;
+    bool restorePending() const override;
 
 public slots:
     void setLevel(const QString &level);

@@ -396,6 +396,11 @@ bool OutputMode::levelSet() const
     return m_level != off;
 }
 
+bool OutputMode::restorePending() const
+{
+    return m_restoreWanted;
+}
+
 void OutputMode::restorePlaying(bool playing)
 {
     if (!playing || m_level == off)

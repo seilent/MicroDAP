@@ -70,6 +70,7 @@ public:
 private:
     void onSignal();
     void onStatusChanged();
+    void onPositionChanged();
     void onQueueChanged();
     void runQueueJobs();
     bool restoreLegacy(const QJsonObject &object);
@@ -85,6 +86,7 @@ private:
     QString m_queuePath;
     QTimer m_timer;
     QTimer m_queueTimer;
+    QTimer m_pauseTimer;
     QJsonArray m_stack;
     QSocketNotifier *m_notifier = nullptr;
     int m_fds[2] = {-1, -1};

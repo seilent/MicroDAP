@@ -78,6 +78,7 @@ public:
     bool transportReady() const;
     void setTransportReady(bool ready);
     bool playPending() const;
+    bool resumePending() const;
     bool positionPollEnabled() const;
     void setPositionPollEnabled(bool on);
     GstElement *audioFilter() const;

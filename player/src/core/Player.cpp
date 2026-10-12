@@ -661,6 +661,11 @@ bool Player::playPending() const
     return m_playPending;
 }
 
+bool Player::resumePending() const
+{
+    return m_resumeOnReady;
+}
+
 bool Player::holdForPhone()
 {
     if (!m_transportActive)

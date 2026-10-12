@@ -34,6 +34,7 @@ namespace {
 
 constexpr int saveIntervalMs = 10000;
 constexpr int queueDelayMs = 1000;
+constexpr int pauseSaveDelayMs = 500;
 constexpr qint64 handoffWindowS = 60;
 constexpr int pathChunk = 500;
 
@@ -135,7 +136,11 @@ State::State(Player *player, const QString &path, QObject *parent)
     m_queueTimer.setSingleShot(true);
     m_queueTimer.setInterval(queueDelayMs);
     connect(&m_queueTimer, &QTimer::timeout, this, &State::writeQueueLater);
+    m_pauseTimer.setSingleShot(true);
+    m_pauseTimer.setInterval(pauseSaveDelayMs);
+    connect(&m_pauseTimer, &QTimer::timeout, this, [this] { save(false); });
     connect(m_player, &Player::statusChanged, this, &State::onStatusChanged);
+    connect(m_player, &Player::positionChanged, this, &State::onPositionChanged);
     Queue *queue = m_player->queue();
     connect(queue, &QAbstractItemModel::modelReset, this, &State::onQueueChanged);
     connect(queue, &QAbstractItemModel::rowsInserted, this, &State::onQueueChanged);
@@ -202,10 +207,21 @@ qint64 State::writtenQueueRev()
 
 void State::onStatusChanged()
 {
-    if (m_player->status() == Player::Playing)
+    if (m_player->status() == Player::Playing) {
+        m_pauseTimer.stop();
         m_timer.start();
-    else
-        m_timer.stop();
+        return;
+    }
+    m_timer.stop();
+    onPositionChanged();
+}
+
+void State::onPositionChanged()
+{
+    if (m_loading || m_player->status() != Player::Paused || m_player->resumePending()
+        || (m_restore && m_restore->restorePending()))
+        return;
+    m_pauseTimer.start();
 }
 
 void State::onQueueChanged()

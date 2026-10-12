@@ -115,6 +115,7 @@ public:
 
     virtual bool levelSet() const = 0;
     virtual void restorePlaying(bool playing) = 0;
+    virtual bool restorePending() const = 0;
 };
 
 }
