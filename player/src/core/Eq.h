@@ -119,6 +119,7 @@ public:
     static constexpr int syncDelayMs = 500;
     static constexpr int sinkTimeoutMs = 1000;
     static constexpr int sinkPollMs = 2000;
+    static constexpr int startBoundMs = 3000;
     static constexpr double gainFine = 0.1;
     static constexpr double gainCoarse = 1.0;
     static constexpr double qFine = 0.1;
@@ -137,6 +138,7 @@ public:
     static QString defaultSinkOutput();
 
     void setOutputControl(OutputControl *control);
+    void awaitOutput(OutputControl *control, int boundMs = startBoundMs);
     void startSinkPoll();
     bool sinkPolling() const;
 
@@ -192,12 +194,15 @@ private:
     void applyActive(const QString &cause = QStringLiteral("profile"));
     void emitApplied(const QString &cause);
     void pollSink();
+    void querySink(bool seed);
+    void seedFromSink();
     void dropSinkProcess();
 
     Settings *m_settings;
     OutputControl *m_outputControl = nullptr;
     QProcess *m_sinkProcess = nullptr;
     QTimer m_sinkTimer;
+    QTimer m_startTimer;
     bool m_sinkWarned = false;
     QString m_activeOutput;
     QVariantList m_sources;

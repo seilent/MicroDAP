@@ -269,10 +269,13 @@ int main(int argc, char *argv[])
         dac->onPlayStateChanged();
         dac->start();
     }
-    const QString sinkOutput = casdap::EqControl::defaultSinkOutput();
-    eqControl->setActiveOutput(sinkOutput.isEmpty() ? QStringLiteral("speaker") : sinkOutput);
-    if (overlayMode)
+    if (overlayMode) {
+        const QString sinkOutput = casdap::EqControl::defaultSinkOutput();
+        eqControl->setActiveOutput(sinkOutput.isEmpty() ? QStringLiteral("speaker") : sinkOutput);
         eqControl->startSinkPoll();
+    } else {
+        eqControl->awaitOutput(outputControl.get());
+    }
     casdap::State state(&player);
     state.setRestore(outputMode.get());
     state.installSignalHandlers();
@@ -322,7 +325,6 @@ int main(int argc, char *argv[])
         outputControl->setHeadphone(settings.hpGain(), settings.hpAmp());
         outputControl->setSpkGain(settings.spkGain());
         outputControl->apply(settings.output());
-        eqControl->setOutputControl(outputControl.get());
         QObject::connect(&settings, &casdap::Settings::outputChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->apply(settings.output()); });
         auto applyHeadphone = [&settings, control = outputControl.get()] {

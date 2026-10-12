@@ -411,6 +411,8 @@ EqControl::EqControl(Settings *settings, QObject *parent)
     connect(&m_syncTimer, &QTimer::timeout, this, &EqControl::sync);
     m_sinkTimer.setInterval(sinkPollMs);
     connect(&m_sinkTimer, &QTimer::timeout, this, &EqControl::pollSink);
+    m_startTimer.setSingleShot(true);
+    connect(&m_startTimer, &QTimer::timeout, this, &EqControl::seedFromSink);
     if (QCoreApplication *app = QCoreApplication::instance())
         connect(app, &QCoreApplication::aboutToQuit, this, &EqControl::sync);
     if (m_settings) {
@@ -514,6 +516,19 @@ void EqControl::setOutputControl(OutputControl *control)
         setActiveOutput(m_outputControl->activeOutput());
 }
 
+void EqControl::awaitOutput(OutputControl *control, int boundMs)
+{
+    setOutputControl(control);
+    if (!m_outputControl)
+        return;
+    connect(m_outputControl, &OutputControl::firstApplied, this, [this](bool ok) {
+        m_startTimer.stop();
+        if (!ok)
+            seedFromSink();
+    });
+    m_startTimer.start(boundMs);
+}
+
 void EqControl::startSinkPoll()
 {
     if (m_outputControl)
@@ -533,6 +548,19 @@ void EqControl::pollSink()
         m_sinkTimer.stop();
         return;
     }
+    querySink(false);
+}
+
+void EqControl::seedFromSink()
+{
+    if (!m_activeOutput.isEmpty() || m_sinkProcess)
+        return;
+    qInfo() << "casdap eq: output not resolved, default sink";
+    querySink(true);
+}
+
+void EqControl::querySink(bool seed)
+{
     if (m_sinkProcess) {
         if (m_sinkProcess->state() != QProcess::NotRunning) {
             qWarning() << "casdap eq: get-default-sink timed out";
@@ -542,16 +570,24 @@ void EqControl::pollSink()
     }
     auto *process = new QProcess(this);
     m_sinkProcess = process;
-    connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
+    connect(process, &QProcess::finished, this, [this, process, seed](int code, QProcess::ExitStatus status) {
         if (m_sinkProcess == process)
             m_sinkProcess = nullptr;
         process->deleteLater();
-        if (status != QProcess::NormalExit || code != 0)
+        const bool ok = status == QProcess::NormalExit && code == 0;
+        if (seed) {
+            const QString output = ok ? outputForSink(QString::fromUtf8(process->readAllStandardOutput()).trimmed())
+                                      : QString();
+            if (m_activeOutput.isEmpty())
+                setActiveOutput(output.isEmpty() ? QStringLiteral("speaker") : output);
+            return;
+        }
+        if (!ok)
             return;
         m_sinkWarned = false;
         setActiveOutput(outputForSink(QString::fromUtf8(process->readAllStandardOutput()).trimmed()));
     });
-    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+    connect(process, &QProcess::errorOccurred, this, [this, process, seed](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
         if (m_sinkProcess == process)
@@ -560,7 +596,19 @@ void EqControl::pollSink()
         if (!m_sinkWarned)
             qWarning() << "casdap eq: cannot start" << process->program();
         m_sinkWarned = true;
+        if (seed && m_activeOutput.isEmpty())
+            setActiveOutput(QStringLiteral("speaker"));
     });
+    if (seed) {
+        QTimer::singleShot(sinkTimeoutMs, process, [this, process] {
+            if (m_sinkProcess != process)
+                return;
+            qWarning() << "casdap eq: get-default-sink timed out";
+            dropSinkProcess();
+            if (m_activeOutput.isEmpty())
+                setActiveOutput(QStringLiteral("speaker"));
+        });
+    }
     process->start(OutputControl::pactlPath(), {QStringLiteral("get-default-sink")});
 }
 

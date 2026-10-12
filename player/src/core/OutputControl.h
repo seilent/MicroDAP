@@ -79,6 +79,7 @@ signals:
     void hpAmpChanged();
     void spkGainChanged();
     void applied(const QString &output, bool ok);
+    void firstApplied(bool ok);
     void cardGone(int index);
     void sinksRead(const QString &usbSink, quint64 read);
 
@@ -111,6 +112,7 @@ private:
     bool m_reading = false;
     bool m_reread = false;
     bool m_everApplied = false;
+    bool m_resolvedOnce = false;
     bool m_active = false;
     QString m_hpGain;
     QString m_hpAmp;

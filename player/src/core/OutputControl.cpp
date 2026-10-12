@@ -470,6 +470,10 @@ void OutputControl::finish(bool ok)
     updateBusy();
     qInfo() << "casdap output: applied" << m_output << "as" << m_activeOutput << ok;
     emit applied(m_output, ok);
+    if (!m_resolvedOnce) {
+        m_resolvedOnce = true;
+        emit firstApplied(ok);
+    }
     if (ok)
         applyHeadphone();
     if (!m_reread)

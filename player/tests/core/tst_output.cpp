@@ -1,6 +1,9 @@
+#include "Eq.h"
 #include "OutputControl.h"
+#include "Settings.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
@@ -105,6 +108,11 @@ private slots:
     void watchedCardPolled();
     void rereadDuringRead();
     void rereadDuringApply();
+    void eqLoadsResolvedOutput();
+    void eqBoundLoadsSinkDefault();
+    void eqFailedResolveLoadsSinkDefault();
+    void eqMissingPactlLoadsSpeaker();
+    void eqHangingSinkLoadsSpeaker();
 
 private:
     int count(const QString &line) const;
@@ -116,6 +124,8 @@ private:
     QString m_jackFile;
     QString m_cardIdFile;
     QString m_gateFile;
+    QString m_defaultFile;
+    QString m_defaultGateFile;
 };
 
 void OutputTest::initTestCase()
@@ -127,18 +137,24 @@ void OutputTest::initTestCase()
     m_jackFile = m_dir.path() + QStringLiteral("/jack.txt");
     m_cardIdFile = m_dir.path() + QStringLiteral("/asound/card1/id");
     m_gateFile = m_dir.path() + QStringLiteral("/gate");
+    m_defaultFile = m_dir.path() + QStringLiteral("/default.txt");
+    m_defaultGateFile = m_dir.path() + QStringLiteral("/default-gate");
     const QString logLine = QStringLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"") + m_log
                             + QStringLiteral("\"\n");
     QVERIFY(writeFile(m_bin + QStringLiteral("/wpctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/pactl"),
                       QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("[ \"$1\" = list ] && cat \"") + m_sinksFile
+                          + QStringLiteral("\"\n[ \"$1\" = get-default-sink ] && cat \"") + m_defaultFile
                           + QStringLiteral("\"\nexit 0\n"),
                       true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/slow/pactl"),
                       QStringLiteral("#!/bin/sh\nif [ \"$1\" = list ]; then\nout=$(cat \"") + m_sinksFile
                           + QStringLiteral("\")\n") + logLine
                           + QStringLiteral("while [ -f \"") + m_gateFile
-                          + QStringLiteral("\" ]; do sleep 0.05; done\nprintf '%s\\n' \"$out\"\nexit 0\nfi\n") + logLine + QStringLiteral("exit 0\n"),
+                          + QStringLiteral("\" ]; do sleep 0.05; done\nprintf '%s\\n' \"$out\"\nexit 0\nfi\n") + logLine
+                          + QStringLiteral("if [ \"$1\" = get-default-sink ]; then\nwhile [ -f \"") + m_defaultGateFile
+                          + QStringLiteral("\" ]; do sleep 0.05; done\ncat \"") + m_defaultFile
+                          + QStringLiteral("\"\nfi\nexit 0\n"),
                       true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/amixer"),
@@ -161,6 +177,8 @@ void OutputTest::init()
 {
     QFile::remove(m_log);
     QFile::remove(m_gateFile);
+    QFile::remove(m_defaultGateFile);
+    QVERIFY(writeFile(m_defaultFile, OutputControl::speakerSink() + QStringLiteral("\n")));
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
     QVERIFY(writeFile(m_cardIdFile, QStringLiteral("B\n")));
@@ -779,6 +797,125 @@ void OutputTest::rereadDuringApply()
     const QString log = readFile(m_log);
     QVERIFY2(log.contains(setDefault(OutputControl::headphonesSink())), qPrintable(log));
     QVERIFY2(log.endsWith(setDefault(QString::fromUtf8(usbName))), qPrintable(log));
+}
+
+void OutputTest::eqLoadsResolvedOutput()
+{
+    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-resolved")).toUtf8());
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    Settings settings(m_dir.path() + QStringLiteral("/eq-resolved.ini"));
+    EqControl eq(&settings);
+    OutputControl control;
+    QStringList loads;
+    connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
+
+    QElapsedTimer timer;
+    timer.start();
+    eq.awaitOutput(&control);
+    control.apply(QStringLiteral("auto"));
+    QVERIFY(timer.elapsed() < 500);
+    QCOMPARE(eq.activeOutput(), QString());
+
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("usb")}), waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+    QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 0);
+}
+
+void OutputTest::eqBoundLoadsSinkDefault()
+{
+    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-bound")).toUtf8());
+    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QVERIFY(writeFile(m_defaultFile, OutputControl::headphonesSink() + QStringLiteral("\n")));
+    QVERIFY(writeFile(m_gateFile, QString()));
+    QVERIFY(writeFile(m_defaultGateFile, QString()));
+    Settings settings(m_dir.path() + QStringLiteral("/eq-bound.ini"));
+    EqControl eq(&settings);
+    OutputControl control;
+    QStringList loads;
+    connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
+
+    QElapsedTimer timer;
+    timer.start();
+    eq.awaitOutput(&control, 200);
+    control.apply(QStringLiteral("auto"));
+    QVERIFY(timer.elapsed() < 500);
+    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl get-default-sink\n")), 1, waitMs);
+    QVERIFY(timer.elapsed() >= 200);
+    QVERIFY(loads.isEmpty());
+
+    QVERIFY(QFile::remove(m_defaultGateFile));
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("headphones")}), waitMs);
+
+    QVERIFY(QFile::remove(m_gateFile));
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("headphones"), QStringLiteral("usb")}), waitMs);
+    QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 1);
+}
+
+void OutputTest::eqFailedResolveLoadsSinkDefault()
+{
+    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-failed")).toUtf8());
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsbOnly)));
+    QVERIFY(writeFile(m_defaultFile, QStringLiteral("alsa_output.usb-DAC.analog-stereo\n")));
+    Settings settings(m_dir.path() + QStringLiteral("/eq-failed.ini"));
+    EqControl eq(&settings);
+    OutputControl control;
+    QSignalSpy first(&control, &OutputControl::firstApplied);
+    QStringList loads;
+    connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
+
+    eq.awaitOutput(&control, 60000);
+    control.apply(QStringLiteral("speaker"));
+    QTRY_COMPARE_WITH_TIMEOUT(first.count(), 1, waitMs);
+    QVERIFY(!first.at(0).at(0).toBool());
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("usb")}), waitMs);
+
+    control.apply(QStringLiteral("speaker"));
+    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl list sinks short\n")), 2, waitMs);
+    QTest::qWait(200);
+    QCOMPARE(first.count(), 1);
+}
+
+void OutputTest::eqMissingPactlLoadsSpeaker()
+{
+    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-missing")).toUtf8());
+    qputenv("CASDAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
+    Settings settings(m_dir.path() + QStringLiteral("/eq-missing.ini"));
+    EqControl eq(&settings);
+    OutputControl control;
+    QStringList loads;
+    connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
+
+    eq.awaitOutput(&control, 200);
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("speaker")}), waitMs);
+    QTest::qWait(200);
+    QCOMPARE(loads, QStringList({QStringLiteral("speaker")}));
+}
+
+void OutputTest::eqHangingSinkLoadsSpeaker()
+{
+    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-hanging")).toUtf8());
+    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    QVERIFY(writeFile(m_defaultFile, OutputControl::headphonesSink() + QStringLiteral("\n")));
+    QVERIFY(writeFile(m_defaultGateFile, QString()));
+    Settings settings(m_dir.path() + QStringLiteral("/eq-hanging.ini"));
+    EqControl eq(&settings);
+    OutputControl control;
+    QStringList loads;
+    connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
+
+    QTest::ignoreMessage(QtWarningMsg, "casdap eq: get-default-sink timed out");
+    QElapsedTimer timer;
+    timer.start();
+    eq.awaitOutput(&control, 200);
+    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl get-default-sink\n")), 1, waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("speaker")}), waitMs);
+    QVERIFY(timer.elapsed() >= 200 + EqControl::sinkTimeoutMs);
+
+    QVERIFY(QFile::remove(m_defaultGateFile));
+    QTest::qWait(300);
+    QCOMPARE(loads, QStringList({QStringLiteral("speaker")}));
+    QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 1);
 }
 
 QTEST_GUILESS_MAIN(OutputTest)

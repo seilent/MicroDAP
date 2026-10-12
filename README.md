@@ -1215,9 +1215,13 @@ emits `profileApplied` for the key of the active output on every output change, 
 key or its store, and a relist that finds a missing file again; a change to another output's key or store is
 written only. The active output is `OutputControl.activeOutput` in DAP mode; under `--overlay` `pactl
 get-default-sink` is polled every 2 s (`CASDAP_PACTL_BIN`, async, a run still going at the next tick is killed)
-and a changed mapping is applied. At start the output of `pactl get-default-sink` (`alsa_output.usb-*` usb, the
-headphones sink headphones, anything else speaker, `speaker` when the read fails) is applied before `state.json`
-is restored. Profiles are AutoEQ
+and a changed mapping is applied. At start in DAP mode no profile loads before the first `OutputControl` resolve
+(`firstApplied`): a resolve that succeeds loads its output's key, a failed one or no resolve within 3000 ms
+(`EqControl::startBoundMs`) runs one async `pactl get-default-sink` and loads that output unless a resolve landed
+first; nothing blocks the first frame or `state.json`. Under `--overlay` the output of `pactl get-default-sink` is
+applied before `state.json` is restored. The sink maps `alsa_output.usb-*` to usb, the headphones sink to
+headphones, anything else to speaker, and a failed read (no `pactl`, an exit other than 0, or a start read still running
+after 1000 ms, killed) to `speaker`. Profiles are AutoEQ
 `ParametricEQ.txt` and Equalizer APO files (`Preamp: <g> dB`, `Filter[ <n>]: ON|OFF <code> Fc <f> Hz[ Gain <g>
 dB][ Q <q>]`, case insensitive). Codes: `PK` peak (Gain and Q required); `LSC`, `LS` low shelf and `HSC`, `HS`
 high shelf (Gain required, Q 0.71 when absent); `LP`, `LPQ` low pass, `HP`, `HPQ` high pass, `BP` band pass (the
