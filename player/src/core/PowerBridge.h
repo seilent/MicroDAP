@@ -102,6 +102,7 @@ public:
     bool switching() const;
 
     Q_INVOKABLE bool runVerb(const QString &verb);
+    Q_INVOKABLE void runScreenOff();
     Q_INVOKABLE void reloadDrift();
     Q_INVOKABLE void keepInBackground();
     Q_INVOKABLE void closeAndSwitch();
@@ -121,6 +122,7 @@ signals:
     void switchFailed();
     void switchingChanged();
     void wakeFinished(bool ok);
+    void verbFailed(const QString &verb);
 
 private slots:
     void onVolumeChanged(double level);
@@ -142,6 +144,7 @@ private:
     void failSwitch(SwitchFailure kind, const QString &reason);
     void dropSwitchProcess();
     void dropWakeProcess();
+    void dropScreenOffProcess();
     void notifyPlaybackStatus();
     void notifyOverlayShown();
     void emitPropertiesChanged(const QVariantMap &changed);
@@ -158,6 +161,7 @@ private:
     SleepInhibitor *m_sleep = nullptr;
     QProcess *m_switch = nullptr;
     QProcess *m_wake = nullptr;
+    QProcess *m_screenOffRun = nullptr;
     QTimer m_switchTimer;
     QTimer m_readyTimer;
     bool m_switching = false;

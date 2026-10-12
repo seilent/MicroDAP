@@ -126,6 +126,7 @@ PowerBridge::~PowerBridge()
 {
     dropSwitchProcess();
     dropWakeProcess();
+    dropScreenOffProcess();
     if (!m_registered)
         return;
     m_bus.unregisterService(serviceName());
@@ -439,6 +440,51 @@ bool PowerBridge::runVerb(const QString &verb)
         qWarning() << "casdap power: cannot start" << program << "for" << verb;
     }
     return started;
+}
+
+void PowerBridge::runScreenOff()
+{
+    if (m_screenOffRun) {
+        qInfo() << "casdap power: screen-off already running";
+        return;
+    }
+    QStringList command = commandFor(QStringLiteral("screen-off"));
+    const QString program = programPath(command.takeFirst());
+    qInfo() << "casdap power: verb screen-off" << program << command;
+    auto *process = new QProcess(this);
+    m_screenOffRun = process;
+    connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
+        if (m_screenOffRun != process)
+            return;
+        dropScreenOffProcess();
+        if (status == QProcess::NormalExit && code == 0)
+            return;
+        qWarning() << "casdap power: screen-off exited" << code;
+        emit verbFailed(QStringLiteral("screen-off"));
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart || m_screenOffRun != process)
+            return;
+        qWarning() << "casdap power: cannot start" << process->program() << "for screen-off";
+        dropScreenOffProcess();
+        emit verbFailed(QStringLiteral("screen-off"));
+    });
+    process->start(program, command);
+}
+
+void PowerBridge::dropScreenOffProcess()
+{
+    if (!m_screenOffRun)
+        return;
+    QProcess *process = m_screenOffRun;
+    m_screenOffRun = nullptr;
+    process->disconnect(this);
+    if (process->state() != QProcess::NotRunning) {
+        connect(process, &QProcess::finished, process, &QObject::deleteLater);
+        process->kill();
+        return;
+    }
+    process->deleteLater();
 }
 
 void PowerBridge::reloadDrift()

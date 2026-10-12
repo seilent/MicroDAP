@@ -410,11 +410,11 @@ Window {
     }
 
     function requestScreenOff(): void {
-        if (root.power === null || typeof root.power.runVerb !== "function") {
+        if (root.power === null || typeof root.power.runScreenOff !== "function") {
             console.info("casdap: screen off timer, no power bridge")
             return
         }
-        root.power.runVerb("screen-off")
+        root.power.runScreenOff()
     }
 
     function navigate(name: string) {
@@ -751,6 +751,11 @@ Window {
 
         function onSwitchFailed() {
             root.switchFailed()
+        }
+
+        function onVerbFailed(verb) {
+            if (verb === "screen-off")
+                root.armScreenOff()
         }
     }
 

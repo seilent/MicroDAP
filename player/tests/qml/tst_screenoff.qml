@@ -23,10 +23,16 @@ TestCase {
         signal showPowerMenu()
         signal switchFailed()
         signal volumeChanged(int volume)
+        signal verbFailed(string verb)
 
         function runVerb(verb) {
             fakePower.verbs = fakePower.verbs.concat([verb])
             return true
+        }
+
+        function runScreenOff() {
+            fakePower.calls = fakePower.calls.concat(["screen-off"])
+            fakePower.verbs = fakePower.verbs.concat(["screen-off"])
         }
 
         function keepInBackground() {
@@ -318,6 +324,18 @@ TestCase {
         compare(main.screenOffTimer.running, false)
         menu.close()
         menu.complete()
+    }
+
+    function test_screen_off_timer_rearms_on_failure() {
+        fakeSettings.screenOffSeconds = 1
+        tryVerify(() => fakePower.calls.indexOf("screen-off") >= 0, 3000)
+        compare(main.screenOffTimer.running, false)
+        fakePower.verbFailed("screen-off")
+        compare(main.screenOffTimer.running, true)
+        tryVerify(() => fakePower.calls.length === 2, 3000)
+        compare(fakePower.calls, ["screen-off", "screen-off"])
+        fakePower.verbFailed("suspend")
+        compare(main.screenOffTimer.running, false)
     }
 
     function test_screen_off_timer_restarts_on_action() {

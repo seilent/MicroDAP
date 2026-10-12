@@ -203,6 +203,7 @@ private slots:
     void volume();
     void verbs();
     void powerBinPath();
+    void screenOffTracked();
     void sleepWatch();
     void keepMarker();
     void keepInBackground();
@@ -764,6 +765,28 @@ void PowerTest::verbs()
     qputenv("CASDAP_POWER_BIN", (m_stubDir + QStringLiteral("/casdap-power")).toUtf8());
     QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 5, busTimeoutMs);
+}
+
+void PowerTest::screenOffTracked()
+{
+    QFile::remove(m_log);
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::verbFailed);
+    m_bridge->runScreenOff();
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QTest::qWait(200);
+    QCOMPARE(failed.count(), 0);
+    QCOMPARE(readFile(m_log), QStringLiteral("casdap-power screen-off\n"));
+
+    QVERIFY(writeStub(QStringLiteral("casdap-power"), QStringLiteral("1")));
+    QTest::ignoreMessage(QtWarningMsg, "casdap power: screen-off exited 1");
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("^casdap power")));
+    m_bridge->runScreenOff();
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QCOMPARE(failed.at(0).at(0).toString(), QStringLiteral("screen-off"));
+    QCOMPARE(logLines(), 2);
+    QTest::qWait(200);
+    QCOMPARE(failed.count(), 1);
+    QVERIFY(writeStub(QStringLiteral("casdap-power")));
 }
 
 void PowerTest::powerBinPath()

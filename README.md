@@ -571,10 +571,12 @@ black, and after the next `frameSwapped` (one black frame, O64) the page stack a
 hidden (`rootHidden`); the saver and screen off timers stop. `PadRouter` drops every action and `Pad`
 stops polling. `screenOff` false shows
 the same page again with no transition, restores `Ui.bg` and restarts both timers from zero. The screen off
-timer (`screenOffTimer`, `Settings.screenOffSeconds`) runs `PowerBridge.runVerb("screen-off")` after that
+timer (`screenOffTimer`, `Settings.screenOffSeconds`) runs `PowerBridge.runScreenOff()` after that
 long without a routed action, playing or not and with a dialog up; OFF (0) never arms, overlay mode never
 arms, a tracked switch (`PowerBridge.switching`) cancels it, every routed action and `screenOff` false
-restart it.
+restart it. `runScreenOff()` runs `casdap-power screen-off` through a tracked `QProcess` (one at a time, a second
+call logs `screen-off already running`); an exit other than 0 or a failed start logs one warning and emits
+`verbFailed("screen-off")`, and the timer arms again.
 
 Screenshot mode: `casdap-player --screenshot <screen> --size WxH --out file.png [--angle deg] [--overlay]
 [--orientation portrait|portrait-flipped|landscape|landscape-flipped]` (a portrait `--size` renders the rotor at
