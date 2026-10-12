@@ -904,7 +904,7 @@ While a title runs the first hold is ignored and a
 second hold within 3 s switches. Tap in game mode runs `systemctl --user is-active
 casdap-overlay.service`; `active` means a background player exists and the tap calls
 `busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player ToggleOverlay`,
-anything else logs `no background player`. The tap takes its time from the `evtest` event line: a tap
+`activating` logs `overlay player starting` and runs nothing, anything else logs `no background player`. The tap takes its time from the `evtest` event line: a tap
 whose release came before the last `ToggleOverlay` call returned logs `tap during a toggle, dropped`, one
 older than `CASDAP_HOTKEYD_TAP_MAX_AGE_MS` (default 300) logs `tap <n> ms old, dropped`, and each call
 logs `ToggleOverlay rc=<rc> in <n> ms`. `Call failed: The name is not activatable` (the unit is

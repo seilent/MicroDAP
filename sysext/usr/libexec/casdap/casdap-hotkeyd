@@ -256,11 +256,11 @@ on_tap() {
     case "$1" in
         casdap) mpris PlayPause ;;
         game)
-            if [[ "$(systemctl --user is-active casdap-overlay.service 2>/dev/null)" == active ]]; then
-                tap_overlay "${2:-}"
-            else
-                log "no background player"
-            fi
+            case "$(systemctl --user is-active casdap-overlay.service 2>/dev/null)" in
+                active) tap_overlay "${2:-}" ;;
+                activating) log "overlay player starting" ;;
+                *) log "no background player" ;;
+            esac
             ;;
         *) log "tap in ${1}, ignored" ;;
     esac

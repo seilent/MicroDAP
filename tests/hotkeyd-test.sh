@@ -231,6 +231,11 @@ run_case "tap in game" game 0 0 "press;sleep 0.05;release"
 expect_calls 0
 expect_log "no background player"
 
+OVERLAY=activating run_case "tap in game while the overlay unit starts" game 0 0 "press;sleep 0.05;release"
+expect_calls 0
+expect_log "overlay player starting"
+expect_no_log "no background player"
+
 OVERLAY=active run_case "tap in game with background player" game 0 0 "press;sleep 0.05;release"
 expect_call "${toggle}"
 expect_calls 1
