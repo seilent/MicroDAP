@@ -25,6 +25,7 @@
 | home | `pressed` | `--size 640x960` and `960x640` | focused menu item at F3 scale | pending |
 | quickplay | `pressed` | `--size 640x960` and `960x640` | focused tile at F3 scale inside its slot | pending |
 | nowplaying | `pressed` | `--size 640x960` and `960x640` | focused ring at F3 scale | pending |
+| nowplaying | `outside-library` | `--size 640x960`, `--orientation landscape` and `960x640` | no rate ring, shuffle and repeat at their NP_RINGS centers | pending |
 | settings | `touch-edit` | `--size 640x960` and `960x640` | TOUCH draft OFF in accent after AUTO ROTATE | pending |
 | settings | `touch` | `--size 640x960` and `960x640` | TOUCH reads ON after AUTO ROTATE, focus on TOUCH | pending |
 | eq | `pressed` | `--size 640x960` and `960x640` | renders as browse (EQ rows have no F3) | pending |

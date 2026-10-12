@@ -46,7 +46,7 @@ Item {
         readonly property int status: 1
         readonly property real position: 5000
         readonly property real duration: 233000
-        readonly property var current: Object.assign({ rating: 0 }, sampleQueue.rows[0])
+        readonly property var current: Object.assign({ rating: 0 }, sampleQueue.rows[0], root.fixture === "outside-library" ? { id: 0 } : {})
         readonly property QtObject queue: sampleQueue
     }
 

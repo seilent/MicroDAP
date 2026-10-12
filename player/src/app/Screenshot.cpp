@@ -140,6 +140,7 @@ const QStringList &states()
         QStringLiteral("auto-rotate-off"),
         QStringLiteral("auto-rotate-edit"),
         QStringLiteral("pressed"),
+        QStringLiteral("outside-library"),
         QStringLiteral("touch-scrolled"),
         QStringLiteral("touch"),
         QStringLiteral("touch-edit"),

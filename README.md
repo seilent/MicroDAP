@@ -587,6 +587,7 @@ sensor that reads unsupported, `auto-rotate-below` focuses SAVER with AUTO ROTAT
 AUTO ROTATE with it OFF, `auto-rotate-edit` opens its edit and steps to ON; the `settings` sample reads AUTO ROTATE OFF;
 `pressed` sets `pressed` on the `hub`, `album`, `queue`, `home`, `quickplay` and `nowplaying` page so the focused
 item shows its F3 scale (on `hub` a focused divider or letter tile first moves down or right to a song row or album cell),
+`outside-library` plays a `nowplaying` track with id 0,
 `touch-scrolled` sets the `hub` or `queue` list `contentY` to one and a half rows and runs `clampFocusToView()`,
 `touch` focuses TOUCH on `settings`, `touch-edit` also opens its edit with OFF drafted; the `settings` sample reads TOUCH ON;
 `bit-perfect` focuses BIT PERFECT ON on a USB output, `bit-perfect-edit` opens its edit with EXCLUSIVE drafted,
