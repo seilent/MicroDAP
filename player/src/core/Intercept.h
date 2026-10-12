@@ -38,6 +38,7 @@ public:
 
     bool shown() const;
     void setShown(bool shown);
+    void reassert();
     QStringList devices() const;
     QStringList targets() const;
     bool hasTargets() const;
@@ -53,8 +54,10 @@ private slots:
     void onServiceUnregistered();
 
 private:
-    void write(const QString &path, uint mode, bool retry = true);
+    void write(const QString &path, uint mode);
     void writeAll(uint mode);
+    void verifyReleased(const QString &path);
+    void retryRelease(const QString &path);
     void track(const QString &path, const InterfaceList &interfaces, bool &devices, bool &targets);
 
     QDBusConnection m_bus;
@@ -65,6 +68,8 @@ private:
     QSet<QString> m_targets;
     QSet<QString> m_inFlight;
     QHash<QString, uint> m_pending;
+    QHash<QString, int> m_releaseTries;
+    int m_retryMs;
     quint64 m_generation = 0;
 };
 

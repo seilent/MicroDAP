@@ -478,8 +478,10 @@ void OverlayBridge::onPrepareForSleep(bool start)
         return;
     }
     setSleeping(false);
-    if (m_pad)
+    if (m_pad) {
         m_pad->setShown(false);
+        m_pad->intercept()->reassert();
+    }
     m_sleep->take();
 }
 

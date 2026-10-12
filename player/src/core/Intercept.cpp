@@ -17,6 +17,7 @@ namespace {
 
 constexpr int exitWriteTimeoutMs = 1000;
 constexpr int releaseRetryMs = 1000;
+constexpr int releaseTries = 30;
 
 QString propertiesInterface()
 {
@@ -71,6 +72,9 @@ Intercept::Intercept(const QDBusConnection &bus, QObject *parent)
     : QObject(parent)
     , m_bus(bus)
     , m_watcher(service(), bus, QDBusServiceWatcher::WatchForOwnerChange)
+    , m_retryMs(qEnvironmentVariableIntValue("CASDAP_INTERCEPT_RETRY_MS") > 0
+                    ? qEnvironmentVariableIntValue("CASDAP_INTERCEPT_RETRY_MS")
+                    : releaseRetryMs)
 {
     registerMetaTypes();
     connect(&m_watcher, &QDBusServiceWatcher::serviceRegistered, this, &Intercept::refresh);
@@ -156,7 +160,16 @@ void Intercept::setShown(bool shown)
     m_shown = shown;
     if (shown)
         m_everShown = true;
+    m_releaseTries.clear();
     writeAll(shown ? ModeOverlay : ModeNone);
+}
+
+void Intercept::reassert()
+{
+    if (m_shown)
+        return;
+    m_releaseTries.clear();
+    writeAll(ModeNone);
 }
 
 QStringList Intercept::devices() const
@@ -283,7 +296,7 @@ void Intercept::writeAll(uint mode)
         write(path, mode);
 }
 
-void Intercept::write(const QString &path, uint mode, bool retry)
+void Intercept::write(const QString &path, uint mode)
 {
     if (!m_bus.isConnected()) {
         qWarning() << "casdap intercept: bus not connected, skipping" << path << mode;
@@ -296,33 +309,67 @@ void Intercept::write(const QString &path, uint mode, bool retry)
     m_inFlight.insert(path);
     auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(setModeCall(path, mode)), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
-            [this, path, mode, retry](QDBusPendingCallWatcher *finished) {
+            [this, path, mode](QDBusPendingCallWatcher *finished) {
         finished->deleteLater();
         m_inFlight.remove(path);
         const QDBusMessage reply = finished->reply();
         const bool failed = reply.type() == QDBusMessage::ErrorMessage;
         const bool queued = m_pending.contains(path);
         const uint next = m_pending.take(path);
-        if (queued && m_devices.contains(path)) {
+        if (queued && m_devices.contains(path) && (failed || next != mode)) {
             if (failed)
                 qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
-            if (failed || next != mode)
-                write(path, next);
+            write(path, next);
             return;
         }
-        if (!failed)
-            return;
-        if (mode == ModeNone && !retry) {
-            qWarning() << "casdap intercept: intercept release failed" << path << reply.errorMessage();
+        if (mode != ModeNone) {
+            if (failed)
+                qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
             return;
         }
-        qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
-        if (mode == ModeNone && !m_shown) {
-            QTimer::singleShot(releaseRetryMs, this, [this, path] {
-                if (!m_shown && m_devices.contains(path))
-                    write(path, ModeNone, false);
-            });
+        if (m_shown || !m_devices.contains(path)) {
+            m_releaseTries.remove(path);
+            return;
         }
+        if (failed)
+            retryRelease(path);
+        else
+            verifyReleased(path);
+    });
+}
+
+void Intercept::verifyReleased(const QString &path)
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(service(), path, propertiesInterface(), QStringLiteral("Get"));
+    call << compositeInterface() << interceptModeProperty();
+    auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, path](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        if (m_shown || !m_devices.contains(path)) {
+            m_releaseTries.remove(path);
+            return;
+        }
+        const QDBusMessage reply = finished->reply();
+        if (reply.type() != QDBusMessage::ErrorMessage && unwrap(reply.arguments().value(0)).toUInt() == ModeNone) {
+            m_releaseTries.remove(path);
+            return;
+        }
+        retryRelease(path);
+    });
+}
+
+void Intercept::retryRelease(const QString &path)
+{
+    const int tries = ++m_releaseTries[path];
+    if (tries >= releaseTries) {
+        m_releaseTries.remove(path);
+        qWarning() << "casdap intercept: release gave up" << path << "after" << tries << "tries";
+        return;
+    }
+    QTimer::singleShot(m_retryMs, this, [this, path] {
+        if (m_shown || !m_devices.contains(path) || !m_releaseTries.contains(path))
+            return;
+        write(path, ModeNone);
     });
 }
 

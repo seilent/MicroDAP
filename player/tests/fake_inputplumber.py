@@ -33,12 +33,19 @@ class UnknownObject(dbus.DBusException):
     _dbus_error_name = 'org.freedesktop.DBus.Error.UnknownObject'
 
 
+class AccessDenied(dbus.DBusException):
+    _dbus_error_name = 'org.freedesktop.DBus.Error.AccessDenied'
+
+
 class CompositeDevice(dbus.service.Object):
     def __init__(self, bus, path, fake):
         super().__init__(bus, path)
         self.path = path
         self.fake = fake
         self.writes = []
+        self.attempts = 0
+        self.refuse = 0
+        self.stick = 0
         self.props = {
             'Name': dbus.String('Fake Composite'),
             'InterceptMode': dbus.UInt32(0),
@@ -66,10 +73,18 @@ class CompositeDevice(dbus.service.Object):
             raise InvalidArgs(f'{interface}.{name}')
         if not isinstance(value, dbus.UInt32):
             raise InvalidArgs(f'{name}: {type(value).__name__}')
-        self.props[name] = dbus.UInt32(value)
-        self.writes.append(int(value))
-        self.PropertiesChanged(COMPOSITE, dbus.Dictionary({name: self.props[name]}, signature='sv'),
-                               dbus.Array([], signature='s'))
+        self.attempts += 1
+        if self.refuse > 0:
+            self.refuse -= 1
+            error(AccessDenied(f'{name} refused'))
+            return
+        if self.stick > 0:
+            self.stick -= 1
+        else:
+            self.props[name] = dbus.UInt32(value)
+            self.writes.append(int(value))
+            self.PropertiesChanged(COMPOSITE, dbus.Dictionary({name: self.props[name]}, signature='sv'),
+                                   dbus.Array([], signature='s'))
         if self.fake.delay_ms > 0:
             GLib.timeout_add(self.fake.delay_ms, lambda: reply() or False)
         else:
@@ -152,6 +167,35 @@ class Control(dbus.service.Object):
         for obj in self.fake.objects.values():
             if isinstance(obj, CompositeDevice):
                 obj.writes = []
+                obj.attempts = 0
+
+    @dbus.service.method(CONTROL, in_signature='s', out_signature='u')
+    def Attempts(self, path):
+        obj = self.fake.objects.get(str(path))
+        if not isinstance(obj, CompositeDevice):
+            raise UnknownObject(str(path))
+        return dbus.UInt32(obj.attempts)
+
+    @dbus.service.method(CONTROL, in_signature='su', out_signature='')
+    def SetMode(self, path, mode):
+        obj = self.fake.objects.get(str(path))
+        if not isinstance(obj, CompositeDevice):
+            raise UnknownObject(str(path))
+        obj.props['InterceptMode'] = dbus.UInt32(mode)
+
+    @dbus.service.method(CONTROL, in_signature='su', out_signature='')
+    def Refuse(self, path, count):
+        obj = self.fake.objects.get(str(path))
+        if not isinstance(obj, CompositeDevice):
+            raise UnknownObject(str(path))
+        obj.refuse = int(count)
+
+    @dbus.service.method(CONTROL, in_signature='su', out_signature='')
+    def Stick(self, path, count):
+        obj = self.fake.objects.get(str(path))
+        if not isinstance(obj, CompositeDevice):
+            raise UnknownObject(str(path))
+        obj.stick = int(count)
 
     @dbus.service.method(CONTROL, in_signature='u', out_signature='')
     def SetDelay(self, ms):

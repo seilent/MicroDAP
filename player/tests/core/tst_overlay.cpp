@@ -123,6 +123,11 @@ private slots:
     void prepareForSleepHides();
     void resumeTakesNewInhibitor();
     void prepareForSleepWhileHidden();
+    void resumeRewritesZero();
+    void releaseRetriesUntilZero();
+    void releaseRetriesUntilReadZero();
+    void releaseGivesUpAfterThirty();
+    void showStopsReleaseRetry();
     void hideSavesStack();
     void closePlayer();
     void closePlayerTimeout();
@@ -132,6 +137,8 @@ private:
     QDBusMessage control(const QString &method, const QList<QVariant> &arguments = {});
     QDBusMessage login1(const QString &method, const QList<QVariant> &arguments = {});
     int mode(const QString &path);
+    int attempts(const QString &path);
+    void sleepAndResume();
     int inhibitCount();
     int openFds();
     int depth() const;
@@ -190,6 +197,22 @@ int OverlayTest::mode(const QString &path)
     if (reply.type() == QDBusMessage::ErrorMessage)
         return -1;
     return reply.arguments().value(0).toInt();
+}
+
+int OverlayTest::attempts(const QString &path)
+{
+    const QDBusMessage reply = control(QStringLiteral("Attempts"), {path});
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return -1;
+    return reply.arguments().value(0).toInt();
+}
+
+void OverlayTest::sleepAndResume()
+{
+    login1(QStringLiteral("EmitPrepareForSleep"), {true});
+    QTRY_VERIFY_WITH_TIMEOUT(m_overlay->sleeping(), busTimeoutMs);
+    login1(QStringLiteral("EmitPrepareForSleep"), {false});
+    QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->sleeping(), busTimeoutMs);
 }
 
 int OverlayTest::inhibitCount()
@@ -320,6 +343,7 @@ void OverlayTest::initTestCase()
     qputenv("CASDAP_CODEC_BIN", (m_dir.path() + QStringLiteral("/casdap-codec")).toUtf8());
 
     qputenv("CASDAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+    qputenv("CASDAP_INTERCEPT_RETRY_MS", QByteArrayLiteral("50"));
     qputenv("CASDAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
     QDBusConnection bus = Intercept::bus();
     QVERIFY2(bus.isConnected(), qPrintable(bus.lastError().message()));
@@ -766,6 +790,75 @@ void OverlayTest::prepareForSleepWhileHidden()
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->sleeping(), busTimeoutMs);
     QVERIFY(m_overlay->sleep()->held());
     QCOMPARE(m_overlay->sleep()->takeCount(), takes + 1);
+}
+
+void OverlayTest::resumeRewritesZero()
+{
+    settleHidden();
+    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(mode(devicePath(0)), 3);
+    sleepAndResume();
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QVERIFY(!m_overlay->shown());
+}
+
+void OverlayTest::releaseRetriesUntilZero()
+{
+    settleHidden();
+    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 2u}).type(), QDBusMessage::ReplyMessage);
+    sleepAndResume();
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QCOMPARE(attempts(devicePath(0)), 3);
+    QTest::qWait(300);
+    QCOMPARE(attempts(devicePath(0)), 3);
+}
+
+void OverlayTest::releaseRetriesUntilReadZero()
+{
+    settleHidden();
+    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("Stick"), {devicePath(0), 2u}).type(), QDBusMessage::ReplyMessage);
+    sleepAndResume();
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QCOMPARE(attempts(devicePath(0)), 3);
+    QTest::qWait(300);
+    QCOMPARE(attempts(devicePath(0)), 3);
+}
+
+void OverlayTest::releaseGivesUpAfterThirty()
+{
+    settleHidden();
+    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 100u}).type(), QDBusMessage::ReplyMessage);
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^casdap intercept: release gave up")));
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("^casdap intercept")));
+    sleepAndResume();
+    QTRY_COMPARE_WITH_TIMEOUT(attempts(devicePath(0)), 30, busTimeoutMs);
+    QTest::qWait(500);
+    QCOMPARE(attempts(devicePath(0)), 30);
+    QCOMPARE(mode(devicePath(0)), 3);
+    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 0u}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 0u}).type(), QDBusMessage::ReplyMessage);
+}
+
+void OverlayTest::showStopsReleaseRetry()
+{
+    settleHidden();
+    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 100u}).type(), QDBusMessage::ReplyMessage);
+    sleepAndResume();
+    QTRY_VERIFY_WITH_TIMEOUT(attempts(devicePath(0)) >= 2, busTimeoutMs);
+    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 0u}).type(), QDBusMessage::ReplyMessage);
+    m_overlay->show();
+    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
+    QTest::qWait(300);
+    QCOMPARE(mode(devicePath(0)), 3);
+    settleHidden();
 }
 
 void OverlayTest::hideSavesStack()
