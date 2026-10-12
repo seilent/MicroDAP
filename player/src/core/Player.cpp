@@ -1005,7 +1005,7 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
     m_historyCounted = true;
     setPosition(0);
     setUri(pending.entry.path);
-    m_playAfterSeek = m_policy && target == GST_STATE_PLAYING && pending.positionMs > 0;
+    m_playAfterSeek = target == GST_STATE_PLAYING && pending.positionMs > 0;
     gst_element_set_state(m_playbin, m_playAfterSeek ? GST_STATE_PAUSED : target);
     setStatus(target == GST_STATE_PLAYING ? Playing : Paused);
     emit currentChanged();
@@ -1344,7 +1344,7 @@ void Player::handleStreamStart()
     m_firstErrorRow = -1;
     m_historyCounted = same && m_listenCounted;
     m_listenStarted = true;
-    if (!m_policy || m_pendingSeek < 0)
+    if (m_pendingSeek < 0)
         setPosition(0);
     updateDuration();
     readFormats();

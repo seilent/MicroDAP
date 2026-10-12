@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cmath>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -195,6 +196,7 @@ private slots:
     void badSinkConfigure();
     void guardBeforeAdmit();
     void rateTailNoWarnings();
+    void resumeSeeksBeforeAudio();
 
 private:
     int historyCount() const;
@@ -1434,6 +1436,49 @@ void PlayerTest::eqHammer()
                                 .arg(peak / bound)
                                 .toUtf8()
                                 .constData());
+}
+
+void PlayerTest::resumeSeeksBeforeAudio()
+{
+    QueueEntry entry;
+    entry.path = m_dir.path() + QStringLiteral("/resume.flac");
+    entry.title = QStringLiteral("Resume");
+    entry.durationMs = 100000;
+    QVERIFY(encodeSine(entry.path, 100));
+    auto player = withEnv("CASDAP_AUDIO_SINK",
+                          QByteArrayLiteral("appsink name=casdap-resume sync=false caps=audio/x-raw,format=F32LE"));
+    QVERIFY(player->audioSink());
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "casdap-resume");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+
+    std::atomic<qint64> minPts{std::numeric_limits<qint64>::max()};
+    std::atomic<int> buffers{0};
+    auto pull = [&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            GstSample *sample = nullptr;
+            g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(200 * GST_MSECOND), &sample);
+            if (!sample)
+                continue;
+            GstBuffer *buffer = gst_sample_get_buffer(sample);
+            if (buffer && GST_BUFFER_PTS_IS_VALID(buffer)) {
+                const qint64 pts = qint64(GST_BUFFER_PTS(buffer) / GST_MSECOND);
+                if (pts < minPts.load())
+                    minPts.store(pts);
+                ++buffers;
+            }
+            gst_sample_unref(sample);
+        }
+    };
+
+    std::jthread puller(pull);
+    player->restore({entry}, 0, 90000, true, {});
+    QCOMPARE(player->status(), Player::Playing);
+    QTRY_VERIFY_WITH_TIMEOUT(buffers.load() > 20, playTimeoutMs);
+    player->stop();
+    puller.request_stop();
+    puller.join();
+    QVERIFY2(minPts.load() >= 89000, QByteArray::number(minPts.load()).constData());
 }
 
 void PlayerTest::eqTypesMapped()
