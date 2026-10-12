@@ -5,6 +5,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -87,6 +88,7 @@ private slots:
     void levelOffRestoresAsToday();
     void pauseAndPausedSeekSaved();
     void restorePendingSkipsPauseSave();
+    void emptyOrderKeepsListOrder();
 
 private:
     qint64 savePlaying(const QString &path, bool handoff);
@@ -271,6 +273,41 @@ void StateTest::restorePendingSkipsPauseSave()
     QTRY_VERIFY_WITH_TIMEOUT(State::read(path, object) && !object.value(QStringLiteral("handoff")).toBool(true), 1000);
     QVERIFY(qAbs(static_cast<qint64>(object.value(QStringLiteral("position")).toDouble()) - 4000) <= 50);
     QCOMPARE(object.value(QStringLiteral("status")).toString(), QStringLiteral("paused"));
+}
+
+void StateTest::emptyOrderKeepsListOrder()
+{
+    const QString path = m_dir.path() + QStringLiteral("/empty-order/state.json");
+    QJsonArray ids;
+    QJsonArray paths;
+    for (const QueueEntry &entry : std::as_const(m_entries)) {
+        ids.append(0);
+        paths.append(entry.path);
+    }
+    QJsonObject queue;
+    queue.insert(QStringLiteral("rev"), 3);
+    queue.insert(QStringLiteral("index"), 1);
+    queue.insert(QStringLiteral("ids"), ids);
+    queue.insert(QStringLiteral("paths"), paths);
+    queue.insert(QStringLiteral("order"), QJsonArray());
+    QVERIFY(State::write(State::queuePathFor(path), queue));
+    QJsonObject saved;
+    saved.insert(QStringLiteral("index"), 1);
+    saved.insert(QStringLiteral("position"), 0);
+    saved.insert(QStringLiteral("shuffle"), true);
+    saved.insert(QStringLiteral("status"), QStringLiteral("paused"));
+    saved.insert(QStringLiteral("queueRev"), 3);
+    QVERIFY(State::write(path, saved));
+
+    for (int run = 0; run < 2; ++run) {
+        Player player;
+        State state(&player, path);
+        QVERIFY(state.load());
+        QVERIFY(player.queue()->shuffle());
+        QCOMPARE(player.queue()->currentIndex(), 1);
+        QCOMPARE(player.queue()->order(), QList<int>({0, 1}));
+        player.stop();
+    }
 }
 
 QTEST_GUILESS_MAIN(StateTest)

@@ -84,7 +84,7 @@ Page {
     function rowsUpdated(pivot: int, from: int): void {
         page.fixFocus(pivot)
         if (d.ready && pivot === page.shownPivot && page.live && !page.arriving && !page.switching)
-            page.refreshFrom(from)
+            page.refreshFrom(from < 0 ? page.panes[pivot].focusIndex : from)
     }
 
     function refreshFrom(index: int): void {
@@ -320,7 +320,7 @@ Page {
         ignoreUnknownSignals: true
 
         function onModelReset() {
-            page.rowsUpdated(0, 0)
+            page.rowsUpdated(0, -1)
         }
 
         function onRowsInserted(parent, first, last) {
@@ -345,7 +345,7 @@ Page {
         ignoreUnknownSignals: true
 
         function onModelReset() {
-            page.rowsUpdated(1, 0)
+            page.rowsUpdated(1, -1)
         }
 
         function onRowsInserted(parent, first, last) {

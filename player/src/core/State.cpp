@@ -23,6 +23,7 @@
 #include <atomic>
 #include <csignal>
 #include <fcntl.h>
+#include <numeric>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -552,11 +553,16 @@ bool State::restoreQueue(const QJsonObject &state, bool hasState)
 void State::restorePlayer(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing,
                           const QList<int> &order)
 {
+    QList<int> kept = order;
+    if (kept.isEmpty() && m_player->queue()->shuffle()) {
+        kept.resize(entries.size());
+        std::iota(kept.begin(), kept.end(), 0);
+    }
     if (!m_restore || !m_restore->levelSet()) {
-        m_player->restore(entries, index, positionMs, playing, order);
+        m_player->restore(entries, index, positionMs, playing, kept);
         return;
     }
-    m_player->restore(entries, index, positionMs, false, order);
+    m_player->restore(entries, index, positionMs, false, kept);
     m_player->park(positionMs);
     if (playing)
         m_restore->restorePlaying(true);

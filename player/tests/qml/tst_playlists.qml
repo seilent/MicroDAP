@@ -527,6 +527,24 @@ TestCase {
         compare(tc.rowAt(page.recentPane, 0).enter, 1)
     }
 
+    function test_history_f12_reset_from_focused_row() {
+        const page = open(historyComponent, { animated: true, player: fakePlayer })
+        for (let i = 0; i < 3; i++)
+            verify(router.dispatch("down", false))
+        compare(page.rowIndex, 3)
+        recent.modelReset()
+        tryVerify(function() {
+            const r = page.recentPane.itemAtIndex(3)
+            return r !== null && r.enter < 1
+        }, 1000)
+        compare(tc.rowAt(page.recentPane, 3).stagger, 0)
+        compare(tc.rowAt(page.recentPane, 4).stagger, 50)
+        compare(tc.rowAt(page.recentPane, 0).enter, 1)
+        compare(tc.rowAt(page.recentPane, 2).enter, 1)
+        compare(page.rowIndex, 3)
+        tryCompare(tc.rowAt(page.recentPane, 3), "enter", 1, 2000)
+    }
+
     function tapAt(item, x, y) {
         mouseClick(item, x, y)
         wait(0)
