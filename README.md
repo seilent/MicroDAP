@@ -1000,7 +1000,7 @@ reads true, the deferral is logged and the restart runs when `transportActive` g
 unchanged file runs nothing. `restarting` is true while the restart runs, `restartFinished(ok)` ends it;
 a failed restart leaves `pending` true. The phone picks among the offered codecs when it connects.
 `BluezModel.transportState` reads the selected device's `MediaTransport1.State` as `idle`, `pending` or `active`,
-and `none` with no transport; `transportActive` is true only for `active`. `restartForNet(reason)` restarts
+and `none` with no transport; `transportActive` is true only for `active`. `BluezModel.volume` is `MediaTransport1.Volume` (0 to 127) in percent; `volumeChanged` follows every read; `phoneVolumeChanged`, and with it the volume overlay, follows a changed value only, not the first read at start or after a device connects. `restartForNet(reason)` restarts
 WirePlumber for the release net: a restart already running is joined (its `restartFinished` counts, also when
 `apply` replaces it), and it refuses with any transport present (returns false). A net restart that succeeds
 clears `pending` unless a deferred write came during it; a failed one leaves `pending` as it was. When it ends with

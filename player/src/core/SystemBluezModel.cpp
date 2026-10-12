@@ -393,6 +393,7 @@ void SystemBluezModel::clearDevice()
     updateConnected(false);
     updateDeviceName({});
     m_transportVolume = -1;
+    forgetVolume();
 }
 
 void SystemBluezModel::apply()

@@ -36,6 +36,7 @@ void FakeBluezModel::clearAll()
     setPairingRemaining(0);
     setConnected(false);
     setDeviceName({});
+    forgetVolume();
 }
 
 bool FakeBluezModel::applyPreset(const QString &name)

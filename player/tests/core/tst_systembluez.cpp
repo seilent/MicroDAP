@@ -405,6 +405,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     void initialState();
+    void startVolumeSilent();
     void transportStates();
     void propertiesChanged();
     void positionPolling();
@@ -518,6 +519,17 @@ void SystemBluezTest::initialState()
     QCOMPARE(m_model->pairingRemaining(), 0);
     QVERIFY(m_model->active());
     QVERIFY(!m_model->pollingPosition());
+}
+
+void SystemBluezTest::startVolumeSilent()
+{
+    SystemBluezModel model(QDBusConnection::sessionBus(), QDBusConnection::sessionBus());
+    QSignalSpy volumeSpy(&model, &BluezModel::volumeChanged);
+    QSignalSpy phoneSpy(&model, &BluezModel::phoneVolumeChanged);
+    QTRY_VERIFY_WITH_TIMEOUT(model.connected(), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(model.volume(), 50, busTimeoutMs);
+    QVERIFY(!volumeSpy.isEmpty());
+    QCOMPARE(phoneSpy.count(), 0);
 }
 
 void SystemBluezTest::transportStates()
@@ -713,16 +725,26 @@ void SystemBluezTest::deviceLifecycle()
     InterfaceList transportInterfaces;
     transportInterfaces.insert(mediaTransport1(), transportProps);
     QSignalSpy volumeSpy(m_model.get(), &BluezModel::volumeChanged);
+    QSignalSpy phoneSpy(m_model.get(), &BluezModel::phoneVolumeChanged);
     QVERIFY(m_fake->add(secondDevicePath() + QStringLiteral("/fd0"), transportInterfaces, true));
     QTRY_VERIFY_WITH_TIMEOUT(m_model->transportActive(), busTimeoutMs);
     QCOMPARE(m_model->volume(), 100);
     QCOMPARE(volumeSpy.count(), 1);
+    QCOMPARE(phoneSpy.count(), 0);
+
+    FakeObject *transport = m_fake->object(secondDevicePath() + QStringLiteral("/fd0"));
+    QVERIFY(transport);
+    transport->set(mediaTransport1(), QStringLiteral("Volume"), QVariant::fromValue(static_cast<ushort>(64)));
+    QTRY_COMPARE_WITH_TIMEOUT(phoneSpy.count(), 1, busTimeoutMs);
+    QCOMPARE(phoneSpy.at(0).at(0).toInt(), 50);
+    QCOMPARE(volumeSpy.count(), 2);
 }
 
 void SystemBluezTest::transportStateNone()
 {
     QCOMPARE(m_model->transportState(), QStringLiteral("active"));
     QSignalSpy stateSpy(m_model.get(), &BluezModel::transportStateChanged);
+    QSignalSpy phoneSpy(m_model.get(), &BluezModel::phoneVolumeChanged);
     FakeObject *second = m_fake->object(secondDevicePath());
     QVERIFY(second);
     second->set(device1(), QStringLiteral("Connected"), false);
@@ -733,6 +755,8 @@ void SystemBluezTest::transportStateNone()
     QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("active"), busTimeoutMs);
     QVERIFY(m_model->transportActive());
     QCOMPARE(stateSpy.count(), 2);
+    QCOMPARE(m_model->volume(), 50);
+    QCOMPARE(phoneSpy.count(), 0);
 
     QVERIFY(m_fake->remove(secondDevicePath() + QStringLiteral("/fd0")));
     QTRY_COMPARE_WITH_TIMEOUT(m_model->transportState(), QStringLiteral("none"), busTimeoutMs);

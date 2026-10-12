@@ -87,6 +87,7 @@ signals:
     void shuffleChanged();
     void repeatChanged();
     void volumeChanged(int volume);
+    void phoneVolumeChanged(int volume);
     void batteryChanged();
     void pairingChanged();
     void pairingRemainingChanged();
@@ -110,6 +111,7 @@ protected:
     void updateShuffle(const QString &shuffle);
     void updateRepeat(const QString &repeat);
     void updateVolume(int percent);
+    void forgetVolume();
     void updateBattery(int percent);
     void updatePairing(bool pairing);
     void updatePairingRemaining(int seconds);
@@ -130,6 +132,7 @@ private:
     QString m_shuffle = QStringLiteral("off");
     QString m_repeat = QStringLiteral("off");
     int m_volume = 0;
+    bool m_volumeKnown = false;
     int m_battery = -1;
     bool m_pairing = false;
     int m_pairingRemaining = 0;

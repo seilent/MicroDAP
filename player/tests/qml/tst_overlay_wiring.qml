@@ -57,6 +57,7 @@ TestCase {
         property string status: "stopped"
 
         signal volumeChanged(int volume)
+        signal phoneVolumeChanged(int volume)
 
         function reset() {
             fakeBluez.transportActive = false
@@ -129,7 +130,9 @@ TestCase {
 
     function test_volume_from_bluez() {
         open("home")
-        fakeBluez.volumeChanged(50)
+        fakeBluez.volumeChanged(40)
+        compare(layer.volume.shown, false)
+        fakeBluez.phoneVolumeChanged(50)
         compare(layer.volume.level, 50)
         compare(layer.volume.shown, true)
         compare(layer.volume.hide.running, true)
@@ -240,7 +243,7 @@ TestCase {
         compare(layer.volume.level, 20)
         compare(layer.volume.shown, false)
         compare(layer.volume.visible, false)
-        fakeBluez.volumeChanged(60)
+        fakeBluez.phoneVolumeChanged(60)
         compare(layer.volume.level, 60)
         compare(layer.volume.shown, false)
         fakePlayer.current = ({ id: 2, title: "Later", artist: "other" })

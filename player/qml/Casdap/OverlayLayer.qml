@@ -97,7 +97,7 @@ Item {
         target: layer.bluez
         ignoreUnknownSignals: true
 
-        function onVolumeChanged(level) {
+        function onPhoneVolumeChanged(level) {
             layer.showVolume(level === undefined ? layer.bluez.volume : level)
         }
 

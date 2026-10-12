@@ -63,14 +63,24 @@ void BluezTest::volumeMapping()
 
     FakeBluezModel fake;
     QSignalSpy spy(&fake, &BluezModel::volumeChanged);
+    QSignalSpy phone(&fake, &BluezModel::phoneVolumeChanged);
     fake.setTransportVolume(64);
     QCOMPARE(fake.volume(), 50);
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.at(0).at(0).toInt(), 50);
+    QCOMPARE(phone.count(), 0);
     fake.setTransportVolume(64);
     QCOMPARE(spy.count(), 2);
+    QCOMPARE(phone.count(), 0);
     fake.setVolume(130);
     QCOMPARE(fake.volume(), 100);
+    QCOMPARE(phone.count(), 1);
+    QCOMPARE(phone.at(0).at(0).toInt(), 100);
+    fake.applyPreset(QStringLiteral("off"));
+    fake.setTransportVolume(32);
+    QCOMPARE(fake.volume(), 25);
+    QCOMPARE(spy.count(), 4);
+    QCOMPARE(phone.count(), 1);
 }
 
 void BluezTest::propertySignals()

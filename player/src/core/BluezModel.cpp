@@ -251,8 +251,18 @@ void BluezModel::updateRepeat(const QString &repeat)
 
 void BluezModel::updateVolume(int percent)
 {
-    m_volume = qBound(0, percent, 100);
+    const int volume = qBound(0, percent, 100);
+    const bool phone = m_volumeKnown && volume != m_volume;
+    m_volume = volume;
+    m_volumeKnown = true;
     emit volumeChanged(m_volume);
+    if (phone)
+        emit phoneVolumeChanged(m_volume);
+}
+
+void BluezModel::forgetVolume()
+{
+    m_volumeKnown = false;
 }
 
 void BluezModel::updateBattery(int percent)
