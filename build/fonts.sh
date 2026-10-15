@@ -22,8 +22,8 @@ if ! echo "${license_sha}  ${cache}/LICENSE.txt" | sha256sum -c --status 2>/dev/
     echo "${license_sha}  ${cache}/LICENSE.txt" | sha256sum -c --status || { echo "fonts.sh: Selawik license sha256 mismatch" >&2; exit 1; }
 fi
 
-mkdir -p "${dist}/usr/share/fonts/casdap" "${dist}/usr/share/licenses/casdap"
+mkdir -p "${dist}/usr/share/fonts/microdap" "${dist}/usr/share/licenses/microdap"
 for face in ${faces}; do
-    unzip -o -q -j "${zip}" "${face}.ttf" -d "${dist}/usr/share/fonts/casdap"
+    unzip -o -q -j "${zip}" "${face}.ttf" -d "${dist}/usr/share/fonts/microdap"
 done
-cp "${cache}/LICENSE.txt" "${dist}/usr/share/licenses/casdap/Selawik.txt"
+cp "${cache}/LICENSE.txt" "${dist}/usr/share/licenses/microdap/Selawik.txt"

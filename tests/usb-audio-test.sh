@@ -3,17 +3,17 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-helper="${repo}/sysext/usr/libexec/casdap/casdap-usb-audio"
-rules="${repo}/sysext/usr/lib/udev/rules.d/70-casdap-usb-audio.rules"
-unit="${repo}/sysext/usr/lib/systemd/system/casdap-usb-audio.service"
-wants="${repo}/sysext/usr/lib/systemd/system/multi-user.target.d/50-casdap.conf"
+helper="${repo}/sysext/usr/libexec/microdap/microdap-usb-audio"
+rules="${repo}/sysext/usr/lib/udev/rules.d/70-microdap-usb-audio.rules"
+unit="${repo}/sysext/usr/lib/systemd/system/microdap-usb-audio.service"
+wants="${repo}/sysext/usr/lib/systemd/system/multi-user.target.d/50-microdap.conf"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
 mkdir -p "${T}/bin"
 export LOG="${T}/log"
-export CASDAP_SYS_ROOT="${T}/sys"
-R="${CASDAP_SYS_ROOT}"
+export MICRODAP_SYS_ROOT="${T}/sys"
+R="${MICRODAP_SYS_ROOT}"
 
 cat > "${T}/bin/logger" <<'STUB'
 #!/usr/bin/bash
@@ -96,7 +96,7 @@ expect_log() {
 expect_handled() {
     expect_unbind "$1:1.0"
     expect_power "$1" auto 2000
-    expect_log "casdap-usb-audio: $1 2972:0149 hid $1:1.0 unbound" "casdap-usb-audio: $1 autosuspend on"
+    expect_log "microdap-usb-audio: $1 2972:0149 hid $1:1.0 unbound" "microdap-usb-audio: $1 autosuspend on"
 }
 expect_untouched() {
     expect_unbind ""
@@ -104,7 +104,7 @@ expect_untouched() {
 }
 expect_skipped() {
     expect_untouched "$1"
-    expect_log "casdap-usb-audio: $1 skipped, generic desktop hid"
+    expect_log "microdap-usb-audio: $1 skipped, generic desktop hid"
 }
 
 begin fiio
@@ -167,7 +167,7 @@ expect_unbind "3-1:1.0"
 expect_power 3-1 auto 2000
 expect_power 3-2 on 100
 expect_power usb3 on 100
-expect_log "casdap-usb-audio: 3-1 2972:0149 hid 3-1:1.0 unbound" "casdap-usb-audio: 3-1 autosuspend on" "casdap-usb-audio: 3-2 skipped, generic desktop hid"
+expect_log "microdap-usb-audio: 3-1 2972:0149 hid 3-1:1.0 unbound" "microdap-usb-audio: 3-1 autosuspend on" "microdap-usb-audio: 3-2 skipped, generic desktop hid"
 
 begin unreadable
 dac 3-1 none
@@ -195,7 +195,7 @@ mkdir "${R}/bus/usb/drivers/usbhid/unbind"
 run "$(devpath 3-1)"
 expect_rc 0
 expect_power 3-1 auto 2000
-expect_log "casdap-usb-audio: 3-1 2972:0149 hid 3-1:1.0 unbind failed" "casdap-usb-audio: 3-1 autosuspend on"
+expect_log "microdap-usb-audio: 3-1 2972:0149 hid 3-1:1.0 unbind failed" "microdap-usb-audio: 3-1 autosuspend on"
 
 begin gd-page-2-bytes
 dac 3-1 '06 01 00 09 05 a1 01 c0'
@@ -254,14 +254,14 @@ for f in "${helper}" "${rules}" "${unit}" "${wants}"; do
         fail "${f} has a comment"
     fi
 done
-grep -qxF 'ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/libexec/casdap/casdap-usb-audio %S%p"' "${rules}" || fail "rules lack the usb_device line"
-grep -qxF 'ACTION=="bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", DRIVER=="usbhid", RUN+="/usr/libexec/casdap/casdap-usb-audio %S%p/.."' "${rules}" || fail "rules lack the usbhid interface line"
+grep -qxF 'ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/libexec/microdap/microdap-usb-audio %S%p"' "${rules}" || fail "rules lack the usb_device line"
+grep -qxF 'ACTION=="bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_interface", DRIVER=="usbhid", RUN+="/usr/libexec/microdap/microdap-usb-audio %S%p/.."' "${rules}" || fail "rules lack the usbhid interface line"
 grep -qxF 'ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2972", ATTR{idProduct}=="0149", GROUP="audio", MODE="0660", TAG+="systemd"' "${rules}" || fail "rules lack the fiio node line"
-grep -qxF 'ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2972", ATTR{idProduct}=="0149", ENV{SYSTEMD_USER_WANTS}+="casdap-fiio-reset.service"' "${rules}" || fail "rules lack the fiio plug in line"
-grep -qxF 'ExecStart=/usr/libexec/casdap/casdap-usb-audio --scan' "${unit}" || fail "unit lacks the scan"
+grep -qxF 'ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2972", ATTR{idProduct}=="0149", ENV{SYSTEMD_USER_WANTS}+="microdap-fiio-reset.service"' "${rules}" || fail "rules lack the fiio plug in line"
+grep -qxF 'ExecStart=/usr/libexec/microdap/microdap-usb-audio --scan' "${unit}" || fail "unit lacks the scan"
 grep -qxF 'RemainAfterExit=yes' "${unit}" || fail "unit lacks RemainAfterExit=yes"
-grep -qxF 'Upholds=casdap-guard.service casdap-usb-audio.service' "${wants}" || fail "multi-user drop in lacks the Upholds line"
-grep -qxF 'EXTENSION_RELOAD_MANAGER=1' "${repo}/sysext/usr/lib/extension-release.d/extension-release.casdap" \
+grep -qxF 'Upholds=microdap-guard.service microdap-usb-audio.service' "${wants}" || fail "multi-user drop in lacks the Upholds line"
+grep -qxF 'EXTENSION_RELOAD_MANAGER=1' "${repo}/sysext/usr/lib/extension-release.d/extension-release.microdap" \
     || fail "extension-release does not ask for a manager reload"
 
 if (( failures )); then

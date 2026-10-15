@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import Casdap
+import MicroDap
 
 TestCase {
     id: tc
@@ -84,7 +84,7 @@ TestCase {
         ]
 
         function artistInfo(id) {
-            return { id: id, name: "Addison Road", artPath: "/tmp/casdap-artist.jpg" }
+            return { id: id, name: "Addison Road", artPath: "/tmp/microdap-artist.jpg" }
         }
 
         function artistAlbums(id) {
@@ -93,7 +93,7 @@ TestCase {
 
         function albumInfo(id) {
             if (id === 1)
-                return { id: 1, title: "Addison Road", artist: "Addison Road", year: 2008, artPath: "/tmp/casdap-album.jpg" }
+                return { id: 1, title: "Addison Road", artist: "Addison Road", year: 2008, artPath: "/tmp/microdap-album.jpg" }
             if (id === 2)
                 return { id: 2, title: "Stories", artist: "Addison Road", year: 0, artPath: "" }
             return {}
@@ -513,7 +513,7 @@ TestCase {
 
     function test_artist_backdrop() {
         const page = openArtist({ animated: true })
-        compare(page.artPath, "/tmp/casdap-artist.jpg")
+        compare(page.artPath, "/tmp/microdap-artist.jpg")
         compare(page.backdrop.source.toString(), "")
         compare(page.backdrop.hasArt, false)
         compare(page.backdrop.holding, true)
@@ -594,7 +594,7 @@ TestCase {
         compare(page.artItem.y, Ui.px(155))
         compare(page.artItem.width, Ui.px(116))
         compare(page.artItem.height, Ui.px(116))
-        compare(page.artItem.source.toString(), "file:///tmp/casdap-album.jpg")
+        compare(page.artItem.source.toString(), "file:///tmp/microdap-album.jpg")
         compare(page.trackList.x, 0)
         compare(page.trackList.y, Ui.px(155 + 116 + 12))
         compare(page.trackList.y, Ui.px(283))

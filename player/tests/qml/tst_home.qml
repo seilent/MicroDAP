@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import Casdap
+import MicroDap
 
 TestCase {
     id: tc
@@ -713,7 +713,7 @@ TestCase {
 
     function test_watermark() {
         const page = open()
-        compare(page.watermark.text, "casdap")
+        compare(page.watermark.text, "microdap")
         compare(page.watermark.x, Ui.px(70))
         verify(page.watermark.parent === page.menuPanel)
         fuzzyCompare(page.watermark.y + page.watermark.baselineOffset, page.height - Ui.px(16), 0.5)

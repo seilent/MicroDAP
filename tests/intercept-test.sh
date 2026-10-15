@@ -3,7 +3,7 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-intercept="${repo}/sysext/usr/libexec/casdap/casdap-intercept"
+intercept="${repo}/sysext/usr/libexec/microdap/microdap-intercept"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
@@ -81,7 +81,7 @@ touch "${MODES}/fail"
 run 0
 [[ "${rc}" == 0 ]] || fail "0 with failing set-property exit ${rc}"
 [[ "$(count "set-property")" == 2 ]] || fail "0 with failing set-property stopped early: $(cat "${STATE}")"
-[[ "$(count "^logger -t casdap-intercept set ${dev0} InterceptMode 0 failed")" == 1 ]] || fail "0 failure not logged: $(cat "${STATE}")"
+[[ "$(count "^logger -t microdap-intercept set ${dev0} InterceptMode 0 failed")" == 1 ]] || fail "0 failure not logged: $(cat "${STATE}")"
 
 reset
 modes 0 3

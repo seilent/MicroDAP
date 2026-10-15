@@ -29,7 +29,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -302,7 +302,7 @@ QVariant PowerTest::savedState(const QString &key) const
 bool PowerTest::startLogin1()
 {
     m_login1.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    m_login1.start(QStringLiteral("python3"), {QStringLiteral(CASDAP_FAKE_LOGIN1)});
+    m_login1.start(QStringLiteral("python3"), {QStringLiteral(MICRODAP_FAKE_LOGIN1)});
     if (!m_login1.waitForStarted(busTimeoutMs))
         return false;
     QDBusConnectionInterface *iface = QDBusConnection::sessionBus().interface();
@@ -321,8 +321,8 @@ bool PowerTest::startLogin1()
 QDBusMessage PowerTest::login1(const QString &method, const QList<QVariant> &arguments)
 {
     QDBusMessage call = QDBusMessage::createMethodCall(SleepInhibitor::service(),
-                                                       QStringLiteral("/org/casdap/FakeLogin1"),
-                                                       QStringLiteral("org.casdap.FakeLogin1"), method);
+                                                       QStringLiteral("/net/seilent/MicroDap/FakeLogin1"),
+                                                       QStringLiteral("net.seilent.MicroDap.FakeLogin1"), method);
     call.setArguments(arguments);
     return QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
 }
@@ -342,8 +342,8 @@ void PowerTest::initTestCase()
         QSKIP("no session bus, run under dbus-run-session");
 
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
 
     QVERIFY(m_dir.isValid());
     m_stubDir = m_dir.path() + QStringLiteral("/bin");
@@ -351,27 +351,27 @@ void PowerTest::initTestCase()
     QVERIFY(QDir().mkpath(m_emptyDir));
     m_log = m_dir.path() + QStringLiteral("/verbs.log");
     m_driftFile = m_dir.path() + QStringLiteral("/drift");
-    m_keepFile = m_dir.path() + QStringLiteral("/config/casdap/keep");
+    m_keepFile = m_dir.path() + QStringLiteral("/config/microdap/keep");
     m_bootIdFile = m_dir.path() + QStringLiteral("/boot_id");
-    m_stateFile = m_dir.path() + QStringLiteral("/config/casdap/state.json");
-    QVERIFY(writeStub(QStringLiteral("casdap-power")));
+    m_stateFile = m_dir.path() + QStringLiteral("/config/microdap/state.json");
+    QVERIFY(writeStub(QStringLiteral("microdap-power")));
     QVERIFY(writeStub(QStringLiteral("systemctl")));
     QVERIFY(writeFile(m_driftFile, QStringLiteral("/usr/libexec/armada/session-control\n\n")));
     QVERIFY(writeFile(m_bootIdFile, QStringLiteral("  0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10 \n")));
-    qputenv("CASDAP_DRIFT_FILE", m_driftFile.toUtf8());
-    qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
-    qputenv("CASDAP_POWER_BIN", (m_stubDir + QStringLiteral("/casdap-power")).toUtf8());
-    qputenv("CASDAP_KEEP_FILE", m_keepFile.toUtf8());
-    qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
-    qputenv("CASDAP_SWITCH_TIMEOUT_MS", QByteArrayLiteral("400"));
+    qputenv("MICRODAP_DRIFT_FILE", m_driftFile.toUtf8());
+    qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
+    qputenv("MICRODAP_POWER_BIN", (m_stubDir + QStringLiteral("/microdap-power")).toUtf8());
+    qputenv("MICRODAP_KEEP_FILE", m_keepFile.toUtf8());
+    qputenv("MICRODAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
+    qputenv("MICRODAP_SWITCH_TIMEOUT_MS", QByteArrayLiteral("400"));
     const QString asound = m_dir.path() + QStringLiteral("/asound/card1");
     QVERIFY(writeFile(asound + QStringLiteral("/id"), QStringLiteral("B\n")));
     QVERIFY(writeFile(asound + QStringLiteral("/pcm0p/sub0/status"), QStringLiteral("closed\n")));
-    qputenv("CASDAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
     qputenv("PATH", m_stubDir.toUtf8() + ':' + qgetenv("PATH"));
     m_login1Running = startLogin1();
     if (m_login1Running)
-        qputenv("CASDAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+        qputenv("MICRODAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
 
     m_bridge = std::make_unique<PowerBridge>(nullptr, bus);
     QVERIFY(m_bridge->isRegistered());
@@ -419,7 +419,7 @@ void PowerTest::registered()
                                   QStringLiteral("org.freedesktop.DBus.Introspectable"), bus);
     QDBusReply<QString> xml = introspectable.call(QStringLiteral("Introspect"));
     QVERIFY2(xml.isValid(), qPrintable(xml.error().message()));
-    QVERIFY(xml.value().contains(QStringLiteral("org.casdap.Player")));
+    QVERIFY(xml.value().contains(QStringLiteral("net.seilent.MicroDap.Player")));
     QVERIFY(xml.value().contains(QStringLiteral("SetScreenOff")));
     QVERIFY(xml.value().contains(QStringLiteral("ShowPowerMenu")));
     QVERIFY(xml.value().contains(QStringLiteral("ScreenOff")));
@@ -441,14 +441,14 @@ void PowerTest::registered()
 void PowerTest::secondInstanceNotRegistered()
 {
     QDBusConnection second = QDBusConnection::connectToBus(QDBusConnection::SessionBus,
-                                                           QStringLiteral("casdap-test-second"));
+                                                           QStringLiteral("microdap-test-second"));
     QVERIFY(second.isConnected());
     {
         PowerBridge other(nullptr, second);
         QVERIFY(!other.isRegistered());
         QVERIFY(m_bridge->isRegistered());
     }
-    QDBusConnection::disconnectFromBus(QStringLiteral("casdap-test-second"));
+    QDBusConnection::disconnectFromBus(QStringLiteral("microdap-test-second"));
 
     QDBusReply<QString> owner = QDBusConnection::sessionBus().interface()->serviceOwner(PowerBridge::serviceName());
     QVERIFY2(owner.isValid(), qPrintable(owner.error().message()));
@@ -547,10 +547,10 @@ void PowerTest::keepInBackground()
     QCOMPARE(readFile(m_keepFile), QStringLiteral("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n"));
     QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
 
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: keep in background");
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: switch already running");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: keep in background");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: switch already running");
     m_bridge->keepInBackground();
     QCoreApplication::processEvents();
     QCOMPARE(logLines(), 1);
@@ -578,10 +578,10 @@ void PowerTest::closeAndSwitch()
     QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
     QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
 
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: close player");
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: switch already running");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: close player");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: switch already running");
     m_bridge->closeAndSwitch();
     QCoreApplication::processEvents();
     QCOMPARE(logLines(), 1);
@@ -611,17 +611,17 @@ void PowerTest::switchFails()
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, busTimeoutMs);
     QVERIFY(!QFile::exists(m_keepFile));
 
-    qputenv("CASDAP_VERB_DIR", m_emptyDir.toUtf8());
+    qputenv("MICRODAP_VERB_DIR", m_emptyDir.toUtf8());
     m_bridge->keepInBackground();
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 3, busTimeoutMs);
     QVERIFY(!m_bridge->switching());
     QVERIFY(!QFile::exists(m_keepFile));
-    qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
+    qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
     QVERIFY(writeStub(QStringLiteral("systemctl")));
 
     const int lines = logLines();
     QSignalSpy switching(m_bridge.get(), &PowerBridge::switchingChanged);
-    qputenv("CASDAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/missing")).toUtf8());
+    qputenv("MICRODAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/missing")).toUtf8());
     m_bridge->keepInBackground();
     QCOMPARE(failed.count(), 4);
     QCOMPARE(switching.count(), 0);
@@ -630,10 +630,10 @@ void PowerTest::switchFails()
     QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
     QCoreApplication::processEvents();
     QCOMPARE(logLines(), lines);
-    qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
+    qputenv("MICRODAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap power: session bus not connected");
-    PowerBridge detached(nullptr, QDBusConnection(QStringLiteral("casdap-no-session-bus")));
+    QTest::ignoreMessage(QtWarningMsg, "microdap power: session bus not connected");
+    PowerBridge detached(nullptr, QDBusConnection(QStringLiteral("microdap-no-session-bus")));
     QCOMPARE(detached.state(), nullptr);
     QSignalSpy detachedFailed(&detached, &PowerBridge::switchFailed);
     detached.keepInBackground();
@@ -673,9 +673,9 @@ void PowerTest::switchStalls()
 
 void PowerTest::overlayNotSupported()
 {
-    QCOMPARE(PowerBridge::notSupportedError(), QStringLiteral("org.casdap.Error.NotSupported"));
+    QCOMPARE(PowerBridge::notSupportedError(), QStringLiteral("net.seilent.MicroDap.Error.NotSupported"));
     for (const char *member : {"ShowOverlay", "HideOverlay", "ToggleOverlay"}) {
-        const QByteArray called = QByteArrayLiteral("casdap power: ") + member;
+        const QByteArray called = QByteArrayLiteral("microdap power: ") + member;
         const QByteArray rejected = called + QByteArrayLiteral(" needs overlay mode");
         QTest::ignoreMessage(QtInfoMsg, called.constData());
         QTest::ignoreMessage(QtInfoMsg, rejected.constData());
@@ -685,9 +685,9 @@ void PowerTest::overlayNotSupported()
     }
     QCOMPARE(m_remote->property("OverlayShown").toBool(), false);
     QVERIFY(!m_bridge->overlayShown());
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowOverlay needs overlay mode");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: ShowOverlay needs overlay mode");
     m_bridge->showOverlay();
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: ToggleOverlay needs overlay mode");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: ToggleOverlay needs overlay mode");
     m_bridge->toggleOverlay();
     QVERIFY(!m_bridge->overlayShown());
     QCOMPARE(m_remote->property("ScreenOff").toBool(), false);
@@ -696,7 +696,7 @@ void PowerTest::overlayNotSupported()
 void PowerTest::volume()
 {
     QDBusConnection emitter = QDBusConnection::connectToBus(QDBusConnection::SessionBus,
-                                                            QStringLiteral("casdap-test-hotkeys"));
+                                                            QStringLiteral("microdap-test-hotkeys"));
     QVERIFY(emitter.isConnected());
     QSignalSpy spy(m_bridge.get(), &PowerBridge::volumeChanged);
 
@@ -730,25 +730,25 @@ void PowerTest::volume()
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 4, busTimeoutMs);
     QCOMPARE(m_bridge->volume(), 0);
 
-    QDBusConnection::disconnectFromBus(QStringLiteral("casdap-test-hotkeys"));
+    QDBusConnection::disconnectFromBus(QStringLiteral("microdap-test-hotkeys"));
 }
 
 void PowerTest::verbs()
 {
     QCOMPARE(PowerBridge::verbs().size(), 4);
     QFile::remove(m_log);
-    qputenv("CASDAP_VERB_DIR", m_stubDir.toUtf8());
+    qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
 
     for (const QString &verb : PowerBridge::verbs())
         QVERIFY2(m_bridge->runVerb(verb), qPrintable(verb));
 
     QTRY_VERIFY_WITH_TIMEOUT(logLines() >= 4, busTimeoutMs);
     const QString log = readFile(m_log);
-    QVERIFY2(log.contains(QStringLiteral("casdap-power screen-off\n")), qPrintable(log));
-    QVERIFY2(log.contains(QStringLiteral("systemctl start casdap-switch-back.service\n")),
+    QVERIFY2(log.contains(QStringLiteral("microdap-power screen-off\n")), qPrintable(log));
+    QVERIFY2(log.contains(QStringLiteral("systemctl start microdap-switch-back.service\n")),
              qPrintable(log));
-    QVERIFY2(log.contains(QStringLiteral("casdap-power suspend\n")), qPrintable(log));
-    QVERIFY2(log.contains(QStringLiteral("casdap-power poweroff\n")), qPrintable(log));
+    QVERIFY2(log.contains(QStringLiteral("microdap-power suspend\n")), qPrintable(log));
+    QVERIFY2(log.contains(QStringLiteral("microdap-power poweroff\n")), qPrintable(log));
 
     QVERIFY(!m_bridge->runVerb(QStringLiteral("rm")));
     QVERIFY(!m_bridge->runVerb(QStringLiteral("rm -rf /")));
@@ -758,11 +758,11 @@ void PowerTest::verbs()
     QCoreApplication::processEvents();
     QCOMPARE(logLines(), 4);
 
-    qputenv("CASDAP_POWER_BIN", (m_emptyDir + QStringLiteral("/casdap-power")).toUtf8());
+    qputenv("MICRODAP_POWER_BIN", (m_emptyDir + QStringLiteral("/microdap-power")).toUtf8());
     QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
     QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
     QCOMPARE(logLines(), 4);
-    qputenv("CASDAP_POWER_BIN", (m_stubDir + QStringLiteral("/casdap-power")).toUtf8());
+    qputenv("MICRODAP_POWER_BIN", (m_stubDir + QStringLiteral("/microdap-power")).toUtf8());
     QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 5, busTimeoutMs);
 }
@@ -775,35 +775,35 @@ void PowerTest::screenOffTracked()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QTest::qWait(200);
     QCOMPARE(failed.count(), 0);
-    QCOMPARE(readFile(m_log), QStringLiteral("casdap-power screen-off\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("microdap-power screen-off\n"));
 
-    QVERIFY(writeStub(QStringLiteral("casdap-power"), QStringLiteral("1")));
-    QTest::ignoreMessage(QtWarningMsg, "casdap power: screen-off exited 1");
-    QTest::failOnWarning(QRegularExpression(QStringLiteral("^casdap power")));
+    QVERIFY(writeStub(QStringLiteral("microdap-power"), QStringLiteral("1")));
+    QTest::ignoreMessage(QtWarningMsg, "microdap power: screen-off exited 1");
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("^microdap power")));
     m_bridge->runScreenOff();
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
     QCOMPARE(failed.at(0).at(0).toString(), QStringLiteral("screen-off"));
     QCOMPARE(logLines(), 2);
     QTest::qWait(200);
     QCOMPARE(failed.count(), 1);
-    QVERIFY(writeStub(QStringLiteral("casdap-power")));
+    QVERIFY(writeStub(QStringLiteral("microdap-power")));
 }
 
 void PowerTest::powerBinPath()
 {
-    const QByteArray saved = qgetenv("CASDAP_POWER_BIN");
-    qunsetenv("CASDAP_POWER_BIN");
-    QCOMPARE(PowerBridge::powerBin(), QStringLiteral("/usr/libexec/casdap/casdap-power"));
+    const QByteArray saved = qgetenv("MICRODAP_POWER_BIN");
+    qunsetenv("MICRODAP_POWER_BIN");
+    QCOMPARE(PowerBridge::powerBin(), QStringLiteral("/usr/libexec/microdap/microdap-power"));
     QCOMPARE(PowerBridge::commandFor(QStringLiteral("screen-off")),
-             QStringList({QStringLiteral("/usr/libexec/casdap/casdap-power"), QStringLiteral("screen-off")}));
+             QStringList({QStringLiteral("/usr/libexec/microdap/microdap-power"), QStringLiteral("screen-off")}));
     QCOMPARE(PowerBridge::commandFor(QStringLiteral("suspend")).constFirst(),
-             QStringLiteral("/usr/libexec/casdap/casdap-power"));
+             QStringLiteral("/usr/libexec/microdap/microdap-power"));
     QCOMPARE(PowerBridge::commandFor(QStringLiteral("poweroff")).constFirst(),
-             QStringLiteral("/usr/libexec/casdap/casdap-power"));
+             QStringLiteral("/usr/libexec/microdap/microdap-power"));
     QCOMPARE(PowerBridge::wakeCommand(),
-             QStringList({QStringLiteral("/usr/libexec/casdap/casdap-power"), QStringLiteral("screen-on")}));
+             QStringList({QStringLiteral("/usr/libexec/microdap/microdap-power"), QStringLiteral("screen-on")}));
     QCOMPARE(PowerBridge::commandFor(QStringLiteral("game-mode")).constFirst(), QStringLiteral("systemctl"));
-    qputenv("CASDAP_POWER_BIN", saved);
+    qputenv("MICRODAP_POWER_BIN", saved);
     QCOMPARE(PowerBridge::powerBin(), QString::fromUtf8(saved));
 }
 
@@ -824,7 +824,7 @@ void PowerTest::sleepWatch()
     QTRY_COMPARE_WITH_TIMEOUT(login1Count(QStringLiteral("OpenFds")), 1, busTimeoutMs);
     const QDBusMessage last = login1(QStringLiteral("LastInhibit"));
     QCOMPARE(last.arguments().value(0).toStringList(),
-             QStringList({QStringLiteral("sleep"), QStringLiteral("casdap"), QStringLiteral("save state"),
+             QStringList({QStringLiteral("sleep"), QStringLiteral("microdap"), QStringLiteral("save state"),
                           QStringLiteral("delay")}));
     m_bridge->enableSleepWatch();
     QCOMPARE(m_bridge->sleep()->takeCount(), 1);
@@ -850,7 +850,7 @@ void PowerTest::sleepWatch()
     QCOMPARE(wake.at(0).at(0).toBool(), true);
     QVERIFY(!m_bridge->waking());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("casdap-power screen-on\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("microdap-power screen-on\n"));
     QCOMPARE(m_player->status(), Player::Stopped);
 }
 
@@ -877,7 +877,7 @@ void PowerTest::drift()
 
 void PowerTest::settingsPersist()
 {
-    QVERIFY(Settings::defaultPath().endsWith(QStringLiteral("/casdap/settings.ini")));
+    QVERIFY(Settings::defaultPath().endsWith(QStringLiteral("/microdap/settings.ini")));
     const QString path = m_dir.path() + QStringLiteral("/settings.ini");
     {
         Settings settings(path);
@@ -1086,7 +1086,7 @@ void PowerTest::statusSysfs()
     QVERIFY(writeFile(root + QStringLiteral("/BAT0/capacity"), QStringLiteral("73\n")));
     QVERIFY(writeFile(root + QStringLiteral("/BAT0/status"), QStringLiteral("Charging\n")));
 
-    StatusModel status(QDBusConnection(QStringLiteral("casdap-no-system-bus")), root);
+    StatusModel status(QDBusConnection(QStringLiteral("microdap-no-system-bus")), root);
     QVERIFY(!status.usesUPower());
     QVERIFY(status.batteryPresent());
     QCOMPARE(status.battery(), 73);
@@ -1115,7 +1115,7 @@ void PowerTest::statusSysfs()
     status.setActive(true);
     QCOMPARE(status.battery(), 50);
 
-    StatusModel none(QDBusConnection(QStringLiteral("casdap-no-system-bus")), m_emptyDir);
+    StatusModel none(QDBusConnection(QStringLiteral("microdap-no-system-bus")), m_emptyDir);
     QVERIFY(!none.batteryPresent());
     QCOMPARE(none.battery(), -1);
     QVERIFY(!none.charging());
@@ -1155,8 +1155,8 @@ void PowerTest::switchHeldOrder()
              QStringLiteral("release seen, handoff 1, service lines 0"));
     QVERIFY(indexOf(rig.log, QStringLiteral("player park")) < indexOf(rig.log, QStringLiteral("reserve release")));
 
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: keep in background");
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: switch already running");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: keep in background");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: switch already running");
     m_bridge->keepInBackground();
     QCOMPARE(countOf(rig.log, QStringLiteral("reserve release")), 1);
     QTest::qWait(150);
@@ -1165,7 +1165,7 @@ void PowerTest::switchHeldOrder()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     const qint64 started = timer.elapsed();
     QVERIFY(started >= 300);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
     QCOMPARE(failed.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 300 + PowerBridge::switchTimeoutMs());
@@ -1212,10 +1212,10 @@ void PowerTest::switchBeforeStartRebuildsNothing()
     QVERIFY(rig.hold());
     QFile::remove(m_log);
     m_bridge->setOutputMode(rig.mode.get(), &rig.player);
-    qputenv("CASDAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/missing")).toUtf8());
+    qputenv("MICRODAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/missing")).toUtf8());
     auto detach = qScopeGuard([this] {
         m_bridge->setOutputMode(nullptr, nullptr);
-        qputenv("CASDAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
+        qputenv("MICRODAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
     });
     QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
     const int calls = rig.player.calls.size();
@@ -1253,16 +1253,16 @@ void PowerTest::switchLevelOffStartsAtOnce()
     m_bridge->closeAndSwitch();
     QVERIFY(m_bridge->switching());
     QVERIFY(!rig.mode->switchStoppedStream());
-    QCOMPARE(countOf(messages, QStringLiteral("casdap power: switch ")), 1);
-    QCOMPARE(countOf(messages, QStringLiteral("casdap power: switch waits")), 0);
-    QCOMPARE(countOf(messages, QStringLiteral("casdap output:")), 0);
+    QCOMPARE(countOf(messages, QStringLiteral("microdap power: switch ")), 1);
+    QCOMPARE(countOf(messages, QStringLiteral("microdap power: switch waits")), 0);
+    QCOMPARE(countOf(messages, QStringLiteral("microdap output:")), 0);
     QVERIFY(rig.reservation.calls.isEmpty());
     QVERIFY(!rig.player.isParked);
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
     QCOMPARE(countOf(rig.player.calls, QStringLiteral("rebuild")), 0);
     QCOMPARE(countOf(rig.player.calls, QStringLiteral("park")), 0);
-    QCOMPARE(countOf(messages, QStringLiteral("casdap output:")), 0);
+    QCOMPARE(countOf(messages, QStringLiteral("microdap output:")), 0);
     QCOMPARE(rig.player.status, PlayerPort::PlayState::Playing);
 }
 
@@ -1305,7 +1305,7 @@ void PowerTest::switchReadyFallback()
     timer.start();
 
     QTest::ignoreMessage(QtWarningMsg,
-                         qPrintable(QStringLiteral("casdap power: no output release within %1 ms, switching").arg(bound)));
+                         qPrintable(QStringLiteral("microdap power: no output release within %1 ms, switching").arg(bound)));
     m_bridge->keepInBackground();
     QVERIFY(m_bridge->switching());
     QVERIFY(rig.mode->switchStoppedStream());
@@ -1357,11 +1357,11 @@ void PowerTest::switchJoinedRestartAsyncDacNoRebuild()
 {
     const QString restartStub = m_dir.path() + QStringLiteral("/slow-systemctl");
     QVERIFY(writeFile(restartStub, QStringLiteral("#!/bin/sh\nsleep 1\nexit 0\n"), true));
-    const QByteArray previous = qgetenv("CASDAP_SYSTEMCTL_BIN");
-    qputenv("CASDAP_SYSTEMCTL_BIN", restartStub.toUtf8());
+    const QByteArray previous = qgetenv("MICRODAP_SYSTEMCTL_BIN");
+    qputenv("MICRODAP_SYSTEMCTL_BIN", restartStub.toUtf8());
     QVERIFY(writeStub(QStringLiteral("systemctl"), QStringLiteral("1")));
     auto restore = qScopeGuard([this, previous] {
-        qputenv("CASDAP_SYSTEMCTL_BIN", previous);
+        qputenv("MICRODAP_SYSTEMCTL_BIN", previous);
         writeStub(QStringLiteral("systemctl"));
     });
     QList<int> rebuilds;
@@ -1428,7 +1428,7 @@ void PowerTest::switchDacOrder()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 300);
     QVERIFY(timer.elapsed() < rig.mode->switchBoundMs());
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
     QCOMPARE(failed.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 }
@@ -1455,7 +1455,7 @@ void PowerTest::switchDacNeverAnswers()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= dacBound);
     QVERIFY(timer.elapsed() < rig.mode->switchBoundMs() + PowerBridge::switchReadyMarginMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
     QCOMPARE(rig.dacEq.pending.size(), 1);
     rig.dacEq.pending.takeFirst()();
     QTest::qWait(50);
@@ -1487,7 +1487,7 @@ void PowerTest::switchDacFirstReleaseLater()
     QCOMPARE(logLines(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 300);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
     QCOMPARE(failed.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 }

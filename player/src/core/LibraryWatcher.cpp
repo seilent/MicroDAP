@@ -9,7 +9,7 @@
 
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -134,7 +134,7 @@ void LibraryWatcher::rebuild()
     if (wanted.size() > m_limit) {
         if (!limitLogged) {
             limitLogged = true;
-            qWarning().noquote() << QStringLiteral("casdap: watch limit %1 reached").arg(m_limit);
+            qWarning().noquote() << QStringLiteral("microdap: watch limit %1 reached").arg(m_limit);
         }
         wanted.resize(m_limit);
         listed = QSet<QString>(wanted.cbegin(), wanted.cend());

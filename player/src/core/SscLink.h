@@ -3,7 +3,7 @@
 #include <QByteArray>
 #include <QObject>
 
-namespace casdap {
+namespace microdap {
 
 class SscLink : public QObject
 {

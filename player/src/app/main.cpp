@@ -57,18 +57,18 @@ namespace {
 
 int scanOnly(const QString &dir)
 {
-    casdap::Library library;
+    microdap::Library library;
     if (!library.isOpen()) {
-        QTextStream(stderr) << "casdap-player: cannot open " << library.dbPath() << '\n';
+        QTextStream(stderr) << "microdap-player: cannot open " << library.dbPath() << '\n';
         return 1;
     }
 
     QElapsedTimer timer;
     timer.start();
-    QObject::connect(&library, &casdap::Library::scanned, &library,
+    QObject::connect(&library, &microdap::Library::scanned, &library,
                      [&library, &timer](int, int, int, bool ok) {
         if (!ok) {
-            QTextStream(stderr) << "casdap-player: scan failed\n";
+            QTextStream(stderr) << "microdap-player: scan failed\n";
             QCoreApplication::exit(1);
             return;
         }
@@ -90,11 +90,11 @@ int main(int argc, char *argv[])
         if (std::strcmp(argv[i], "--scan-only") == 0 && !qEnvironmentVariableIsSet("QT_QPA_PLATFORM"))
             qputenv("QT_QPA_PLATFORM", "offscreen");
     }
-    casdap::initGStreamer(argc, argv);
+    microdap::initGStreamer(argc, argv);
 
     QGuiApplication app(argc, argv);
-    QGuiApplication::setApplicationName(QStringLiteral("casdap-player"));
-    QGuiApplication::setApplicationVersion(casdap::version());
+    QGuiApplication::setApplicationName(QStringLiteral("microdap-player"));
+    QGuiApplication::setApplicationVersion(microdap::version());
 
     QCommandLineParser parser;
     parser.addHelpOption();
@@ -139,13 +139,13 @@ int main(int argc, char *argv[])
     parser.process(app);
 
     if (parser.isSet(versionOption)) {
-        QTextStream(stdout) << "casdap-player " << casdap::version() << '\n'
-                            << casdap::dependencies() << '\n';
+        QTextStream(stdout) << "microdap-player " << microdap::version() << '\n'
+                            << microdap::dependencies() << '\n';
         return 0;
     }
 
     if (parser.isSet(screenshotOption)) {
-        casdap::ScreenshotOptions options;
+        microdap::ScreenshotOptions options;
         options.screen = parser.value(screenshotOption);
         options.size = parser.value(sizeOption);
         options.out = parser.value(outOption);
@@ -156,7 +156,7 @@ int main(int argc, char *argv[])
         options.pivot = parser.value(pivotOption);
         options.orientation = parser.value(orientationOption);
         options.overlay = parser.isSet(overlayOption);
-        return casdap::screenshot(options);
+        return microdap::screenshot(options);
     }
 
     if (parser.isSet(scanOnlyOption)) {
@@ -164,72 +164,72 @@ int main(int argc, char *argv[])
         return scanOnly(parser.positionalArguments().value(0, music));
     }
 
-    casdap::Settings settings;
-    casdap::Library library;
-    casdap::HistoryModel quickplayRecent(&library, casdap::HistoryModel::Recent, 8);
-    casdap::HistoryModel quickplayNew(&library, casdap::HistoryModel::New, 8);
-    casdap::HistoryModel historyRecent(&library, casdap::HistoryModel::Recent, 100);
-    casdap::HistoryModel historyNew(&library, casdap::HistoryModel::New, 100);
-    casdap::ArtistsModel artists(&library);
-    casdap::AlbumsModel albums(&library);
-    casdap::SongsModel songs(&library);
-    casdap::GenresModel genres(&library);
-    casdap::SectionedModel artistsHub;
+    microdap::Settings settings;
+    microdap::Library library;
+    microdap::HistoryModel quickplayRecent(&library, microdap::HistoryModel::Recent, 8);
+    microdap::HistoryModel quickplayNew(&library, microdap::HistoryModel::New, 8);
+    microdap::HistoryModel historyRecent(&library, microdap::HistoryModel::Recent, 100);
+    microdap::HistoryModel historyNew(&library, microdap::HistoryModel::New, 100);
+    microdap::ArtistsModel artists(&library);
+    microdap::AlbumsModel albums(&library);
+    microdap::SongsModel songs(&library);
+    microdap::GenresModel genres(&library);
+    microdap::SectionedModel artistsHub;
     artistsHub.setKind(QStringLiteral("artist"));
     artistsHub.setSource(&artists);
-    casdap::SectionedModel songsHub;
+    microdap::SectionedModel songsHub;
     songsHub.setKind(QStringLiteral("song"));
     songsHub.setSource(&songs);
-    casdap::SectionedModel genresHub;
+    microdap::SectionedModel genresHub;
     genresHub.setKind(QStringLiteral("genre"));
     genresHub.setSource(&genres);
-    casdap::AlbumGridModel albumsGrid;
+    microdap::AlbumGridModel albumsGrid;
     albumsGrid.setSource(&albums);
-    casdap::PinsModel pins(&library);
-    casdap::PlaylistsModel playlists(&library);
-    casdap::AudioInfo audioInfo;
-    casdap::Player player(&library);
-    std::unique_ptr<casdap::BluezModel> bluez;
-    if (qEnvironmentVariableIntValue("CASDAP_BLUEZ_FAKE") == 1)
-        bluez = std::make_unique<casdap::FakeBluezModel>();
+    microdap::PinsModel pins(&library);
+    microdap::PlaylistsModel playlists(&library);
+    microdap::AudioInfo audioInfo;
+    microdap::Player player(&library);
+    std::unique_ptr<microdap::BluezModel> bluez;
+    if (qEnvironmentVariableIntValue("MICRODAP_BLUEZ_FAKE") == 1)
+        bluez = std::make_unique<microdap::FakeBluezModel>();
     else
-        bluez = std::make_unique<casdap::SystemBluezModel>(QDBusConnection::systemBus(),
+        bluez = std::make_unique<microdap::SystemBluezModel>(QDBusConnection::systemBus(),
                                                            QDBusConnection::sessionBus());
     player.setBluez(bluez.get());
     const bool overlayMode = parser.isSet(overlayOption);
-    std::unique_ptr<casdap::EqControl> eqControl = std::make_unique<casdap::EqControl>(&settings);
-    QObject::connect(eqControl.get(), &casdap::EqControl::profileApplied, &player, &casdap::Player::applyEq);
-    QObject::connect(&library, &casdap::Library::scanningChanged, eqControl.get(), [&library, eq = eqControl.get()] {
+    std::unique_ptr<microdap::EqControl> eqControl = std::make_unique<microdap::EqControl>(&settings);
+    QObject::connect(eqControl.get(), &microdap::EqControl::profileApplied, &player, &microdap::Player::applyEq);
+    QObject::connect(&library, &microdap::Library::scanningChanged, eqControl.get(), [&library, eq = eqControl.get()] {
         if (!library.scanning())
             eq->relist();
     });
-    QObject::connect(&settings, &casdap::Settings::rootsChanged, eqControl.get(), &casdap::EqControl::relist);
-    std::unique_ptr<casdap::OutputControl> outputControl;
-    std::unique_ptr<casdap::CodecFragment> codecFragment;
-    std::unique_ptr<casdap::AlsaVolume> alsaVolume;
-    std::unique_ptr<casdap::DeviceReservation> reservation;
-    std::unique_ptr<casdap::VolumeKeys> volumeKeys;
-    std::unique_ptr<casdap::DacEq> dacEq;
-    std::unique_ptr<casdap::OutputMode> outputMode;
-    casdap::PulseSinkVolume *pulseVolume = nullptr;
-    casdap::RoutedSinkVolume *routedVolume = nullptr;
+    QObject::connect(&settings, &microdap::Settings::rootsChanged, eqControl.get(), &microdap::EqControl::relist);
+    std::unique_ptr<microdap::OutputControl> outputControl;
+    std::unique_ptr<microdap::CodecFragment> codecFragment;
+    std::unique_ptr<microdap::AlsaVolume> alsaVolume;
+    std::unique_ptr<microdap::DeviceReservation> reservation;
+    std::unique_ptr<microdap::VolumeKeys> volumeKeys;
+    std::unique_ptr<microdap::DacEq> dacEq;
+    std::unique_ptr<microdap::OutputMode> outputMode;
+    microdap::PulseSinkVolume *pulseVolume = nullptr;
+    microdap::RoutedSinkVolume *routedVolume = nullptr;
     if (!overlayMode) {
-        const casdap::OutputMode::Bounds bounds{};
-        outputControl = std::make_unique<casdap::OutputControl>();
-        codecFragment = std::make_unique<casdap::CodecFragment>();
-        alsaVolume = std::make_unique<casdap::AlsaVolume>(std::make_unique<casdap::SndMixer>(), bounds.pacingMs);
-        reservation = std::make_unique<casdap::DeviceReservation>(bounds.reservation);
-        pulseVolume = new casdap::PulseSinkVolume;
-        routedVolume = new casdap::RoutedSinkVolume(pulseVolume, pulseVolume, alsaVolume.get(), bounds.storeDelayMs);
-        casdap::DacEq::Ports dacPorts;
+        const microdap::OutputMode::Bounds bounds{};
+        outputControl = std::make_unique<microdap::OutputControl>();
+        codecFragment = std::make_unique<microdap::CodecFragment>();
+        alsaVolume = std::make_unique<microdap::AlsaVolume>(std::make_unique<microdap::SndMixer>(), bounds.pacingMs);
+        reservation = std::make_unique<microdap::DeviceReservation>(bounds.reservation);
+        pulseVolume = new microdap::PulseSinkVolume;
+        routedVolume = new microdap::RoutedSinkVolume(pulseVolume, pulseVolume, alsaVolume.get(), bounds.storeDelayMs);
+        microdap::DacEq::Ports dacPorts;
         dacPorts.eq = eqControl.get();
         dacPorts.dac = pulseVolume;
         dacPorts.player = &player;
-        dacPorts.usb = std::make_unique<casdap::UsbfsIo>();
-        dacPorts.paths = casdap::fiioPathsFromEnv();
+        dacPorts.usb = std::make_unique<microdap::UsbfsIo>();
+        dacPorts.paths = microdap::fiioPathsFromEnv();
         dacPorts.releasing = [&outputMode] { return outputMode && outputMode->releasing(); };
-        dacEq = std::make_unique<casdap::DacEq>(casdap::DacEq::Bounds{}, std::move(dacPorts));
-        casdap::OutputMode::Ports ports;
+        dacEq = std::make_unique<microdap::DacEq>(microdap::DacEq::Bounds{}, std::move(dacPorts));
+        microdap::OutputMode::Ports ports;
         ports.player = &player;
         ports.reservation = reservation.get();
         ports.output = outputControl.get();
@@ -240,29 +240,29 @@ int main(int argc, char *argv[])
         ports.bluez = bluez.get();
         ports.eq = eqControl.get();
         ports.dacEq = dacEq.get();
-        outputMode = std::make_unique<casdap::OutputMode>(bounds, ports);
+        outputMode = std::make_unique<microdap::OutputMode>(bounds, ports);
         outputMode->setLevel(settings.outputLevel());
         outputMode->setSampleRate(settings.sampleRate());
         player.setPolicy(outputMode.get());
-        casdap::DacEq *dac = dacEq.get();
-        casdap::OutputMode *mode = outputMode.get();
-        casdap::OutputControl *control = outputControl.get();
-        QObject::connect(mode, &casdap::OutputMode::effectiveChanged, dac,
+        microdap::DacEq *dac = dacEq.get();
+        microdap::OutputMode *mode = outputMode.get();
+        microdap::OutputControl *control = outputControl.get();
+        QObject::connect(mode, &microdap::OutputMode::effectiveChanged, dac,
                          [dac, mode] { dac->onEffectiveChanged(mode->effective()); });
-        QObject::connect(mode, &casdap::OutputMode::cardChanged, dac, &casdap::DacEq::onCardChanged);
-        QObject::connect(mode, &casdap::OutputMode::generationChanged, dac, &casdap::DacEq::onGenerationChanged);
-        QObject::connect(mode, &casdap::OutputMode::cardGoneChanged, dac, &casdap::DacEq::onCardGoneChanged);
-        QObject::connect(mode, &casdap::OutputMode::exHeldChanged, dac, &casdap::DacEq::onExHeldChanged,
+        QObject::connect(mode, &microdap::OutputMode::cardChanged, dac, &microdap::DacEq::onCardChanged);
+        QObject::connect(mode, &microdap::OutputMode::generationChanged, dac, &microdap::DacEq::onGenerationChanged);
+        QObject::connect(mode, &microdap::OutputMode::cardGoneChanged, dac, &microdap::DacEq::onCardGoneChanged);
+        QObject::connect(mode, &microdap::OutputMode::exHeldChanged, dac, &microdap::DacEq::onExHeldChanged,
                          Qt::QueuedConnection);
-        QObject::connect(control, &casdap::OutputControl::applied, dac, &casdap::DacEq::onApplied);
-        QObject::connect(&settings, &casdap::Settings::outputLevelChanged, dac,
+        QObject::connect(control, &microdap::OutputControl::applied, dac, &microdap::DacEq::onApplied);
+        QObject::connect(&settings, &microdap::Settings::outputLevelChanged, dac,
                          [&settings, dac] { dac->setLevel(settings.outputLevel()); });
-        QObject::connect(&player, &casdap::Player::statusChanged, dac, &casdap::DacEq::onPlayStateChanged);
-        QObject::connect(control, &casdap::OutputControl::activeOutputChanged, dac,
+        QObject::connect(&player, &microdap::Player::statusChanged, dac, &microdap::DacEq::onPlayStateChanged);
+        QObject::connect(control, &microdap::OutputControl::activeOutputChanged, dac,
                          [control, dac] { dac->onActiveOutputChanged(control->activeOutput()); });
-        QObject::connect(eqControl.get(), &casdap::EqControl::profileChanged, dac, &casdap::DacEq::onProfileChanged);
-        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::sinkAppeared, dac, &casdap::DacEq::onSinkAppeared);
-        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::cardRemoved, dac, &casdap::DacEq::onCardRemoved);
+        QObject::connect(eqControl.get(), &microdap::EqControl::profileChanged, dac, &microdap::DacEq::onProfileChanged);
+        QObject::connect(pulseVolume, &microdap::PulseSinkVolume::sinkAppeared, dac, &microdap::DacEq::onSinkAppeared);
+        QObject::connect(pulseVolume, &microdap::PulseSinkVolume::cardRemoved, dac, &microdap::DacEq::onCardRemoved);
         dac->setLevel(settings.outputLevel());
         dac->onEffectiveChanged(mode->effective());
         dac->onActiveOutputChanged(control->activeOutput());
@@ -270,95 +270,95 @@ int main(int argc, char *argv[])
         dac->start();
     }
     if (overlayMode) {
-        const QString sinkOutput = casdap::EqControl::defaultSinkOutput();
+        const QString sinkOutput = microdap::EqControl::defaultSinkOutput();
         eqControl->setActiveOutput(sinkOutput.isEmpty() ? QStringLiteral("speaker") : sinkOutput);
         eqControl->startSinkPoll();
     } else {
         eqControl->awaitOutput(outputControl.get());
     }
-    casdap::State state(&player);
+    microdap::State state(&player);
     state.setRestore(outputMode.get());
     state.installSignalHandlers();
     state.load();
-    casdap::Mpris mpris(&player, QDBusConnection::sessionBus());
-    casdap::PowerBridge power(&player, QDBusConnection::sessionBus());
+    microdap::Mpris mpris(&player, QDBusConnection::sessionBus());
+    microdap::PowerBridge power(&player, QDBusConnection::sessionBus());
     if (dacEq) {
-        QObject::connect(&power, &casdap::PowerBridge::switchingChanged, dacEq.get(),
+        QObject::connect(&power, &microdap::PowerBridge::switchingChanged, dacEq.get(),
                          [&power, dac = dacEq.get()] { dac->onSwitchingChanged(power.switching()); });
         dacEq->onSwitchingChanged(power.switching());
     }
     if (overlayMode && !power.isRegistered()) {
-        qWarning() << "casdap overlay: another player owns org.casdap.Player, exiting";
+        qWarning() << "microdap overlay: another player owns net.seilent.MicroDap.Player, exiting";
         return 0;
     }
     if (!overlayMode) {
-        casdap::Keep::clear();
+        microdap::Keep::clear();
         power.runScreenOn();
         power.setState(&state);
         power.setOutputMode(outputMode.get(), &player);
         power.enableSleepWatch();
     }
-    std::unique_ptr<casdap::LibraryWatcher> libraryWatcher;
+    std::unique_ptr<microdap::LibraryWatcher> libraryWatcher;
     if (!overlayMode) {
         library.setSettings(&settings);
-        libraryWatcher = std::make_unique<casdap::LibraryWatcher>(&library);
+        libraryWatcher = std::make_unique<microdap::LibraryWatcher>(&library);
     }
-    casdap::StatusModel status;
+    microdap::StatusModel status;
 
-    casdap::AccentControl accent;
+    microdap::AccentControl accent;
     accent.setSliderHue(settings.accentHue());
     accent.setFromArt(settings.accentFromArt());
     accent.setPhoneActive(bluez->transportActive());
     accent.setArtPath(player.current().value(QStringLiteral("artPath")).toString());
-    QObject::connect(&settings, &casdap::Settings::accentHueChanged, &accent,
+    QObject::connect(&settings, &microdap::Settings::accentHueChanged, &accent,
                      [&settings, &accent] { accent.setSliderHue(settings.accentHue()); });
-    QObject::connect(&settings, &casdap::Settings::accentFromArtChanged, &accent,
+    QObject::connect(&settings, &microdap::Settings::accentFromArtChanged, &accent,
                      [&settings, &accent] { accent.setFromArt(settings.accentFromArt()); });
-    QObject::connect(&player, &casdap::Player::currentChanged, &accent, [&player, &accent] {
+    QObject::connect(&player, &microdap::Player::currentChanged, &accent, [&player, &accent] {
         accent.setArtPath(player.current().value(QStringLiteral("artPath")).toString());
     });
-    QObject::connect(bluez.get(), &casdap::BluezModel::transportActiveChanged, &accent,
+    QObject::connect(bluez.get(), &microdap::BluezModel::transportActiveChanged, &accent,
                      [&accent, model = bluez.get()] { accent.setPhoneActive(model->transportActive()); });
-    QObject::connect(&library, &casdap::Library::albumsChanged, &accent, &casdap::AccentControl::clearCache);
-    std::unique_ptr<casdap::RgbControl> rgbControl;
+    QObject::connect(&library, &microdap::Library::albumsChanged, &accent, &microdap::AccentControl::clearCache);
+    std::unique_ptr<microdap::RgbControl> rgbControl;
     if (!overlayMode) {
         outputControl->setHeadphone(settings.hpGain(), settings.hpAmp());
         outputControl->setSpkGain(settings.spkGain());
         outputControl->apply(settings.output());
-        QObject::connect(&settings, &casdap::Settings::outputChanged, outputControl.get(),
+        QObject::connect(&settings, &microdap::Settings::outputChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->apply(settings.output()); });
         auto applyHeadphone = [&settings, control = outputControl.get()] {
             control->setHeadphone(settings.hpGain(), settings.hpAmp());
         };
-        QObject::connect(&settings, &casdap::Settings::hpGainChanged, outputControl.get(), applyHeadphone);
-        QObject::connect(&settings, &casdap::Settings::hpAmpChanged, outputControl.get(), applyHeadphone);
-        QObject::connect(&settings, &casdap::Settings::spkGainChanged, outputControl.get(),
+        QObject::connect(&settings, &microdap::Settings::hpGainChanged, outputControl.get(), applyHeadphone);
+        QObject::connect(&settings, &microdap::Settings::hpAmpChanged, outputControl.get(), applyHeadphone);
+        QObject::connect(&settings, &microdap::Settings::spkGainChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->setSpkGain(settings.spkGain()); });
         codecFragment->setBluez(bluez.get());
         codecFragment->apply(settings.btCodec());
-        QObject::connect(&settings, &casdap::Settings::btCodecChanged, codecFragment.get(),
+        QObject::connect(&settings, &microdap::Settings::btCodecChanged, codecFragment.get(),
                          [&settings, fragment = codecFragment.get()] { fragment->apply(settings.btCodec()); });
-        rgbControl = std::make_unique<casdap::RgbControl>();
+        rgbControl = std::make_unique<microdap::RgbControl>();
         rgbControl->setScreenOff(power.screenOff());
         rgbControl->start(settings.rgb(), accent.hue(), accent.level());
-        QObject::connect(&settings, &casdap::Settings::rgbChanged, rgbControl.get(),
+        QObject::connect(&settings, &microdap::Settings::rgbChanged, rgbControl.get(),
                          [&settings, rgb = rgbControl.get()] { rgb->setMode(settings.rgb()); });
-        QObject::connect(&accent, &casdap::AccentControl::hueChanged, rgbControl.get(),
+        QObject::connect(&accent, &microdap::AccentControl::hueChanged, rgbControl.get(),
                          [&accent, rgb = rgbControl.get()] { rgb->setColor(accent.hue(), accent.level()); });
-        QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, rgbControl.get(),
+        QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, rgbControl.get(),
                          [&power, rgb = rgbControl.get()] { rgb->setScreenOff(power.screenOff()); });
     }
 
-    std::unique_ptr<casdap::PadSource> pad;
-    std::unique_ptr<casdap::OverlayBridge> overlay;
+    std::unique_ptr<microdap::PadSource> pad;
+    std::unique_ptr<microdap::OverlayBridge> overlay;
     if (overlayMode) {
-        auto dbusPad = std::make_unique<casdap::DbusPad>(casdap::Intercept::bus());
-        overlay = std::make_unique<casdap::OverlayBridge>(dbusPad.get(), &player);
+        auto dbusPad = std::make_unique<microdap::DbusPad>(microdap::Intercept::bus());
+        overlay = std::make_unique<microdap::OverlayBridge>(dbusPad.get(), &player);
         overlay->setState(&state);
         power.setOverlay(overlay.get());
         pad = std::move(dbusPad);
     } else {
-        pad = std::make_unique<casdap::Pad>();
+        pad = std::make_unique<microdap::Pad>();
     }
 
     auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get()] {
@@ -367,80 +367,80 @@ int main(int argc, char *argv[])
         audioInfo.setActive(active);
         model->setActive(active);
     };
-    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, &status, applyActive);
+    QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, &status, applyActive);
     if (overlay) {
-        QObject::connect(overlay.get(), &casdap::OverlayBridge::mappedChanged, &status, applyActive);
+        QObject::connect(overlay.get(), &microdap::OverlayBridge::mappedChanged, &status, applyActive);
         applyActive();
     } else {
         outputControl->setActive(true);
         audioInfo.setActive(!power.screenOff());
     }
-    QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, pad.get(),
+    QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, pad.get(),
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
-    std::unique_ptr<casdap::GuideChord> guide;
-    std::unique_ptr<casdap::OutputWatch> outputs;
+    std::unique_ptr<microdap::GuideChord> guide;
+    std::unique_ptr<microdap::OutputWatch> outputs;
     std::unique_ptr<QObject> sensor;
     if (!overlayMode) {
-        guide = std::make_unique<casdap::GuideChord>();
-        volumeKeys = std::make_unique<casdap::VolumeKeys>(new casdap::EvdevKeys, routedVolume, &settings);
-        QObject::connect(volumeKeys.get(), &casdap::VolumeKeys::levelChanged, &power, &casdap::PowerBridge::setVolume);
-        const QString backend = qEnvironmentVariable("CASDAP_SENSOR_BACKEND");
+        guide = std::make_unique<microdap::GuideChord>();
+        volumeKeys = std::make_unique<microdap::VolumeKeys>(new microdap::EvdevKeys, routedVolume, &settings);
+        QObject::connect(volumeKeys.get(), &microdap::VolumeKeys::levelChanged, &power, &microdap::PowerBridge::setVolume);
+        const QString backend = qEnvironmentVariable("MICRODAP_SENSOR_BACKEND");
         if (backend == QLatin1StringView("ssc")
             || (backend != QLatin1StringView("proxy") && QFileInfo::exists(QStringLiteral("/dev/fastrpc-sdsp"))))
-            sensor = std::make_unique<casdap::SscRotation>();
+            sensor = std::make_unique<microdap::SscRotation>();
         else
-            sensor = std::make_unique<casdap::SensorRotation>();
-        outputs = std::make_unique<casdap::OutputWatch>();
+            sensor = std::make_unique<microdap::SensorRotation>();
+        outputs = std::make_unique<microdap::OutputWatch>();
         outputs->setScreenOff(power.screenOff());
-        QObject::connect(&power, &casdap::PowerBridge::screenOffChanged, outputs.get(),
+        QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, outputs.get(),
                          [&power, watch = outputs.get()] { watch->setScreenOff(power.screenOff()); });
     }
     if (outputMode) {
-        casdap::OutputMode *mode = outputMode.get();
-        casdap::OutputControl *control = outputControl.get();
-        casdap::DeviceReservation *reserve = reservation.get();
-        QObject::connect(&settings, &casdap::Settings::outputLevelChanged, mode,
+        microdap::OutputMode *mode = outputMode.get();
+        microdap::OutputControl *control = outputControl.get();
+        microdap::DeviceReservation *reserve = reservation.get();
+        QObject::connect(&settings, &microdap::Settings::outputLevelChanged, mode,
                          [&settings, mode] { mode->setLevel(settings.outputLevel()); });
-        QObject::connect(&settings, &casdap::Settings::sampleRateChanged, mode,
+        QObject::connect(&settings, &microdap::Settings::sampleRateChanged, mode,
                          [&settings, mode] { mode->setSampleRate(settings.sampleRate()); });
         auto activeOutput = [control, mode] { mode->onActiveOutputChanged(control->activeOutput(), control->usbSink()); };
-        QObject::connect(control, &casdap::OutputControl::activeOutputChanged, mode, activeOutput);
-        QObject::connect(control, &casdap::OutputControl::usbSinkChanged, mode, activeOutput);
-        QObject::connect(control, &casdap::OutputControl::applied, mode, &casdap::OutputMode::onApplied);
-        QObject::connect(control, &casdap::OutputControl::cardGone, mode, &casdap::OutputMode::onCardGone);
-        QObject::connect(control, &casdap::OutputControl::sinksRead, mode, &casdap::OutputMode::onSinksRead);
-        QObject::connect(&player, &casdap::Player::statusChanged, mode, &casdap::OutputMode::onStatusChanged);
-        QObject::connect(&player, &casdap::Player::endOfStream, mode, &casdap::OutputMode::onEndOfStream);
-        QObject::connect(&player, &casdap::Player::formatChanged, mode, &casdap::OutputMode::onFormatChanged);
-        QObject::connect(&audioInfo, &casdap::AudioInfo::hwRateChanged, mode,
+        QObject::connect(control, &microdap::OutputControl::activeOutputChanged, mode, activeOutput);
+        QObject::connect(control, &microdap::OutputControl::usbSinkChanged, mode, activeOutput);
+        QObject::connect(control, &microdap::OutputControl::applied, mode, &microdap::OutputMode::onApplied);
+        QObject::connect(control, &microdap::OutputControl::cardGone, mode, &microdap::OutputMode::onCardGone);
+        QObject::connect(control, &microdap::OutputControl::sinksRead, mode, &microdap::OutputMode::onSinksRead);
+        QObject::connect(&player, &microdap::Player::statusChanged, mode, &microdap::OutputMode::onStatusChanged);
+        QObject::connect(&player, &microdap::Player::endOfStream, mode, &microdap::OutputMode::onEndOfStream);
+        QObject::connect(&player, &microdap::Player::formatChanged, mode, &microdap::OutputMode::onFormatChanged);
+        QObject::connect(&audioInfo, &microdap::AudioInfo::hwRateChanged, mode,
                          [&audioInfo, mode] { mode->onHwRateChanged(audioInfo.hwRate()); });
-        QObject::connect(alsaVolume.get(), &casdap::AlsaVolume::disconnected, mode,
-                         &casdap::OutputMode::onMixerDisconnected);
-        QObject::connect(alsaVolume.get(), &casdap::AlsaVolume::levelChanged, mode,
-                         &casdap::OutputMode::onVolumePressed);
-        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::sinkAppeared, mode,
-                         &casdap::OutputMode::onSinkAppeared);
-        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::sinkChanged, mode, &casdap::OutputMode::onSinkChanged);
-        QObject::connect(pulseVolume, &casdap::PulseSinkVolume::cardRemoved, mode, &casdap::OutputMode::onCardRemoved);
-        QObject::connect(bluez.get(), &casdap::BluezModel::connectedChanged, mode,
-                         &casdap::OutputMode::onBluezConnectedChanged);
-        QObject::connect(bluez.get(), &casdap::BluezModel::readyChanged, mode, &casdap::OutputMode::onBluezReadyChanged);
-        QObject::connect(bluez.get(), &casdap::BluezModel::transportStateChanged, mode,
-                         &casdap::OutputMode::onTransportStateChanged);
-        QObject::connect(codecFragment.get(), &casdap::CodecFragment::restartFinished, mode,
-                         &casdap::OutputMode::onCodecRestartFinished);
-        QObject::connect(reserve, &casdap::DeviceReservation::acquired, mode, &casdap::OutputMode::onAcquired);
-        QObject::connect(reserve, &casdap::DeviceReservation::refused, mode, &casdap::OutputMode::onRefused);
-        QObject::connect(reserve, &casdap::DeviceReservation::failed, mode, &casdap::OutputMode::onFailed);
-        QObject::connect(reserve, &casdap::DeviceReservation::releaseRequested, mode,
-                         &casdap::OutputMode::onReleaseRequested);
-        QObject::connect(reserve, &casdap::DeviceReservation::releaseTimedOut, mode,
-                         &casdap::OutputMode::onReleaseTimedOut);
-        QObject::connect(reserve, &casdap::DeviceReservation::nameLost, mode, &casdap::OutputMode::onNameLost);
-        QObject::connect(reserve, &casdap::DeviceReservation::connectionLost, mode,
-                         &casdap::OutputMode::onConnectionLost);
-        QObject::connect(reserve, &casdap::DeviceReservation::released, mode, &casdap::OutputMode::onReleased);
-        QObject::connect(&app, &QCoreApplication::aboutToQuit, mode, &casdap::OutputMode::aboutToQuit);
+        QObject::connect(alsaVolume.get(), &microdap::AlsaVolume::disconnected, mode,
+                         &microdap::OutputMode::onMixerDisconnected);
+        QObject::connect(alsaVolume.get(), &microdap::AlsaVolume::levelChanged, mode,
+                         &microdap::OutputMode::onVolumePressed);
+        QObject::connect(pulseVolume, &microdap::PulseSinkVolume::sinkAppeared, mode,
+                         &microdap::OutputMode::onSinkAppeared);
+        QObject::connect(pulseVolume, &microdap::PulseSinkVolume::sinkChanged, mode, &microdap::OutputMode::onSinkChanged);
+        QObject::connect(pulseVolume, &microdap::PulseSinkVolume::cardRemoved, mode, &microdap::OutputMode::onCardRemoved);
+        QObject::connect(bluez.get(), &microdap::BluezModel::connectedChanged, mode,
+                         &microdap::OutputMode::onBluezConnectedChanged);
+        QObject::connect(bluez.get(), &microdap::BluezModel::readyChanged, mode, &microdap::OutputMode::onBluezReadyChanged);
+        QObject::connect(bluez.get(), &microdap::BluezModel::transportStateChanged, mode,
+                         &microdap::OutputMode::onTransportStateChanged);
+        QObject::connect(codecFragment.get(), &microdap::CodecFragment::restartFinished, mode,
+                         &microdap::OutputMode::onCodecRestartFinished);
+        QObject::connect(reserve, &microdap::DeviceReservation::acquired, mode, &microdap::OutputMode::onAcquired);
+        QObject::connect(reserve, &microdap::DeviceReservation::refused, mode, &microdap::OutputMode::onRefused);
+        QObject::connect(reserve, &microdap::DeviceReservation::failed, mode, &microdap::OutputMode::onFailed);
+        QObject::connect(reserve, &microdap::DeviceReservation::releaseRequested, mode,
+                         &microdap::OutputMode::onReleaseRequested);
+        QObject::connect(reserve, &microdap::DeviceReservation::releaseTimedOut, mode,
+                         &microdap::OutputMode::onReleaseTimedOut);
+        QObject::connect(reserve, &microdap::DeviceReservation::nameLost, mode, &microdap::OutputMode::onNameLost);
+        QObject::connect(reserve, &microdap::DeviceReservation::connectionLost, mode,
+                         &microdap::OutputMode::onConnectionLost);
+        QObject::connect(reserve, &microdap::DeviceReservation::released, mode, &microdap::OutputMode::onReleased);
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, mode, &microdap::OutputMode::aboutToQuit);
         mode->onHwRateChanged(audioInfo.hwRate());
         mode->attach();
     }
@@ -493,13 +493,13 @@ int main(int argc, char *argv[])
         engine.rootContext()->setContextProperty(QStringLiteral("DacEq"), dacEq.get());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
-    engine.loadFromModule("Casdap", "Main");
+    engine.loadFromModule("MicroDap", "Main");
     if (!engine.rootObjects().isEmpty()) {
         auto *root = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
         if (overlayMode) {
             if (auto *quick = qobject_cast<QQuickWindow *>(root)) {
                 const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
-                                         + QStringLiteral("/casdap");
+                                         + QStringLiteral("/microdap");
                 if (QDir().mkpath(cacheDir)) {
                     const QString cacheFile = cacheDir + QStringLiteral("/overlay-pipeline.bin");
                     QQuickGraphicsConfiguration config = quick->graphicsConfiguration();
@@ -508,16 +508,16 @@ int main(int argc, char *argv[])
                     quick->setGraphicsConfiguration(config);
                 }
             }
-            overlay->setWindow(root, casdap::setOverlayAtoms);
+            overlay->setWindow(root, microdap::setOverlayAtoms);
             auto *toast = qobject_cast<QWindow *>(qvariant_cast<QObject *>(root->property("toastWindow")));
             if (toast)
-                overlay->setToastWindow(toast, casdap::setToastAtoms);
+                overlay->setToastWindow(toast, microdap::setToastAtoms);
         } else {
-            casdap::claimGamescopeFocus(root);
+            microdap::claimGamescopeFocus(root);
         }
     }
 
-    const QString grabOut = qEnvironmentVariable("CASDAP_GRAB_OUT");
+    const QString grabOut = qEnvironmentVariable("MICRODAP_GRAB_OUT");
     auto *window = engine.rootObjects().isEmpty()
                        ? nullptr
                        : qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
@@ -525,10 +525,10 @@ int main(int argc, char *argv[])
         QObject::connect(window, &QQuickWindow::frameSwapped, &library,
                          [&library] { library.rescanRoots(); }, Qt::SingleShotConnection);
     if (!grabOut.isEmpty() && window) {
-        const int delay = qEnvironmentVariableIntValue("CASDAP_GRAB_AFTER_MS");
+        const int delay = qEnvironmentVariableIntValue("MICRODAP_GRAB_AFTER_MS");
         QTimer::singleShot(delay > 0 ? delay : 3000, window, [window, grabOut] {
             const QImage image = window->grabWindow();
-            QTextStream(stderr) << "casdap-player: grab " << image.width() << 'x' << image.height()
+            QTextStream(stderr) << "microdap-player: grab " << image.width() << 'x' << image.height()
                                 << (image.save(grabOut, "PNG") ? " saved " : " failed ") << grabOut << '\n';
         });
     }

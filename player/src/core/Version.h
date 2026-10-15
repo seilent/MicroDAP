@@ -2,7 +2,7 @@
 
 #include <QString>
 
-namespace casdap {
+namespace microdap {
 
 QString version();
 QString dependencies();

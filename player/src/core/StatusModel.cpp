@@ -6,7 +6,7 @@
 #include <QFile>
 #include <QFileInfo>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -68,11 +68,11 @@ StatusModel::StatusModel(const QDBusConnection &systemBus, const QString &powerS
                                QStringLiteral("org.freedesktop.DBus.Properties"),
                                QStringLiteral("PropertiesChanged"), this,
                                SLOT(onUPowerChanged(QString,QVariantMap,QStringList)))) {
-                qWarning() << "casdap status: cannot subscribe to UPower"
+                qWarning() << "microdap status: cannot subscribe to UPower"
                            << m_bus.lastError().message();
             }
         } else {
-            qInfo() << "casdap status: no UPower DisplayDevice, reading" << m_root;
+            qInfo() << "microdap status: no UPower DisplayDevice, reading" << m_root;
             delete upower;
         }
     }
@@ -84,7 +84,7 @@ StatusModel::StatusModel(const QDBusConnection &systemBus, const QString &powerS
 
 QString StatusModel::defaultPowerSupplyRoot()
 {
-    return qEnvironmentVariable("CASDAP_POWER_SUPPLY_ROOT",
+    return qEnvironmentVariable("MICRODAP_POWER_SUPPLY_ROOT",
                                 QStringLiteral("/sys/class/power_supply"));
 }
 

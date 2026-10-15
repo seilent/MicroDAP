@@ -10,7 +10,7 @@
 
 class QDBusInterface;
 
-namespace casdap {
+namespace microdap {
 
 class StatusModel : public QObject
 {

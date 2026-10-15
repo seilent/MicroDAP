@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import Casdap
+import MicroDap
 
 TestCase {
     id: tc

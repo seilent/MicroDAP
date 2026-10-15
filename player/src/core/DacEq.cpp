@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -781,7 +781,7 @@ QString DacEq::computeMode() const
 
 void DacEq::log(const QString &text) const
 {
-    qInfo().noquote() << "casdap dac eq:" << text;
+    qInfo().noquote() << "microdap dac eq:" << text;
 }
 
 }

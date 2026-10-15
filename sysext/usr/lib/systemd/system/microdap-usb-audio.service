@@ -1,0 +1,8 @@
+[Unit]
+Description=MicroDAP USB DAC autosuspend
+After=systemd-sysext.service systemd-udev-settle.service systemd-udev-trigger.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/microdap/microdap-usb-audio --scan

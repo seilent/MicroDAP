@@ -5,7 +5,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -50,7 +50,7 @@ OutputWatch::OutputWatch(const QString &root, QObject *parent)
 
 QString OutputWatch::defaultRoot()
 {
-    return qEnvironmentVariable("CASDAP_DRM_ROOT", QStringLiteral("/sys/class/drm"));
+    return qEnvironmentVariable("MICRODAP_DRM_ROOT", QStringLiteral("/sys/class/drm"));
 }
 
 QString OutputWatch::root() const

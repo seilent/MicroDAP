@@ -7,7 +7,7 @@
 #include <QDBusVariant>
 #include <QDebug>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -113,36 +113,36 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
         if (!m_bluez.connect(bluezService(), QStringLiteral("/"), objectManagerInterface(),
                              QStringLiteral("InterfacesAdded"), this,
                              SLOT(onInterfacesAdded(QDBusMessage)))) {
-            qWarning() << "casdap bluez: cannot subscribe to InterfacesAdded"
+            qWarning() << "microdap bluez: cannot subscribe to InterfacesAdded"
                        << m_bluez.lastError().message();
         }
         if (!m_bluez.connect(bluezService(), QStringLiteral("/"), objectManagerInterface(),
                              QStringLiteral("InterfacesRemoved"), this,
                              SLOT(onInterfacesRemoved(QDBusMessage)))) {
-            qWarning() << "casdap bluez: cannot subscribe to InterfacesRemoved"
+            qWarning() << "microdap bluez: cannot subscribe to InterfacesRemoved"
                        << m_bluez.lastError().message();
         }
         if (!m_bluez.connect(bluezService(), QString(), propertiesInterface(),
                              QStringLiteral("PropertiesChanged"), this,
                              SLOT(onBluezPropertiesChanged(QString,QVariantMap,QStringList,QDBusMessage)))) {
-            qWarning() << "casdap bluez: cannot subscribe to PropertiesChanged"
+            qWarning() << "microdap bluez: cannot subscribe to PropertiesChanged"
                        << m_bluez.lastError().message();
         }
         refresh();
     } else {
-        qWarning() << "casdap bluez: bus not connected";
+        qWarning() << "microdap bluez: bus not connected";
     }
 
     if (m_session.isConnected()) {
         if (!m_session.connect(agentService(), agentPath(), propertiesInterface(),
                                QStringLiteral("PropertiesChanged"), this,
                                SLOT(onAgentPropertiesChanged(QString,QVariantMap,QStringList)))) {
-            qWarning() << "casdap bluez: cannot subscribe to" << agentInterface()
+            qWarning() << "microdap bluez: cannot subscribe to" << agentInterface()
                        << m_session.lastError().message();
         }
         refreshAgent();
     } else {
-        qWarning() << "casdap bluez: session bus not connected";
+        qWarning() << "microdap bluez: session bus not connected";
     }
 }
 
@@ -159,17 +159,17 @@ QString SystemBluezModel::bluezService()
 
 QString SystemBluezModel::agentService()
 {
-    return QStringLiteral("org.casdap.Bluetooth");
+    return QStringLiteral("net.seilent.MicroDap.Bluetooth");
 }
 
 QString SystemBluezModel::agentPath()
 {
-    return QStringLiteral("/org/casdap/Bluetooth");
+    return QStringLiteral("/net/seilent/MicroDap/Bluetooth");
 }
 
 QString SystemBluezModel::agentInterface()
 {
-    return QStringLiteral("org.casdap.Bluetooth");
+    return QStringLiteral("net.seilent.MicroDap.Bluetooth");
 }
 
 QString SystemBluezModel::a2dpSourceUuid()
@@ -210,7 +210,7 @@ void SystemBluezModel::refresh()
         finished->deleteLater();
         const QDBusMessage reply = finished->reply();
         if (reply.type() == QDBusMessage::ErrorMessage) {
-            qInfo() << "casdap bluez: GetManagedObjects failed" << reply.errorMessage();
+            qInfo() << "microdap bluez: GetManagedObjects failed" << reply.errorMessage();
             m_objects.clear();
             apply();
             updateReady(true);

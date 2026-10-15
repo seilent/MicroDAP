@@ -4,5 +4,5 @@
 
 int main(int argc, char **argv)
 {
-    return casdap::runCli(argc, argv, [] { return std::make_unique<casdap::UsbfsIo>(); }, casdap::fiioPathsFromEnv());
+    return microdap::runCli(argc, argv, [] { return std::make_unique<microdap::UsbfsIo>(); }, microdap::fiioPathsFromEnv());
 }

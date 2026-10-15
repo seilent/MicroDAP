@@ -10,7 +10,7 @@
 
 class QSocketNotifier;
 
-namespace casdap {
+namespace microdap {
 
 struct MixerRange
 {

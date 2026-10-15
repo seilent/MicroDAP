@@ -1,6 +1,6 @@
 #include "SectionKey.h"
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 

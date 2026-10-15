@@ -6,7 +6,7 @@
 #include <cmath>
 #include <vector>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 

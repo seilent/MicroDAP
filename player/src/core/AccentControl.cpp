@@ -8,7 +8,7 @@
 #include <cmath>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -278,9 +278,9 @@ void AccentControl::logArt(const QString &path, const ArtPick &pick)
         return;
     m_loggedPath = path;
     if (pick.valid())
-        qInfo().noquote() << QStringLiteral("casdap accent: art hue %1 s %2 for %3").arg(pick.hue).arg(pick.level).arg(path);
+        qInfo().noquote() << QStringLiteral("microdap accent: art hue %1 s %2 for %3").arg(pick.hue).arg(pick.level).arg(path);
     else
-        qInfo().noquote() << QStringLiteral("casdap accent: no art hue for %1").arg(path);
+        qInfo().noquote() << QStringLiteral("microdap accent: no art hue for %1").arg(path);
 }
 
 void AccentControl::setArt(const ArtPick &pick)
@@ -308,7 +308,7 @@ void AccentControl::updateHue()
     m_hue = value;
     m_level = level;
     m_tone = tone;
-    qInfo().noquote() << QStringLiteral("casdap accent: hue %1 s %2 (%3)")
+    qInfo().noquote() << QStringLiteral("microdap accent: hue %1 s %2 (%3)")
                              .arg(value)
                              .arg(art ? level : 4)
                              .arg(art ? QStringLiteral("art") : QStringLiteral("slider"));

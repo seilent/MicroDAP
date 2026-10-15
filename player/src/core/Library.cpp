@@ -16,7 +16,7 @@
 #include <atomic>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -219,7 +219,7 @@ bool run(QSqlQuery &query)
 {
     if (query.exec())
         return true;
-    qWarning() << "casdap library:" << query.lastError().text() << query.lastQuery();
+    qWarning() << "microdap library:" << query.lastError().text() << query.lastQuery();
     return false;
 }
 
@@ -228,7 +228,7 @@ bool run(const QSqlDatabase &db, const char *sql)
     QSqlQuery query(db);
     if (query.exec(QString::fromLatin1(sql)))
         return true;
-    qWarning() << "casdap library:" << query.lastError().text() << QLatin1StringView(sql);
+    qWarning() << "microdap library:" << query.lastError().text() << QLatin1StringView(sql);
     return false;
 }
 
@@ -274,7 +274,7 @@ Library::Library(const QString &dbPath, const QString &artDir, QObject *parent)
     : QObject(parent)
     , m_dbPath(dbPath)
     , m_artDir(QDir::cleanPath(artDir))
-    , m_connection(QStringLiteral("casdap-library-%1").arg(connectionCounter.fetch_add(1)))
+    , m_connection(QStringLiteral("microdap-library-%1").arg(connectionCounter.fetch_add(1)))
 {
     open();
 }
@@ -293,13 +293,13 @@ Library::~Library()
 QString Library::defaultDbPath()
 {
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
-           + QStringLiteral("/casdap/library.db");
+           + QStringLiteral("/microdap/library.db");
 }
 
 QString Library::defaultArtDir()
 {
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
-           + QStringLiteral("/casdap/art");
+           + QStringLiteral("/microdap/art");
 }
 
 void Library::open()
@@ -308,7 +308,7 @@ void Library::open()
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connection);
     m_db.setDatabaseName(m_dbPath);
     if (!m_db.open()) {
-        qWarning() << "casdap library: cannot open" << m_dbPath << m_db.lastError().text();
+        qWarning() << "microdap library: cannot open" << m_dbPath << m_db.lastError().text();
         return;
     }
     run(m_db, "PRAGMA foreign_keys = ON");
@@ -331,7 +331,7 @@ void Library::open()
         for (const char *sql : migrateFrom4)
             run(m_db, sql);
     } else if (current != schemaVersion) {
-        qWarning() << "casdap library: unsupported schema version" << current << "in" << m_dbPath;
+        qWarning() << "microdap library: unsupported schema version" << current << "in" << m_dbPath;
         m_db.close();
     }
 }
@@ -419,7 +419,7 @@ QStringList Library::scannedDirectories() const
 void Library::rescanRoots()
 {
     if (!m_settings) {
-        qWarning() << "casdap library: rescan without settings";
+        qWarning() << "microdap library: rescan without settings";
         return;
     }
     rescan(m_settings->roots());
@@ -492,7 +492,7 @@ void Library::finishScan(const ScanResult &result)
         if (playlist.readable)
             readable.append(playlist);
         else
-            qWarning().noquote() << QStringLiteral("casdap: playlist %1: unreadable, kept as is")
+            qWarning().noquote() << QStringLiteral("microdap: playlist %1: unreadable, kept as is")
                                         .arg(playlist.source);
     }
     const int added = static_cast<int>(result.added.size());
@@ -547,7 +547,7 @@ void Library::finishScan(const ScanResult &result)
         if (tracksTouched)
             pruneArt();
     } else {
-        qWarning() << "casdap library: scan apply failed" << m_db.lastError().text();
+        qWarning() << "microdap library: scan apply failed" << m_db.lastError().text();
         if (began)
             m_db.rollback();
     }
@@ -816,7 +816,7 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
         }
 
         if (skipped > 0)
-            qInfo().noquote() << QStringLiteral("casdap: playlist %1: %2 entries not in the library")
+            qInfo().noquote() << QStringLiteral("microdap: playlist %1: %2 entries not in the library")
                                      .arg(playlist.name)
                                      .arg(skipped);
     }

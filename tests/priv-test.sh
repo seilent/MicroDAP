@@ -3,7 +3,7 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-priv="${repo}/sysext/usr/libexec/casdap/casdap-priv"
+priv="${repo}/sysext/usr/libexec/microdap/microdap-priv"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
@@ -16,12 +16,12 @@ for n in 1 2 3 4 5 6 7; do
     mkdir -p "${cpu}/cpu${n}"
 done
 export STATE="${T}/state"
-export CASDAP_SYSFS_ROOT="${sys}"
-export CASDAP_CPU_BEFORE_FILE="${T}/run/cpu-before"
-export CASDAP_AMIXER_BIN="${T}/bin/amixer"
-export CASDAP_RGB_BIN="${T}/bin/armada-rgb"
-export CASDAP_RGB_CONFIG="${T}/etc/armada/rgb.json"
-export CASDAP_RGB_BEFORE_FILE="${T}/run/rgb-before.json"
+export MICRODAP_SYSFS_ROOT="${sys}"
+export MICRODAP_CPU_BEFORE_FILE="${T}/run/cpu-before"
+export MICRODAP_AMIXER_BIN="${T}/bin/amixer"
+export MICRODAP_RGB_BIN="${T}/bin/armada-rgb"
+export MICRODAP_RGB_CONFIG="${T}/etc/armada/rgb.json"
+export MICRODAP_RGB_BEFORE_FILE="${T}/run/rgb-before.json"
 export RGB_GET="${T}/rgb-get"
 export AMIXER_FAIL="${T}/amixer-fail"
 export RGB_FAIL="${T}/rgb-fail"
@@ -74,8 +74,8 @@ reset() {
 }
 
 rgb_config() {
-    mkdir -p "$(dirname "${CASDAP_RGB_CONFIG}")"
-    printf '%s\n' "$1" > "${CASDAP_RGB_CONFIG}"
+    mkdir -p "$(dirname "${MICRODAP_RGB_CONFIG}")"
+    printf '%s\n' "$1" > "${MICRODAP_RGB_CONFIG}"
 }
 
 expect_calls() {
@@ -85,8 +85,8 @@ expect_calls() {
 }
 
 expect_no_rgb_files() {
-    [[ ! -e "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save file written"
-    [[ ! -e "${CASDAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
+    [[ ! -e "${MICRODAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save file written"
+    [[ ! -e "${MICRODAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
 }
 
 run() {
@@ -115,15 +115,15 @@ expect_untouched_sysfs() {
 }
 
 expect_saved() {
-    [[ -f "${CASDAP_CPU_BEFORE_FILE}" ]] || { fail "${case_name}: no save file"; return 0; }
-    [[ ! -e "${CASDAP_CPU_BEFORE_FILE}.tmp" ]] || fail "${case_name}: temp file left"
-    [[ "$(grep -c . "${CASDAP_CPU_BEFORE_FILE}")" == 12 ]] || fail "${case_name}: $(grep -c . "${CASDAP_CPU_BEFORE_FILE}") saved lines, expected 12"
-    grep -qxF "${cpu}/cpufreq/policy0/scaling_max_freq 1804800" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy0 not saved"
-    grep -qxF "${cpu}/cpufreq/policy4/scaling_max_freq 2419200" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy4 not saved"
-    grep -qxF "${cpu}/cpufreq/policy7/scaling_max_freq 2841600" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy7 not saved"
-    grep -qxF "${cpu}/cpu4/online 1" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: cpu4 online not saved"
-    grep -qxF "${gpu}/governor userspace" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: governor not saved"
-    grep -qxF "${gpu}/max_freq 587000000" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: max_freq not saved"
+    [[ -f "${MICRODAP_CPU_BEFORE_FILE}" ]] || { fail "${case_name}: no save file"; return 0; }
+    [[ ! -e "${MICRODAP_CPU_BEFORE_FILE}.tmp" ]] || fail "${case_name}: temp file left"
+    [[ "$(grep -c . "${MICRODAP_CPU_BEFORE_FILE}")" == 12 ]] || fail "${case_name}: $(grep -c . "${MICRODAP_CPU_BEFORE_FILE}") saved lines, expected 12"
+    grep -qxF "${cpu}/cpufreq/policy0/scaling_max_freq 1804800" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy0 not saved"
+    grep -qxF "${cpu}/cpufreq/policy4/scaling_max_freq 2419200" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy4 not saved"
+    grep -qxF "${cpu}/cpufreq/policy7/scaling_max_freq 2841600" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy7 not saved"
+    grep -qxF "${cpu}/cpu4/online 1" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: cpu4 online not saved"
+    grep -qxF "${gpu}/governor userspace" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: governor not saved"
+    grep -qxF "${gpu}/max_freq 587000000" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: max_freq not saved"
 }
 
 expect_dap_floor() {
@@ -188,16 +188,16 @@ expect_dap_floor
 expect_value "${sys}/class/backlight/panel0/bl_power" 0
 
 case_name="cpu-dap twice"
-saved=$(cat "${CASDAP_CPU_BEFORE_FILE}")
+saved=$(cat "${MICRODAP_CPU_BEFORE_FILE}")
 run cpu-dap
 [[ "${rc}" == 0 ]] || fail "second cpu-dap exit ${rc}"
-[[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "second cpu-dap rewrote the save file"
+[[ "$(cat "${MICRODAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "second cpu-dap rewrote the save file"
 expect_dap_floor
 
 case_name="cpu-off after cpu-dap"
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "cpu-off exit ${rc}"
-[[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "cpu-off rewrote the save file"
+[[ "$(cat "${MICRODAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "cpu-off rewrote the save file"
 expect_off_floor 1804800
 expect_value "${gpu}/governor" simple_ondemand
 expect_value "${gpu}/max_freq" 305000000
@@ -205,14 +205,14 @@ expect_value "${gpu}/max_freq" 305000000
 case_name="cpu-dap after cpu-off"
 run cpu-dap
 [[ "${rc}" == 0 ]] || fail "cpu-dap after cpu-off exit ${rc}"
-[[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "cpu-dap after cpu-off rewrote the save file"
+[[ "$(cat "${MICRODAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "cpu-dap after cpu-off rewrote the save file"
 expect_dap_floor
 
 case_name=cpu-restore
 run cpu-restore
 [[ "${rc}" == 0 ]] || fail "cpu-restore exit ${rc}"
 expect_untouched_sysfs
-[[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore left the save file"
+[[ ! -e "${MICRODAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore left the save file"
 
 case_name="cpu-off saves first"
 reset
@@ -224,26 +224,26 @@ expect_value "${gpu}/governor" userspace
 expect_value "${gpu}/max_freq" 587000000
 
 case_name="cpu-off twice"
-saved=$(cat "${CASDAP_CPU_BEFORE_FILE}")
+saved=$(cat "${MICRODAP_CPU_BEFORE_FILE}")
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "second cpu-off exit ${rc}"
-[[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "second cpu-off rewrote the save file"
+[[ "$(cat "${MICRODAP_CPU_BEFORE_FILE}")" == "${saved}" ]] || fail "second cpu-off rewrote the save file"
 expect_off_floor 1804800
 
 case_name="cpu-restore after cpu-off"
 run cpu-restore
 [[ "${rc}" == 0 ]] || fail "cpu-restore exit ${rc}"
 expect_untouched_sysfs
-[[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore left the save file"
+[[ ! -e "${MICRODAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore left the save file"
 
 case_name="cpu-off without a policy0 line"
 reset
 mkdir -p "${T}/run"
-printf '%s\n' "${cpu}/cpu4/online 1" > "${CASDAP_CPU_BEFORE_FILE}"
+printf '%s\n' "${cpu}/cpu4/online 1" > "${MICRODAP_CPU_BEFORE_FILE}"
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_off_floor 1958400
-[[ "$(cat "${CASDAP_CPU_BEFORE_FILE}")" == "${cpu}/cpu4/online 1" ]] || fail "${case_name} rewrote the save file"
+[[ "$(cat "${MICRODAP_CPU_BEFORE_FILE}")" == "${cpu}/cpu4/online 1" ]] || fail "${case_name} rewrote the save file"
 
 case_name="cpu-resave without a file"
 reset
@@ -262,15 +262,15 @@ chmod 0000 "${cpu}/cpufreq/policy7/scaling_max_freq"
 run cpu-resave
 chmod 0644 "${cpu}/cpufreq/policy7/scaling_max_freq"
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-[[ ! -e "${CASDAP_CPU_BEFORE_FILE}.tmp" ]] || fail "${case_name}: temp file left"
-[[ "$(grep -c . "${CASDAP_CPU_BEFORE_FILE}")" == 12 ]] || fail "${case_name}: $(grep -c . "${CASDAP_CPU_BEFORE_FILE}") saved lines, expected 12"
-grep -qxF "${cpu}/cpufreq/policy0/scaling_max_freq 1497600" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy0 not refreshed"
-grep -qxF "${cpu}/cpufreq/policy4/scaling_max_freq 1920000" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy4 not refreshed"
-grep -qxF "${cpu}/cpufreq/policy7/scaling_max_freq 2841600" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: unreadable policy7 line not kept"
-grep -qxF "${gpu}/max_freq 400000000" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: max_freq not refreshed"
-grep -qxF "${gpu}/governor userspace" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: governor line changed"
+[[ ! -e "${MICRODAP_CPU_BEFORE_FILE}.tmp" ]] || fail "${case_name}: temp file left"
+[[ "$(grep -c . "${MICRODAP_CPU_BEFORE_FILE}")" == 12 ]] || fail "${case_name}: $(grep -c . "${MICRODAP_CPU_BEFORE_FILE}") saved lines, expected 12"
+grep -qxF "${cpu}/cpufreq/policy0/scaling_max_freq 1497600" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy0 not refreshed"
+grep -qxF "${cpu}/cpufreq/policy4/scaling_max_freq 1920000" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: policy4 not refreshed"
+grep -qxF "${cpu}/cpufreq/policy7/scaling_max_freq 2841600" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: unreadable policy7 line not kept"
+grep -qxF "${gpu}/max_freq 400000000" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: max_freq not refreshed"
+grep -qxF "${gpu}/governor userspace" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: governor line changed"
 for n in 1 2 3 4 5 6 7; do
-    grep -qxF "${cpu}/cpu${n}/online 1" "${CASDAP_CPU_BEFORE_FILE}" || fail "${case_name}: cpu${n} online line changed"
+    grep -qxF "${cpu}/cpu${n}/online 1" "${MICRODAP_CPU_BEFORE_FILE}" || fail "${case_name}: cpu${n} online line changed"
 done
 run cpu-off
 [[ "${rc}" == 0 ]] || fail "${case_name}: cpu-off exit ${rc}"
@@ -288,7 +288,7 @@ run cpu-restore
 expect_online 1 1 1 1 1 1 1
 expect_value "${cpu}/cpufreq/policy0/scaling_max_freq" 518400
 expect_value "${gpu}/max_freq" 305000000
-[[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore without a file created one"
+[[ ! -e "${MICRODAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore without a file created one"
 [[ ! -e "${T}/run" ]] || fail "cpu-restore without a file created the directory"
 
 case_name="cpu-dap with a refused write"
@@ -311,14 +311,14 @@ expect_online 1 1 1 1 1 1 1
 expect_value "${cpu}/cpufreq/policy0/scaling_max_freq" 787200
 expect_value "${gpu}/governor" userspace
 expect_value "${gpu}/max_freq" 587000000
-[[ -f "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore with a refused write removed the save file"
+[[ -f "${MICRODAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore with a refused write removed the save file"
 chmod 0644 "${cpu}/cpufreq/policy0/scaling_max_freq"
 
 case_name="cpu-restore retry"
 run cpu-restore
 [[ "${rc}" == 0 ]] || fail "cpu-restore retry exit ${rc}"
 expect_untouched_sysfs
-[[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore retry left the save file"
+[[ ! -e "${MICRODAP_CPU_BEFORE_FILE}" ]] || fail "cpu-restore retry left the save file"
 
 for pair in "low 8" "normal 20" "high 24"; do
     read -r name value <<< "${pair}"
@@ -388,12 +388,12 @@ for pair in "0 FF0000" "20 FF5500" "120 00FF00" "200 00AAFF" "280 AA00FF" "350 F
     run "rgb-hue-${hue}"
     [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
     expect_calls "${rgb_get}" "$(hue_call "${hex}" true true 60 100 30)"
-    [[ -f "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
-    [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
-    [[ ! -e "${CASDAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
-    [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config rewritten by the word"
+    [[ -f "${MICRODAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
+    [[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
+    [[ ! -e "${MICRODAP_RGB_BEFORE_FILE}.tmp" ]] || fail "${case_name}: save temp file left"
+    [[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config rewritten by the word"
     expect_untouched_sysfs
-    [[ ! -e "${CASDAP_CPU_BEFORE_FILE}" ]] || fail "${case_name} wrote the cpu save file"
+    [[ ! -e "${MICRODAP_CPU_BEFORE_FILE}" ]] || fail "${case_name} wrote the cpu save file"
 done
 
 for (( hue = 0; hue <= 350; hue += 10 )); do
@@ -420,7 +420,7 @@ case_name="rgb-hue-200 saturation from the save"
 reset
 rgb_config "${half_config}"
 mkdir -p "${T}/run"
-printf '%s\n' "${steam_config}" > "${CASDAP_RGB_BEFORE_FILE}"
+printf '%s\n' "${steam_config}" > "${MICRODAP_RGB_BEFORE_FILE}"
 rgb_answer true true 30 60 40
 run rgb-color-200-2
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
@@ -441,19 +441,19 @@ case_name="rgb-hue-200 with a save present"
 reset
 rgb_config "${steam_config}"
 mkdir -p "${T}/run"
-echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
+echo earlier > "${MICRODAP_RGB_BEFORE_FILE}"
 run rgb-hue-200
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
 expect_calls "${rgb_get}" "$(hue_call 00AAFF true true 60 100 30)"
 
 case_name="rgb-hue-120 without a config"
 reset
 run rgb-hue-120
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-[[ -f "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
-[[ ! -s "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
-[[ ! -e "${CASDAP_RGB_CONFIG}" ]] || fail "${case_name}: config created by the word"
+[[ -f "${MICRODAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: no save file"
+[[ ! -s "${MICRODAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
+[[ ! -e "${MICRODAP_RGB_CONFIG}" ]] || fail "${case_name}: config created by the word"
 expect_calls "${rgb_get}" "$(hue_call 00FF00 true true 60 100 30)"
 
 case_name="rgb-hue-200 with a failing set"
@@ -462,7 +462,7 @@ rgb_config "${steam_config}"
 echo set > "${RGB_FAIL}"
 run rgb-hue-200
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
 expect_calls "${rgb_get}" "$(hue_call 00AAFF true true 60 100 30)"
 
 case_name="rgb-hue-200 with a failing get"
@@ -471,7 +471,7 @@ rgb_config "${steam_config}"
 echo get > "${RGB_FAIL}"
 run rgb-hue-200
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
 expect_calls "${rgb_get}"
 
 for key in enabled linkBrightness brightness maxBrightness saturation; do
@@ -492,24 +492,24 @@ rgb_config "${steam_config}"
 run rgb-off
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "${rgb_off}"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
 expect_untouched_sysfs
 
 case_name="rgb-off without a config"
 reset
 run rgb-off
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-[[ -f "${CASDAP_RGB_BEFORE_FILE}" && ! -s "${CASDAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
+[[ -f "${MICRODAP_RGB_BEFORE_FILE}" && ! -s "${MICRODAP_RGB_BEFORE_FILE}" ]] || fail "${case_name}: save not zero byte"
 expect_calls "${rgb_off}"
 
 case_name="rgb-off with a save present"
 reset
 rgb_config "${steam_config}"
 mkdir -p "${T}/run"
-echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
+echo earlier > "${MICRODAP_RGB_BEFORE_FILE}"
 run rgb-off
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save rewritten"
 
 case_name="rgb-off with a failing off"
 reset
@@ -517,7 +517,7 @@ rgb_config "${steam_config}"
 echo off > "${RGB_FAIL}"
 run rgb-off
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
 
 case_name="rgb-sleep"
 reset
@@ -527,7 +527,7 @@ run rgb-sleep
 expect_calls "armada-rgb[sleep]"
 expect_no_rgb_files
 [[ ! -e "${T}/run" ]] || fail "${case_name} created the save directory"
-[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
+[[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
 expect_untouched_sysfs
 
 case_name="rgb-wake"
@@ -537,15 +537,15 @@ run rgb-wake
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "armada-rgb[wake]"
 expect_no_rgb_files
-[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
+[[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
 
 case_name="rgb-sleep with a save present"
 reset
 mkdir -p "${T}/run"
-echo earlier > "${CASDAP_RGB_BEFORE_FILE}"
+echo earlier > "${MICRODAP_RGB_BEFORE_FILE}"
 run rgb-sleep
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save touched"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == earlier ]] || fail "${case_name}: save touched"
 
 case_name="rgb-wake with a failing wake"
 reset
@@ -558,12 +558,12 @@ case_name="rgb-restore with a saved config"
 reset
 rgb_config '{"version":1,"enabled":true,"brightness":30,"color":"1BA1E2"}'
 mkdir -p "${T}/run"
-printf '%s\n' "${steam_config}" > "${CASDAP_RGB_BEFORE_FILE}"
+printf '%s\n' "${steam_config}" > "${MICRODAP_RGB_BEFORE_FILE}"
 run rgb-restore
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "${rgb_apply}"
-[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
-[[ ! -e "${CASDAP_RGB_CONFIG}.tmp" ]] || fail "${case_name}: config temp file left"
+[[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
+[[ ! -e "${MICRODAP_RGB_CONFIG}.tmp" ]] || fail "${case_name}: config temp file left"
 expect_no_rgb_files
 expect_untouched_sysfs
 
@@ -571,17 +571,17 @@ case_name="rgb-restore with a zero byte save"
 reset
 rgb_config '{"version":1,"enabled":true,"brightness":30,"color":"1BA1E2"}'
 mkdir -p "${T}/run"
-: > "${CASDAP_RGB_BEFORE_FILE}"
+: > "${MICRODAP_RGB_BEFORE_FILE}"
 run rgb-restore
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "${rgb_apply}"
-[[ ! -e "${CASDAP_RGB_CONFIG}" ]] || fail "${case_name}: config left"
+[[ ! -e "${MICRODAP_RGB_CONFIG}" ]] || fail "${case_name}: config left"
 expect_no_rgb_files
 
 case_name="rgb-restore with a zero byte save and no config"
 reset
 mkdir -p "${T}/run"
-: > "${CASDAP_RGB_BEFORE_FILE}"
+: > "${MICRODAP_RGB_BEFORE_FILE}"
 run rgb-restore
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "${rgb_apply}"
@@ -593,20 +593,20 @@ rgb_config "${steam_config}"
 run rgb-restore
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 [[ ! -s "${STATE}" ]] || fail "${case_name} ran $(cat "${STATE}")"
-[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
+[[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config touched"
 [[ ! -e "${T}/run" ]] || fail "${case_name} created the save directory"
 
 case_name="rgb-restore with a failing apply"
 reset
 rgb_config '{"version":1,"enabled":true,"brightness":30,"color":"1BA1E2"}'
 mkdir -p "${T}/run"
-printf '%s\n' "${steam_config}" > "${CASDAP_RGB_BEFORE_FILE}"
+printf '%s\n' "${steam_config}" > "${MICRODAP_RGB_BEFORE_FILE}"
 echo apply > "${RGB_FAIL}"
 run rgb-restore
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
 expect_calls "${rgb_apply}"
-[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save removed"
+[[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save removed"
 
 case_name="rgb-restore retry"
 rm -f "${RGB_FAIL}"
@@ -624,7 +624,7 @@ run rgb-off
 run rgb-restore
 [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
 expect_calls "${rgb_get}" "$(hue_call AA00FF true true 60 100 30)" "${rgb_off}" "${rgb_apply}"
-[[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
+[[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config not restored"
 expect_no_rgb_files
 
 for quad in "0 1 FF9999 40" "30 3 FF9933 80" "120 3 33FF33 80" "200 2 66CCFF 60" "280 4 AA00FF 100" "350 4 FF002B 100"; do
@@ -635,8 +635,8 @@ for quad in "0 1 FF9999 40" "30 3 FF9933 80" "120 3 33FF33 80" "200 2 66CCFF 60"
     run "rgb-color-${hue}-${level}"
     [[ "${rc}" == 0 ]] || fail "${case_name} exit ${rc}"
     expect_calls "${rgb_get}" "$(hue_call "${hex}" true true 60 "${sat}" 30)"
-    [[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
-    [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config rewritten by the word"
+    [[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save differs from the config"
+    [[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "${case_name}: config rewritten by the word"
     expect_untouched_sysfs
 done
 
@@ -682,7 +682,7 @@ rgb_config "${steam_config}"
 echo set > "${RGB_FAIL}"
 run rgb-color-120-1
 [[ "${rc}" == 1 ]] || fail "${case_name} exit ${rc}, expected 1"
-[[ "$(cat "${CASDAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
+[[ "$(cat "${MICRODAP_RGB_BEFORE_FILE}")" == "${steam_config}" ]] || fail "${case_name}: save missing or changed"
 
 for verb in bogus "" "cores-offline;id" "bt-class-headphones;id" "backlight-off --help" "cpu-dap;id" cpu "cpu-restore " CPU-DAP \
     hp-gain hp-gain-8 hp-gain-medium hp-amp hp-amp-cls_h_ulp spk-gain spk-gain-120 spk-gain-0 "spk-gain-102 " \
@@ -701,7 +701,7 @@ for verb in bogus "" "cores-offline;id" "bt-class-headphones;id" "backlight-off 
     [[ "$(cat "${sys}/class/backlight/panel0/bl_power")" == 0 ]] || fail "verb '${verb}' touched sysfs"
     expect_untouched_sysfs
     [[ ! -e "${T}/run" ]] || fail "verb '${verb}' wrote a save file"
-    [[ "$(cat "${CASDAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "verb '${verb}' touched the rgb config"
+    [[ "$(cat "${MICRODAP_RGB_CONFIG}")" == "${steam_config}" ]] || fail "verb '${verb}' touched the rgb config"
 done
 
 case_name="no verb"

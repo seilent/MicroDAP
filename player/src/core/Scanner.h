@@ -15,7 +15,7 @@ namespace TagLib {
 class File;
 }
 
-namespace casdap {
+namespace microdap {
 
 struct FileStamp
 {

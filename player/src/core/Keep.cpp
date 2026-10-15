@@ -7,7 +7,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -23,14 +23,14 @@ QString firstLine(const QString &path)
 
 QString Keep::markerPath()
 {
-    return qEnvironmentVariable("CASDAP_KEEP_FILE",
+    return qEnvironmentVariable("MICRODAP_KEEP_FILE",
                                 QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-                                    + QStringLiteral("/casdap/keep"));
+                                    + QStringLiteral("/microdap/keep"));
 }
 
 QString Keep::bootIdPath()
 {
-    return qEnvironmentVariable("CASDAP_BOOT_ID_FILE", QStringLiteral("/proc/sys/kernel/random/boot_id"));
+    return qEnvironmentVariable("MICRODAP_BOOT_ID_FILE", QStringLiteral("/proc/sys/kernel/random/boot_id"));
 }
 
 QString Keep::bootId()
@@ -47,25 +47,25 @@ bool Keep::write()
 {
     const QString id = bootId();
     if (id.isEmpty()) {
-        qWarning() << "casdap keep: no boot id in" << bootIdPath();
+        qWarning() << "microdap keep: no boot id in" << bootIdPath();
         return false;
     }
     const QString path = markerPath();
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        qWarning() << "casdap keep: cannot create" << QFileInfo(path).absolutePath();
+        qWarning() << "microdap keep: cannot create" << QFileInfo(path).absolutePath();
         return false;
     }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qWarning() << "casdap keep: cannot write" << path;
+        qWarning() << "microdap keep: cannot write" << path;
         return false;
     }
     file.write(id.toUtf8() + '\n');
     if (!file.commit()) {
-        qWarning() << "casdap keep: cannot commit" << path;
+        qWarning() << "microdap keep: cannot commit" << path;
         return false;
     }
-    qInfo() << "casdap keep: marker written" << path;
+    qInfo() << "microdap keep: marker written" << path;
     return true;
 }
 
@@ -75,10 +75,10 @@ bool Keep::clear()
     if (!QFile::exists(path))
         return true;
     if (!QFile::remove(path)) {
-        qWarning() << "casdap keep: cannot remove" << path;
+        qWarning() << "microdap keep: cannot remove" << path;
         return false;
     }
-    qInfo() << "casdap keep: marker removed" << path;
+    qInfo() << "microdap keep: marker removed" << path;
     return true;
 }
 

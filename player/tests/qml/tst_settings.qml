@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import Casdap
+import MicroDap
 
 TestCase {
     id: tc
@@ -185,7 +185,7 @@ TestCase {
         id: fakeEq
 
         property string activeOutput: "headphones"
-        property var keys: ({ headphones: "/home/armada/.config/casdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
+        property var keys: ({ headphones: "/home/armada/.config/microdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
         property bool missing: false
 
         signal profilesChanged()
@@ -320,7 +320,7 @@ TestCase {
         counters.closePlayer = 0
         counters.eq = 0
         fakeEq.activeOutput = "headphones"
-        fakeEq.keys = ({ headphones: "/home/armada/.config/casdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
+        fakeEq.keys = ({ headphones: "/home/armada/.config/microdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
         fakeEq.missing = false
         fakeDacEq.status = "none"
     }
@@ -1283,7 +1283,7 @@ TestCase {
 
     function test_eq_row_dac() {
         tc.useUsb()
-        const file = "/home/armada/.config/casdap/eq/HD 600.txt"
+        const file = "/home/armada/.config/microdap/eq/HD 600.txt"
         fakeEq.activeOutput = "usb"
         fakeEq.keys = ({ headphones: file, usb: file, speaker: "off" })
         const page = open({ eq: fakeEq, dacEq: fakeDacEq })

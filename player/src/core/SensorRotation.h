@@ -9,7 +9,7 @@
 #include <QTimer>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 class SensorRotation : public QObject
 {

@@ -1,0 +1,8 @@
+[Unit]
+Description=MicroDAP FiiO bypass on plug in
+ConditionUser=!root
+ConditionGroup=audio
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/microdap/microdap-fiio reset

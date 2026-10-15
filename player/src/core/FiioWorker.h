@@ -14,9 +14,9 @@
 
 class QThread;
 
-Q_DECLARE_METATYPE(casdap::FiioMirror)
+Q_DECLARE_METATYPE(microdap::FiioMirror)
 
-namespace casdap {
+namespace microdap {
 
 class FiioRunner;
 
@@ -56,7 +56,7 @@ public:
     bool quitAndJoin(int ms);
 
 signals:
-    void batchDone(quint64 seq, bool ok, int reason, const casdap::FiioMirror &mirror);
+    void batchDone(quint64 seq, bool ok, int reason, const microdap::FiioMirror &mirror);
 
 private:
     void quit();
@@ -80,7 +80,7 @@ public:
     std::atomic<int64_t> quitDeadline{0};
 
 signals:
-    void done(quint64 seq, bool ok, int reason, const casdap::FiioMirror &mirror);
+    void done(quint64 seq, bool ok, int reason, const microdap::FiioMirror &mirror);
 
 private:
     FiioReason attempt(const FiioWorker::Target &target, const FiioModel &model, FiioMirror &mirror,

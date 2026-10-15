@@ -18,7 +18,7 @@ except (ImportError, ValueError, AttributeError):
 SERVICE = 'org.freedesktop.ReserveDevice1.Audio1'
 PATH = '/org/freedesktop/ReserveDevice1/Audio1'
 INTERFACE = 'org.freedesktop.ReserveDevice1'
-CONTROL = 'org.casdap.FakeReserve'
+CONTROL = 'net.seilent.MicroDap.FakeReserve'
 CONTROL_PATH = '/control'
 BUS_SERVICE = 'org.freedesktop.DBus'
 BUS_PATH = '/org/freedesktop/DBus'

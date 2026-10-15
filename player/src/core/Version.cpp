@@ -6,11 +6,11 @@
 
 #include <QtGlobal>
 
-namespace casdap {
+namespace microdap {
 
 QString version()
 {
-    return QStringLiteral(CASDAP_VERSION);
+    return QStringLiteral(MICRODAP_VERSION);
 }
 
 QString dependencies()

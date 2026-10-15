@@ -13,7 +13,7 @@
 #include <functional>
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -68,7 +68,7 @@ double measure(const std::function<void(int)> &body)
 
 void report(const char *name, double ms, double budget)
 {
-    qInfo().noquote() << QStringLiteral("casdap perf: %1 %2").arg(QLatin1StringView(name)).arg(ms, 0, 'f', 3);
+    qInfo().noquote() << QStringLiteral("microdap perf: %1 %2").arg(QLatin1StringView(name)).arg(ms, 0, 'f', 3);
     QVERIFY2(ms <= budget, qPrintable(QStringLiteral("%1 took %2 ms, budget %3 ms")
                                           .arg(QLatin1StringView(name))
                                           .arg(ms, 0, 'f', 3)

@@ -11,7 +11,7 @@
 #include <array>
 #include <atomic>
 
-namespace casdap {
+namespace microdap {
 
 class Pad : public PadSource
 {

@@ -29,7 +29,7 @@
 
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -177,7 +177,7 @@ State::~State()
 QString State::defaultPath()
 {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-           + QStringLiteral("/casdap/state.json");
+           + QStringLiteral("/microdap/state.json");
 }
 
 QString State::queuePathFor(const QString &statePath)
@@ -283,7 +283,7 @@ void State::runQueueJobs()
         if (writeQueue(job))
             m_writtenRev = job.rev;
         else
-            qWarning() << "casdap state: cannot write" << job.path;
+            qWarning() << "microdap state: cannot write" << job.path;
     }
 }
 
@@ -300,7 +300,7 @@ bool State::flushQueue()
     if (m_writtenRev == m_rev)
         return true;
     if (!writeQueue(queueSnapshot())) {
-        qWarning() << "casdap state: cannot write" << m_queuePath;
+        qWarning() << "microdap state: cannot write" << m_queuePath;
         return false;
     }
     m_writtenRev = m_rev;
@@ -371,7 +371,7 @@ bool State::saveState(bool handoff)
 {
     const bool ok = write(m_path, snapshot(m_player, handoff, m_stack, m_rev));
     if (!ok)
-        qWarning() << "casdap state: cannot write" << m_path;
+        qWarning() << "microdap state: cannot write" << m_path;
     return ok;
 }
 
@@ -594,7 +594,7 @@ void State::installSignalHandlers()
     if (m_fds[0] >= 0)
         return;
     if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, m_fds) != 0) {
-        qWarning() << "casdap state: socketpair failed";
+        qWarning() << "microdap state: socketpair failed";
         m_fds[0] = -1;
         m_fds[1] = -1;
         return;

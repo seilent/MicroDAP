@@ -22,7 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -763,14 +763,14 @@ struct Run
 FiioPaths fiioPathsFromEnv()
 {
     FiioPaths paths;
-    paths.runDir = envOr("CASDAP_RUN_DIR", "/run/user/" + std::to_string(::getuid()));
+    paths.runDir = envOr("MICRODAP_RUN_DIR", "/run/user/" + std::to_string(::getuid()));
     std::error_code ec;
     paths.runDirExists = fs::is_directory(paths.runDir, ec);
     const std::string home = envOr("HOME", "");
-    paths.stateDir = envOr("XDG_STATE_HOME", home + "/.local/state") + "/casdap";
-    paths.configDir = envOr("XDG_CONFIG_HOME", home + "/.config") + "/casdap";
-    paths.sysRoot = envOr("CASDAP_SYS_ROOT", "/sys");
-    paths.asoundDir = envOr("CASDAP_ASOUND_DIR", "/proc/asound");
+    paths.stateDir = envOr("XDG_STATE_HOME", home + "/.local/state") + "/microdap";
+    paths.configDir = envOr("XDG_CONFIG_HOME", home + "/.config") + "/microdap";
+    paths.sysRoot = envOr("MICRODAP_SYS_ROOT", "/sys");
+    paths.asoundDir = envOr("MICRODAP_ASOUND_DIR", "/proc/asound");
     return paths;
 }
 
@@ -780,7 +780,7 @@ std::string fiioMarkerPath(const FiioPaths &paths)
 }
 
 FiioLock::FiioLock(const FiioPaths &paths)
-    : m_path(paths.runDir + "/casdap-fiio.lock")
+    : m_path(paths.runDir + "/microdap-fiio.lock")
     , m_none(!paths.runDirExists)
 {
 }
@@ -842,7 +842,7 @@ InflightStamp::InflightStamp(const FiioPaths &paths, const std::string &sysPath)
 {
     std::error_code ec;
     const fs::path device = fs::canonical(sysPath, ec);
-    m_path = paths.runDir + "/casdap-fiio.inflight." + (ec ? fs::path(sysPath) : device).filename().string();
+    m_path = paths.runDir + "/microdap-fiio.inflight." + (ec ? fs::path(sysPath) : device).filename().string();
 }
 
 bool InflightStamp::write(int64_t ms, const std::string &device) const
@@ -1189,7 +1189,7 @@ namespace FiioBatch {
 
 namespace {
 
-constexpr std::string_view casdapName = "CASDAP";
+constexpr std::string_view microdapName = "MICRODAP";
 
 FiioResult claimSlot(Run &run, FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths,
                      std::optional<int64_t> deadline)
@@ -1225,9 +1225,9 @@ FiioResult claimSlot(Run &run, FiioDevice &device, FiioMirror &mirror, const Fii
         return {FiioReason::Backup, {}};
     }
     device.log("backup " + *written);
-    if ((r = run.set(fiioCmdName, namePayload(slot, casdapName))).reason != FiioReason::None)
+    if ((r = run.set(fiioCmdName, namePayload(slot, microdapName))).reason != FiioReason::None)
         return r;
-    mirror.name = casdapName;
+    mirror.name = microdapName;
     removeMarker(paths);
     return {};
 }
@@ -1257,7 +1257,7 @@ FiioResult take(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, 
     if ((r = run.get(fiioCmdName, {slot})).reason != FiioReason::None)
         return r;
     mirror.name = nameOfPayload(r.payload);
-    if (mirror.name == casdapName) {
+    if (mirror.name == microdapName) {
         removeMarker(paths);
     } else {
         if ((r = claimSlot(run, device, mirror, paths, deadline)).reason != FiioReason::None)
@@ -1396,7 +1396,7 @@ FiioResult restoreSlot(FiioDevice &device, FiioMirror &mirror, const FiioPaths &
         return r;
     mirror.name = nameOfPayload(r.payload);
     mirror.preset = -1;
-    if (mirror.name != casdapName) {
+    if (mirror.name != microdapName) {
         if (mirror.firmware.empty()) {
             if ((r = run.get(fiioCmdVersion)).reason != FiioReason::None)
                 return r;

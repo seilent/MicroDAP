@@ -12,7 +12,7 @@ constexpr double shareThreshold = 0.02;
 
 int landscapeTurn()
 {
-    return qEnvironmentVariable("CASDAP_LANDSCAPE_TURN") == QLatin1StringView("3") ? 3 : 1;
+    return qEnvironmentVariable("MICRODAP_LANDSCAPE_TURN") == QLatin1StringView("3") ? 3 : 1;
 }
 
 }
@@ -28,7 +28,7 @@ private slots:
 
 void ShotTest::blank()
 {
-    const QImage image(QStringLiteral(CASDAP_SHOT_PNG));
+    const QImage image(QStringLiteral(MICRODAP_SHOT_PNG));
     QVERIFY(!image.isNull());
     QCOMPARE(image.size(), QSize(640, 960));
 
@@ -39,8 +39,8 @@ void ShotTest::blank()
 
 void ShotTest::orientation()
 {
-    const QImage upright = QImage(QStringLiteral(CASDAP_SHOT_UPRIGHT)).convertToFormat(QImage::Format_RGB32);
-    const QImage turned = QImage(QStringLiteral(CASDAP_SHOT_TURNED)).convertToFormat(QImage::Format_RGB32);
+    const QImage upright = QImage(QStringLiteral(MICRODAP_SHOT_UPRIGHT)).convertToFormat(QImage::Format_RGB32);
+    const QImage turned = QImage(QStringLiteral(MICRODAP_SHOT_TURNED)).convertToFormat(QImage::Format_RGB32);
     QVERIFY(!upright.isNull());
     QVERIFY(!turned.isNull());
     QCOMPARE(upright.size(), QSize(960, 640));
@@ -61,7 +61,7 @@ void ShotTest::orientation()
         }
     }
     const double share = double(differing) / (upright.width() * upright.height());
-    qInfo() << "casdap shot: orientation share over" << channelDelta << share;
+    qInfo() << "microdap shot: orientation share over" << channelDelta << share;
     QVERIFY(share <= shareThreshold);
 }
 

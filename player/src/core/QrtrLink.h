@@ -6,7 +6,7 @@
 
 class QSocketNotifier;
 
-namespace casdap {
+namespace microdap {
 
 class QrtrLink : public SscLink
 {

@@ -7,7 +7,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using namespace casdap;
+using namespace microdap;
 
 class AudioInfoTest : public QObject
 {
@@ -161,8 +161,8 @@ void AudioInfoTest::graphRateFromStub()
     }
     const QString stub = dir.filePath(QStringLiteral("pw-dump"));
     QVERIFY(writeExecutable(stub, QStringLiteral("#!/bin/sh\ncat \"") + json + QStringLiteral("\"\n")));
-    qputenv("CASDAP_PW_DUMP_BIN", stub.toUtf8());
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_PW_DUMP_BIN", stub.toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
     QCOMPARE(AudioInfo::pwDumpPath(), stub);
 
     AudioInfo info;
@@ -185,8 +185,8 @@ void AudioInfoTest::graphRateFromStub()
     QTRY_VERIFY_WITH_TIMEOUT([&info] { info.refreshGraphRate(); return info.graphRate() == 0; }(), 5000);
     QCOMPARE(changed.count(), 2);
 
-    qunsetenv("CASDAP_PW_DUMP_BIN");
-    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_PW_DUMP_BIN");
+    qunsetenv("MICRODAP_ASOUND_DIR");
 }
 
 void AudioInfoTest::graphRateWithoutPwDump()
@@ -202,8 +202,8 @@ void AudioInfoTest::graphRateWithoutPwDump()
                                   "rate: %1 (%1/1)\n").arg(rate).toUtf8());
     };
     writeParams(88200);
-    qputenv("CASDAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
     QCOMPARE(AudioInfo::pwDumpPath(), QString());
 
     AudioInfo info;
@@ -220,8 +220,8 @@ void AudioInfoTest::graphRateWithoutPwDump()
     QCOMPARE(info.graphRate(), 44100);
     QCOMPARE(changed.count(), 2);
 
-    qunsetenv("CASDAP_PW_DUMP_BIN");
-    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_PW_DUMP_BIN");
+    qunsetenv("MICRODAP_ASOUND_DIR");
 }
 
 void AudioInfoTest::picksRunningSubstream()
@@ -245,8 +245,8 @@ void AudioInfoTest::picksRunningSubstream()
     writeSub(QStringLiteral("card0/pcm1p"), QStringLiteral("closed\n"), QStringLiteral("closed\n"));
     writeSub(QStringLiteral("card1/pcm0p"), open96, running);
     QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("card1/pcm0c/sub0")));
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
-    qputenv("CASDAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
 
     QCOMPARE(AudioInfo::asoundDir(), dir.path());
     QCOMPARE(AudioInfo::parseState(running), QStringLiteral("RUNNING"));
@@ -268,8 +268,8 @@ void AudioInfoTest::picksRunningSubstream()
     QCOMPARE(info.pcmFormat(), QString());
     QCOMPARE(info.graphRate(), 0);
 
-    qunsetenv("CASDAP_ASOUND_DIR");
-    qunsetenv("CASDAP_PW_DUMP_BIN");
+    qunsetenv("MICRODAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_PW_DUMP_BIN");
 }
 
 void AudioInfoTest::streamOfFiio()
@@ -277,7 +277,7 @@ void AudioInfoTest::streamOfFiio()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     QVERIFY(writeText(dir.filePath(QStringLiteral("card1/stream0")), fiioStream));
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
 
     const QList<int> eight{44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     const UsbStream stream = AudioInfo::streamFor(1);
@@ -290,7 +290,7 @@ void AudioInfoTest::streamOfFiio()
     QVERIFY(AudioInfo::streamFor(2).rates.isEmpty());
     QVERIFY(AudioInfo::ratesFor(2).isEmpty());
 
-    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_ASOUND_DIR");
 }
 
 void AudioInfoTest::streamOfAppleDongle()
@@ -298,14 +298,14 @@ void AudioInfoTest::streamOfAppleDongle()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     QVERIFY(writeText(dir.filePath(QStringLiteral("card1/stream0")), dongleStream));
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
 
     const UsbStream stream = AudioInfo::streamFor(1);
     QCOMPARE(stream.formats, QStringList({QStringLiteral("S24_3LE"), QStringLiteral("S16_LE")}));
     QCOMPARE(stream.rates, QList<int>({48000}));
     QCOMPARE(AudioInfo::ratesFor(1), QList<int>({48000}));
 
-    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_ASOUND_DIR");
 }
 
 void AudioInfoTest::streamPlaybackOnlyAndRanges()
@@ -322,14 +322,14 @@ void AudioInfoTest::streamPlaybackOnlyAndRanges()
                       "Capture:\n  Status: Stop\n"
                       "  Interface 2\n    Altset 1\n    Format: S32_LE\n    Channels: 1\n"
                       "    Rates: 176400\n"));
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
 
     const UsbStream stream = AudioInfo::streamFor(2);
     QCOMPARE(stream.formats, QStringList({QStringLiteral("S16_LE"), QStringLiteral("S24_LE")}));
     QCOMPARE(stream.rates, QList<int>({32000, 44100, 48000, 88200, 96000, 768000}));
     QCOMPARE(AudioInfo::ratesFor(2), QList<int>({44100, 48000, 88200, 96000}));
 
-    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_ASOUND_DIR");
 }
 
 void AudioInfoTest::hwRateFromHwParams()
@@ -339,8 +339,8 @@ void AudioInfoTest::hwRateFromHwParams()
     const QString params = dir.filePath(QStringLiteral("card1/pcm0p/sub0/hw_params"));
     QVERIFY(writeText(params, "access: MMAP_INTERLEAVED\nformat: S32_LE\nsubformat: STD\nchannels: 2\n"
                               "rate: 44100 (44100/1)\nperiod_size: 441\nbuffer_size: 3528\n"));
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
-    qputenv("CASDAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
 
     AudioInfo info;
     QSignalSpy changed(&info, &AudioInfo::hwRateChanged);
@@ -358,8 +358,8 @@ void AudioInfoTest::hwRateFromHwParams()
     QCOMPARE(info.hwRate(), 0);
     QCOMPARE(changed.count(), 2);
 
-    qunsetenv("CASDAP_ASOUND_DIR");
-    qunsetenv("CASDAP_PW_DUMP_BIN");
+    qunsetenv("MICRODAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_PW_DUMP_BIN");
 }
 
 void AudioInfoTest::parseLive()
@@ -387,8 +387,8 @@ void AudioInfoTest::readsFixtureAndTracksChanges()
         file.write(text.toUtf8());
     };
     writeFile(QStringLiteral("closed\n"));
-    qputenv("CASDAP_ASOUND_DIR", dir.path().toUtf8());
-    qputenv("CASDAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", dir.path().toUtf8());
+    qputenv("MICRODAP_PW_DUMP_BIN", dir.filePath(QStringLiteral("missing/pw-dump")).toUtf8());
     QCOMPARE(AudioInfo::hwParamsPath(), QString());
 
     AudioInfo info;
@@ -410,8 +410,8 @@ void AudioInfoTest::readsFixtureAndTracksChanges()
     QCOMPARE(info.pcmFormat(), QStringLiteral("96000 S24_LE"));
     info.refresh();
     QCOMPARE(info.pcmFormat(), QString());
-    qunsetenv("CASDAP_ASOUND_DIR");
-    qunsetenv("CASDAP_PW_DUMP_BIN");
+    qunsetenv("MICRODAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_PW_DUMP_BIN");
 }
 
 QTEST_GUILESS_MAIN(AudioInfoTest)

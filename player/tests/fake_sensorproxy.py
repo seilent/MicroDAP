@@ -18,8 +18,8 @@ SERVICE = 'net.hadess.SensorProxy'
 PATH = '/net/hadess/SensorProxy'
 INTERFACE = 'net.hadess.SensorProxy'
 PROPERTIES = 'org.freedesktop.DBus.Properties'
-CONTROL = 'org.casdap.FakeSensorProxy'
-CONTROL_PATH = '/org/casdap/FakeSensorProxy'
+CONTROL = 'net.seilent.MicroDap.FakeSensorProxy'
+CONTROL_PATH = '/net/seilent/MicroDap/FakeSensorProxy'
 
 
 class InvalidArgs(dbus.DBusException):

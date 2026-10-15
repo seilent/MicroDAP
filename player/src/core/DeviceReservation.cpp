@@ -13,7 +13,7 @@
 #include <QRegularExpression>
 #include <QTimer>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -71,7 +71,7 @@ DeviceReservation::DeviceReservation(const Bounds &bounds, QObject *parent)
     , m_thread(new QThread)
     , m_worker(new ReserveWorker(bounds, m_shared))
 {
-    m_thread->setObjectName(QStringLiteral("casdap-reserve"));
+    m_thread->setObjectName(QStringLiteral("microdap-reserve"));
     m_worker->moveToThread(m_thread);
     connect(m_worker, &ReserveWorker::acquired, this, &DeviceReservation::acquired, Qt::QueuedConnection);
     connect(m_worker, &ReserveWorker::refused, this, &DeviceReservation::refused, Qt::QueuedConnection);
@@ -95,7 +95,7 @@ DeviceReservation::~DeviceReservation()
     else
         m_thread->wait(QDeadlineTimer(bound));
     if (m_thread->isRunning()) {
-        qWarning() << "casdap reserve: thread did not stop within" << bound << "ms, left running";
+        qWarning() << "microdap reserve: thread did not stop within" << bound << "ms, left running";
         return;
     }
     delete m_worker;
@@ -120,7 +120,7 @@ QString DeviceReservation::pathFor(const QString &reserveName)
 
 QString DeviceReservation::applicationName()
 {
-    return QStringLiteral("casdap");
+    return QStringLiteral("microdap");
 }
 
 void DeviceReservation::acquire(const QString &reserveName, const QString &cardId, quint64 seq)
@@ -189,13 +189,13 @@ void DeviceReservation::quitAndJoin(int ms)
         worker->quit(seq);
     }, Qt::QueuedConnection);
     if (!m_thread->wait(QDeadlineTimer(ms)))
-        qWarning() << "casdap reserve: thread still running" << ms << "ms after quit";
+        qWarning() << "microdap reserve: thread still running" << ms << "ms after quit";
 }
 
 void DeviceReservation::onReleaseRequested(quint64 id, int priority)
 {
     if (id <= m_shared->answered.load()) {
-        qInfo() << "casdap reserve: RequestRelease" << priority << "answered before the release ran, dropped";
+        qInfo() << "microdap reserve: RequestRelease" << priority << "answered before the release ran, dropped";
         return;
     }
     m_lastRequest = id;
@@ -261,7 +261,7 @@ ReserveWorker::ReserveWorker(const DeviceReservation::Bounds &bounds, ReserveSha
     m_nameLostTimer->setSingleShot(true);
     m_nameLostTimer->setInterval(bounds.nameLostMs);
     connect(m_nameLostTimer, &QTimer::timeout, this, [this] {
-        qWarning().noquote() << "casdap reserve: no NameLost for" << m_service << "within" << m_bounds.nameLostMs
+        qWarning().noquote() << "microdap reserve: no NameLost for" << m_service << "within" << m_bounds.nameLostMs
                              << "ms of a true reply, releasing";
         releaseNow();
         emit releaseTimedOut();
@@ -278,7 +278,7 @@ void ReserveWorker::acquire(const QString &reserveName, const QString &cardId, q
     static const QRegularExpression nameRe(QStringLiteral("^Audio(\\d+)$"));
     const QRegularExpressionMatch match = nameRe.match(reserveName);
     if (!match.hasMatch() || cardId.isEmpty()) {
-        qWarning().noquote() << "casdap reserve: cannot reserve" << reserveName << "for card" << cardId;
+        qWarning().noquote() << "microdap reserve: cannot reserve" << reserveName << "for card" << cardId;
         emit failed(m_acquireSeq, QStringLiteral("name"));
         return;
     }
@@ -292,7 +292,7 @@ void ReserveWorker::acquire(const QString &reserveName, const QString &cardId, q
         emit failed(m_acquireSeq, QStringLiteral("bus"));
         return;
     }
-    qInfo().noquote() << "casdap reserve: acquiring" << m_service << "for hw:CARD=" + cardId << "on"
+    qInfo().noquote() << "microdap reserve: acquiring" << m_service << "for hw:CARD=" + cardId << "on"
                       << m_connectionName;
     QDBusMessage call = QDBusMessage::createMethodCall(m_service, m_path, DeviceReservation::interfaceName(),
                                                        QStringLiteral("RequestRelease"));
@@ -307,7 +307,7 @@ void ReserveWorker::acquire(const QString &reserveName, const QString &cardId, q
             return;
         const QDBusMessage reply = finished->reply();
         if (reply.type() == QDBusMessage::ErrorMessage && timedOut(reply.errorName())) {
-            qWarning().noquote() << "casdap reserve: RequestRelease(10) on" << m_service
+            qWarning().noquote() << "microdap reserve: RequestRelease(10) on" << m_service
                                  << "timed out, taking and releasing the name";
             takeName(false);
             releaseNow();
@@ -315,13 +315,13 @@ void ReserveWorker::acquire(const QString &reserveName, const QString &cardId, q
             return;
         }
         if (reply.type() == QDBusMessage::ErrorMessage && !noOwner(reply.errorName())) {
-            qWarning().noquote() << "casdap reserve: RequestRelease(10) on" << m_service << "failed"
+            qWarning().noquote() << "microdap reserve: RequestRelease(10) on" << m_service << "failed"
                                  << reply.errorName() << reply.errorMessage();
             emit failed(m_acquireSeq, reply.errorName());
             return;
         }
         if (reply.type() != QDBusMessage::ErrorMessage && !reply.arguments().value(0).toBool()) {
-            qInfo().noquote() << "casdap reserve: owner of" << m_service << "refused";
+            qInfo().noquote() << "microdap reserve: owner of" << m_service << "refused";
             emit refused(m_acquireSeq);
             return;
         }
@@ -333,7 +333,7 @@ bool ReserveWorker::takeName(bool announce)
 {
     m_endpoint = new ReserveEndpoint(this, QStringLiteral("hw:CARD=") + m_cardId);
     if (!m_bus.registerObject(m_path, m_endpoint, QDBusConnection::ExportAdaptors)) {
-        qWarning().noquote() << "casdap reserve: cannot export" << m_path << m_bus.lastError().message();
+        qWarning().noquote() << "microdap reserve: cannot export" << m_path << m_bus.lastError().message();
         delete m_endpoint;
         m_endpoint = nullptr;
         if (announce)
@@ -344,7 +344,7 @@ bool ReserveWorker::takeName(bool announce)
     call << m_service << (nameDoNotQueue | nameReplaceExisting | nameAllowReplacement);
     const QDBusMessage reply = m_bus.call(call, QDBus::Block, m_bounds.callMs);
     if (reply.type() == QDBusMessage::ErrorMessage) {
-        qWarning().noquote() << "casdap reserve: RequestName" << m_service << "failed" << reply.errorName()
+        qWarning().noquote() << "microdap reserve: RequestName" << m_service << "failed" << reply.errorName()
                              << reply.errorMessage();
         unexport();
         if (announce)
@@ -353,7 +353,7 @@ bool ReserveWorker::takeName(bool announce)
     }
     const uint code = reply.arguments().value(0).toUInt();
     if (code != primaryOwner && code != alreadyOwner) {
-        qInfo().noquote() << "casdap reserve:" << m_service << "kept by its owner, RequestName" << code;
+        qInfo().noquote() << "microdap reserve:" << m_service << "kept by its owner, RequestName" << code;
         unexport();
         if (announce)
             emit refused(m_acquireSeq);
@@ -361,7 +361,7 @@ bool ReserveWorker::takeName(bool announce)
     }
     m_owned = true;
     setHeld(true);
-    qInfo().noquote() << "casdap reserve: holding" << m_service;
+    qInfo().noquote() << "microdap reserve: holding" << m_service;
     if (announce)
         emit acquired(m_acquireSeq);
     return true;
@@ -370,12 +370,12 @@ bool ReserveWorker::takeName(bool announce)
 bool ReserveWorker::onRequest(int priority, ReserveEndpoint *endpoint)
 {
     if (!m_owned || m_releasing) {
-        qInfo().noquote() << "casdap reserve: RequestRelease(" + QString::number(priority) + ") while not held, true";
+        qInfo().noquote() << "microdap reserve: RequestRelease(" + QString::number(priority) + ") while not held, true";
         return true;
     }
     if (priority <= DeviceReservation::ownPriority) {
         const bool gone = m_gone || cardGone();
-        qInfo().noquote() << "casdap reserve: RequestRelease(" + QString::number(priority) + ")"
+        qInfo().noquote() << "microdap reserve: RequestRelease(" + QString::number(priority) + ")"
                           << (gone ? "true, card gone" : "false");
         if (gone)
             granted();
@@ -386,7 +386,7 @@ bool ReserveWorker::onRequest(int priority, ReserveEndpoint *endpoint)
     QTimer::singleShot(m_bounds.replyMs, this, [this, id] {
         expire(id);
     });
-    qInfo().noquote() << "casdap reserve: RequestRelease(" + QString::number(priority) + ") asks for a release";
+    qInfo().noquote() << "microdap reserve: RequestRelease(" + QString::number(priority) + ") asks for a release";
     emit releaseRequested(id, priority);
     return false;
 }
@@ -405,12 +405,12 @@ void ReserveWorker::grant(quint64 upTo)
         any = true;
     }
     if (any) {
-        qInfo().noquote() << "casdap reserve: release granted for" << m_service;
+        qInfo().noquote() << "microdap reserve: release granted for" << m_service;
         granted();
         return;
     }
     if (m_owned && !m_granted && upTo > m_holdStart && upTo <= m_expired) {
-        qWarning().noquote() << "casdap reserve: grant after the false reply, releasing" << m_service;
+        qWarning().noquote() << "microdap reserve: grant after the false reply, releasing" << m_service;
         releaseNow();
         emit released();
     }
@@ -426,7 +426,7 @@ void ReserveWorker::release(quint64 seq)
 void ReserveWorker::markGone()
 {
     m_gone = true;
-    qInfo().noquote() << "casdap reserve: hold on" << m_service << "marked gone";
+    qInfo().noquote() << "microdap reserve: hold on" << m_service << "marked gone";
 }
 
 void ReserveWorker::quit(quint64 seq)
@@ -449,7 +449,7 @@ void ReserveWorker::onNameLost(const QString &name)
     flush();
     m_granted = false;
     setHeld(false);
-    qInfo().noquote() << "casdap reserve: lost" << m_service << (requested ? "to the requester" : "unrequested");
+    qInfo().noquote() << "microdap reserve: lost" << m_service << (requested ? "to the requester" : "unrequested");
     emit nameLost(requested);
 }
 
@@ -457,7 +457,7 @@ void ReserveWorker::onDisconnected()
 {
     if (m_closing)
         return;
-    qWarning().noquote() << "casdap reserve: connection" << m_connectionName << "dropped";
+    qWarning().noquote() << "microdap reserve: connection" << m_connectionName << "dropped";
     ++m_generation;
     m_owned = false;
     m_granted = false;
@@ -472,22 +472,22 @@ void ReserveWorker::onDisconnected()
 bool ReserveWorker::openBus()
 {
     closeBus();
-    m_connectionName = QStringLiteral("casdap-reserve-%1").arg(++connectionCount);
-    const QString address = qEnvironmentVariable("CASDAP_RESERVE_BUS");
+    m_connectionName = QStringLiteral("microdap-reserve-%1").arg(++connectionCount);
+    const QString address = qEnvironmentVariable("MICRODAP_RESERVE_BUS");
     m_bus = address.isEmpty() ? QDBusConnection::connectToBus(QDBusConnection::SessionBus, m_connectionName)
                               : QDBusConnection::connectToBus(address, m_connectionName);
     if (!m_bus.isConnected()) {
-        qWarning().noquote() << "casdap reserve: no bus" << m_bus.lastError().message();
+        qWarning().noquote() << "microdap reserve: no bus" << m_bus.lastError().message();
         closeBus();
         return false;
     }
     if (!m_bus.connect(QString(), busPath(), busService(), QStringLiteral("NameLost"), this,
                        SLOT(onNameLost(QString)))) {
-        qWarning().noquote() << "casdap reserve: cannot watch NameLost" << m_bus.lastError().message();
+        qWarning().noquote() << "microdap reserve: cannot watch NameLost" << m_bus.lastError().message();
     }
     if (!m_bus.connect(QString(), localPath(), localInterface(), QStringLiteral("Disconnected"), this,
                        SLOT(onDisconnected()))) {
-        qWarning().noquote() << "casdap reserve: cannot watch the connection" << m_bus.lastError().message();
+        qWarning().noquote() << "microdap reserve: cannot watch the connection" << m_bus.lastError().message();
     }
     return true;
 }
@@ -516,7 +516,7 @@ void ReserveWorker::answered(quint64 id)
 void ReserveWorker::reply(const QDBusMessage &message, bool value)
 {
     if (!m_bus.send(message.createReply(QVariant(value))))
-        qWarning().noquote() << "casdap reserve: reply to RequestRelease not sent" << m_bus.lastError().message();
+        qWarning().noquote() << "microdap reserve: reply to RequestRelease not sent" << m_bus.lastError().message();
 }
 
 void ReserveWorker::expire(quint64 id)
@@ -528,7 +528,7 @@ void ReserveWorker::expire(quint64 id)
         m_calls.removeAt(i);
         m_expired = qMax(m_expired, id);
         answered(id);
-        qWarning().noquote() << "casdap reserve: no release within" << m_bounds.replyMs << "ms, answered false";
+        qWarning().noquote() << "microdap reserve: no release within" << m_bounds.replyMs << "ms, answered false";
         return;
     }
 }
@@ -569,11 +569,11 @@ void ReserveWorker::releaseNow()
         call << m_service;
         const QDBusMessage reply = m_bus.call(call, QDBus::Block, m_bounds.callMs);
         if (reply.type() == QDBusMessage::ErrorMessage) {
-            qWarning().noquote() << "casdap reserve: ReleaseName" << m_service << "failed" << reply.errorName()
+            qWarning().noquote() << "microdap reserve: ReleaseName" << m_service << "failed" << reply.errorName()
                                  << reply.errorMessage();
         }
         m_owned = false;
-        qInfo().noquote() << "casdap reserve: released" << m_service << "ReleaseName"
+        qInfo().noquote() << "microdap reserve: released" << m_service << "ReleaseName"
                           << reply.arguments().value(0).toUInt();
     }
     unexport();

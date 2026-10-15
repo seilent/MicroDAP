@@ -5,7 +5,7 @@
 
 #include <cstdio>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -38,18 +38,18 @@ DbusPad::DbusPad(const QDBusConnection &bus, QObject *parent)
     : PadSource(parent)
     , m_bus(bus)
     , m_intercept(new Intercept(bus, this))
-    , m_log(qEnvironmentVariableIntValue("CASDAP_PAD_LOG") == 1)
+    , m_log(qEnvironmentVariableIntValue("MICRODAP_PAD_LOG") == 1)
 {
     m_repeat.setTimerType(Qt::PreciseTimer);
     connect(&m_repeat, &QTimer::timeout, this, &DbusPad::repeatTick);
     connect(m_intercept, &Intercept::targetsChanged, this, &PadSource::connectedChanged);
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap dbuspad: bus not connected";
+        qWarning() << "microdap dbuspad: bus not connected";
         return;
     }
     if (!m_bus.connect(Intercept::service(), QString(), Intercept::dbusDeviceInterface(),
                        QStringLiteral("InputEvent"), this, SLOT(onInputEvent(QString,double)))) {
-        qWarning() << "casdap dbuspad: cannot subscribe to InputEvent" << m_bus.lastError().message();
+        qWarning() << "microdap dbuspad: cannot subscribe to InputEvent" << m_bus.lastError().message();
     }
 }
 
@@ -117,7 +117,7 @@ void DbusPad::onInputEvent(const QString &name, double value)
     if (mapped < 0) {
         if (!m_dropped.contains(name)) {
             m_dropped.insert(name);
-            qInfo() << "casdap dbuspad: dropped" << name;
+            qInfo() << "microdap dbuspad: dropped" << name;
         }
         return;
     }

@@ -7,7 +7,7 @@
 
 #include <QDebug>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -74,14 +74,14 @@ SscRotation::~SscRotation()
 int SscRotation::defaultReclaimMs()
 {
     bool ok = false;
-    const int ms = qEnvironmentVariableIntValue("CASDAP_SENSOR_RECLAIM_MS", &ok);
+    const int ms = qEnvironmentVariableIntValue("MICRODAP_SENSOR_RECLAIM_MS", &ok);
     return ok && ms > 0 ? ms : reclaimMs;
 }
 
 int SscRotation::defaultRetryMs()
 {
     bool ok = false;
-    const int ms = qEnvironmentVariableIntValue("CASDAP_SSC_RETRY_MS", &ok);
+    const int ms = qEnvironmentVariableIntValue("MICRODAP_SSC_RETRY_MS", &ok);
     return ok && ms > 0 ? ms : retryMs;
 }
 
@@ -240,7 +240,7 @@ void SscRotation::handleControl(const QByteArray &bytes)
     if (control->cmd == ssc::newServer && !m_server) {
         m_server = control;
         m_retryDelay = m_retryBase;
-        qInfo() << "casdap sensor: ssc service" << control->node << control->port;
+        qInfo() << "microdap sensor: ssc service" << control->node << control->port;
         requestSuid();
         return;
     }
@@ -262,18 +262,18 @@ void SscRotation::handleResponse(const ssc::Message &message)
         if (message.txn != m_enableTxn)
             return;
         if (!ok) {
-            qWarning() << "casdap sensor: ssc enable failed" << (result ? result->error : 0);
+            qWarning() << "microdap sensor: ssc enable failed" << (result ? result->error : 0);
             m_enableTxn = 0;
             return;
         }
         m_claimed = true;
-        qInfo() << "casdap sensor: ssc enabled";
+        qInfo() << "microdap sensor: ssc enabled";
         setTurn(m_last);
         send(Request::Flush, ssc::request(*m_suid, ssc::msgFlush, std::nullopt));
         return;
     }
     if (!ok)
-        qWarning() << "casdap sensor: ssc request failed" << (result ? result->error : 0);
+        qWarning() << "microdap sensor: ssc request failed" << (result ? result->error : 0);
     if (kind == Request::Disable && m_sleepTxn && message.txn == m_sleepTxn)
         releaseSleep();
 }
@@ -285,7 +285,7 @@ void SscRotation::handleReport(const ssc::Report &report)
         return;
     for (const ssc::Event &event : report.events) {
         if (event.msgId == ssc::msgError) {
-            qWarning() << "casdap sensor: ssc error" << ssc::uintField(event.payload, 1).value_or(0);
+            qWarning() << "microdap sensor: ssc error" << ssc::uintField(event.payload, 1).value_or(0);
             continue;
         }
         if (lookup && event.msgId == ssc::msgSuidEvent)
@@ -318,7 +318,7 @@ void SscRotation::handleSuid(const QByteArray &payload)
     m_suid = suid;
     m_retry.stop();
     m_retryDelay = m_retryBase;
-    qInfo().noquote() << "casdap sensor: ssc device_orient" << suidHex(*suid);
+    qInfo().noquote() << "microdap sensor: ssc device_orient" << suidHex(*suid);
     m_hold.stop();
     m_holding = false;
     updateSupported();
@@ -332,7 +332,7 @@ void SscRotation::handleValue(const QByteArray &payload)
     const std::optional<quint64> value = ssc::uintField(payload, 1);
     if (!value)
         return;
-    qInfo() << "casdap sensor: ssc value" << *value;
+    qInfo() << "microdap sensor: ssc value" << *value;
     const int orientation = *value <= 3 ? int(*value) : -1;
     if (turnOf(orientation, m_sensorTurn) < 0)
         return;
@@ -342,7 +342,7 @@ void SscRotation::handleValue(const QByteArray &payload)
 void SscRotation::sendLookup()
 {
     if (!m_link->send(m_link->localNode(), ssc::controlPort, ssc::lookup(ssc::service)))
-        qWarning() << "casdap sensor: ssc lookup failed";
+        qWarning() << "microdap sensor: ssc lookup failed";
 }
 
 quint16 SscRotation::send(Request kind, const QByteArray &request)
@@ -386,7 +386,7 @@ quint16 SscRotation::disable()
         txn = send(Request::Disable, ssc::request(*m_suid, ssc::msgDisable, std::nullopt));
     m_enableTxn = 0;
     m_claimed = false;
-    qInfo() << "casdap sensor: ssc released";
+    qInfo() << "microdap sensor: ssc released";
     return txn;
 }
 

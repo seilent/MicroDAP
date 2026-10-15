@@ -6,7 +6,7 @@
 
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -88,12 +88,12 @@ RgbControl::~RgbControl()
 
 QString RgbControl::rgbPath()
 {
-    return binary("CASDAP_RGB_BIN", QStringLiteral("/usr/libexec/armada/armada-rgb-env"));
+    return binary("MICRODAP_RGB_BIN", QStringLiteral("/usr/libexec/armada/armada-rgb-env"));
 }
 
 QString RgbControl::systemctlPath()
 {
-    return binary("CASDAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
+    return binary("MICRODAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
 }
 
 QString RgbControl::hueWord(int hue)
@@ -110,7 +110,7 @@ QString RgbControl::colorWord(int hue, int level)
 
 QString RgbControl::unitFor(const QString &word)
 {
-    return QStringLiteral("casdap-priv@") + word + QStringLiteral(".service");
+    return QStringLiteral("microdap-priv@") + word + QStringLiteral(".service");
 }
 
 bool RgbControl::supported() const
@@ -172,7 +172,7 @@ void RgbControl::start(const QString &mode, int hue, int level)
 {
     const QString m = mode.toLower();
     if (!Settings::rgbModes().contains(m))
-        qWarning() << "casdap rgb: unknown mode" << mode;
+        qWarning() << "microdap rgb: unknown mode" << mode;
     else if (m_mode != m) {
         m_mode = m;
         emit modeChanged();
@@ -194,7 +194,7 @@ void RgbControl::setMode(const QString &mode)
 {
     const QString m = mode.toLower();
     if (!Settings::rgbModes().contains(m)) {
-        qWarning() << "casdap rgb: unknown mode" << mode;
+        qWarning() << "microdap rgb: unknown mode" << mode;
         return;
     }
     if (m_mode == m)
@@ -290,7 +290,7 @@ void RgbControl::probe()
         const bool changed = m_supported != ok;
         m_supported = ok;
         m_probed = true;
-        qInfo() << "casdap rgb: supported" << ok;
+        qInfo() << "microdap rgb: supported" << ok;
         if (changed)
             emit supportedChanged();
         emit probedChanged();
@@ -308,7 +308,7 @@ void RgbControl::probe()
     connect(process, &QProcess::errorOccurred, this, [done, process](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
-        qWarning() << "casdap rgb: cannot start" << process->program();
+        qWarning() << "microdap rgb: cannot start" << process->program();
         done(false);
     });
     QTimer::singleShot(processTimeoutMs, process, [process] {
@@ -377,7 +377,7 @@ void RgbControl::nextWord()
     const QString word = m_words.takeFirst();
     if (!keepsHue(word))
         m_sentWord = isColorWord(word) ? word : QString();
-    qInfo() << "casdap rgb: start" << unitFor(word);
+    qInfo() << "microdap rgb: start" << unitFor(word);
     auto *process = new QProcess(this);
     m_word = process;
     auto done = [this, process, word](bool ok) {
@@ -385,11 +385,11 @@ void RgbControl::nextWord()
             m_word = nullptr;
         process->deleteLater();
         if (!ok) {
-            qWarning() << "casdap rgb:" << word << "failed";
+            qWarning() << "microdap rgb:" << word << "failed";
             if (isColorWord(word) && m_sentWord == word)
                 m_sentWord.clear();
         }
-        qInfo() << "casdap rgb: applied" << word << ok;
+        qInfo() << "microdap rgb: applied" << word << ok;
         emit applied(word, ok);
         nextWord();
     };
@@ -398,7 +398,7 @@ void RgbControl::nextWord()
     connect(process, &QProcess::errorOccurred, this, [done, process](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
-        qWarning() << "casdap rgb: cannot start" << process->program();
+        qWarning() << "microdap rgb: cannot start" << process->program();
         done(false);
     });
     QTimer::singleShot(processTimeoutMs, process, [process] {

@@ -18,7 +18,7 @@
 #include <cstring>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     : QObject(parent)
@@ -56,7 +56,7 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     m_closeTimer.setSingleShot(true);
     m_closeTimer.setInterval(CloseTimeoutMs);
     connect(&m_closeTimer, &QTimer::timeout, this, [this] {
-        qWarning() << "casdap overlay: close steps timed out after" << CloseTimeoutMs << "ms";
+        qWarning() << "microdap overlay: close steps timed out after" << CloseTimeoutMs << "ms";
         finishClose();
     });
 }
@@ -79,12 +79,12 @@ QByteArray OverlayBridge::notifySocket()
 
 QString OverlayBridge::btBin()
 {
-    return qEnvironmentVariable("CASDAP_BT_BIN", QStringLiteral("/usr/libexec/casdap/casdap-bt"));
+    return qEnvironmentVariable("MICRODAP_BT_BIN", QStringLiteral("/usr/libexec/microdap/microdap-bt"));
 }
 
 QString OverlayBridge::codecBin()
 {
-    return qEnvironmentVariable("CASDAP_CODEC_BIN", QStringLiteral("/usr/libexec/casdap/casdap-codec"));
+    return qEnvironmentVariable("MICRODAP_CODEC_BIN", QStringLiteral("/usr/libexec/microdap/microdap-codec"));
 }
 
 bool OverlayBridge::notify(const QByteArray &state)
@@ -231,7 +231,7 @@ void OverlayBridge::show()
     m_releaseArmed = false;
     m_phase = Phase::Showing;
     m_shown = true;
-    qInfo() << "casdap overlay: show requested";
+    qInfo() << "microdap overlay: show requested";
     emit shownChanged();
     if (m_pad)
         m_pad->setShown(true);
@@ -249,7 +249,7 @@ void OverlayBridge::hide()
     m_clock.start();
     m_phase = Phase::Hiding;
     m_shown = false;
-    qInfo() << "casdap overlay: hide requested";
+    qInfo() << "microdap overlay: hide requested";
     emit shownChanged();
     if (m_pad)
         m_pad->setShown(false);
@@ -267,10 +267,10 @@ void OverlayBridge::toggle()
 void OverlayBridge::closePlayer()
 {
     if (m_closing) {
-        qInfo() << "casdap overlay: close player already running";
+        qInfo() << "microdap overlay: close player already running";
         return;
     }
-    qInfo() << "casdap overlay: close player";
+    qInfo() << "microdap overlay: close player";
     m_closing = true;
     if (m_pad)
         m_pad->setShown(false);
@@ -310,17 +310,17 @@ void OverlayBridge::runCloseStep()
         if (process != m_closeProcess.data())
             return;
         if (status != QProcess::NormalExit || code != 0)
-            qWarning().noquote() << "casdap overlay:" << process->program() << "exit"
+            qWarning().noquote() << "microdap overlay:" << process->program() << "exit"
                                  << (status == QProcess::NormalExit ? code : -1);
         QMetaObject::invokeMethod(this, &OverlayBridge::runCloseStep, Qt::QueuedConnection);
     });
     connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
         if (process != m_closeProcess.data() || error != QProcess::FailedToStart)
             return;
-        qWarning().noquote() << "casdap overlay: cannot start" << process->program();
+        qWarning().noquote() << "microdap overlay: cannot start" << process->program();
         QMetaObject::invokeMethod(this, &OverlayBridge::runCloseStep, Qt::QueuedConnection);
     });
-    qInfo().noquote() << "casdap overlay: close" << program << arguments.join(QLatin1Char(' '));
+    qInfo().noquote() << "microdap overlay: close" << program << arguments.join(QLatin1Char(' '));
     process->start(program, arguments);
 }
 
@@ -345,7 +345,7 @@ void OverlayBridge::finishClose()
     m_closeDone = true;
     m_closeTimer.stop();
     dropCloseProcess();
-    qInfo() << "casdap overlay: close player done";
+    qInfo() << "microdap overlay: close player done";
     emit closed();
     if (m_state) {
         m_state->quit(false);
@@ -538,7 +538,7 @@ void OverlayBridge::destroyWindow()
 
 void OverlayBridge::step(const char *name) const
 {
-    qInfo().nospace() << "casdap overlay: " << name << " after " << m_clock.elapsed() << " ms";
+    qInfo().nospace() << "microdap overlay: " << name << " after " << m_clock.elapsed() << " ms";
 }
 
 void OverlayBridge::notifyReady()
@@ -549,7 +549,7 @@ void OverlayBridge::notifyReady()
     if (notifySocket().isEmpty())
         return;
     if (!notify(QByteArrayLiteral("READY=1\n")))
-        qWarning() << "casdap overlay: ready notify failed" << notifySocket();
+        qWarning() << "microdap overlay: ready notify failed" << notifySocket();
     ping();
 }
 
@@ -562,7 +562,7 @@ void OverlayBridge::ping()
     if (m_pingFailed)
         return;
     m_pingFailed = true;
-    qWarning() << "casdap overlay: watchdog ping failed" << notifySocket();
+    qWarning() << "microdap overlay: watchdog ping failed" << notifySocket();
 }
 
 }

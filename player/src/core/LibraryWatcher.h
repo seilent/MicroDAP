@@ -5,7 +5,7 @@
 #include <QStringList>
 #include <QTimer>
 
-namespace casdap {
+namespace microdap {
 
 class Library;
 

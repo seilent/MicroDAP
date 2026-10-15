@@ -4,7 +4,7 @@
 #include <QObject>
 #include <QString>
 
-namespace casdap {
+namespace microdap {
 
 class SleepInhibitor : public QObject
 {

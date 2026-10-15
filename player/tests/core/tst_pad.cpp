@@ -7,7 +7,7 @@
 
 #include <SDL3/SDL.h>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -40,7 +40,7 @@ public:
         desc.type = static_cast<Uint16>(SDL_JOYSTICK_TYPE_GAMEPAD);
         desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
         desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
-        desc.name = "casdap virtual pad";
+        desc.name = "microdap virtual pad";
         m_id = SDL_AttachVirtualJoystick(&desc);
         if (m_id == 0)
             return false;

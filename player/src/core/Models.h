@@ -7,7 +7,7 @@
 #include <QString>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 class Library;
 

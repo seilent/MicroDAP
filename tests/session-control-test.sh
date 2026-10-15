@@ -3,9 +3,9 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-base_root="${CASDAP_BASE_ROOT:-/}"
+base_root="${MICRODAP_BASE_ROOT:-/}"
 sc="${base_root%/}/usr/libexec/armada/session-control"
-[[ -r "${sc}" ]] || { echo "base session-control not found at ${sc} (set CASDAP_BASE_ROOT)" >&2; exit 1; }
+[[ -r "${sc}" ]] || { echo "base session-control not found at ${sc} (set MICRODAP_BASE_ROOT)" >&2; exit 1; }
 export ARMADA_PLASMA_SESSION_LIB="${base_root%/}/usr/lib/armada/plasma-session-lib"
 REAL_FLOCK=$(command -v flock)
 export REAL_FLOCK
@@ -46,11 +46,11 @@ at() { tail -n 1 "${ARMADA_SDDM_CONF_DIR}/zz-holo-autologin.conf" > "${STATE}/at
 case "$*" in
     "systemctl --user is-active --quiet -- gamescope-session-plus@steam.service")
         [[ "$(pop steam)" == active ]] ;;
-    "systemctl --user is-active --quiet -- gamescope-session-plus@casdap.service")
-        [[ "$(pop casdap)" == active ]] ;;
-    "systemctl --user stop -- gamescope-session-plus@casdap.service")
+    "systemctl --user is-active --quiet -- gamescope-session-plus@microdap.service")
+        [[ "$(pop microdap)" == active ]] ;;
+    "systemctl --user stop -- gamescope-session-plus@microdap.service")
         at stop
-        echo inactive > "${STATE}/casdap" ;;
+        echo inactive > "${STATE}/microdap" ;;
     "busctl --user status org.kde.Shutdown")
         [[ "$(cat "${STATE}/plasma")" == 1 ]] ;;
     *"/steam -shutdown")
@@ -146,7 +146,7 @@ setup() {
     : > "${STATE}/calls"
     : > "${STATE}/logger"
     tr ' ' '\n' <<< "${2}" > "${STATE}/steam"
-    tr ' ' '\n' <<< "${3}" > "${STATE}/casdap"
+    tr ' ' '\n' <<< "${3}" > "${STATE}/microdap"
     echo "${4}" > "${STATE}/plasma"
     tr ' ' '\n' <<< "${5}" > "${STATE}/sessions"
     echo "steam failed" > "${T}/tracker"
@@ -184,24 +184,24 @@ expect_sleeps() {
 
 sddm_restart="systemctl --no-block restart sddm.service"
 steam_shutdown="/steam -shutdown"
-casdap_stop="systemctl --user stop -- gamescope-session-plus@casdap.service"
+microdap_stop="systemctl --user stop -- gamescope-session-plus@microdap.service"
 apply="controller-type apply"
 
 setup "list-sessions" inactive inactive 0 gone
 run list-sessions
 expect_rc 0
-[[ "$(cat "${STATE}/stdout")" == casdap ]] || fail "listed $(cat "${STATE}/stdout")"
+[[ "$(cat "${STATE}/stdout")" == microdap ]] || fail "listed $(cat "${STATE}/stdout")"
 
-setup "switch-casdap from game mode" "active inactive" "inactive active" 0 gone
-run switch-casdap
+setup "switch-microdap from game mode" "active inactive" "inactive active" 0 gone
+run switch-microdap
 expect_rc 0
-expect_session casdap.desktop
+expect_session microdap.desktop
 expect_call "timeout 15 sudo"
 expect_call "${steam_shutdown}"
-expect_at shutdown casdap.desktop
+expect_at shutdown microdap.desktop
 expect_no_call "${sddm_restart}"
 expect_no_call qdbus
-expect_no_call "${casdap_stop}"
+expect_no_call "${microdap_stop}"
 expect_no_call "${apply}"
 if [[ -e "${T}/tracker" ]]; then fail "short session tracker kept"; fi
 grep -qxF "HOME=${T}/home" "${STATE}/shutdown_env" || fail "HOME not ${T}/home"
@@ -211,34 +211,34 @@ grep -qxF "LD_LIBRARY_PATH=${T}/home/.local/share/Steam/steamrtarm64" "${STATE}/
 grep -q "^-t session-control -- steam -shutdown HOME=${T}/home XDG_RUNTIME_DIR=${T}/run session=16$" "${STATE}/logger" \
     || fail "logger line missing: $(cat "${STATE}/logger")"
 
-setup "switch-casdap from Plasma" inactive "inactive active" 1 active
-run switch-casdap
+setup "switch-microdap from Plasma" inactive "inactive active" 1 active
+run switch-microdap
 expect_rc 0
-expect_session casdap.desktop
+expect_session microdap.desktop
 expect_call qdbus
-expect_at logout casdap.desktop
+expect_at logout microdap.desktop
 expect_no_call "${steam_shutdown}"
 expect_no_call "${sddm_restart}"
 
-setup "switch-casdap while casdap runs" inactive active 0 active
-run switch-casdap
+setup "switch-microdap while microdap runs" inactive active 0 active
+run switch-microdap
 expect_rc 0
-expect_session casdap.desktop
-expect_no_call "${casdap_stop}"
+expect_session microdap.desktop
+expect_no_call "${microdap_stop}"
 expect_no_call "${sddm_restart}"
 
-setup "switch-gamemode from casdap" "inactive active" active 0 active
+setup "switch-gamemode from microdap" "inactive active" active 0 active
 run switch-gamemode
 expect_rc 0
 expect_session gamescope-session-steam.desktop
-expect_call "${casdap_stop}"
+expect_call "${microdap_stop}"
 expect_at stop gamescope-session-steam.desktop
 expect_call "timeout 20 ${T}/bin/${apply}"
 expect_no_call qdbus
 expect_no_call "${sddm_restart}"
-[[ "$(cat "${STATE}/casdap")" == inactive ]] || fail "casdap unit still active"
+[[ "$(cat "${STATE}/microdap")" == inactive ]] || fail "microdap unit still active"
 
-setup "switch-desktop from casdap" inactive active 0 active
+setup "switch-desktop from microdap" inactive active 0 active
 mkdir -p "${T}/proc/101"
 echo "0::/user.slice/user-1000.slice/user@1000.service/session.slice/plasma-plasmashell.service" > "${T}/proc/101/cgroup"
 cat > "${T}/bin/pgrep" <<'EOF'
@@ -249,7 +249,7 @@ chmod 0755 "${T}/bin/pgrep"
 ARMADA_PROC_DIR="${T}/proc" run switch-desktop
 expect_rc 0
 expect_session armada-plasma.desktop
-expect_call "${casdap_stop}"
+expect_call "${microdap_stop}"
 expect_call "${apply}"
 expect_no_call "${sddm_restart}"
 
@@ -260,36 +260,36 @@ expect_call "busctl --user status org.kde.Shutdown"
 expect_no_call qdbus
 expect_call "${sddm_restart}"
 
-setup "default-casdap" active inactive 1 active
-run default-casdap
+setup "default-microdap" active inactive 1 active
+run default-microdap
 expect_rc 0
-expect_session casdap.desktop
+expect_session microdap.desktop
 expect_call "systemctl reset-failed sddm.service"
 expect_no_call "${sddm_restart}"
 expect_no_call sudo
 
-setup "switch-casdap with Steam unit inactive" inactive "inactive active" 0 active
-run switch-casdap
+setup "switch-microdap with Steam unit inactive" inactive "inactive active" 0 active
+run switch-microdap
 expect_rc 0
 expect_no_call "${steam_shutdown}"
 expect_call "${sddm_restart}"
 [[ -e "${T}/tracker" ]] || fail "short session tracker removed"
 
-setup "switch-casdap session closing" "active inactive" "inactive active" 0 "active closing"
-run switch-casdap
+setup "switch-microdap session closing" "active inactive" "inactive active" 0 "active closing"
+run switch-microdap
 expect_rc 0
 expect_call "${steam_shutdown}"
 expect_no_call "${sddm_restart}"
 
-setup "switch-casdap session still active after wait" "active inactive" "inactive active" 0 active
-run switch-casdap
+setup "switch-microdap session still active after wait" "active inactive" "inactive active" 0 active
+run switch-microdap
 expect_rc 0
 expect_call "${sddm_restart}"
 expect_sleeps 10 10
 [[ -e "${T}/tracker" ]] || fail "short session tracker removed"
 
-setup "switch-casdap Steam unit never stops" active "inactive active" 0 active
-run switch-casdap
+setup "switch-microdap Steam unit never stops" active "inactive active" 0 active
+run switch-microdap
 expect_rc 0
 expect_call "${sddm_restart}"
 expect_sleeps 20 20

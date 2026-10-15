@@ -3,7 +3,7 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-pad="${repo}/sysext/usr/libexec/casdap/casdap-pad"
+pad="${repo}/sysext/usr/libexec/microdap/microdap-pad"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
@@ -66,7 +66,7 @@ run xb360
 [[ "$(count "${call} /org/shadowblip/InputPlumber/CompositeDevice0 ${iface}")" == 1 ]] || fail "CompositeDevice0 not set: $(cat "${STATE}")"
 [[ "$(count "${call} /org/shadowblip/InputPlumber/CompositeDevice1 ${iface}")" == 1 ]] || fail "CompositeDevice1 not set: $(cat "${STATE}")"
 [[ "$(count "^busctl")" == 2 ]] || fail "expected 2 busctl calls: $(cat "${STATE}")"
-[[ "$(count "^logger -t casdap-pad")" == 2 ]] || fail "expected 2 log lines: $(cat "${STATE}")"
+[[ "$(count "^logger -t microdap-pad")" == 2 ]] || fail "expected 2 log lines: $(cat "${STATE}")"
 [[ "$(count "devices/target")" == 0 ]] || fail "touched a non composite path: $(cat "${STATE}")"
 
 reset
@@ -77,7 +77,7 @@ EOF
 run xb360
 [[ "${rc}" == 0 ]] || fail "xb360 with no device exit ${rc}"
 [[ "$(count "^busctl")" == 0 ]] || fail "xb360 with no device called busctl: $(cat "${STATE}")"
-[[ "$(count "^logger -t casdap-pad no composite device")" == 1 ]] || fail "xb360 with no device did not log: $(cat "${STATE}")"
+[[ "$(count "^logger -t microdap-pad no composite device")" == 1 ]] || fail "xb360 with no device did not log: $(cat "${STATE}")"
 
 for verb in bogus "" "xb360;id" restore "restore --help"; do
     reset

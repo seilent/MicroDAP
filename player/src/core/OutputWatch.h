@@ -6,7 +6,7 @@
 
 class QScreen;
 
-namespace casdap {
+namespace microdap {
 
 class OutputWatch : public QObject
 {

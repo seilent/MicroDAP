@@ -20,7 +20,7 @@
 #include <memory>
 #include <thread>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -48,8 +48,8 @@ FiioPaths pathsIn(const QString &root)
     FiioPaths paths;
     paths.runDir = (root + QStringLiteral("/run")).toStdString();
     paths.runDirExists = QDir().mkpath(root + QStringLiteral("/run"));
-    paths.stateDir = (root + QStringLiteral("/state/casdap")).toStdString();
-    paths.configDir = (root + QStringLiteral("/config/casdap")).toStdString();
+    paths.stateDir = (root + QStringLiteral("/state/microdap")).toStdString();
+    paths.configDir = (root + QStringLiteral("/config/microdap")).toStdString();
     paths.sysRoot = (root + QStringLiteral("/sys")).toStdString();
     paths.asoundDir = (root + QStringLiteral("/asound")).toStdString();
     return paths;
@@ -140,7 +140,7 @@ struct Rig
     explicit Rig(DacEq::Bounds bounds = testBounds())
         : paths(pathsIn(root.path()))
     {
-        qputenv("CASDAP_EQ_DIR", (root.path() + QStringLiteral("/eqconfig")).toUtf8());
+        qputenv("MICRODAP_EQ_DIR", (root.path() + QStringLiteral("/eqconfig")).toUtf8());
         sys = root.path() + QStringLiteral("/sys");
         devPath = sys + QStringLiteral("/devices/platform/xhci/3-1");
         iface = devPath + QStringLiteral("/3-1:1.0");
@@ -339,7 +339,7 @@ const QStringList takeFromBypass{
     QStringLiteral("get 15 07"),
     QStringLiteral("get 15 08"),
     QStringLiteral("get 15 09"),
-    QStringLiteral("set 30 a24341534441500000"),
+    QStringLiteral("set 30 a24d4943524f444150"),
     QStringLiteral("set 17 0000"),
 };
 
@@ -543,7 +543,7 @@ void DacEqTest::takeOrder()
     for (int i = 1; i < fiioBandCount; ++i)
         QVERIFY(outs.value(expected.size() + i - 1).startsWith(QStringLiteral("set 15 0%1").arg(i)));
     QCOMPARE(rig.fake->preset(), uint8_t(162));
-    QCOMPARE(QString::fromStdString(rig.fake->name(162)), QStringLiteral("CASDAP"));
+    QCOMPARE(QString::fromStdString(rig.fake->name(162)), QStringLiteral("MICRODAP"));
     QVERIFY(QFileInfo::exists(QString::fromStdString(rig.paths.configDir) + QStringLiteral("/fiio-2972-0149-slot162-1.txt")));
     QVERIFY(!QFileInfo::exists(QString::fromStdString(fiioMarkerPath(rig.paths))));
     QCOMPARE(rig.dac->mode(), QStringLiteral("slot"));
@@ -1606,7 +1606,7 @@ void DacEqTest::cardGoneDuringReleaseQueued()
 void DacEqTest::effectiveNoCardLogged()
 {
     LogCapture capture;
-    const QString line = QStringLiteral("casdap dac eq: effective, no card");
+    const QString line = QStringLiteral("microdap dac eq: effective, no card");
     Rig rig;
     QVERIFY(rig.ready);
     rig.seed(QStringLiteral("bitperfect"), true);
@@ -1637,7 +1637,7 @@ void DacEqTest::refusedRearmsCapped()
     rig.holdLevel();
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("failed"), waitMs);
     QCOMPARE(rig.dac->reason(), QStringLiteral("overflow"));
-    const QString rearmed = QStringLiteral("casdap dac eq: reset refused, rearmed");
+    const QString rearmed = QStringLiteral("microdap dac eq: reset refused, rearmed");
     for (int i = 0; i < 4; ++i) {
         const std::shared_ptr<FakeUsbIo::Hold> openHeld = rig.fake->hold(FakeUsbIo::Op::Open);
         QVERIFY(rig.pcm("closed\n"));

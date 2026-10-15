@@ -9,7 +9,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -60,7 +60,7 @@ void GuideTest::init()
 {
     m_dir = std::make_unique<QTemporaryDir>();
     QVERIFY(m_dir->isValid());
-    qputenv("CASDAP_GUIDE_DIR", m_dir->path().toUtf8());
+    qputenv("MICRODAP_GUIDE_DIR", m_dir->path().toUtf8());
     m_down = m_dir->path() + QStringLiteral("/down");
     m_chord = m_dir->path() + QStringLiteral("/chord");
 }
@@ -68,13 +68,13 @@ void GuideTest::init()
 void GuideTest::directory()
 {
     QCOMPARE(GuideChord().directory(), m_dir->path());
-    qunsetenv("CASDAP_GUIDE_DIR");
+    qunsetenv("MICRODAP_GUIDE_DIR");
     const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
-    qputenv("XDG_RUNTIME_DIR", "/tmp/casdap-runtime");
-    QCOMPARE(GuideChord::defaultDirectory(), QStringLiteral("/tmp/casdap-runtime/casdap-guide"));
+    qputenv("XDG_RUNTIME_DIR", "/tmp/microdap-runtime");
+    QCOMPARE(GuideChord::defaultDirectory(), QStringLiteral("/tmp/microdap-runtime/microdap-guide"));
     qunsetenv("XDG_RUNTIME_DIR");
     QVERIFY(GuideChord::defaultDirectory().startsWith(QStringLiteral("/run/user/")));
-    QVERIFY(GuideChord::defaultDirectory().endsWith(QStringLiteral("/casdap-guide")));
+    QVERIFY(GuideChord::defaultDirectory().endsWith(QStringLiteral("/microdap-guide")));
     if (!runtime.isEmpty())
         qputenv("XDG_RUNTIME_DIR", runtime);
 }

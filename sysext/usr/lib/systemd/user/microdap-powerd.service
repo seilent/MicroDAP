@@ -1,0 +1,11 @@
+[Unit]
+Description=MicroDAP power key daemon
+PartOf=gamescope-session-plus@microdap.service
+BindsTo=gamescope-session-plus@microdap.service
+After=gamescope-session-plus@microdap.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/systemd-inhibit --what=handle-power-key:handle-suspend-key --who=microdap-powerd --why="microdap owns the power key" --mode=block /usr/libexec/microdap/microdap-powerd
+Restart=always
+RestartSec=1

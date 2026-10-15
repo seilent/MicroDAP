@@ -6,26 +6,26 @@ input="${1:-}"
 user="${SUDO_USER:-armada}"
 uid=$(id -u "${user}")
 steam=$(runuser -u "${user}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" systemctl --user is-active gamescope-session-plus@steam.service 2>/dev/null || true)
-if [[ "${steam}" != active && -z "${CASDAP_DEPLOY_ANY_SESSION:-}" ]]; then
+if [[ "${steam}" != active && -z "${MICRODAP_DEPLOY_ANY_SESSION:-}" ]]; then
     echo "device-apply: game mode is not active (gamescope-session-plus@steam ${steam:-unknown}), refusing; switch to game mode first" >&2
     exit 1
 fi
 
-mkdir -p /var/lib/extensions/casdap
-changed=$(rsync -ai --delete /tmp/casdap/ /var/lib/extensions/casdap/)
+mkdir -p /var/lib/extensions/microdap
+changed=$(rsync -ai --delete /tmp/microdap/ /var/lib/extensions/microdap/)
 systemd-sysext refresh
 systemctl restart polkit
-systemctl restart casdap-guard.service
+systemctl restart microdap-guard.service
 udevadm control --reload
 udevadm trigger --settle --action=change --subsystem-match=usb --attr-match=idVendor=2972 --attr-match=idProduct=0149
-/usr/libexec/casdap/casdap-usb-audio --scan
+/usr/libexec/microdap/microdap-usb-audio --scan
 if [[ -n "${input}" ]] || grep -q 'usr/share/inputplumber/' <<<"${changed}"; then
     systemctl restart inputplumber.service
     /usr/libexec/armada/controller-type apply || echo "device-apply: controller-type apply failed" >&2
 fi
 if grep -qE 'usr/share/pipewire/|usr/share/wireplumber/|usr/lib64/spa-0\.2/|usr/lib64/libfreeaptx' <<<"${changed}"; then
-    : > /tmp/casdap-restart-audio
-    chown "${SUDO_USER:-root}" /tmp/casdap-restart-audio
+    : > /tmp/microdap-restart-audio
+    chown "${SUDO_USER:-root}" /tmp/microdap-restart-audio
 fi
-systemctl show -p NeedDaemonReload casdap-switch.service
+systemctl show -p NeedDaemonReload microdap-switch.service
 systemd-sysext status

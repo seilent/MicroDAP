@@ -30,7 +30,7 @@
 #include <optional>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -168,7 +168,7 @@ QString Scanner::albumKey(const QString &album, const QString &albumArtist)
 
 QString Scanner::mediaBase()
 {
-    return qEnvironmentVariable("CASDAP_MEDIA_ROOT", QStringLiteral("/run/media"));
+    return qEnvironmentVariable("MICRODAP_MEDIA_ROOT", QStringLiteral("/run/media"));
 }
 
 FileStamp Scanner::stampOf(const QFileInfo &info)

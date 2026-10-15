@@ -12,7 +12,7 @@
 #include <cmath>
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -170,10 +170,10 @@ void EqTest::initTestCase()
     QVERIFY(writeFile(m_bin + QStringLiteral("/amixer"),
                       QStringLiteral("#!/bin/sh\ncat \"") + jackFile + QStringLiteral("\"\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"), QStringLiteral("#!/bin/sh\nexit 0\n"), true));
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
-    qputenv("CASDAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
-    qputenv("CASDAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
-    qputenv("CASDAP_WPCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
+    qputenv("MICRODAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
+    qputenv("MICRODAP_WPCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
 }
 
 void EqTest::init()
@@ -181,7 +181,7 @@ void EqTest::init()
     m_temp = std::make_unique<QTemporaryDir>();
     QVERIFY(m_temp->isValid());
     m_dir = m_temp->path();
-    qputenv("CASDAP_EQ_DIR", (m_dir + QStringLiteral("/config")).toUtf8());
+    qputenv("MICRODAP_EQ_DIR", (m_dir + QStringLiteral("/config")).toUtf8());
     QCOMPARE(EqControl::sourceDir(), m_dir + QStringLiteral("/config/eq"));
     QCOMPARE(EqControl::storePath(QStringLiteral("usb")), m_dir + QStringLiteral("/config/eq-usb.ini"));
 }
@@ -1036,15 +1036,15 @@ void EqTest::applyLogLine()
         eq.setDacHeld(false);
         eq.stepGain(QStringLiteral("usb"), 1, 1);
         const QStringList expected{
-            QStringLiteral("casdap eq: apply usb CUSTOM (output)"),
-            QStringLiteral("casdap eq: apply usb off (bypassed)"),
-            QStringLiteral("casdap eq: apply usb CUSTOM (profile)"),
-            QStringLiteral("casdap eq: apply usb off (dac held)"),
-            QStringLiteral("casdap eq: apply usb CUSTOM (profile)"),
-            QStringLiteral("casdap eq: apply usb CUSTOM (profile)"),
+            QStringLiteral("microdap eq: apply usb CUSTOM (output)"),
+            QStringLiteral("microdap eq: apply usb off (bypassed)"),
+            QStringLiteral("microdap eq: apply usb CUSTOM (profile)"),
+            QStringLiteral("microdap eq: apply usb off (dac held)"),
+            QStringLiteral("microdap eq: apply usb CUSTOM (profile)"),
+            QStringLiteral("microdap eq: apply usb CUSTOM (profile)"),
         };
-        QCOMPARE(capture.lines(QStringLiteral("casdap eq: apply ")), expected);
-        QCOMPARE(capture.lines(QStringLiteral("casdap eq: load ")).size(), 2);
+        QCOMPARE(capture.lines(QStringLiteral("microdap eq: apply ")), expected);
+        QCOMPARE(capture.lines(QStringLiteral("microdap eq: load ")).size(), 2);
     }
 }
 
@@ -1092,8 +1092,8 @@ void EqTest::sinkPoll()
                       QStringLiteral("#!/bin/sh\n[ \"$1\" = get-default-sink ] && echo "
                                      "alsa_output.usb-Apple_USB-C_to_3.5mm.analog-stereo\nexit 0\n"),
                       true));
-    const QByteArray pactl = qgetenv("CASDAP_PACTL_BIN");
-    qputenv("CASDAP_PACTL_BIN", usbPactl.toUtf8());
+    const QByteArray pactl = qgetenv("MICRODAP_PACTL_BIN");
+    qputenv("MICRODAP_PACTL_BIN", usbPactl.toUtf8());
     Settings settings(m_dir + QStringLiteral("/settings.ini"));
     settings.setRoots({m_dir + QStringLiteral("/music")});
     EqControl eq(&settings);
@@ -1101,7 +1101,7 @@ void EqTest::sinkPoll()
     eq.startSinkPoll();
     QVERIFY(eq.sinkPolling());
     QTRY_COMPARE_WITH_TIMEOUT(eq.activeOutput(), QStringLiteral("usb"), waitMs);
-    qputenv("CASDAP_PACTL_BIN", pactl);
+    qputenv("MICRODAP_PACTL_BIN", pactl);
 
     OutputControl control;
     eq.setOutputControl(&control);

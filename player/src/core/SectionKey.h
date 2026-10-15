@@ -3,7 +3,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace casdap {
+namespace microdap {
 
 struct SectionKey
 {

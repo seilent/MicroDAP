@@ -2,7 +2,7 @@
 
 #include <QtEndian>
 
-namespace casdap::ssc {
+namespace microdap::ssc {
 
 namespace {
 

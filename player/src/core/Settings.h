@@ -7,7 +7,7 @@
 #include <QTimer>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 class Settings : public QObject
 {

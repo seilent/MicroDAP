@@ -1,9 +1,0 @@
-[Unit]
-Description=CASDAP pad target
-BindsTo=gamescope-session-plus@casdap.service
-After=gamescope-session-plus@casdap.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/libexec/casdap/casdap-pad xb360

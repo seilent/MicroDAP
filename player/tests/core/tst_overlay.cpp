@@ -36,7 +36,7 @@
 #include <cstring>
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -51,22 +51,22 @@ QString controlService()
 
 QString controlPath()
 {
-    return QStringLiteral("/org/casdap/FakeInputPlumber");
+    return QStringLiteral("/net/seilent/MicroDap/FakeInputPlumber");
 }
 
 QString controlInterface()
 {
-    return QStringLiteral("org.casdap.FakeInputPlumber");
+    return QStringLiteral("net.seilent.MicroDap.FakeInputPlumber");
 }
 
 QString login1ControlPath()
 {
-    return QStringLiteral("/org/casdap/FakeLogin1");
+    return QStringLiteral("/net/seilent/MicroDap/FakeLogin1");
 }
 
 QString login1ControlInterface()
 {
-    return QStringLiteral("org.casdap.FakeLogin1");
+    return QStringLiteral("net.seilent.MicroDap.FakeLogin1");
 }
 
 QString devicePath(int index)
@@ -318,16 +318,16 @@ void OverlayTest::initTestCase()
     QDBusConnection session = QDBusConnection::sessionBus();
     if (!session.isConnected())
         QSKIP("no session bus, run under dbus-run-session");
-    if (!startFake(m_fake, QStringLiteral(CASDAP_FAKE_INPUTPLUMBER), controlService()))
+    if (!startFake(m_fake, QStringLiteral(MICRODAP_FAKE_INPUTPLUMBER), controlService()))
         QSKIP("fake InputPlumber did not start (python3 with dbus and gi needed)");
-    if (!startFake(m_login1, QStringLiteral(CASDAP_FAKE_LOGIN1), SleepInhibitor::service()))
+    if (!startFake(m_login1, QStringLiteral(MICRODAP_FAKE_LOGIN1), SleepInhibitor::service()))
         QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
     QVERIFY(m_dir.isValid());
     QVERIFY(openNotifySocket());
-    m_stateFile = m_dir.path() + QStringLiteral("/config/casdap/state.json");
-    m_keepFile = m_dir.path() + QStringLiteral("/config/casdap/keep");
-    qputenv("CASDAP_KEEP_FILE", m_keepFile.toUtf8());
-    qputenv("CASDAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/boot_id")).toUtf8());
+    m_stateFile = m_dir.path() + QStringLiteral("/config/microdap/state.json");
+    m_keepFile = m_dir.path() + QStringLiteral("/config/microdap/keep");
+    qputenv("MICRODAP_KEEP_FILE", m_keepFile.toUtf8());
+    qputenv("MICRODAP_BOOT_ID_FILE", (m_dir.path() + QStringLiteral("/boot_id")).toUtf8());
     QFile bootId(m_dir.path() + QStringLiteral("/boot_id"));
     QVERIFY(bootId.open(QIODevice::WriteOnly));
     bootId.write("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n");
@@ -335,22 +335,22 @@ void OverlayTest::initTestCase()
     m_closeLog = m_dir.path() + QStringLiteral("/close.log");
     const QByteArray logLine = QByteArrayLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> '")
                                + m_closeLog.toUtf8() + QByteArrayLiteral("'\n");
-    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/casdap-bt"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
-    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/casdap-codec"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
+    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/microdap-bt"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
+    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/microdap-codec"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
     QVERIFY(writeScript(m_dir.path() + QStringLiteral("/slow-bt"),
                         QByteArrayLiteral("#!/bin/sh\n") + logLine + QByteArrayLiteral("exec sleep 10\n")));
-    qputenv("CASDAP_BT_BIN", (m_dir.path() + QStringLiteral("/casdap-bt")).toUtf8());
-    qputenv("CASDAP_CODEC_BIN", (m_dir.path() + QStringLiteral("/casdap-codec")).toUtf8());
+    qputenv("MICRODAP_BT_BIN", (m_dir.path() + QStringLiteral("/microdap-bt")).toUtf8());
+    qputenv("MICRODAP_CODEC_BIN", (m_dir.path() + QStringLiteral("/microdap-codec")).toUtf8());
 
-    qputenv("CASDAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
-    qputenv("CASDAP_INTERCEPT_RETRY_MS", QByteArrayLiteral("50"));
-    qputenv("CASDAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+    qputenv("MICRODAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+    qputenv("MICRODAP_INTERCEPT_RETRY_MS", QByteArrayLiteral("50"));
+    qputenv("MICRODAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
     QDBusConnection bus = Intercept::bus();
     QVERIFY2(bus.isConnected(), qPrintable(bus.lastError().message()));
 
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
     qRegisterMetaType<PadSource::Action>();
     m_player = std::make_unique<Player>();
     QVERIFY(m_player->positionPollEnabled());
@@ -379,7 +379,7 @@ void OverlayTest::initTestCase()
     m_engine->rootContext()->setContextProperty(QStringLiteral("Pad"), m_pad.get());
     m_engine->rootContext()->setContextProperty(QStringLiteral("PowerBridge"), m_power.get());
     m_engine->rootContext()->setContextProperty(QStringLiteral("OverlayBridge"), m_overlay.get());
-    m_engine->loadFromModule("Casdap", "Main");
+    m_engine->loadFromModule("MicroDap", "Main");
     QVERIFY(!m_engine->rootObjects().isEmpty());
     m_window = qobject_cast<QQuickWindow *>(m_engine->rootObjects().constFirst());
     QVERIFY(m_window);
@@ -667,7 +667,7 @@ void OverlayTest::showDuringShowFadeNoOp()
 void OverlayTest::screenOffIgnored()
 {
     QSignalSpy spy(m_power.get(), &PowerBridge::screenOffChanged);
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: SetScreenOff ignored in overlay mode true");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: SetScreenOff ignored in overlay mode true");
     QDBusReply<void> reply = m_remote->call(QStringLiteral("SetScreenOff"), true);
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QCoreApplication::processEvents();
@@ -680,7 +680,7 @@ void OverlayTest::screenOffIgnored()
 void OverlayTest::powerMenuIgnored()
 {
     QSignalSpy spy(m_power.get(), &PowerBridge::showPowerMenu);
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowPowerMenu ignored in overlay mode");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: ShowPowerMenu ignored in overlay mode");
     QDBusReply<void> reply = m_remote->call(QStringLiteral("ShowPowerMenu"));
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QCoreApplication::processEvents();
@@ -690,8 +690,8 @@ void OverlayTest::powerMenuIgnored()
 void OverlayTest::switchPromptNotSupported()
 {
     QSignalSpy spy(m_power.get(), &PowerBridge::showSwitchPrompt);
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowSwitchPrompt");
-    QTest::ignoreMessage(QtInfoMsg, "casdap power: ShowSwitchPrompt needs dap mode");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: ShowSwitchPrompt");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: ShowSwitchPrompt needs dap mode");
     QDBusReply<void> reply = m_remote->call(QStringLiteral("ShowSwitchPrompt"));
     QVERIFY(!reply.isValid());
     QCOMPARE(reply.error().name(), PowerBridge::notSupportedError());
@@ -726,7 +726,7 @@ void OverlayTest::sleepInhibitorHeld()
     const QDBusMessage reply = login1(QStringLiteral("LastInhibit"));
     QCOMPARE(reply.type(), QDBusMessage::ReplyMessage);
     QCOMPARE(reply.arguments().value(0).toStringList(),
-             QStringList({QStringLiteral("sleep"), QStringLiteral("casdap"), QStringLiteral("hide overlay"),
+             QStringList({QStringLiteral("sleep"), QStringLiteral("microdap"), QStringLiteral("hide overlay"),
                           QStringLiteral("delay")}));
     QVERIFY(!m_overlay->sleeping());
 }
@@ -834,8 +834,8 @@ void OverlayTest::releaseGivesUpAfterThirty()
     QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
     QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
     QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 100u}).type(), QDBusMessage::ReplyMessage);
-    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^casdap intercept: release gave up")));
-    QTest::failOnWarning(QRegularExpression(QStringLiteral("^casdap intercept")));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^microdap intercept: release gave up")));
+    QTest::failOnWarning(QRegularExpression(QStringLiteral("^microdap intercept")));
     sleepAndResume();
     QTRY_COMPARE_WITH_TIMEOUT(attempts(devicePath(0)), 30, busTimeoutMs);
     QTest::qWait(500);
@@ -909,11 +909,11 @@ void OverlayTest::closePlayer()
     QVERIFY(State::read(m_stateFile, after));
     QCOMPARE(after.value(QStringLiteral("handoff")).toBool(true), false);
     QTRY_COMPARE_WITH_TIMEOUT(closed.count(), 1, OverlayBridge::CloseTimeoutMs + busTimeoutMs);
-    QCOMPARE(readText(m_closeLog), QStringLiteral("casdap-bt --disconnect-sources\ncasdap-codec clear\n"));
+    QCOMPARE(readText(m_closeLog), QStringLiteral("microdap-bt --disconnect-sources\nmicrodap-codec clear\n"));
     m_overlay->closePlayer();
     QCoreApplication::processEvents();
     QCOMPARE(closed.count(), 1);
-    QCOMPARE(readText(m_closeLog), QStringLiteral("casdap-bt --disconnect-sources\ncasdap-codec clear\n"));
+    QCOMPARE(readText(m_closeLog), QStringLiteral("microdap-bt --disconnect-sources\nmicrodap-codec clear\n"));
     m_overlay->hide();
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
 }
@@ -921,7 +921,7 @@ void OverlayTest::closePlayer()
 void OverlayTest::closePlayerTimeout()
 {
     QFile::remove(m_closeLog);
-    qputenv("CASDAP_BT_BIN", (m_dir.path() + QStringLiteral("/slow-bt")).toUtf8());
+    qputenv("MICRODAP_BT_BIN", (m_dir.path() + QStringLiteral("/slow-bt")).toUtf8());
     OverlayBridge bridge(nullptr, nullptr);
     QSignalSpy closed(&bridge, &OverlayBridge::closed);
     QElapsedTimer timer;
@@ -929,7 +929,7 @@ void OverlayTest::closePlayerTimeout()
     bridge.closePlayer();
     QTRY_COMPARE_WITH_TIMEOUT(closed.count(), 1, OverlayBridge::CloseTimeoutMs + busTimeoutMs);
     const qint64 elapsed = timer.elapsed();
-    qputenv("CASDAP_BT_BIN", (m_dir.path() + QStringLiteral("/casdap-bt")).toUtf8());
+    qputenv("MICRODAP_BT_BIN", (m_dir.path() + QStringLiteral("/microdap-bt")).toUtf8());
     QVERIFY2(elapsed >= OverlayBridge::CloseTimeoutMs - 100, qPrintable(QString::number(elapsed)));
     QVERIFY2(elapsed < 3000, qPrintable(QString::number(elapsed)));
     QCOMPARE(readText(m_closeLog), QStringLiteral("slow-bt --disconnect-sources\n"));

@@ -13,10 +13,10 @@ import dbus.service
 from gi.repository import GLib
 
 ADDRESS = os.environ['DBUS_SESSION_BUS_ADDRESS']
-CASDAP_BT = os.environ['CASDAP_BT']
-LOG = os.environ['CASDAP_BT_LOG']
-KEEP_FILE = os.environ['CASDAP_KEEP_FILE']
-BOOT_ID_FILE = os.environ['CASDAP_BOOT_ID_FILE']
+MICRODAP_BT = os.environ['MICRODAP_BT']
+LOG = os.environ['MICRODAP_BT_LOG']
+KEEP_FILE = os.environ['MICRODAP_KEEP_FILE']
+BOOT_ID_FILE = os.environ['MICRODAP_BOOT_ID_FILE']
 BOOT_ID = '0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10'
 
 BLUEZ = 'org.bluez'
@@ -26,9 +26,9 @@ ADAPTER = 'org.bluez.Adapter1'
 DEVICE = 'org.bluez.Device1'
 AGENT = 'org.bluez.Agent1'
 AGENT_MANAGER = 'org.bluez.AgentManager1'
-AGENT_PATH = '/org/casdap/agent'
-SERVICE = 'org.casdap.Bluetooth'
-SERVICE_PATH = '/org/casdap/Bluetooth'
+AGENT_PATH = '/net/seilent/MicroDap/agent'
+SERVICE = 'net.seilent.MicroDap.Bluetooth'
+SERVICE_PATH = '/net/seilent/MicroDap/Bluetooth'
 ADAPTER_PATH = '/org/bluez/hci0'
 REJECTED = 'org.bluez.Error.Rejected'
 INVALID_ARGS = 'org.freedesktop.DBus.Error.InvalidArgs'
@@ -447,8 +447,8 @@ class Driver:
         except subprocess.TimeoutExpired:
             proc.kill()
             code = proc.wait()
-            self.check(False, f'{label}: casdap-bt did not exit on SIGTERM')
-        self.check(code == 0, f'{label}: casdap-bt exit {code}')
+            self.check(False, f'{label}: microdap-bt did not exit on SIGTERM')
+        self.check(code == 0, f'{label}: microdap-bt exit {code}')
         self.check(wait_for(lambda: not self.bus.name_has_owner(SERVICE), 2), f'{label}: {SERVICE} still owned')
 
     def test_sigterm(self, proc):
@@ -487,18 +487,18 @@ class Driver:
         )
         for content, expected in cases:
             write_marker(content)
-            result = subprocess.run([sys.executable, CASDAP_BT, '--print-keep'], env=env,
+            result = subprocess.run([sys.executable, MICRODAP_BT, '--print-keep'], env=env,
                                     capture_output=True, text=True)
             self.check(result.returncode == 0, f'--print-keep exit {result.returncode} for {content!r}')
             self.check(result.stdout.strip() == expected,
                        f'--print-keep printed {result.stdout.strip()!r} for {content!r}')
         write_marker(BOOT_ID + '\n')
-        missing = dict(env, CASDAP_KEEP_BIN=os.path.join(os.path.dirname(LOG), 'missing', 'casdap-keep'))
-        result = subprocess.run([sys.executable, CASDAP_BT, '--print-keep'], env=missing,
+        missing = dict(env, MICRODAP_KEEP_BIN=os.path.join(os.path.dirname(LOG), 'missing', 'microdap-keep'))
+        result = subprocess.run([sys.executable, MICRODAP_BT, '--print-keep'], env=missing,
                                 capture_output=True, text=True)
-        self.check(result.returncode == 0, f'--print-keep without casdap-keep exit {result.returncode}')
+        self.check(result.returncode == 0, f'--print-keep without microdap-keep exit {result.returncode}')
         self.check(result.stdout.strip() == 'drop',
-                   f'--print-keep without casdap-keep printed {result.stdout.strip()!r}')
+                   f'--print-keep without microdap-keep printed {result.stdout.strip()!r}')
 
     def test_disconnect_sources(self, env):
         phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
@@ -508,7 +508,7 @@ class Driver:
         self.fake.disconnected.clear()
         for label, expected in (('first', [phone]), ('second', [phone])):
             with open(LOG, 'a') as log:
-                code = subprocess.run([sys.executable, CASDAP_BT, '--disconnect-sources'], env=env,
+                code = subprocess.run([sys.executable, MICRODAP_BT, '--disconnect-sources'], env=env,
                                       stdout=log, stderr=log, timeout=10).returncode
             self.check(code == 0, f'--disconnect-sources {label} exit {code}')
             self.check(self.fake.disconnected == expected, f'--disconnect-sources {label} {self.fake.disconnected}')
@@ -530,7 +530,7 @@ def launch(fake, driver, env):
     fake.agent = None
     fake.default_agent = None
     with open(LOG, 'a') as log:
-        proc = subprocess.Popen([sys.executable, CASDAP_BT], env=env, stdout=log, stderr=log)
+        proc = subprocess.Popen([sys.executable, MICRODAP_BT], env=env, stdout=log, stderr=log)
     ready = wait_for(lambda: fake.agent is not None and fake.default_agent is not None
                      and driver.bus.name_has_owner(SERVICE), 5)
     if not ready or proc.poll() is not None:
@@ -539,7 +539,7 @@ def launch(fake, driver, env):
             proc.wait()
         with open(LOG) as log:
             sys.stderr.write(log.read())
-        print('FAIL casdap-bt did not register', file=sys.stderr)
+        print('FAIL microdap-bt did not register', file=sys.stderr)
         return None
     driver.connect()
     return proc
@@ -553,7 +553,7 @@ def main():
     threading.Thread(target=loop.run, daemon=True).start()
 
     driver = Driver(fake)
-    env = dict(os.environ, CASDAP_BT_SYSTEM_BUS=ADDRESS)
+    env = dict(os.environ, MICRODAP_BT_SYSTEM_BUS=ADDRESS)
     with open(BOOT_ID_FILE, 'w') as f:
         f.write(BOOT_ID + '\n')
     write_marker(None)

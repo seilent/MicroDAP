@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=MicroDAP
+Comment=MicroDAP session
+Exec=gamescope-session-plus microdap
+Type=Application
+DesktopNames=microdap
+NoDisplay=true

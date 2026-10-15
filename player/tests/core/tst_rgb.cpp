@@ -8,7 +8,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -38,7 +38,7 @@ QString readFile(const QString &path)
 
 QString unit(const QString &word)
 {
-    return QStringLiteral("casdap-priv@") + word + QStringLiteral(".service");
+    return QStringLiteral("microdap-priv@") + word + QStringLiteral(".service");
 }
 
 }
@@ -98,8 +98,8 @@ void RgbTest::initTestCase()
                           + QStringLiteral("\" ] && sleep \"$(cat \"") + m_systemctlDelay
                           + QStringLiteral("\")\"\nexit \"$(cat \"") + m_systemctlExit + QStringLiteral("\")\"\n"),
                       true));
-    qputenv("CASDAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
-    qputenv("CASDAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
+    qputenv("MICRODAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
     QCOMPARE(RgbControl::rgbPath(), m_bin + QStringLiteral("/armada-rgb"));
     QCOMPARE(RgbControl::systemctlPath(), m_bin + QStringLiteral("/systemctl"));
 }
@@ -110,7 +110,7 @@ void RgbTest::init()
     QFile::remove(m_systemctlDelay);
     useSupported(true);
     QVERIFY(writeFile(m_systemctlExit, QStringLiteral("0\n")));
-    qputenv("CASDAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
+    qputenv("MICRODAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
 }
 
 void RgbTest::useSupported(bool supported)
@@ -143,7 +143,7 @@ void RgbTest::words()
     QCOMPARE(RgbControl::hueWord(198), QStringLiteral("rgb-hue-200"));
     QCOMPARE(RgbControl::hueWord(360), QStringLiteral("rgb-hue-0"));
     QCOMPARE(RgbControl::hueWord(-10), QStringLiteral("rgb-hue-350"));
-    QCOMPARE(RgbControl::unitFor(QStringLiteral("rgb-off")), QStringLiteral("casdap-priv@rgb-off.service"));
+    QCOMPARE(RgbControl::unitFor(QStringLiteral("rgb-off")), QStringLiteral("microdap-priv@rgb-off.service"));
     QCOMPARE(RgbControl::colorWord(0, 1), QStringLiteral("rgb-color-0-1"));
     QCOMPARE(RgbControl::colorWord(200, 4), QStringLiteral("rgb-color-200-4"));
     QCOMPARE(RgbControl::colorWord(355, 2), QStringLiteral("rgb-color-0-2"));
@@ -228,7 +228,7 @@ void RgbTest::artWordHeldWhileOff()
 
     QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
     QVERIFY(writeFile(m_systemctlExit, QStringLiteral("1\n")));
-    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: \"rgb-color-60-2\" failed");
+    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: \"rgb-color-60-2\" failed");
     control.setColor(60, 2);
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
     QVERIFY(!applied.at(6).at(1).toBool());
@@ -297,7 +297,7 @@ void RgbTest::offAndArmada()
     QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-off")), unit(QStringLiteral("rgb-hue-280"))}));
 
     QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: unknown mode \"disco\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: unknown mode \"disco\"");
     control.setMode(QStringLiteral("disco"));
     QCOMPARE(control.mode(), QStringLiteral("accent"));
     QTest::qWait(200);
@@ -526,7 +526,7 @@ void RgbTest::unsupportedRunsNothing()
 
 void RgbTest::missingBinaryUnsupported()
 {
-    qputenv("CASDAP_RGB_BIN", (m_dir.path() + QStringLiteral("/missing/armada-rgb")).toUtf8());
+    qputenv("MICRODAP_RGB_BIN", (m_dir.path() + QStringLiteral("/missing/armada-rgb")).toUtf8());
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
     control.start(QStringLiteral("off"), 350);
@@ -543,7 +543,7 @@ void RgbTest::failedWordReported()
     QVERIFY(writeFile(m_systemctlExit, QStringLiteral("1\n")));
     RgbControl control;
     QSignalSpy applied(&control, &RgbControl::applied);
-    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: unknown mode \"disco\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: unknown mode \"disco\"");
     control.start(QStringLiteral("disco"), 350);
     QCOMPARE(control.mode(), QStringLiteral("armada"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
@@ -555,7 +555,7 @@ void RgbTest::failedWordReported()
     QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore"))}));
 
     QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "casdap rgb: \"rgb-hue-350\" failed");
+    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: \"rgb-hue-350\" failed");
     control.setMode(QStringLiteral("accent"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
     QVERIFY(!applied.at(1).at(1).toBool());

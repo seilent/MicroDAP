@@ -1,0 +1,11 @@
+[Unit]
+Description=MicroDAP Bluetooth receiver agent
+BindsTo=gamescope-session-plus@microdap.service
+After=gamescope-session-plus@microdap.service
+
+[Service]
+ExecStartPre=/usr/bin/systemctl start microdap-priv@bt-class-headphones.service
+ExecStart=/usr/libexec/microdap/microdap-bt
+ExecStopPost=/usr/bin/systemctl start microdap-priv@bt-class-default.service
+Restart=on-failure
+RestartSec=5

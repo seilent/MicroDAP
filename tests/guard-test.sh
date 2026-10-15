@@ -3,22 +3,22 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-guard="${repo}/sysext/usr/libexec/casdap/casdap-guard"
+guard="${repo}/sysext/usr/libexec/microdap/microdap-guard"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
 mkdir -p "${T}/bin" "${T}/share"
 export STATE="${T}/state"
-export CASDAP_SHARE="${T}/share"
-export CASDAP_RUN="${T}/run"
-export CASDAP_SESSION_CONTROL="${T}/bin/session-control"
+export MICRODAP_SHARE="${T}/share"
+export MICRODAP_RUN="${T}/run"
+export MICRODAP_SESSION_CONTROL="${T}/bin/session-control"
 
 cat > "${T}/bin/session-control" <<'EOF'
 #!/usr/bin/bash
 echo "session-control $*" >> "${STATE}/calls"
 case "$(cat "${STATE}/mode")" in
-    listed)  printf 'casdap\nspanel\n' ;;
-    other)   echo spanel ;;
+    listed)  printf 'microdap\nmicroemu\n' ;;
+    other)   echo microemu ;;
     usage)   echo "usage: session-control {switch-desktop|switch-gamemode}" >&2; exit 1 ;;
 esac
 EOF
@@ -36,7 +36,7 @@ case_name=
 
 setup() {
     case_name=$1
-    rm -rf "${STATE}" "${CASDAP_RUN}"
+    rm -rf "${STATE}" "${MICRODAP_RUN}"
     mkdir -p "${STATE}"
     : > "${STATE}/calls"
     : > "${STATE}/logger"
@@ -51,17 +51,17 @@ run() {
 fail() { echo "FAIL ${case_name}: $*" >&2; failures=$((failures + 1)); }
 
 expect_drift() {
-    [[ "$(cat "${CASDAP_RUN}/drift" 2>/dev/null)" == "${CASDAP_SESSION_CONTROL}" ]] \
-        || fail "drift is '$(cat "${CASDAP_RUN}/drift" 2>/dev/null)'"
-    grep -q "^-t casdap-guard -p user.warning -- session-control does not list the casdap session$" "${STATE}/logger" \
+    [[ "$(cat "${MICRODAP_RUN}/drift" 2>/dev/null)" == "${MICRODAP_SESSION_CONTROL}" ]] \
+        || fail "drift is '$(cat "${MICRODAP_RUN}/drift" 2>/dev/null)'"
+    grep -q "^-t microdap-guard -p user.warning -- session-control does not list the microdap session$" "${STATE}/logger" \
         || fail "no warning: $(cat "${STATE}/logger")"
 }
 
-setup "casdap listed" listed
+setup "microdap listed" listed
 run
 [[ "${rc}" == 0 ]] || fail "exit ${rc}"
 grep -qxF "session-control list-sessions" "${STATE}/calls" || fail "list-sessions not called"
-[[ -e "${CASDAP_RUN}/drift" ]] && fail "drift written: $(cat "${CASDAP_RUN}/drift")"
+[[ -e "${MICRODAP_RUN}/drift" ]] && fail "drift written: $(cat "${MICRODAP_RUN}/drift")"
 [[ -s "${STATE}/logger" ]] && fail "logged: $(cat "${STATE}/logger")"
 
 setup "session-control without drop-ins" usage
@@ -69,7 +69,7 @@ run
 [[ "${rc}" == 0 ]] || fail "exit ${rc}"
 expect_drift
 
-setup "casdap not listed" other
+setup "microdap not listed" other
 run
 [[ "${rc}" == 0 ]] || fail "exit ${rc}"
 expect_drift

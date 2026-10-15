@@ -1,7 +1,0 @@
-[Desktop Entry]
-Name=CASDAP
-Comment=Console as DAP session
-Exec=gamescope-session-plus casdap
-Type=Application
-DesktopNames=casdap
-NoDisplay=true

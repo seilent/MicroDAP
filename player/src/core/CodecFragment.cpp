@@ -9,7 +9,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -42,19 +42,19 @@ QStringList CodecFragment::codecs()
 
 QString CodecFragment::confDir()
 {
-    return qEnvironmentVariable("CASDAP_WP_CONF_DIR",
+    return qEnvironmentVariable("MICRODAP_WP_CONF_DIR",
                                 QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
                                     + QStringLiteral("/wireplumber/wireplumber.conf.d"));
 }
 
 QString CodecFragment::confPath()
 {
-    return confDir() + QStringLiteral("/50-casdap-codec.conf");
+    return confDir() + QStringLiteral("/50-microdap-codec.conf");
 }
 
 QString CodecFragment::systemctlPath()
 {
-    const QString value = qEnvironmentVariable("CASDAP_SYSTEMCTL_BIN");
+    const QString value = qEnvironmentVariable("MICRODAP_SYSTEMCTL_BIN");
     return value.isEmpty() ? QStringLiteral("systemctl") : value;
 }
 
@@ -97,7 +97,7 @@ void CodecFragment::onTransportActiveChanged()
 {
     if (!m_bluez || m_bluez->transportActive() || !m_pending || m_process)
         return;
-    qInfo() << "casdap codec: transport ended, applying" << m_codec;
+    qInfo() << "microdap codec: transport ended, applying" << m_codec;
     restart();
 }
 
@@ -124,7 +124,7 @@ bool CodecFragment::restarting() const
 bool CodecFragment::apply(const QString &codec)
 {
     if (!codecs().contains(codec)) {
-        qWarning() << "casdap codec: unknown codec" << codec;
+        qWarning() << "microdap codec: unknown codec" << codec;
         return false;
     }
     if (m_codec != codec) {
@@ -135,14 +135,14 @@ bool CodecFragment::apply(const QString &codec)
     const QString wanted = fragmentText(codec);
     const bool exists = QFile::exists(path);
     if (wanted.isEmpty() ? !exists : exists && readAll(path) == wanted) {
-        qInfo() << "casdap codec:" << codec << "already in place";
+        qInfo() << "microdap codec:" << codec << "already in place";
         return true;
     }
     const bool written = wanted.isEmpty() ? removeFragment() : writeFragment(wanted);
     if (!written)
         return false;
     if (m_bluez && m_bluez->transportActive()) {
-        qInfo() << "casdap codec:" << codec << "written, transport active, applies at the next wireplumber start";
+        qInfo() << "microdap codec:" << codec << "written, transport active, applies at the next wireplumber start";
         if (m_process)
             m_writtenDuringRestart = true;
         setPending(true);
@@ -155,14 +155,14 @@ bool CodecFragment::apply(const QString &codec)
 bool CodecFragment::restartForNet(const QString &reason)
 {
     if (m_process) {
-        qInfo() << "casdap codec: restart for" << reason << "joins the running restart";
+        qInfo() << "microdap codec: restart for" << reason << "joins the running restart";
         return true;
     }
     if (m_bluez && m_bluez->transportState() != QLatin1StringView("none")) {
-        qInfo() << "casdap codec: restart for" << reason << "refused, transport" << m_bluez->transportState();
+        qInfo() << "microdap codec: restart for" << reason << "refused, transport" << m_bluez->transportState();
         return false;
     }
-    qInfo() << "casdap codec: restart for" << reason;
+    qInfo() << "microdap codec: restart for" << reason;
     restart(true);
     return true;
 }
@@ -171,20 +171,20 @@ bool CodecFragment::writeFragment(const QString &text)
 {
     const QString path = confPath();
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        qWarning() << "casdap codec: cannot create" << QFileInfo(path).absolutePath();
+        qWarning() << "microdap codec: cannot create" << QFileInfo(path).absolutePath();
         return false;
     }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qWarning() << "casdap codec: cannot write" << path;
+        qWarning() << "microdap codec: cannot write" << path;
         return false;
     }
     file.write(text.toUtf8());
     if (!file.commit()) {
-        qWarning() << "casdap codec: cannot commit" << path;
+        qWarning() << "microdap codec: cannot commit" << path;
         return false;
     }
-    qInfo() << "casdap codec: fragment written" << path;
+    qInfo() << "microdap codec: fragment written" << path;
     return true;
 }
 
@@ -192,10 +192,10 @@ bool CodecFragment::removeFragment()
 {
     const QString path = confPath();
     if (!QFile::remove(path)) {
-        qWarning() << "casdap codec: cannot remove" << path;
+        qWarning() << "microdap codec: cannot remove" << path;
         return false;
     }
-    qInfo() << "casdap codec: fragment removed" << path;
+    qInfo() << "microdap codec: fragment removed" << path;
     return true;
 }
 
@@ -204,18 +204,18 @@ void CodecFragment::restart(bool net)
     dropProcess();
     m_writtenDuringRestart = false;
     const QStringList args{QStringLiteral("--user"), QStringLiteral("restart"), QStringLiteral("wireplumber")};
-    qInfo() << "casdap codec: restart" << systemctlPath() << args;
+    qInfo() << "microdap codec: restart" << systemctlPath() << args;
     m_process = new QProcess(this);
     connect(m_process, &QProcess::finished, this, [this, net](int code, QProcess::ExitStatus status) {
         const bool ok = status == QProcess::NormalExit && code == 0;
         if (!ok)
-            qWarning() << "casdap codec: wireplumber restart exit" << code;
+            qWarning() << "microdap codec: wireplumber restart exit" << code;
         finishRestart(net, ok);
     });
     connect(m_process, &QProcess::errorOccurred, this, [this, net](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
-        qWarning() << "casdap codec: cannot start" << m_process->program();
+        qWarning() << "microdap codec: cannot start" << m_process->program();
         finishRestart(net, false);
     });
     m_process->start(systemctlPath(), args);
@@ -235,7 +235,7 @@ void CodecFragment::finishRestart(bool net, bool ok)
     if (!net || !m_pending || m_process
         || (m_bluez && m_bluez->transportState() != QLatin1StringView("none")))
         return;
-    qInfo() << "casdap codec: net restart ended, applying" << m_codec;
+    qInfo() << "microdap codec: net restart ended, applying" << m_codec;
     restart();
 }
 

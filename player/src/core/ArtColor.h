@@ -8,7 +8,7 @@
 #include <QString>
 #include <QThreadPool>
 
-namespace casdap {
+namespace microdap {
 
 struct ArtPick
 {

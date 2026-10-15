@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -26,23 +26,23 @@ constexpr const char *bitPerfectFilter = "audioconvert ! capsfilter caps=audio/x
 GstElement *parseBin(const QString &description, const char *what)
 {
     if (description.isEmpty()) {
-        qWarning() << "casdap player:" << what << "empty";
+        qWarning() << "microdap player:" << what << "empty";
         return nullptr;
     }
     const QByteArray text = description.toUtf8();
     GError *err = nullptr;
     GstElement *bin = gst_parse_bin_from_description(text.constData(), TRUE, &err);
     if (!bin)
-        qWarning() << "casdap player:" << what << description << (err ? err->message : "failed");
+        qWarning() << "microdap player:" << what << description << (err ? err->message : "failed");
     g_clear_error(&err);
     return bin;
 }
 
 QByteArray eqDescription()
 {
-    QByteArray text = "audioconvert ! audio/x-raw,format=F32LE ! volume name=casdap-preamp";
+    QByteArray text = "audioconvert ! audio/x-raw,format=F32LE ! volume name=microdap-preamp";
     for (int i = 0; i < EqProfile::bandCount; ++i)
-        text += " ! audioiirfilter name=casdap-b" + QByteArray::number(i);
+        text += " ! audioiirfilter name=microdap-b" + QByteArray::number(i);
     return text + " ! audioconvert";
 }
 
@@ -141,16 +141,16 @@ Player::Player(Library *library, QObject *parent)
     , m_library(library)
     , m_queue(new Queue(this))
 {
-    m_playbin = gst_element_factory_make("playbin", "casdap");
+    m_playbin = gst_element_factory_make("playbin", "microdap");
     if (!m_playbin) {
-        qWarning() << "casdap player: playbin not available";
+        qWarning() << "microdap player: playbin not available";
     } else {
         g_object_set(m_playbin, "flags", audioOnlyFlags, nullptr);
-        m_audioSinkEnv = qEnvironmentVariable("CASDAP_AUDIO_SINK");
-        if (m_audioSinkEnv.isNull() && qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
+        m_audioSinkEnv = qEnvironmentVariable("MICRODAP_AUDIO_SINK");
+        if (m_audioSinkEnv.isNull() && qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
             m_audioSinkEnv = QLatin1String("");
-        m_exclusiveEnv = qEnvironmentVariable("CASDAP_EXCLUSIVE_SINK");
-        if (qEnvironmentVariableIntValue("CASDAP_EQ_DISABLE") != 1)
+        m_exclusiveEnv = qEnvironmentVariable("MICRODAP_EXCLUSIVE_SINK");
+        if (qEnvironmentVariableIntValue("MICRODAP_EQ_DISABLE") != 1)
             buildEq();
         configure(OutputChain::Pw);
         m_bus = gst_element_get_bus(m_playbin);
@@ -290,22 +290,22 @@ void Player::buildEq()
     GError *err = nullptr;
     GstElement *filter = gst_parse_bin_from_description(eqDescription().constData(), TRUE, &err);
     if (!filter || err) {
-        qWarning() << "casdap player: eq filter" << (err ? err->message : "failed");
+        qWarning() << "microdap player: eq filter" << (err ? err->message : "failed");
         g_clear_error(&err);
         if (filter)
             gst_object_unref(gst_object_ref_sink(filter));
         return;
     }
-    GstElement *preamp = gst_bin_get_by_name(GST_BIN(filter), "casdap-preamp");
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(filter), "microdap-preamp");
     QList<GstElement *> bands;
     for (int i = 0; i < EqProfile::bandCount; ++i) {
-        const QByteArray name = "casdap-b" + QByteArray::number(i);
+        const QByteArray name = "microdap-b" + QByteArray::number(i);
         if (GstElement *band = gst_bin_get_by_name(GST_BIN(filter), name.constData()))
             bands.append(band);
     }
     GstPad *pad = preamp ? gst_element_get_static_pad(preamp, "sink") : nullptr;
     if (!pad || bands.size() != EqProfile::bandCount) {
-        qWarning() << "casdap player: eq filter incomplete";
+        qWarning() << "microdap player: eq filter incomplete";
         for (GstElement *band : std::as_const(bands))
             gst_object_unref(band);
         if (pad)
@@ -390,7 +390,7 @@ void Player::setEq()
             const BiquadCoeffs coeffs = bandCoeffs(band, rate);
             if (coeffs.guarded && !snapshot.guardLogged[i]) {
                 snapshot.guardLogged[i] = true;
-                guards.append(QStringLiteral("casdap eq: band %1 at %2 Hz above 0.49 of %3, %4")
+                guards.append(QStringLiteral("microdap eq: band %1 at %2 Hz above 0.49 of %3, %4")
                                   .arg(i + 1)
                                   .arg(band.freq)
                                   .arg(rate)
@@ -464,7 +464,7 @@ GstElement *Player::pwFilter(int rate)
         gst_object_unref(src);
     if (ok)
         return bin;
-    qWarning() << "casdap player: rate filter link failed" << rate;
+    qWarning() << "microdap player: rate filter link failed" << rate;
     detach(m_eqFilter);
     gst_object_unref(gst_object_ref_sink(bin));
     return m_eqFilter;
@@ -672,7 +672,7 @@ bool Player::holdForPhone()
         return false;
     if (!m_playPending) {
         m_playPending = true;
-        qInfo() << "casdap player: pausing the phone before local playback";
+        qInfo() << "microdap player: pausing the phone before local playback";
         emit localPlayRequested();
         m_holdTimer.start();
     }
@@ -911,7 +911,7 @@ void Player::setUri(const QString &path)
 {
     gchar *uri = gst_filename_to_uri(QFile::encodeName(path).constData(), nullptr);
     if (!uri) {
-        qWarning() << "casdap player: bad path" << path;
+        qWarning() << "microdap player: bad path" << path;
         return;
     }
     g_object_set(m_playbin, "uri", uri, nullptr);
@@ -986,7 +986,7 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
     if (!configure(chain)) {
         if (chain == OutputChain::Ex && m_policy) {
             hold(index, pending);
-            qWarning() << "casdap player: output error" << int(GST_RESOURCE_ERROR_FAILED) << "exclusive sink";
+            qWarning() << "microdap player: output error" << int(GST_RESOURCE_ERROR_FAILED) << "exclusive sink";
             m_policy->outputError(GST_RESOURCE_ERROR_FAILED);
             return;
         }
@@ -1041,7 +1041,7 @@ int Player::playSource(const QString &kind, qint64 id, const QString &mode, qint
     const bool next = mode == QLatin1String("next");
     const bool shuffle = mode == QLatin1String("shuffle");
     if (!add && !next && !shuffle && mode != QLatin1String("play")) {
-        qWarning() << "casdap player: unknown source mode" << mode;
+        qWarning() << "microdap player: unknown source mode" << mode;
         return 0;
     }
     const QList<QueueEntry> entries = kind == QLatin1String("song")
@@ -1212,7 +1212,7 @@ bool Player::doSeek(qint64 ms)
     const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT);
     const bool ok = gst_element_seek_simple(m_playbin, GST_FORMAT_TIME, flags, ms * GST_MSECOND);
     if (!ok)
-        qWarning() << "casdap player: seek failed" << ms;
+        qWarning() << "microdap player: seek failed" << ms;
     setPosition(ms);
     return ok;
 }
@@ -1397,7 +1397,7 @@ void Player::handleError(GstMessage *message)
                           && gst_object_has_as_ancestor(GST_MESSAGE_SRC(message), GST_OBJECT(m_sink));
     if (exclusive && (m_outputErrorSent || fromSink)) {
         if (!std::exchange(m_outputErrorSent, true)) {
-            qWarning() << "casdap player: output error" << err->code << err->message;
+            qWarning() << "microdap player: output error" << err->code << err->message;
             m_policy->outputError(err->code);
         }
         g_clear_error(&err);
@@ -1405,7 +1405,7 @@ void Player::handleError(GstMessage *message)
         return;
     }
     const QString text = err ? QString::fromUtf8(err->message) : QStringLiteral("playback error");
-    qWarning() << "casdap player:" << text << (debug ? debug : "");
+    qWarning() << "microdap player:" << text << (debug ? debug : "");
     g_clear_error(&err);
     g_free(debug);
     emit error(text);
@@ -1424,7 +1424,7 @@ void Player::handleError(GstMessage *message)
         return;
     }
     if (exhausted) {
-        qWarning() << "casdap: no playable track";
+        qWarning() << "microdap: no playable track";
         const int first = m_firstErrorRow;
         m_errorStreak = 0;
         m_firstErrorRow = -1;

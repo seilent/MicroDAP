@@ -3,14 +3,14 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-daemon="${repo}/sysext/usr/libexec/casdap/casdap-powerd"
-unit="${repo}/sysext/usr/lib/systemd/user/casdap-powerd.service"
+daemon="${repo}/sysext/usr/libexec/microdap/microdap-powerd"
+unit="${repo}/sysext/usr/lib/systemd/user/microdap-powerd.service"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
 mkdir -p "${T}/bin"
 export STATE="${T}/state"
-export CASDAP_RUNTIME_DIR="${T}/rt"
+export MICRODAP_RUNTIME_DIR="${T}/rt"
 
 cat > "${T}/bin/evtest" <<'EOF'
 #!/usr/bin/bash
@@ -46,9 +46,9 @@ case "$*" in
 esac
 EOF
 
-cat > "${T}/bin/casdap-power" <<'EOF'
+cat > "${T}/bin/microdap-power" <<'EOF'
 #!/usr/bin/bash
-echo "casdap-power $*" >> "${STATE}/calls"
+echo "microdap-power $*" >> "${STATE}/calls"
 if [[ "$*" == cpu-apply && -s "${STATE}/apply-sleep" ]]; then
     sleep "$(cat "${STATE}/apply-sleep")"
 fi
@@ -62,13 +62,13 @@ EOF
 
 chmod 0755 "${T}"/bin/*
 export PATH="${T}/bin:${PATH}"
-export CASDAP_POWERD_LONG_MS=200
-export CASDAP_POWERD_DEVICE_WAIT_SEC=0
-export CASDAP_POWERD_DEVICE_NAME=casdap-test-pwrkey
-export CASDAP_POWERD_POLL_SEC=0.05
-export CASDAP_POWERD_BUZZ_MS=20
-export CASDAP_POWER_DEBOUNCE_MS=2000
-export CASDAP_DEV_INPUT="${T}/nodev" CASDAP_SYS_INPUT="${T}/nosys"
+export MICRODAP_POWERD_LONG_MS=200
+export MICRODAP_POWERD_DEVICE_WAIT_SEC=0
+export MICRODAP_POWERD_DEVICE_NAME=microdap-test-pwrkey
+export MICRODAP_POWERD_POLL_SEC=0.05
+export MICRODAP_POWERD_BUZZ_MS=20
+export MICRODAP_POWER_DEBOUNCE_MS=2000
+export MICRODAP_DEV_INPUT="${T}/nodev" MICRODAP_SYS_INPUT="${T}/nosys"
 
 failures=0
 case_name=
@@ -76,28 +76,28 @@ fail() { echo "FAIL ${case_name}: $*" >&2; echo "--- log" >&2; cat "${STATE}/log
 
 run_case() {
     case_name=$1
-    rm -rf "${STATE}" "${CASDAP_RUNTIME_DIR}"
+    rm -rf "${STATE}" "${MICRODAP_RUNTIME_DIR}"
     mkdir -p "${STATE}"
     : > "${STATE}/calls"
     : > "${STATE}/log"
     printf '%s' "${PROFILE-Balanced}" > "${STATE}/profile"
     printf '%s' "${APPLY_SLEEP:-}" > "${STATE}/apply-sleep"
     if [[ "${OFF:-0}" == 1 ]]; then
-        mkdir -p "${CASDAP_RUNTIME_DIR}"
-        : > "${CASDAP_RUNTIME_DIR}/off"
+        mkdir -p "${MICRODAP_RUNTIME_DIR}"
+        : > "${MICRODAP_RUNTIME_DIR}/off"
     fi
     if [[ "${RECENT:-0}" == 1 ]]; then
-        mkdir -p "${CASDAP_RUNTIME_DIR}"
-        date +%s%3N > "${CASDAP_RUNTIME_DIR}/last-ms"
+        mkdir -p "${MICRODAP_RUNTIME_DIR}"
+        date +%s%3N > "${MICRODAP_RUNTIME_DIR}/last-ms"
     fi
     if [[ "${LOCKED:-0}" == 1 ]]; then
-        mkdir -p "${CASDAP_RUNTIME_DIR}"
-        ( flock 9; sleep 1.5 ) 9>"${CASDAP_RUNTIME_DIR}/lock" &
+        mkdir -p "${MICRODAP_RUNTIME_DIR}"
+        ( flock 9; sleep 1.5 ) 9>"${MICRODAP_RUNTIME_DIR}/lock" &
         sleep 0.2
     fi
     [[ -z "$2" ]] || printf '%s\n' "$2" | tr ';' '\n' > "${STATE}/script-event0"
     rc=0
-    CASDAP_POWERD_DRY_RUN="${3:-0}" "${daemon}" || rc=$?
+    MICRODAP_POWERD_DRY_RUN="${3:-0}" "${daemon}" || rc=$?
 }
 
 expect_call() { grep -qF -- "$1" "${STATE}/calls" || fail "missing call: $1"; }
@@ -117,10 +117,10 @@ expect_buzz() {
     [[ "${n}" == "$1" ]] || fail "${n} buzzes, expected $1"
 }
 
-toggle="casdap-power toggle"
-screen_on="casdap-power screen-on"
-apply="casdap-power cpu-apply"
-menu="busctl --user call org.casdap.Player /org/casdap/Player org.casdap.Player ShowPowerMenu"
+toggle="microdap-power toggle"
+screen_on="microdap-power screen-on"
+apply="microdap-power cpu-apply"
+menu="busctl --user call net.seilent.MicroDap.Player /net/seilent/MicroDap/Player net.seilent.MicroDap.Player ShowPowerMenu"
 
 run_case "no device" "press"
 [[ "${rc}" == 0 ]] || fail "exit ${rc} without device"
@@ -128,8 +128,8 @@ expect_log "not found"
 
 mkdir -p "${T}/sys/event0/device" "${T}/dev"
 : > "${T}/dev/event0"
-echo casdap-test-pwrkey > "${T}/sys/event0/device/name"
-export CASDAP_DEV_INPUT="${T}/dev" CASDAP_SYS_INPUT="${T}/sys"
+echo microdap-test-pwrkey > "${T}/sys/event0/device/name"
+export MICRODAP_DEV_INPUT="${T}/dev" MICRODAP_SYS_INPUT="${T}/sys"
 
 run_case "short press" "press;sleep 0.05;release"
 expect_sequence "${toggle}"
@@ -142,18 +142,18 @@ expect_buzz 0
 expect_log "would: buzz 20"
 expect_log "would: ${toggle}"
 
-unset CASDAP_POWERD_BUZZ_MS
+unset MICRODAP_POWERD_BUZZ_MS
 run_case "short press dry run with the default tick" "press;sleep 0.05;release" 1
 expect_calls 0
 expect_log "would: buzz 15"
-export CASDAP_POWERD_BUZZ_MS=20
+export MICRODAP_POWERD_BUZZ_MS=20
 
-export CASDAP_POWERD_BUZZ_LEVEL=0.3
+export MICRODAP_POWERD_BUZZ_LEVEL=0.3
 run_case "short press with a buzz level" "press;sleep 0.05;release"
 expect_sequence "${toggle}"
 expect_buzz 0
 grep -qF -- "CompositeDevice0 org.shadowblip.Output.ForceFeedback Rumble d 0.3" "${STATE}/buzz" || fail "no buzz at level 0.3"
-unset CASDAP_POWERD_BUZZ_LEVEL
+unset MICRODAP_POWERD_BUZZ_LEVEL
 RECENT=1 run_case "short press within the debounce" "press;sleep 0.05;release"
 expect_sequence "${toggle}"
 expect_buzz 0
@@ -232,7 +232,7 @@ expect_call "${apply}"
 expect_call "${menu}"
 expect_calls 2
 
-CASDAP_POWERD_LONG_MS=400 APPLY_SLEEP=1 run_case "tap behind a slow profile apply" "sleep 0.3;press;sleep 0.02;profile Eco;sleep 0.2;release;sleep 1.2"
+MICRODAP_POWERD_LONG_MS=400 APPLY_SLEEP=1 run_case "tap behind a slow profile apply" "sleep 0.3;press;sleep 0.02;profile Eco;sleep 0.2;release;sleep 1.2"
 expect_sequence "${apply}" "${toggle}"
 expect_buzz 1
 expect_no_call "${menu}"
@@ -243,19 +243,19 @@ expect_log "event stream ended"
 
 case_name=unit
 for line in \
-    'PartOf=gamescope-session-plus@casdap.service' \
-    'BindsTo=gamescope-session-plus@casdap.service' \
-    'After=gamescope-session-plus@casdap.service' \
+    'PartOf=gamescope-session-plus@microdap.service' \
+    'BindsTo=gamescope-session-plus@microdap.service' \
+    'After=gamescope-session-plus@microdap.service' \
     'Restart=always' \
     'StartLimitIntervalSec=0'; do
     grep -qxF -- "${line}" "${unit}" || fail "unit lacks ${line}"
 done
-grep -qE '^ExecStart=/usr/bin/systemd-inhibit --what=handle-power-key:handle-suspend-key --who=casdap-powerd --why="[^"]+" --mode=block /usr/libexec/casdap/casdap-powerd$' "${unit}" || fail "unit ExecStart is not the inhibited daemon"
+grep -qE '^ExecStart=/usr/bin/systemd-inhibit --what=handle-power-key:handle-suspend-key --who=microdap-powerd --why="[^"]+" --mode=block /usr/libexec/microdap/microdap-powerd$' "${unit}" || fail "unit ExecStart is not the inhibited daemon"
 
-if command -v systemd-analyze >/dev/null && [[ -e /usr/lib/systemd/user/gamescope-session-plus@.service && -x /usr/libexec/casdap/casdap-powerd ]]; then
+if command -v systemd-analyze >/dev/null && [[ -e /usr/lib/systemd/user/gamescope-session-plus@.service && -x /usr/libexec/microdap/microdap-powerd ]]; then
     systemd-analyze --user verify "${unit}" || fail "systemd-analyze verify"
 else
-    echo "skip: systemd-analyze verify (image units or casdap-powerd absent)"
+    echo "skip: systemd-analyze verify (image units or microdap-powerd absent)"
 fi
 
 if (( failures )); then

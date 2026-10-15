@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace casdap {
+namespace microdap {
 
 constexpr uint8_t fiioReportId = 7;
 constexpr uint8_t fiioCmdVersion = 0x0B;

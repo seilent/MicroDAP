@@ -1,6 +1,6 @@
 #include "BluezModel.h"
 
-namespace casdap {
+namespace microdap {
 
 BluezModel::BluezModel(QObject *parent)
     : QObject(parent)

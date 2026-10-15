@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     env:
-      BUILDER_REPO: ghcr.io/seilent/casdap-builder
+      BUILDER_REPO: ghcr.io/seilent/microdap-builder
       PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
@@ -48,13 +48,13 @@ jobs:
           image="${BUILDER_REPO}:${KEY}"
           printf '%s' "${TOKEN}" | podman login ghcr.io -u "${ACTOR}" --password-stdin
           if podman pull "${image}"; then
-            podman tag "${image}" localhost/casdap-builder
+            podman tag "${image}" localhost/microdap-builder
           else
             . build/base.env
-            podman build --build-arg BASE_IMAGE="$BASE_IMAGE" -t localhost/casdap-builder -f build/Containerfile .
+            podman build --build-arg BASE_IMAGE="$BASE_IMAGE" -t localhost/microdap-builder -f build/Containerfile .
             podman image prune -f
             if [[ "${PUBLISH}" == true ]]; then
-              podman tag localhost/casdap-builder "${image}"
+              podman tag localhost/microdap-builder "${image}"
               podman push "${image}"
             fi
           fi
@@ -69,10 +69,10 @@ jobs:
             cache-${{ steps.keys.outputs.builder }}-
 
       - name: Build
-        run: podman run --rm -v "$PWD":/work:Z -e CASDAP_VERSION=${{ steps.keys.outputs.short }} localhost/casdap-builder build/build.sh
+        run: podman run --rm -v "$PWD":/work:Z -e MICRODAP_VERSION=${{ steps.keys.outputs.short }} localhost/microdap-builder build/build.sh
 
       - name: ctest
-        run: podman run --rm -v "$PWD":/work:Z -w /work/build/player localhost/casdap-builder ctest --timeout 300 --output-on-failure -j 2
+        run: podman run --rm -v "$PWD":/work:Z -w /work/build/player localhost/microdap-builder ctest --timeout 300 --output-on-failure -j 2
 
       - name: Test deps
         run: |
@@ -83,10 +83,10 @@ jobs:
         run: |
           root=$(mktemp -d)
           mkdir -p "${root}/usr/libexec/armada"
-          cid=$(podman create localhost/casdap-builder true)
+          cid=$(podman create localhost/microdap-builder true)
           podman cp "${cid}:/usr/libexec/armada/session-control" "${root}/usr/libexec/armada/session-control"
           podman rm "${cid}"
-          CASDAP_BASE_ROOT="${root}" bash tests/session-control-test.sh
+          MICRODAP_BASE_ROOT="${root}" bash tests/session-control-test.sh
           bash tests/priv-test.sh
           bash tests/hotkeyd-test.sh
           bash tests/pad-test.sh
@@ -104,7 +104,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: casdap-dist-${{ steps.keys.outputs.short }}
+          name: microdap-dist-${{ steps.keys.outputs.short }}
           path: dist.tar
           retention-days: 7
           if-no-files-found: error

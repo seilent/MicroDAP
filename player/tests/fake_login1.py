@@ -18,8 +18,8 @@ except (ImportError, ValueError, AttributeError):
 SERVICE = 'org.freedesktop.login1'
 PATH = '/org/freedesktop/login1'
 MANAGER = 'org.freedesktop.login1.Manager'
-CONTROL = 'org.casdap.FakeLogin1'
-CONTROL_PATH = '/org/casdap/FakeLogin1'
+CONTROL = 'net.seilent.MicroDap.FakeLogin1'
+CONTROL_PATH = '/net/seilent/MicroDap/FakeLogin1'
 
 
 class Manager(dbus.service.Object):

@@ -24,7 +24,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -307,7 +307,7 @@ void LibraryTest::initTestCase()
 {
     QVERIFY(m_dir.isValid());
     m_music = m_dir.path() + QStringLiteral("/music");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC), m_music));
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC), m_music));
 
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
@@ -852,7 +852,7 @@ void LibraryTest::missingRoot()
     const QSqlDatabase db = m_library->database();
     const QString extra = m_dir.path() + QStringLiteral("/extra");
     const QString hidden = m_dir.path() + QStringLiteral("/extra.gone");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      extra + QStringLiteral("/Single")));
     const QStringList roots{m_music, extra};
 
@@ -939,7 +939,7 @@ void LibraryTest::artContent()
     QCOMPARE(QDir(m_library->artDir()).entryList(QDir::Files).size(), 1);
 
     QByteArray altered = cover;
-    altered.append(QByteArrayLiteral("casdap"));
+    altered.append(QByteArrayLiteral("microdap"));
     QVERIFY(replaceCover(copy, altered));
     QVERIFY(bumpMtime(copy, 7200));
     QVERIFY(scan(added, updated, removed));
@@ -1394,7 +1394,7 @@ void LibraryTest::folderOff()
 {
     const QSqlDatabase db = m_library->database();
     const QString other = m_dir.path() + QStringLiteral("/other");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      other + QStringLiteral("/Single")));
     const int before = m_library->songCount();
 
@@ -1424,9 +1424,9 @@ void LibraryTest::mediaUnmounted()
     const QString base = m_dir.path() + QStringLiteral("/media");
     const QString label = base + QStringLiteral("/armada/CARD");
     const QString path = label + QStringLiteral("/Single/01 Single.mp3");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      label + QStringLiteral("/Single")));
-    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
     const QStringList roots{m_music, base};
     const int before = m_library->songCount();
 
@@ -1449,7 +1449,7 @@ void LibraryTest::mediaUnmounted()
     QVERIFY(trackId(db, path) > 0);
     QCOMPARE(m_library->songCount(), before + 1);
 
-    qunsetenv("CASDAP_MEDIA_ROOT");
+    qunsetenv("MICRODAP_MEDIA_ROOT");
     QVERIFY(scan(roots, added, updated, removed));
     QCOMPARE(removed, 1);
     QCOMPARE(m_library->songCount(), before);
@@ -1463,9 +1463,9 @@ void LibraryTest::mediaMountLayout()
     const QString card = base + QStringLiteral("/mmcblk0p1");
     const QString music = card + QStringLiteral("/Music");
     const QString path = music + QStringLiteral("/Single/01 Single.mp3");
-    const QString single = QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single");
+    const QString single = QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single");
     QVERIFY(copyTree(single, music + QStringLiteral("/Single")));
-    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
     Scanner::setMountCheck(fakeMountCheck);
     fakeMount = card;
     const QStringList roots{m_music, base};
@@ -1506,7 +1506,7 @@ void LibraryTest::mediaMountLayout()
 
     fakeMount.clear();
     Scanner::setMountCheck(nullptr);
-    qunsetenv("CASDAP_MEDIA_ROOT");
+    qunsetenv("MICRODAP_MEDIA_ROOT");
     QVERIFY(QDir(base).removeRecursively());
 }
 
@@ -1521,7 +1521,7 @@ void LibraryTest::candidateRoots()
     QVERIFY(QDir().mkpath(label));
     QVERIFY(QDir().mkpath(user + QStringLiteral("/stale")));
     QVERIFY(QDir().mkpath(empty + QStringLiteral("/old")));
-    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
     Scanner::setMountCheck([](const QString &dir) {
         const QString path = QDir::cleanPath(dir);
         return path.endsWith(QLatin1StringView("/mmcblk0p1")) || path.endsWith(QLatin1StringView("/CARD"));
@@ -1538,7 +1538,7 @@ void LibraryTest::candidateRoots()
     QVERIFY(!roots.contains(empty + QStringLiteral("/old")));
 
     Scanner::setMountCheck(nullptr);
-    qunsetenv("CASDAP_MEDIA_ROOT");
+    qunsetenv("MICRODAP_MEDIA_ROOT");
     QVERIFY(QDir(base).removeRecursively());
 }
 
@@ -1668,7 +1668,7 @@ void LibraryTest::playlistUnreadable()
     }
     QSignalSpy playlistsSpy(m_library.get(), &Library::playlistsChanged);
     QTest::ignoreMessage(QtWarningMsg,
-                         qPrintable(QStringLiteral("casdap: playlist %1: unreadable, kept as is").arg(latinPath)));
+                         qPrintable(QStringLiteral("microdap: playlist %1: unreadable, kept as is").arg(latinPath)));
     int added = 0;
     int updated = 0;
     int removed = 0;
@@ -1798,7 +1798,7 @@ void LibraryTest::rootsChange()
     m_settings->setRoots({m_music});
     m_library->setSettings(m_settings.get());
     const QString other = m_dir.path() + QStringLiteral("/roots");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      other + QStringLiteral("/Single")));
     const int before = m_library->songCount();
 
@@ -1876,7 +1876,7 @@ void LibraryTest::watcherLimit()
     for (int i = 0; i < 10; ++i)
         QVERIFY(QDir().mkpath(deep + QStringLiteral("/d%1").arg(i)));
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap: watch limit 8 reached");
+    QTest::ignoreMessage(QtWarningMsg, "microdap: watch limit 8 reached");
     QVERIFY(scanRoots());
     QCOMPARE(watcher.watched().size(), 8);
     QVERIFY(watcher.watched().contains(m_music));
@@ -1905,7 +1905,7 @@ void LibraryTest::watcherMissingRoot()
     QVERIFY(watcher.watched().contains(mnt));
     const int before = m_library->songCount();
 
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      card + QStringLiteral("/Single")));
     QTRY_COMPARE_WITH_TIMEOUT(m_library->songCount(), before + 1, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(watcher.watched().contains(card), 10000);
@@ -1920,13 +1920,13 @@ void LibraryTest::watcherClimbStops()
 {
     const QString base = m_dir.path() + QStringLiteral("/climb");
     const QString root = base + QStringLiteral("/mmcblk0p1/Music");
-    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
     QCOMPARE(LibraryWatcher::nearestExisting(root), QString());
     QVERIFY(QDir().mkpath(base));
     QCOMPARE(LibraryWatcher::nearestExisting(root), base);
     QVERIFY(QDir().mkpath(base + QStringLiteral("/mmcblk0p1")));
     QCOMPARE(LibraryWatcher::nearestExisting(root), base + QStringLiteral("/mmcblk0p1"));
-    qunsetenv("CASDAP_MEDIA_ROOT");
+    qunsetenv("MICRODAP_MEDIA_ROOT");
     QVERIFY(QDir(base).removeRecursively());
 }
 
@@ -1934,7 +1934,7 @@ void LibraryTest::watcherPoll()
 {
     const QString base = m_dir.path() + QStringLiteral("/pollmedia");
     const QString root = base + QStringLiteral("/mmcblk0p1/Music");
-    qputenv("CASDAP_MEDIA_ROOT", QFile::encodeName(base));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
     LibraryWatcher watcher(m_library.get());
     watcher.setDebounceMs(600000);
     watcher.setPollMs(200);
@@ -1949,7 +1949,7 @@ void LibraryTest::watcherPoll()
 
     QSignalSpy triggered(&watcher, &LibraryWatcher::triggered);
     const QString stage = m_dir.path() + QStringLiteral("/pollstage");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      stage + QStringLiteral("/mmcblk0p1/Music/Single")));
     QVERIFY(QDir().rename(stage, base));
     QTRY_VERIFY_WITH_TIMEOUT(triggered.count() >= 1, 5000);
@@ -1958,7 +1958,7 @@ void LibraryTest::watcherPoll()
 
     m_settings->setRoots({m_music});
     QTRY_VERIFY_WITH_TIMEOUT(!m_library->scanning() && m_library->songCount() == before, scanTimeoutMs);
-    qunsetenv("CASDAP_MEDIA_ROOT");
+    qunsetenv("MICRODAP_MEDIA_ROOT");
     QVERIFY(QDir(base).removeRecursively());
 }
 

@@ -6,7 +6,7 @@
 
 #include <optional>
 
-namespace casdap::ssc {
+namespace microdap::ssc {
 
 constexpr quint32 service = 400;
 constexpr quint32 controlPort = 0xfffffffe;

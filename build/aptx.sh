@@ -37,7 +37,7 @@ license() {
     local root=$1 name=$2 file
     file=$(find "${root}/usr/share/licenses" -type f 2>/dev/null | sort | head -n 1)
     [[ -n "${file}" ]] || return 1
-    cp "${file}" "${dist}/usr/share/licenses/casdap/${name}.txt"
+    cp "${file}" "${dist}/usr/share/licenses/microdap/${name}.txt"
 }
 
 mkdir -p "${cache}"
@@ -53,7 +53,7 @@ extract "${cache}/${APTX_CODEC_RPM}" "${work}/codec" './usr/lib64/spa-0.2/bluez5
 ls "${work}"/lib/usr/lib64/libfreeaptx.so.0* >/dev/null 2>&1 || { echo "aptx.sh: libfreeaptx.so.0* missing in ${APTX_LIB_RPM}" >&2; exit 1; }
 [[ -f "${work}/codec/usr/lib64/spa-0.2/bluez5/libspa-codec-bluez5-aptx.so" ]] || { echo "aptx.sh: libspa-codec-bluez5-aptx.so missing in ${APTX_CODEC_RPM}" >&2; exit 1; }
 
-mkdir -p "${dist}/usr/lib64/spa-0.2/bluez5" "${dist}/usr/share/licenses/casdap"
+mkdir -p "${dist}/usr/lib64/spa-0.2/bluez5" "${dist}/usr/share/licenses/microdap"
 cp -a "${work}"/lib/usr/lib64/libfreeaptx.so.0* "${dist}/usr/lib64/"
 cp -a "${work}/codec/usr/lib64/spa-0.2/bluez5/libspa-codec-bluez5-aptx.so" "${dist}/usr/lib64/spa-0.2/bluez5/"
 license "${work}/lib" libfreeaptx || { echo "aptx.sh: no license file in ${APTX_LIB_RPM}" >&2; exit 1; }

@@ -9,7 +9,7 @@
 #include <cmath>
 #include <vector>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 

@@ -7,7 +7,7 @@
 #include <QFile>
 #include <QRegularExpression>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -60,22 +60,22 @@ QString OutputControl::usbPrefix()
 
 QString OutputControl::wpctlPath()
 {
-    return binary("CASDAP_WPCTL_BIN", QStringLiteral("wpctl"));
+    return binary("MICRODAP_WPCTL_BIN", QStringLiteral("wpctl"));
 }
 
 QString OutputControl::pactlPath()
 {
-    return binary("CASDAP_PACTL_BIN", QStringLiteral("pactl"));
+    return binary("MICRODAP_PACTL_BIN", QStringLiteral("pactl"));
 }
 
 QString OutputControl::amixerPath()
 {
-    return binary("CASDAP_AMIXER_BIN", QStringLiteral("amixer"));
+    return binary("MICRODAP_AMIXER_BIN", QStringLiteral("amixer"));
 }
 
 QString OutputControl::systemctlPath()
 {
-    return binary("CASDAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
+    return binary("MICRODAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
 }
 
 QStringList OutputControl::parseSinks(const QString &text)
@@ -121,7 +121,7 @@ QString OutputControl::resolve(const QString &output, bool jack, bool usb)
 
 QString OutputControl::unitFor(const QString &word)
 {
-    return QStringLiteral("casdap-priv@") + word + QStringLiteral(".service");
+    return QStringLiteral("microdap-priv@") + word + QStringLiteral(".service");
 }
 
 QString OutputControl::output() const
@@ -201,7 +201,7 @@ void OutputControl::setHeld(HeldState state)
     const bool usb = usbPresent();
     const bool released = state == HeldState::None;
     m_held = state;
-    qInfo() << "casdap output: held"
+    qInfo() << "microdap output: held"
             << (released ? "none" : state == HeldState::Held ? "held" : "returning");
     if (usb != usbPresent())
         emit usbSinkChanged();
@@ -218,7 +218,7 @@ void OutputControl::watchCard(int index, const QString &id)
     m_watchIndex = index;
     m_watchId = id;
     m_watchGone = false;
-    qInfo() << "casdap output: watch card" << index << id;
+    qInfo() << "microdap output: watch card" << index << id;
 }
 
 void OutputControl::unwatchCard()
@@ -242,14 +242,14 @@ void OutputControl::checkWatchedCard()
     if (id == m_watchId)
         return;
     m_watchGone = true;
-    qInfo() << "casdap output: card gone" << m_watchIndex << m_watchId << "reads" << id;
+    qInfo() << "microdap output: card gone" << m_watchIndex << m_watchId << "reads" << id;
     emit cardGone(m_watchIndex);
 }
 
 void OutputControl::apply(const QString &output)
 {
     if (!outputs().contains(output)) {
-        qWarning() << "casdap output: unknown output" << output;
+        qWarning() << "microdap output: unknown output" << output;
         return;
     }
     if (m_output != output) {
@@ -264,7 +264,7 @@ void OutputControl::apply(const QString &output)
     m_applying = true;
     m_everApplied = true;
     updateBusy();
-    qInfo() << "casdap output: apply" << output;
+    qInfo() << "microdap output: apply" << output;
     readBoth([this] { resolveAndSet(); });
 }
 
@@ -281,7 +281,7 @@ void OutputControl::refresh()
     readBoth([this, jack, usb] {
         m_reading = false;
         if (m_everApplied && (jack != m_jackPresent || usb != m_usbSink)) {
-            qInfo() << "casdap output: edge, jack" << m_jackPresent << "usb" << m_usbSink;
+            qInfo() << "microdap output: edge, jack" << m_jackPresent << "usb" << m_usbSink;
             apply(m_output);
             return;
         }
@@ -329,7 +329,7 @@ void OutputControl::resolveAndSet()
 {
     const QString active = resolve(m_output, m_jackPresent, usbPresent());
     if (active == QLatin1StringView("usb") && m_held != HeldState::None) {
-        qInfo() << "casdap output: usb held, default sink kept";
+        qInfo() << "microdap output: usb held, default sink kept";
         setActiveOutput(active);
         finish(true);
         return;
@@ -337,7 +337,7 @@ void OutputControl::resolveAndSet()
     const QString sink = active == QLatin1StringView("usb") ? m_usbSink
         : active == QLatin1StringView("headphones") ? headphonesSink() : speakerSink();
     if (!m_sinks.contains(sink)) {
-        qWarning() << "casdap output: sink not listed" << sink;
+        qWarning() << "microdap output: sink not listed" << sink;
         finish(false);
         return;
     }
@@ -354,7 +354,7 @@ void OutputControl::setHeadphone(const QString &gain, const QString &amp)
     const QString g = gain.toLower();
     const QString a = amp.toLower();
     if (!Settings::hpGains().contains(g) || !Settings::hpAmps().contains(a)) {
-        qWarning() << "casdap output: unknown headphone setting" << gain << amp;
+        qWarning() << "microdap output: unknown headphone setting" << gain << amp;
         return;
     }
     if (m_hpGain != g) {
@@ -372,7 +372,7 @@ void OutputControl::setHeadphone(const QString &gain, const QString &amp)
 void OutputControl::setSpkGain(int step)
 {
     if (!Settings::spkGains().contains(step)) {
-        qWarning() << "casdap output: unknown speaker gain" << step;
+        qWarning() << "microdap output: unknown speaker gain" << step;
         return;
     }
     if (m_spkGain != step) {
@@ -387,7 +387,7 @@ void OutputControl::applyHeadphone()
     if (m_hpGain.isEmpty() || m_hpAmp.isEmpty())
         return;
     if (m_activeOutput != QLatin1StringView("headphones")) {
-        qInfo() << "casdap output: headphones not active, hp words skipped";
+        qInfo() << "microdap output: headphones not active, hp words skipped";
         return;
     }
     startWords({QStringLiteral("hp-gain-") + m_hpGain, QStringLiteral("hp-amp-") + m_hpAmp});
@@ -408,10 +408,10 @@ void OutputControl::nextWord()
         return;
     }
     const QString word = m_words.takeFirst();
-    qInfo() << "casdap output: start" << unitFor(word);
+    qInfo() << "microdap output: start" << unitFor(word);
     run(m_word, systemctlPath(), {QStringLiteral("start"), unitFor(word)},
         [this, word](bool ok, const QByteArray &) {
-        qInfo() << "casdap output: applied" << word << ok;
+        qInfo() << "microdap output: applied" << word << ok;
         emit applied(word, ok);
         nextWord();
     });
@@ -429,7 +429,7 @@ void OutputControl::run(QProcess *&slot, const QString &program, const QStringLi
         process->deleteLater();
         const bool ok = status == QProcess::NormalExit && code == 0;
         if (!ok)
-            qWarning() << "casdap output:" << process->program() << process->arguments() << "exit" << code;
+            qWarning() << "microdap output:" << process->program() << process->arguments() << "exit" << code;
         handler(ok, process->readAllStandardOutput());
     });
     connect(process, &QProcess::errorOccurred, this,
@@ -439,7 +439,7 @@ void OutputControl::run(QProcess *&slot, const QString &program, const QStringLi
         if (slot == process)
             slot = nullptr;
         process->deleteLater();
-        qWarning() << "casdap output: cannot start" << process->program();
+        qWarning() << "microdap output: cannot start" << process->program();
         handler(false, {});
     });
     QTimer::singleShot(processTimeoutMs, process, [process] {
@@ -468,7 +468,7 @@ void OutputControl::finish(bool ok)
 {
     m_applying = false;
     updateBusy();
-    qInfo() << "casdap output: applied" << m_output << "as" << m_activeOutput << ok;
+    qInfo() << "microdap output: applied" << m_output << "as" << m_activeOutput << ok;
     emit applied(m_output, ok);
     if (!m_resolvedOnce) {
         m_resolvedOnce = true;

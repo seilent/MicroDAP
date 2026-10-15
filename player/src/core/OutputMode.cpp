@@ -11,7 +11,7 @@
 #include <QFile>
 #include <QPointer>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -1970,7 +1970,7 @@ void OutputMode::driveBuild(Player::OutputChain chain)
 
 void OutputMode::log(const QString &text) const
 {
-    qInfo().noquote() << "casdap output:" << text;
+    qInfo().noquote() << "microdap output:" << text;
 }
 
 }

@@ -13,7 +13,7 @@
 
 #include <gst/gst.h>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -100,8 +100,8 @@ private:
 void StateTest::initTestCase()
 {
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
     QVERIFY(m_dir.isValid());
     for (int i = 0; i < 2; ++i) {
         QueueEntry entry;
@@ -115,10 +115,10 @@ void StateTest::initTestCase()
 
 qint64 StateTest::savePlaying(const QString &path, bool handoff)
 {
-    const QByteArray sink = qgetenv("CASDAP_AUDIO_SINK");
-    qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    const QByteArray sink = qgetenv("MICRODAP_AUDIO_SINK");
+    qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
     Player player;
-    qputenv("CASDAP_AUDIO_SINK", sink);
+    qputenv("MICRODAP_AUDIO_SINK", sink);
     State state(&player, path);
     player.play(m_entries, 1);
     if (!QTest::qWaitFor([&player] { return player.status() == Player::Playing && player.position() >= 500; },
@@ -218,10 +218,10 @@ void StateTest::levelOffRestoresAsToday()
 void StateTest::pauseAndPausedSeekSaved()
 {
     const QString path = m_dir.path() + QStringLiteral("/pause/state.json");
-    const QByteArray sink = qgetenv("CASDAP_AUDIO_SINK");
-    qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    const QByteArray sink = qgetenv("MICRODAP_AUDIO_SINK");
+    qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
     Player player;
-    qputenv("CASDAP_AUDIO_SINK", sink);
+    qputenv("MICRODAP_AUDIO_SINK", sink);
     State state(&player, path);
     player.play(m_entries, 1);
     QTRY_VERIFY_WITH_TIMEOUT(player.status() == Player::Playing && player.position() >= 500, playTimeoutMs);

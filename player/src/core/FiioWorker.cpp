@@ -10,7 +10,7 @@
 #include <chrono>
 #include <thread>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -18,7 +18,7 @@ constexpr int guiWaitMs = 500;
 
 void logLine(const std::string &line)
 {
-    qInfo().noquote() << "casdap dac eq:" << QString::fromStdString(line);
+    qInfo().noquote() << "microdap dac eq:" << QString::fromStdString(line);
 }
 
 const FiioModel *modelAt(const FiioPaths &paths, const QString &sysPath)
@@ -63,7 +63,7 @@ FiioWorker::FiioWorker(std::unique_ptr<UsbIo> usb, Bounds bounds, FiioPaths path
     , m_thread(new QThread)
     , m_runner(new FiioRunner(std::move(usb), bounds, std::move(paths)))
 {
-    m_thread->setObjectName(QStringLiteral("casdap-fiio"));
+    m_thread->setObjectName(QStringLiteral("microdap-fiio"));
     m_runner->moveToThread(m_thread);
     connect(m_runner, &FiioRunner::done, this, &FiioWorker::batchDone, Qt::QueuedConnection);
     m_thread->start();
@@ -76,7 +76,7 @@ FiioWorker::~FiioWorker()
     else
         m_thread->wait(QDeadlineTimer(guiWaitMs));
     if (m_thread->isRunning()) {
-        qWarning() << "casdap dac eq: worker did not stop, left running";
+        qWarning() << "microdap dac eq: worker did not stop, left running";
         return;
     }
     delete m_runner;
@@ -116,7 +116,7 @@ bool FiioWorker::quitAndJoin(int ms)
     }
     if (m_thread->wait(QDeadlineTimer(ms)))
         return true;
-    qWarning() << "casdap dac eq: worker still running" << ms << "ms after quit";
+    qWarning() << "microdap dac eq: worker still running" << ms << "ms after quit";
     return false;
 }
 

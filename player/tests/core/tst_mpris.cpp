@@ -22,7 +22,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -146,8 +146,8 @@ bool MprisTest::sawChange(const QString &name, const QVariant &value) const
 void MprisTest::initTestCase()
 {
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
 
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
@@ -155,7 +155,7 @@ void MprisTest::initTestCase()
 
     QVERIFY(m_dir.isValid());
     m_music = m_dir.path() + QStringLiteral("/music");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC), m_music));
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC), m_music));
 
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
@@ -219,7 +219,7 @@ void MprisTest::registered()
 
 void MprisTest::identity()
 {
-    QCOMPARE(m_root->property("Identity").toString(), QStringLiteral("CASDAP"));
+    QCOMPARE(m_root->property("Identity").toString(), QStringLiteral("MicroDAP"));
     QVERIFY(!m_root->property("DesktopEntry").isValid());
     QCOMPARE(m_root->property("CanQuit").toBool(), false);
     QCOMPARE(m_root->property("CanRaise").toBool(), false);

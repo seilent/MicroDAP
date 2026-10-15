@@ -21,7 +21,7 @@
 #include <pulse/operation.h>
 #include <unistd.h>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -48,8 +48,8 @@ EvdevKeys::EvdevKeys(QObject *parent)
 
 EvdevKeys::EvdevKeys(int retry, QObject *parent)
     : KeySource(parent)
-    , m_devRoot(envPath("CASDAP_DEV_INPUT", QStringLiteral("/dev/input")))
-    , m_sysRoot(envPath("CASDAP_SYS_INPUT", QStringLiteral("/sys/class/input")))
+    , m_devRoot(envPath("MICRODAP_DEV_INPUT", QStringLiteral("/dev/input")))
+    , m_sysRoot(envPath("MICRODAP_SYS_INPUT", QStringLiteral("/sys/class/input")))
 {
     for (const QString &name : defaultNames())
         m_nodes.append(Node{name});
@@ -71,9 +71,9 @@ EvdevKeys::~EvdevKeys()
 
 QStringList EvdevKeys::defaultNames()
 {
-    if (!qEnvironmentVariableIsSet("CASDAP_VOLUME_NAMES"))
+    if (!qEnvironmentVariableIsSet("MICRODAP_VOLUME_NAMES"))
         return {QStringLiteral("gpio-keys"), QStringLiteral("pm8941_resin")};
-    return qEnvironmentVariable("CASDAP_VOLUME_NAMES").split(QLatin1Char(':'), Qt::SkipEmptyParts);
+    return qEnvironmentVariable("MICRODAP_VOLUME_NAMES").split(QLatin1Char(':'), Qt::SkipEmptyParts);
 }
 
 int EvdevKeys::openCount() const
@@ -108,9 +108,9 @@ void EvdevKeys::openMissing()
         if (fd < 0) {
             if (!node.logged) {
                 if (path.isEmpty())
-                    qInfo().noquote() << "casdap volume:" << node.name << "not found, retrying";
+                    qInfo().noquote() << "microdap volume:" << node.name << "not found, retrying";
                 else
-                    qWarning().noquote() << "casdap volume: cannot open" << path << std::strerror(errno);
+                    qWarning().noquote() << "microdap volume: cannot open" << path << std::strerror(errno);
                 node.logged = true;
             }
             missing = true;
@@ -121,7 +121,7 @@ void EvdevKeys::openMissing()
         node.notifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
         connect(node.notifier, &QSocketNotifier::activated, this, [this, i] { drain(i); });
         ++m_opens;
-        qInfo().noquote() << "casdap volume:" << node.name << "on" << path;
+        qInfo().noquote() << "microdap volume:" << node.name << "on" << path;
     }
     if (missing)
         m_retry.start();
@@ -144,7 +144,7 @@ void EvdevKeys::closeNode(int index)
         m_repeatCode = 0;
         m_repeatNode = -1;
     }
-    qInfo().noquote() << "casdap volume:" << node.name << "closed";
+    qInfo().noquote() << "microdap volume:" << node.name << "closed";
     if (!m_retry.isActive())
         m_retry.start();
 }
@@ -159,7 +159,7 @@ void EvdevKeys::drain(int index)
                 continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 return;
-            qWarning().noquote() << "casdap volume:" << m_nodes.at(index).name << "read failed"
+            qWarning().noquote() << "microdap volume:" << m_nodes.at(index).name << "read failed"
                                  << std::strerror(errno);
             closeNode(index);
             return;
@@ -215,7 +215,7 @@ PulseSinkVolume::PulseSinkVolume(QObject *parent)
 
     QAbstractEventDispatcher *dispatcher = QAbstractEventDispatcher::instance();
     if (!dispatcher || !dispatcher->inherits("QEventDispatcherGlib")) {
-        qWarning() << "casdap volume: no glib event loop";
+        qWarning() << "microdap volume: no glib event loop";
         return;
     }
     m_mainloop = pa_glib_mainloop_new(nullptr);
@@ -282,7 +282,7 @@ void PulseSinkVolume::onState(pa_context *context, void *userdata)
         return;
     switch (pa_context_get_state(context)) {
     case PA_CONTEXT_READY:
-        qInfo() << "casdap volume: connected";
+        qInfo() << "microdap volume: connected";
         self->m_failLogged = false;
         pa_context_set_subscribe_callback(context, &PulseSinkVolume::onEvent, self);
         unref(pa_context_subscribe(context,
@@ -386,7 +386,7 @@ void PulseSinkVolume::onSet(pa_context *context, int success, void *userdata)
     auto *self = static_cast<PulseSinkVolume *>(userdata);
     if (context != self->m_context || success)
         return;
-    qWarning() << "casdap volume: set failed" << pa_strerror(pa_context_errno(context));
+    qWarning() << "microdap volume: set failed" << pa_strerror(pa_context_errno(context));
     self->validate();
 }
 
@@ -394,7 +394,7 @@ void PulseSinkVolume::connectContext()
 {
     if (!m_mainloop || m_context)
         return;
-    m_context = pa_context_new(pa_glib_mainloop_get_api(m_mainloop), "casdap-player");
+    m_context = pa_context_new(pa_glib_mainloop_get_api(m_mainloop), "microdap-player");
     if (!m_context) {
         m_reconnect.start();
         return;
@@ -408,7 +408,7 @@ void PulseSinkVolume::teardown(bool reconnect)
 {
     if (m_context) {
         if (reconnect && !m_failLogged) {
-            qWarning() << "casdap volume: pulse unavailable, retrying" << pa_strerror(pa_context_errno(m_context));
+            qWarning() << "microdap volume: pulse unavailable, retrying" << pa_strerror(pa_context_errno(m_context));
             m_failLogged = true;
         }
         pa_context_set_state_callback(m_context, nullptr, nullptr);
@@ -456,7 +456,7 @@ void PulseSinkVolume::apply(int percent)
     const qint64 now = m_clock.elapsed();
     m_lastSetMs = now;
     const int percentLevel = level(m_volume);
-    qInfo() << "casdap volume:" << percentLevel;
+    qInfo() << "microdap volume:" << percentLevel;
     emit levelChanged(percentLevel);
     if (m_send.isActive())
         return;
@@ -587,7 +587,7 @@ void PulseSinkVolume::setSinkVolumeDb(const QString &name, double db, std::funct
     const QByteArray sink = name.toUtf8();
     querySink(PA_INVALID_INDEX, sink, [this, sink, db, done](const pa_sink_info *info) {
         if (!info || !pa_cvolume_valid(&info->volume)) {
-            qWarning().noquote() << "casdap volume: no sink" << QString::fromUtf8(sink);
+            qWarning().noquote() << "microdap volume: no sink" << QString::fromUtf8(sink);
             if (done)
                 done(false);
             return;
@@ -679,7 +679,7 @@ void PulseSinkVolume::onDacSet(pa_context *context, int success, void *userdata)
     auto *self = static_cast<PulseSinkVolume *>(userdata);
     if (context != self->m_context || success)
         return;
-    qWarning() << "casdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
+    qWarning() << "microdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
 }
 
 void PulseSinkVolume::onRequestSet(pa_context *context, int success, void *userdata)
@@ -688,7 +688,7 @@ void PulseSinkVolume::onRequestSet(pa_context *context, int success, void *userd
     if (context != request->self->m_context)
         return;
     if (!success)
-        qWarning() << "casdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
+        qWarning() << "microdap volume: dac sink call failed" << pa_strerror(pa_context_errno(context));
     std::unique_ptr<Request> owned = request->self->take(request);
     if (owned)
         owned->set(success != 0);
@@ -804,7 +804,7 @@ void PulseSinkVolume::dacCall(const char *what, const std::function<pa_operation
 {
     pa_operation *operation = m_context ? start() : nullptr;
     if (!operation) {
-        qWarning() << "casdap volume: dac sink call failed" << what;
+        qWarning() << "microdap volume: dac sink call failed" << what;
         return;
     }
     pa_operation_unref(operation);
@@ -840,7 +840,7 @@ void RoutedSinkVolume::step(int percent)
     if (percent == 0)
         return;
     if (!mixerOn(false)) {
-        qWarning().noquote() << "casdap volume: press skipped, mixer not open on" << m_card;
+        qWarning().noquote() << "microdap volume: press skipped, mixer not open on" << m_card;
         return;
     }
     m_alsa->pressed(percent);
@@ -868,9 +868,9 @@ void RoutedSinkVolume::setRoute(Route route, const QString &cardId, const QStrin
     m_card = card;
     m_sink = route == Route::Alsa ? sink : QString();
     if (route == Route::Alsa)
-        qInfo().noquote() << "casdap volume: route alsa hw:CARD=" + card;
+        qInfo().noquote() << "microdap volume: route alsa hw:CARD=" + card;
     else
-        qInfo() << "casdap volume: route pulse";
+        qInfo() << "microdap volume: route pulse";
 }
 
 void RoutedSinkVolume::setStoreAllowed(bool allowed)
@@ -885,23 +885,23 @@ void RoutedSinkVolume::setStoreAllowed(bool allowed)
 void RoutedSinkVolume::storeSync(const QString &cardId)
 {
     if (m_route != Route::Alsa || cardId != m_card || m_sink.isEmpty()) {
-        qWarning().noquote() << "casdap volume: store sync skipped for" << cardId;
+        qWarning().noquote() << "microdap volume: store sync skipped for" << cardId;
         return;
     }
     if (!mixerOn(true)) {
-        qWarning().noquote() << "casdap volume: store sync skipped, mixer not open on" << cardId;
+        qWarning().noquote() << "microdap volume: store sync skipped, mixer not open on" << cardId;
         return;
     }
     m_store.stop();
     m_dirty = false;
     const double db = m_alsa->stepDb();
-    qInfo().noquote() << "casdap volume: store sync" << cardId << "step" << m_alsa->step() << db << "dB";
+    qInfo().noquote() << "microdap volume: store sync" << cardId << "step" << m_alsa->step() << db << "dB";
     QPointer<RoutedSinkVolume> self(this);
     m_dac->setSinkVolumeDb(m_sink, db, [self, cardId](bool ok) {
         if (!self || self->m_route != Route::Alsa || self->m_card != cardId || !self->mixerOn(true))
             return;
         if (!ok) {
-            qWarning().noquote() << "casdap volume: store sync failed on" << cardId;
+            qWarning().noquote() << "microdap volume: store sync failed on" << cardId;
             return;
         }
         self->m_alsa->nudge();

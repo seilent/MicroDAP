@@ -14,7 +14,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -34,12 +34,12 @@ QString controlService()
 
 QString controlPath()
 {
-    return QStringLiteral("/org/casdap/FakeInputPlumber");
+    return QStringLiteral("/net/seilent/MicroDap/FakeInputPlumber");
 }
 
 QString controlInterface()
 {
-    return QStringLiteral("org.casdap.FakeInputPlumber");
+    return QStringLiteral("net.seilent.MicroDap.FakeInputPlumber");
 }
 
 QString devicePath(int index)
@@ -131,7 +131,7 @@ void DbusPadTest::emitEvent(const QString &target, const QString &name, double v
 bool DbusPadTest::startFake()
 {
     m_fake.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    m_fake.start(QStringLiteral("python3"), {QStringLiteral(CASDAP_FAKE_INPUTPLUMBER)});
+    m_fake.start(QStringLiteral("python3"), {QStringLiteral(MICRODAP_FAKE_INPUTPLUMBER)});
     if (!m_fake.waitForStarted(busTimeoutMs))
         return false;
     QDBusConnectionInterface *iface = QDBusConnection::sessionBus().interface();
@@ -155,7 +155,7 @@ void DbusPadTest::initTestCase()
     if (!startFake())
         QSKIP("fake InputPlumber did not start (python3 with dbus and gi needed)");
 
-    qputenv("CASDAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+    qputenv("MICRODAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
     QDBusConnection bus = Intercept::bus();
     QVERIFY2(bus.isConnected(), qPrintable(bus.lastError().message()));
     QVERIFY(bus.name() != session.name());
@@ -336,7 +336,7 @@ void DbusPadTest::dropped()
     QSignalSpy actions(m_pad.get(), &PadSource::action);
     QCOMPARE(m_pad->dropped(), QStringList());
 
-    QTest::ignoreMessage(QtInfoMsg, "casdap dbuspad: dropped \"ui_guide\"");
+    QTest::ignoreMessage(QtInfoMsg, "microdap dbuspad: dropped \"ui_guide\"");
     emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_guide"), 1.0);
     const QStringList guideOnly{QStringLiteral("ui_guide")};
     QTRY_COMPARE_WITH_TIMEOUT(m_pad->dropped(), guideOnly, busTimeoutMs);

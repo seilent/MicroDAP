@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -153,9 +153,9 @@ void VolumeKeysTest::init()
     m_dir = std::make_unique<QTemporaryDir>();
     QVERIFY(m_dir->isValid());
     QVERIFY(QDir().mkpath(m_dir->filePath(QStringLiteral("dev"))));
-    qputenv("CASDAP_DEV_INPUT", QFile::encodeName(m_dir->filePath(QStringLiteral("dev"))));
-    qputenv("CASDAP_SYS_INPUT", QFile::encodeName(m_dir->filePath(QStringLiteral("sys"))));
-    qputenv("CASDAP_VOLUME_NAMES", "casdap-test-up:casdap-test-down");
+    qputenv("MICRODAP_DEV_INPUT", QFile::encodeName(m_dir->filePath(QStringLiteral("dev"))));
+    qputenv("MICRODAP_SYS_INPUT", QFile::encodeName(m_dir->filePath(QStringLiteral("sys"))));
+    qputenv("MICRODAP_VOLUME_NAMES", "microdap-test-up:microdap-test-down");
 }
 
 void VolumeKeysTest::cleanup()
@@ -204,8 +204,8 @@ std::unique_ptr<EvdevKeys> VolumeKeysTest::make()
 
 void VolumeKeysTest::pressSteps()
 {
-    addNode(QStringLiteral("event3"), QStringLiteral("casdap-test-up"));
-    addNode(QStringLiteral("event5"), QStringLiteral("casdap-test-down"));
+    addNode(QStringLiteral("event3"), QStringLiteral("microdap-test-up"));
+    addNode(QStringLiteral("event5"), QStringLiteral("microdap-test-down"));
     const int up = writer(QStringLiteral("event3"));
     const int down = writer(QStringLiteral("event5"));
     QVERIFY(up >= 0 && down >= 0);
@@ -226,7 +226,7 @@ void VolumeKeysTest::pressSteps()
 
 void VolumeKeysTest::otherEventsIgnored()
 {
-    addNode(QStringLiteral("event3"), QStringLiteral("casdap-test-up"));
+    addNode(QStringLiteral("event3"), QStringLiteral("microdap-test-up"));
     const int up = writer(QStringLiteral("event3"));
     QVERIFY(up >= 0);
     auto keys = make();
@@ -246,7 +246,7 @@ void VolumeKeysTest::missingNodeRetried()
     QCOMPARE(keys->openCount(), 0);
     QSignalSpy spy(keys.get(), &KeySource::step);
     QTest::qWait(3 * retry);
-    addNode(QStringLiteral("event7"), QStringLiteral("casdap-test-down"));
+    addNode(QStringLiteral("event7"), QStringLiteral("microdap-test-down"));
     const int down = writer(QStringLiteral("event7"));
     QVERIFY(down >= 0);
     QTRY_COMPARE(keys->openCount(), 1);
@@ -258,7 +258,7 @@ void VolumeKeysTest::missingNodeRetried()
 
 void VolumeKeysTest::holdRepeats()
 {
-    addNode(QStringLiteral("event3"), QStringLiteral("casdap-test-up"));
+    addNode(QStringLiteral("event3"), QStringLiteral("microdap-test-up"));
     const int up = writer(QStringLiteral("event3"));
     QVERIFY(up >= 0);
     auto keys = make();
@@ -286,7 +286,7 @@ void VolumeKeysTest::holdRepeats()
 
 void VolumeKeysTest::repeatValueIgnored()
 {
-    addNode(QStringLiteral("event3"), QStringLiteral("casdap-test-up"));
+    addNode(QStringLiteral("event3"), QStringLiteral("microdap-test-up"));
     const int up = writer(QStringLiteral("event3"));
     QVERIFY(up >= 0);
     auto keys = make();
@@ -302,7 +302,7 @@ void VolumeKeysTest::repeatValueIgnored()
 
 void VolumeKeysTest::eofRetriesWithoutSpinning()
 {
-    addNode(QStringLiteral("event3"), QStringLiteral("casdap-test-up"));
+    addNode(QStringLiteral("event3"), QStringLiteral("microdap-test-up"));
     const int up = writer(QStringLiteral("event3"));
     QVERIFY(up >= 0);
     auto keys = make();
@@ -325,7 +325,7 @@ void VolumeKeysTest::eofRetriesWithoutSpinning()
 
 void VolumeKeysTest::closeStopsRepeat()
 {
-    addNode(QStringLiteral("event3"), QStringLiteral("casdap-test-up"));
+    addNode(QStringLiteral("event3"), QStringLiteral("microdap-test-up"));
     const int up = writer(QStringLiteral("event3"));
     QVERIFY(up >= 0);
     auto keys = make();
@@ -814,7 +814,7 @@ void VolumeKeysTest::bluezInputMatched()
 {
     QVERIFY(PulseSinkVolume::isBluezInput(
         proplistOf({{"node.name", "bluez_input.BC_27_7A_6F_A9_6F.2"}, {"media.name", "SeFL (codec aptX)"}}).get()));
-    QVERIFY(!PulseSinkVolume::isBluezInput(proplistOf({{"node.name", "casdap-player"}}).get()));
+    QVERIFY(!PulseSinkVolume::isBluezInput(proplistOf({{"node.name", "microdap-player"}}).get()));
     QVERIFY(!PulseSinkVolume::isBluezInput(proplistOf({{"media.name", "bluez_input.BC_27_7A_6F_A9_6F.2"}}).get()));
     QVERIFY(!PulseSinkVolume::isBluezInput(nullptr));
     QCOMPARE(PulseSinkVolume::alsaCardOf(proplistOf({{"alsa.card", "0"}}).get()), 0);

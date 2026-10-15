@@ -21,7 +21,7 @@
 
 class QSocketNotifier;
 
-namespace casdap {
+namespace microdap {
 
 class BluezModel;
 class Library;
@@ -83,7 +83,7 @@ public:
     void setPositionPollEnabled(bool on);
     GstElement *audioFilter() const;
     GstElement *audioSink() const;
-    void applyEq(const casdap::EqProfile &profile);
+    void applyEq(const microdap::EqProfile &profile);
     int eqProbeSets() const;
     int eqBandSets(int band) const;
     void setPolicy(OutputPolicy *policy);

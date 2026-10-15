@@ -10,7 +10,7 @@
 
 #include <optional>
 
-namespace casdap {
+namespace microdap {
 
 class SleepInhibitor;
 class SscLink;

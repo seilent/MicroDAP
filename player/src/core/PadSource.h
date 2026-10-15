@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QString>
 
-namespace casdap {
+namespace microdap {
 
 class PadSource : public QObject
 {
@@ -58,7 +58,7 @@ public:
         return action >= Up && action <= Right;
     }
 
-    Q_INVOKABLE QString actionName(casdap::PadSource::Action action) const
+    Q_INVOKABLE QString actionName(microdap::PadSource::Action action) const
     {
         if (action < 0 || action >= ActionCount)
             return {};
@@ -66,9 +66,9 @@ public:
     }
 
 signals:
-    void action(casdap::PadSource::Action action, bool repeat);
-    void pressed(casdap::PadSource::Action action);
-    void released(casdap::PadSource::Action action);
+    void action(microdap::PadSource::Action action, bool repeat);
+    void pressed(microdap::PadSource::Action action);
+    void released(microdap::PadSource::Action action);
     void screenOffChanged();
     void connectedChanged();
 };

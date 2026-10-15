@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace casdap {
+namespace microdap {
 
 QVariantMap QueueEntry::toMap() const
 {

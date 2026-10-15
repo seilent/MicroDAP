@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace casdap {
+namespace microdap {
 
 class FakeUsbIo : public UsbIo
 {

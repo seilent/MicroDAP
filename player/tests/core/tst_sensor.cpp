@@ -10,7 +10,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -21,12 +21,12 @@ constexpr int settledMs = 800;
 
 QString controlService()
 {
-    return QStringLiteral("org.casdap.FakeSensorProxy");
+    return QStringLiteral("net.seilent.MicroDap.FakeSensorProxy");
 }
 
 QString controlPath()
 {
-    return QStringLiteral("/org/casdap/FakeSensorProxy");
+    return QStringLiteral("/net/seilent/MicroDap/FakeSensorProxy");
 }
 
 }
@@ -124,7 +124,7 @@ void SensorTest::initTestCase()
     if (!QDBusConnection::sessionBus().isConnected())
         QSKIP("no session bus, run under dbus-run-session");
     m_fake.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    m_fake.start(QStringLiteral("python3"), {QStringLiteral(CASDAP_FAKE_SENSORPROXY)});
+    m_fake.start(QStringLiteral("python3"), {QStringLiteral(MICRODAP_FAKE_SENSORPROXY)});
     if (!m_fake.waitForStarted(busTimeoutMs))
         QSKIP("fake SensorProxy did not start");
     QElapsedTimer timer;
@@ -134,7 +134,7 @@ void SensorTest::initTestCase()
             QSKIP("fake SensorProxy did not start (python3 with dbus and gi needed)");
         QTest::qWait(50);
     }
-    qputenv("CASDAP_SENSOR_BUS", "session");
+    qputenv("MICRODAP_SENSOR_BUS", "session");
 }
 
 void SensorTest::init()
@@ -389,9 +389,9 @@ void SensorTest::noSignalBeforeClaimReply()
 
 void SensorTest::vanishKeepsTurn()
 {
-    qputenv("CASDAP_SENSOR_RECLAIM_MS", "30000");
+    qputenv("MICRODAP_SENSOR_RECLAIM_MS", "30000");
     claimSettled(QStringLiteral("left-up"));
-    qunsetenv("CASDAP_SENSOR_RECLAIM_MS");
+    qunsetenv("MICRODAP_SENSOR_RECLAIM_MS");
     QSignalSpy supported(m_sensor.get(), &SensorRotation::supportedChanged);
     QSignalSpy turns(m_sensor.get(), &SensorRotation::turnChanged);
     vanish();

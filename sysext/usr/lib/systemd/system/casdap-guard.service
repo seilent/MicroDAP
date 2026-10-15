@@ -1,9 +1,0 @@
-[Unit]
-Description=CASDAP boot guard
-After=systemd-sysext.service
-ConditionPathExists=/usr/share/casdap/build-manifest
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/libexec/casdap/casdap-guard

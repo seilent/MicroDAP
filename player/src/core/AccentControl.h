@@ -6,7 +6,7 @@
 #include <QObject>
 #include <QString>
 
-namespace casdap {
+namespace microdap {
 
 class AccentControl : public QObject
 {

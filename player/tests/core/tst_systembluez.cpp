@@ -8,7 +8,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -247,7 +247,7 @@ private:
 class AgentAdaptor : public QDBusAbstractAdaptor
 {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "org.casdap.Bluetooth")
+    Q_CLASSINFO("D-Bus Interface", "net.seilent.MicroDap.Bluetooth")
     Q_PROPERTY(bool PairingActive READ pairingActive)
     Q_PROPERTY(uint PairingRemaining READ pairingRemaining)
 

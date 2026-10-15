@@ -2,7 +2,7 @@
 
 #include <vector>
 
-namespace casdap {
+namespace microdap {
 
 enum class BiquadType {
     Peak = 0,

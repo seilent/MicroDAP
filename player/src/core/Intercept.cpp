@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -72,8 +72,8 @@ Intercept::Intercept(const QDBusConnection &bus, QObject *parent)
     : QObject(parent)
     , m_bus(bus)
     , m_watcher(service(), bus, QDBusServiceWatcher::WatchForOwnerChange)
-    , m_retryMs(qEnvironmentVariableIntValue("CASDAP_INTERCEPT_RETRY_MS") > 0
-                    ? qEnvironmentVariableIntValue("CASDAP_INTERCEPT_RETRY_MS")
+    , m_retryMs(qEnvironmentVariableIntValue("MICRODAP_INTERCEPT_RETRY_MS") > 0
+                    ? qEnvironmentVariableIntValue("MICRODAP_INTERCEPT_RETRY_MS")
                     : releaseRetryMs)
 {
     registerMetaTypes();
@@ -82,17 +82,17 @@ Intercept::Intercept(const QDBusConnection &bus, QObject *parent)
             &Intercept::onServiceUnregistered);
 
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap intercept: bus not connected";
+        qWarning() << "microdap intercept: bus not connected";
         return;
     }
     if (!m_bus.connect(service(), rootPath(), objectManagerInterface(), QStringLiteral("InterfacesAdded"),
                        this, SLOT(onInterfacesAdded(QDBusMessage)))) {
-        qWarning() << "casdap intercept: cannot subscribe to InterfacesAdded"
+        qWarning() << "microdap intercept: cannot subscribe to InterfacesAdded"
                    << m_bus.lastError().message();
     }
     if (!m_bus.connect(service(), rootPath(), objectManagerInterface(), QStringLiteral("InterfacesRemoved"),
                        this, SLOT(onInterfacesRemoved(QDBusMessage)))) {
-        qWarning() << "casdap intercept: cannot subscribe to InterfacesRemoved"
+        qWarning() << "microdap intercept: cannot subscribe to InterfacesRemoved"
                    << m_bus.lastError().message();
     }
     refresh();
@@ -105,16 +105,16 @@ Intercept::~Intercept()
     for (const QString &path : std::as_const(m_devices)) {
         const QDBusMessage reply = m_bus.call(setModeCall(path, ModeNone), QDBus::Block, exitWriteTimeoutMs);
         if (reply.type() == QDBusMessage::ErrorMessage)
-            qWarning() << "casdap intercept: release failed" << path << reply.errorMessage();
+            qWarning() << "microdap intercept: release failed" << path << reply.errorMessage();
     }
 }
 
 QDBusConnection Intercept::bus()
 {
-    const QString address = qEnvironmentVariable("CASDAP_INPUTPLUMBER_BUS");
+    const QString address = qEnvironmentVariable("MICRODAP_INPUTPLUMBER_BUS");
     if (address.isEmpty())
         return QDBusConnection::systemBus();
-    return QDBusConnection::connectToBus(address, QStringLiteral("casdap-inputplumber"));
+    return QDBusConnection::connectToBus(address, QStringLiteral("microdap-inputplumber"));
 }
 
 void Intercept::registerMetaTypes()
@@ -210,7 +210,7 @@ void Intercept::refresh()
         m_devices.clear();
         m_targets.clear();
         if (reply.type() == QDBusMessage::ErrorMessage) {
-            qInfo() << "casdap intercept: GetManagedObjects failed" << reply.errorMessage();
+            qInfo() << "microdap intercept: GetManagedObjects failed" << reply.errorMessage();
         } else {
             const ManagedObjectList objects = qdbus_cast<ManagedObjectList>(reply.arguments().value(0));
             bool devices = false;
@@ -299,7 +299,7 @@ void Intercept::writeAll(uint mode)
 void Intercept::write(const QString &path, uint mode)
 {
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap intercept: bus not connected, skipping" << path << mode;
+        qWarning() << "microdap intercept: bus not connected, skipping" << path << mode;
         return;
     }
     if (m_inFlight.contains(path)) {
@@ -318,13 +318,13 @@ void Intercept::write(const QString &path, uint mode)
         const uint next = m_pending.take(path);
         if (queued && m_devices.contains(path) && (failed || next != mode)) {
             if (failed)
-                qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
+                qWarning() << "microdap intercept: intercept failed" << path << mode << reply.errorMessage();
             write(path, next);
             return;
         }
         if (mode != ModeNone) {
             if (failed)
-                qWarning() << "casdap intercept: intercept failed" << path << mode << reply.errorMessage();
+                qWarning() << "microdap intercept: intercept failed" << path << mode << reply.errorMessage();
             return;
         }
         if (m_shown || !m_devices.contains(path)) {
@@ -363,7 +363,7 @@ void Intercept::retryRelease(const QString &path)
     const int tries = ++m_releaseTries[path];
     if (tries >= releaseTries) {
         m_releaseTries.remove(path);
-        qWarning() << "casdap intercept: release gave up" << path << "after" << tries << "tries";
+        qWarning() << "microdap intercept: release gave up" << path << "after" << tries << "tries";
         return;
     }
     QTimer::singleShot(m_retryMs, this, [this, path] {

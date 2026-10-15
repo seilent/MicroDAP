@@ -8,7 +8,7 @@
 #include <QStringList>
 #include <QTimer>
 
-namespace casdap {
+namespace microdap {
 
 struct UsbStream
 {

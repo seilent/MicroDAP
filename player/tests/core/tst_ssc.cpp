@@ -14,7 +14,7 @@
 #include <memory>
 #include <optional>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -300,7 +300,7 @@ bool SscTest::startLogin1()
     if (!QDBusConnection::sessionBus().isConnected())
         return false;
     m_login1.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    m_login1.start(QStringLiteral("python3"), {QStringLiteral(CASDAP_FAKE_LOGIN1)});
+    m_login1.start(QStringLiteral("python3"), {QStringLiteral(MICRODAP_FAKE_LOGIN1)});
     if (!m_login1.waitForStarted(busTimeoutMs))
         return false;
     QDBusConnectionInterface *iface = QDBusConnection::sessionBus().interface();
@@ -319,8 +319,8 @@ bool SscTest::startLogin1()
 QDBusMessage SscTest::login1(const QString &method, const QList<QVariant> &arguments)
 {
     QDBusMessage call = QDBusMessage::createMethodCall(SleepInhibitor::service(),
-                                                       QStringLiteral("/org/casdap/FakeLogin1"),
-                                                       QStringLiteral("org.casdap.FakeLogin1"), method);
+                                                       QStringLiteral("/net/seilent/MicroDap/FakeLogin1"),
+                                                       QStringLiteral("net.seilent.MicroDap.FakeLogin1"), method);
     call.setArguments(arguments);
     return QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
 }
@@ -401,12 +401,12 @@ quint16 SscTest::lastTxn(quint32 msgId) const
 
 void SscTest::initTestCase()
 {
-    qputenv("CASDAP_SSC_RETRY_MS", QByteArray::number(retryMs));
-    qputenv("CASDAP_SENSOR_RECLAIM_MS", QByteArray::number(holdMs));
-    qunsetenv("CASDAP_SENSOR_TURN");
+    qputenv("MICRODAP_SSC_RETRY_MS", QByteArray::number(retryMs));
+    qputenv("MICRODAP_SENSOR_RECLAIM_MS", QByteArray::number(holdMs));
+    qunsetenv("MICRODAP_SENSOR_TURN");
     m_login1Running = startLogin1();
     if (m_login1Running)
-        qputenv("CASDAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+        qputenv("MICRODAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
 }
 
 void SscTest::cleanup()
@@ -886,7 +886,7 @@ void SscTest::enableFailure()
 {
     ready();
     m_rotation->setWanted(true);
-    QTest::ignoreMessage(QtWarningMsg, "casdap sensor: ssc enable failed 31");
+    QTest::ignoreMessage(QtWarningMsg, "microdap sensor: ssc enable failed 31");
     inject(response(lastTxn(ssc::msgOnChange), 1, 31));
     QVERIFY(!m_rotation->claimed());
     QCOMPARE(count(ssc::msgFlush), 0);

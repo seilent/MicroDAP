@@ -27,7 +27,7 @@
 #include <time.h>
 #include <unistd.h>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -108,8 +108,8 @@ FiioPaths pathsIn(const QString &root)
     FiioPaths paths;
     paths.runDir = (root + QStringLiteral("/run")).toStdString();
     paths.runDirExists = QDir().mkpath(root + QStringLiteral("/run"));
-    paths.stateDir = (root + QStringLiteral("/state/casdap")).toStdString();
-    paths.configDir = (root + QStringLiteral("/config/casdap")).toStdString();
+    paths.stateDir = (root + QStringLiteral("/state/microdap")).toStdString();
+    paths.configDir = (root + QStringLiteral("/config/microdap")).toStdString();
     paths.sysRoot = (root + QStringLiteral("/sys")).toStdString();
     paths.asoundDir = (root + QStringLiteral("/asound")).toStdString();
     return paths;
@@ -477,7 +477,7 @@ struct CliRig
 
     ~CliRig()
     {
-        qunsetenv("CASDAP_SYSTEMCTL_BIN");
+        qunsetenv("MICRODAP_SYSTEMCTL_BIN");
         QCOMPARE(fake.refusedReads(), 0);
         QCOMPARE(fake.badFrames(), 0);
     }
@@ -489,7 +489,7 @@ struct CliRig
                                 + QFile::encodeName(callsPath) + "'\n" + body.toUtf8();
         if (!writeFile(path, text))
             return false;
-        qputenv("CASDAP_SYSTEMCTL_BIN", QFile::encodeName(path));
+        qputenv("MICRODAP_SYSTEMCTL_BIN", QFile::encodeName(path));
         return QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     }
 
@@ -527,7 +527,7 @@ struct CliRig
 
     int run(const QStringList &args)
     {
-        std::vector<QByteArray> raw{QByteArrayLiteral("casdap-fiio")};
+        std::vector<QByteArray> raw{QByteArrayLiteral("microdap-fiio")};
         for (const QString &a : args)
             raw.push_back(a.toUtf8());
         std::vector<char *> argv;
@@ -551,7 +551,7 @@ struct CliRig
 
     bool logged(const QString &line) const
     {
-        return err.split(QLatin1Char('\n')).contains(QStringLiteral("casdap-fiio: ") + line);
+        return err.split(QLatin1Char('\n')).contains(QStringLiteral("microdap-fiio: ") + line);
     }
 
     bool bindDriver() const
@@ -568,7 +568,7 @@ struct CliRig
 
     QString resetStamp() const
     {
-        return root.path() + QStringLiteral("/run/casdap-fiio.reset");
+        return root.path() + QStringLiteral("/run/microdap-fiio.reset");
     }
 
     InflightStamp inflight() const
@@ -703,8 +703,8 @@ void FiioTest::crc()
     QCOMPARE(crc8Maxim(nullptr, 0), uint8_t(0));
     const std::vector<uint8_t> band = bytes("07aa0a0006150809fff12ee0004702");
     QCOMPARE(crc8Maxim(band.data(), band.size()), uint8_t(0xCA));
-    const std::vector<uint8_t> name = bytes("07aa0a00083009a24341534441500000");
-    QCOMPARE(crc8Maxim(name.data(), name.size()), uint8_t(0x8B));
+    const std::vector<uint8_t> name = bytes("07aa0a00083009a24d4943524f444150");
+    QCOMPARE(crc8Maxim(name.data(), name.size()), uint8_t(0x3D));
 }
 
 void FiioTest::frames()
@@ -716,8 +716,8 @@ void FiioTest::frames()
     QCOMPARE(hexOf(frameSet(5, fiioCmdPreset, presetPayload(0xA2))), QByteArray("07aa0a00051601a221ee"));
     QCOMPARE(hexOf(frameSet(6, fiioCmdBand, bytes("09fff12ee0004702"))), QByteArray("07aa0a0006150809fff12ee0004702caee"));
     QCOMPARE(hexOf(frameSet(7, fiioCmdPreamp, bytes("fff6"))), QByteArray("07aa0a00071702fff6c2ee"));
-    QCOMPARE(hexOf(frameSet(8, fiioCmdName, namePayload(0xA2, "CASDAP"))),
-             QByteArray("07aa0a00083009a243415344415000008bee"));
+    QCOMPARE(hexOf(frameSet(8, fiioCmdName, namePayload(0xA2, "MICRODAP"))),
+             QByteArray("07aa0a00083009a24d4943524f4441503dee"));
     QCOMPARE(hexOf(frameSet(32767, fiioCmdPreset, presetPayload(fiioBypass))), QByteArray("07aa0a7fff1601f02eee"));
     const std::vector<uint8_t> unpadded = frameSet(6, fiioCmdBand, bytes("09fff12ee0004702"));
     QCOMPARE(unpadded.size(), std::size_t(8 + 9));
@@ -851,12 +851,12 @@ void FiioTest::replyMatch()
     QVERIFY(!matches(frameSet(17, fiioCmdPreamp, bytes("fff7")), preampAck));
     QVERIFY(presetAck.crcValid);
     QVERIFY(volumeAck.crcValid);
-    const FiioReply nameAck = *parse(packet("07aa0a01483009a243415344415000000057"));
+    const FiioReply nameAck = *parse(packet("07aa0a01483009a24d4943524f4441500057"));
     QCOMPARE(nameAck.payload.size(), std::size_t(1 + fiioNameLength));
-    QVERIFY(matches(frameSet(18, fiioCmdName, namePayload(0xA2, "CASDAP")), nameAck));
-    QVERIFY(matches(frameSet(18, fiioCmdName, bytes("a24341534441500000" "00")), nameAck));
-    QVERIFY(!matches(frameSet(18, fiioCmdName, namePayload(0xA2, "CASDAQ")), nameAck));
-    QVERIFY(!matches(frameSet(18, fiioCmdName, namePayload(0xA1, "CASDAP")), nameAck));
+    QVERIFY(matches(frameSet(18, fiioCmdName, namePayload(0xA2, "MICRODAP")), nameAck));
+    QVERIFY(matches(frameSet(18, fiioCmdName, bytes("a24d4943524f444150" "00")), nameAck));
+    QVERIFY(!matches(frameSet(18, fiioCmdName, namePayload(0xA2, "MICRODAQ")), nameAck));
+    QVERIFY(!matches(frameSet(18, fiioCmdName, namePayload(0xA1, "MICRODAP")), nameAck));
 
     for (const char *hexText : {"07bb0b00590b030103000000", "07bb0b000c0b03010300ee00"}) {
         const FiioReply version = *parse(packet(hexText));
@@ -964,10 +964,10 @@ void FiioTest::payloads()
 
 void FiioTest::namePayloadCase()
 {
-    QCOMPARE(hexOf(namePayload(0xA2, "CASDAP")), QByteArray("a2434153444150" "0000"));
+    QCOMPARE(hexOf(namePayload(0xA2, "MICRODAP")), QByteArray("a24d4943524f444150"));
     QCOMPARE(hexOf(namePayload(0xA2, "")), QByteArray("a20000000000000000"));
     QCOMPARE(hexOf(namePayload(0xA0, "ABCDEFGHIJ")), QByteArray("a04142434445464748"));
-    QCOMPARE(namePayload(0xA2, "CASDAP").size(), std::size_t(1 + fiioNameLength));
+    QCOMPARE(namePayload(0xA2, "MICRODAP").size(), std::size_t(1 + fiioNameLength));
     QCOMPARE(nameOfPayload(bytes("a246483300000000")), std::string("FH3"));
     QCOMPARE(nameOfPayload(bytes("a14646350000000000")), std::string("FF5"));
 
@@ -985,7 +985,7 @@ void FiioTest::backupRoundTrip()
 {
     QTemporaryDir root;
     QVERIFY(root.isValid());
-    const std::string dir = (root.path() + QStringLiteral("/config/casdap")).toStdString();
+    const std::string dir = (root.path() + QStringLiteral("/config/microdap")).toStdString();
     const FiioModel &tiny = fiioModels().front();
     QCOMPARE(backupName(tiny, 3), std::string("fiio-2972-0149-slot162-3.txt"));
     QVERIFY(!newestBackup(dir, tiny));
@@ -1018,13 +1018,13 @@ void FiioTest::backupRoundTrip()
 
     backup.date = "2026-10-12T08:00:00Z";
     QCOMPARE(writeBackup(dir, tiny, backup), first);
-    QVERIFY(!QFileInfo::exists(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot162-2.txt")));
+    QVERIFY(!QFileInfo::exists(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot162-2.txt")));
 
     backup.name = "FD15";
     const std::optional<std::string> second = writeBackup(dir, tiny, backup);
     QCOMPARE(second, std::optional<std::string>(dir + "/fiio-2972-0149-slot162-2.txt"));
-    QVERIFY(writeFile(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot162-x.txt"), "junk\n"));
-    QVERIFY(writeFile(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot161-9.txt"), "junk\n"));
+    QVERIFY(writeFile(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot162-x.txt"), "junk\n"));
+    QVERIFY(writeFile(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot161-9.txt"), "junk\n"));
     QCOMPARE(newestBackup(dir, tiny), second);
     backup.bands[0][1] = 0x10;
     QCOMPARE(writeBackup(dir, tiny, backup), std::optional<std::string>(dir + "/fiio-2972-0149-slot162-3.txt"));
@@ -1049,13 +1049,13 @@ void FiioTest::backupRoundTrip()
     wrong = sampleBackup();
     wrong.name = "A B~!";
     QVERIFY(writeBackup(dir, tiny, wrong));
-    QVERIFY(writeFile(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot162-0099.txt"), text));
-    QVERIFY(writeFile(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot162-0.txt"), text));
+    QVERIFY(writeFile(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot162-0099.txt"), text));
+    QVERIFY(writeFile(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot162-0.txt"), text));
     QCOMPARE(newestBackup(dir, tiny), std::optional<std::string>(dir + "/fiio-2972-0149-slot162-4.txt"));
-    QVERIFY(writeFile(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot162-5.txt.tmp"), "stale\n"));
+    QVERIFY(writeFile(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot162-5.txt.tmp"), "stale\n"));
     wrong.name = "STALE";
     QCOMPARE(writeBackup(dir, tiny, wrong), std::optional<std::string>(dir + "/fiio-2972-0149-slot162-5.txt"));
-    QVERIFY(!QFileInfo::exists(root.path() + QStringLiteral("/config/casdap/fiio-2972-0149-slot162-5.txt.tmp")));
+    QVERIFY(!QFileInfo::exists(root.path() + QStringLiteral("/config/microdap/fiio-2972-0149-slot162-5.txt.tmp")));
     QCOMPARE(readBackup(dir + "/fiio-2972-0149-slot162-5.txt")->name, std::string("STALE"));
     QVERIFY(!writeBackup(dir + "/fiio-2972-0149-slot162-5.txt", tiny, sampleBackup()));
     wrong = sampleBackup();
@@ -1516,10 +1516,10 @@ void FiioTest::namesUnderBypass()
         QCOMPARE(name.payload[0], slot.preset);
         QCOMPARE(nameOfPayload(name.payload), std::string(slot.name));
     }
-    const FiioResult renamed = rig.set(fiioCmdName, namePayload(162, "CASDAP"));
+    const FiioResult renamed = rig.set(fiioCmdName, namePayload(162, "MICRODAP"));
     QCOMPARE(renamed.reason, FiioReason::None);
-    QCOMPARE(renamed.payload, namePayload(162, "CASDAP"));
-    QCOMPARE(nameOfPayload(rig.get(fiioCmdName, {162}).payload), std::string("CASDAP"));
+    QCOMPARE(renamed.payload, namePayload(162, "MICRODAP"));
+    QCOMPARE(nameOfPayload(rig.get(fiioCmdName, {162}).payload), std::string("MICRODAP"));
     QCOMPARE(rig.fake.preset(), fiioBypass);
     QCOMPARE(rig.get(fiioCmdPreamp).payload, bytes("0014"));
     const FiioResult version = rig.get(fiioCmdVersion);
@@ -1569,7 +1569,7 @@ void FiioTest::replugPersistence()
     QVERIFY(rig.nodeReady);
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     QCOMPARE(rig.set(fiioCmdPreset, presetPayload(162)).reason, FiioReason::None);
-    QCOMPARE(rig.set(fiioCmdName, namePayload(162, "CASDAP")).reason, FiioReason::None);
+    QCOMPARE(rig.set(fiioCmdName, namePayload(162, "MICRODAP")).reason, FiioReason::None);
     const std::vector<uint8_t> band = bytes("04ffc407d0008d01");
     QCOMPARE(rig.set(fiioCmdBand, band).reason, FiioReason::None);
     QCOMPARE(rig.set(fiioCmdPreamp, bytes("ffe2")).reason, FiioReason::None);
@@ -1584,7 +1584,7 @@ void FiioTest::replugPersistence()
     const FakeUsbIo::Call first = rig.fake.calls().back();
     QCOMPARE(first.op, FakeUsbIo::Op::In);
     QCOMPARE(parseReply(first.data.data(), first.data.size())->seq, uint16_t(0));
-    QCOMPARE(nameOfPayload(rig.get(fiioCmdName, {162}).payload), std::string("CASDAP"));
+    QCOMPARE(nameOfPayload(rig.get(fiioCmdName, {162}).payload), std::string("MICRODAP"));
     QCOMPARE(rig.get(fiioCmdBand, {4}).payload, band);
     QCOMPARE(rig.get(fiioCmdPreamp).payload, bytes("ffe2"));
     QCOMPARE(rig.fake.name(161), std::string("FF5"));
@@ -1678,8 +1678,8 @@ void FiioTest::usbfsNoDevice()
 
 void FiioTest::pathsFromEnv()
 {
-    const char *names[] = {"CASDAP_RUN_DIR", "HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "CASDAP_SYS_ROOT",
-                           "CASDAP_ASOUND_DIR"};
+    const char *names[] = {"MICRODAP_RUN_DIR", "HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "MICRODAP_SYS_ROOT",
+                           "MICRODAP_ASOUND_DIR"};
     struct Saved
     {
         ~Saved()
@@ -1703,32 +1703,32 @@ void FiioTest::pathsFromEnv()
     QTemporaryDir root;
     QVERIFY(root.isValid());
     const QByteArray r = root.path().toUtf8();
-    qputenv("CASDAP_RUN_DIR", r + "/run");
+    qputenv("MICRODAP_RUN_DIR", r + "/run");
     qputenv("HOME", r + "/home");
     qputenv("XDG_STATE_HOME", r + "/xstate");
     qputenv("XDG_CONFIG_HOME", r + "/xconfig");
-    qputenv("CASDAP_SYS_ROOT", r + "/sys");
-    qputenv("CASDAP_ASOUND_DIR", r + "/asound");
+    qputenv("MICRODAP_SYS_ROOT", r + "/sys");
+    qputenv("MICRODAP_ASOUND_DIR", r + "/asound");
     FiioPaths paths = fiioPathsFromEnv();
     QCOMPARE(paths.runDir, (r + "/run").toStdString());
     QVERIFY(!paths.runDirExists);
-    QCOMPARE(paths.stateDir, (r + "/xstate/casdap").toStdString());
-    QCOMPARE(paths.configDir, (r + "/xconfig/casdap").toStdString());
+    QCOMPARE(paths.stateDir, (r + "/xstate/microdap").toStdString());
+    QCOMPARE(paths.configDir, (r + "/xconfig/microdap").toStdString());
     QCOMPARE(paths.sysRoot, (r + "/sys").toStdString());
     QCOMPARE(paths.asoundDir, (r + "/asound").toStdString());
-    QCOMPARE(fiioMarkerPath(paths), (r + "/xstate/casdap/fiio-taking").toStdString());
+    QCOMPARE(fiioMarkerPath(paths), (r + "/xstate/microdap/fiio-taking").toStdString());
     QVERIFY(QDir().mkpath(root.path() + QStringLiteral("/run")));
     QVERIFY(fiioPathsFromEnv().runDirExists);
 
-    qunsetenv("CASDAP_RUN_DIR");
+    qunsetenv("MICRODAP_RUN_DIR");
     qunsetenv("XDG_STATE_HOME");
     qputenv("XDG_CONFIG_HOME", "");
-    qunsetenv("CASDAP_SYS_ROOT");
-    qunsetenv("CASDAP_ASOUND_DIR");
+    qunsetenv("MICRODAP_SYS_ROOT");
+    qunsetenv("MICRODAP_ASOUND_DIR");
     paths = fiioPathsFromEnv();
     QCOMPARE(paths.runDir, "/run/user/" + std::to_string(::getuid()));
-    QCOMPARE(paths.stateDir, (r + "/home/.local/state/casdap").toStdString());
-    QCOMPARE(paths.configDir, (r + "/home/.config/casdap").toStdString());
+    QCOMPARE(paths.stateDir, (r + "/home/.local/state/microdap").toStdString());
+    QCOMPARE(paths.configDir, (r + "/home/.config/microdap").toStdString());
     QCOMPARE(paths.sysRoot, std::string("/sys"));
     QCOMPARE(paths.asoundDir, std::string("/proc/asound"));
 }
@@ -1746,20 +1746,20 @@ void FiioTest::takeOrder()
     QStringList expected{QStringLiteral("get 0b"), QStringLiteral("get 16"), QStringLiteral("get 30 a2"),
                          QStringLiteral("set 16 a2"), QStringLiteral("get 17")};
     expected += bandReads();
-    expected += QStringLiteral("set 30 a24341534441500000");
+    expected += QStringLiteral("set 30 a24d4943524f444150");
     expected += QStringLiteral("set 17 0000");
     expected += bandSets(frames);
     QCOMPARE(outs(rig.fake), expected);
 
     QCOMPARE(rig.fake.preset(), uint8_t(162));
-    QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+    QCOMPARE(rig.fake.name(162), std::string("MICRODAP"));
     QCOMPARE(rig.fake.preamp(162), bytes("0000"));
     QCOMPARE(hexOf(rig.fake.band(162, 0)), hexOf(frames.bands[0]).replace("0047", "0046"));
     for (int i = 1; i < fiioBandCount; ++i)
         QCOMPARE(rig.fake.band(162, i), frames.bands[i]);
     QVERIFY(mirror.valid);
     QCOMPARE(mirror.preset, 162);
-    QCOMPARE(mirror.name, std::string("CASDAP"));
+    QCOMPARE(mirror.name, std::string("MICRODAP"));
     QCOMPARE(mirror.firmware, std::string("1.3.0"));
     QCOMPARE(mirror.preamp, bytes("0000"));
     QVERIFY(mirror.bands == frames.bands);
@@ -1839,7 +1839,7 @@ void FiioTest::numberedBackups()
     QVERIFY(!QFileInfo::exists(dir + QStringLiteral("/fiio-2972-0149-slot162-3.txt")));
     QCOMPARE(QString::fromStdString(*newestBackup(rig.paths.configDir, tinyModel())),
              dir + QStringLiteral("/fiio-2972-0149-slot162-2.txt"));
-    QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+    QCOMPARE(rig.fake.name(162), std::string("MICRODAP"));
 }
 
 void FiioTest::backupFailure()
@@ -1847,7 +1847,7 @@ void FiioTest::backupFailure()
     Rig rig;
     QVERIFY(rig.nodeReady);
     QVERIFY(writeFile(rig.root.path() + QStringLiteral("/blocked"), "file\n"));
-    rig.paths.configDir = (rig.root.path() + QStringLiteral("/blocked/casdap")).toStdString();
+    rig.paths.configDir = (rig.root.path() + QStringLiteral("/blocked/microdap")).toStdString();
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     FiioMirror mirror;
     const FiioResult result = FiioBatch::take(rig.device, mirror, rig.paths, testFrames(), {}, std::nullopt);
@@ -1933,14 +1933,14 @@ void FiioTest::abandonBetween()
         QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), k);
         QVERIFY2(result.reason == (k < 27 ? FiioReason::Abandoned : FiioReason::None), at);
         QVERIFY2(mirror.valid == (k == 27), at);
-        QVERIFY2(rig.fake.preset() != 162 || rig.fake.name(162) == "CASDAP" || rig.marker(), at);
-        QVERIFY2(rig.fake.name(162) != "CASDAP"
+        QVERIFY2(rig.fake.preset() != 162 || rig.fake.name(162) == "MICRODAP" || rig.marker(), at);
+        QVERIFY2(rig.fake.name(162) != "MICRODAP"
                      || readBackup(newestBackup(rig.paths.configDir, tinyModel()).value_or(""))->name == "FH3",
                  at);
         if (k == 3)
             QVERIFY(rig.marker() && rig.fake.preset() == fiioBypass);
         if (k == 16)
-            QVERIFY(!rig.marker() && rig.fake.name(162) == "CASDAP");
+            QVERIFY(!rig.marker() && rig.fake.name(162) == "MICRODAP");
         QVERIFY2(!rig.stamped(), at);
 
         QCOMPARE(FiioBatch::force(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
@@ -1948,7 +1948,7 @@ void FiioTest::abandonBetween()
         QVERIFY2(!rig.marker(), at);
         QVERIFY(!rig.fake.wedged());
         QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
-        QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+        QCOMPARE(rig.fake.name(162), std::string("MICRODAP"));
         QVERIFY(mirror.valid);
     }
 }
@@ -1980,9 +1980,9 @@ void FiioTest::killMidTransaction()
         QVERIFY2(rig.stamped(), at);
         rig.device.releaseClose();
         rig.fake.setReplyDelayMs(0);
-        QVERIFY2(rig.fake.preset() != 162 || rig.fake.name(162) == "CASDAP" || rig.marker(), at);
+        QVERIFY2(rig.fake.preset() != 162 || rig.fake.name(162) == "MICRODAP" || rig.marker(), at);
 
-        QVERIFY2(rig.fake.name(162) != "CASDAP"
+        QVERIFY2(rig.fake.name(162) != "MICRODAP"
                      || readBackup(newestBackup(rig.paths.configDir, tinyModel()).value_or(""))->name == "FH3",
                  at);
         FiioDevice after(rig.fake, tinyModel(), next, rig.paths);
@@ -2081,7 +2081,7 @@ void FiioTest::dumpReads()
     expected += bandReads();
     QCOMPARE(outs(rig.fake, before), expected);
     QCOMPARE(mirror.preset, 162);
-    QCOMPARE(mirror.name, std::string("CASDAP"));
+    QCOMPARE(mirror.name, std::string("MICRODAP"));
     QCOMPARE(mirror.preamp, bytes("0000"));
     QCOMPARE(mirror.firmware, std::string("1.3.0"));
     QCOMPARE(mirror.bands[0], rig.fake.band(162, 0));
@@ -2131,8 +2131,8 @@ void FiioTest::stampPerDevice()
     otherFake.setOutCheck([&otherStamp] { return QFileInfo::exists(QString::fromStdString(otherStamp.path())); });
 
     QVERIFY(rig.stamp().path() != otherStamp.path());
-    QVERIFY(QString::fromStdString(rig.stamp().path()).endsWith(QStringLiteral("/run/casdap-fiio.inflight.3-1")));
-    QVERIFY(QString::fromStdString(otherStamp.path()).endsWith(QStringLiteral("/run/casdap-fiio.inflight.4-1")));
+    QVERIFY(QString::fromStdString(rig.stamp().path()).endsWith(QStringLiteral("/run/microdap-fiio.inflight.3-1")));
+    QVERIFY(QString::fromStdString(otherStamp.path()).endsWith(QStringLiteral("/run/microdap-fiio.inflight.4-1")));
 
     QCOMPARE(rig.device.openClaimed(rig.sysPath, std::nullopt), FiioReason::None);
     QCOMPARE(other.openClaimed(otherLink, std::nullopt), FiioReason::None);
@@ -2372,7 +2372,7 @@ void FiioTest::lockPeer()
     QVERIFY(a.acquire(0, std::nullopt, {}));
     QVERIFY(a.held());
     QVERIFY(a.acquire(0, std::nullopt, {}));
-    QVERIFY(QFileInfo::exists(root.path() + QStringLiteral("/run/casdap-fiio.lock")));
+    QVERIFY(QFileInfo::exists(root.path() + QStringLiteral("/run/microdap-fiio.lock")));
     int64_t start = fiioNowMs();
     QVERIFY(!b.acquire(150, std::nullopt, {}));
     QVERIFY(fiioNowMs() - start >= 140);
@@ -2435,7 +2435,7 @@ void FiioTest::restoreSlotVerified()
     rig.fake.setIgnoreBandSets(true);
     QCOMPARE(FiioBatch::restoreSlot(rig.device, mirror, rig.paths, {}, {}, std::nullopt).reason, FiioReason::Ack);
     QCOMPARE(rig.fake.preset(), fiioBypass);
-    QCOMPARE(rig.fake.name(162), std::string("CASDAP"));
+    QCOMPARE(rig.fake.name(162), std::string("MICRODAP"));
     QCOMPARE(rig.logged("restore band 0 reads "), 1);
     QCOMPARE(outs(rig.fake).filter(QStringLiteral("set 30")).size(), 1);
     rig.fake.setIgnoreBandSets(false);
@@ -2476,7 +2476,7 @@ void FiioTest::restoreAbandon()
                                                          std::nullopt);
         const QByteArray at = QByteArray::number(k);
         QVERIFY2(result.reason == (k < 24 ? FiioReason::Abandoned : FiioReason::None), at);
-        QVERIFY2(rig.fake.name(162) == (k < 24 ? "CASDAP" : "FH3"), at);
+        QVERIFY2(rig.fake.name(162) == (k < 24 ? "MICRODAP" : "FH3"), at);
 
         QCOMPARE(FiioBatch::take(rig.device, mirror, rig.paths, frames, {}, std::nullopt).reason, FiioReason::None);
         QCOMPARE(newestBackup(rig.paths.configDir, tinyModel()), good);
@@ -2516,15 +2516,15 @@ void FiioTest::restoreForeignAbandon()
         const QByteArray at = QByteArray::number(k);
         QVERIFY2(result.reason == (k < 37 ? FiioReason::Abandoned : FiioReason::None), at);
         const std::string name = rig.fake.name(162);
-        QVERIFY2(name == "CASDAP" || name == "USER" || (k == 37 && name == "FH3"), at);
+        QVERIFY2(name == "MICRODAP" || name == "USER" || (k == 37 && name == "FH3"), at);
         if (name == "USER") {
             QVERIFY2(k <= 15, at);
             for (int i = 0; i < fiioBandCount; ++i)
                 QVERIFY2(rig.fake.band(162, i) == userBands[i], at);
         }
         if (k > 15 && k < 37)
-            QVERIFY2(name == "CASDAP", at);
-        QVERIFY2(rig.fake.preset() != 162 || name == "CASDAP" || rig.marker() || k == 37, at);
+            QVERIFY2(name == "MICRODAP", at);
+        QVERIFY2(rig.fake.preset() != 162 || name == "MICRODAP" || rig.marker() || k == 37, at);
         if (k == 37) {
             QCOMPARE(rig.fake.preset(), fiioBypass);
             QCOMPARE(name, std::string("FH3"));
@@ -2842,8 +2842,8 @@ void FiioTest::workerReset()
     QCOMPARE(rig.result(a)->reason, FiioReason::ResetDone);
     QVERIFY(rig.result(a)->ok);
     QVERIFY(!rig.result(a)->mirror.valid);
-    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: driver unbound after reset")), 1);
-    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: reset")), 1);
+    QCOMPARE(capture.count(QStringLiteral("microdap dac eq: driver unbound after reset")), 1);
+    QCOMPARE(capture.count(QStringLiteral("microdap dac eq: reset")), 1);
 
     const std::vector<FakeUsbIo::Call> calls = rig.fake->calls();
     QList<int> ops;
@@ -2874,8 +2874,8 @@ void FiioTest::workerResetFails()
     QCOMPARE(rig.result(a)->reason, FiioReason::Device);
     QVERIFY(!rig.result(a)->ok);
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 1);
-    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: driver unbound after reset")), 0);
-    QCOMPARE(capture.count(QStringLiteral("casdap dac eq: driver bound after reset")), 0);
+    QCOMPARE(capture.count(QStringLiteral("microdap dac eq: driver unbound after reset")), 0);
+    QCOMPARE(capture.count(QStringLiteral("microdap dac eq: driver bound after reset")), 0);
     QVERIFY(!rig.fake->isOpen());
 }
 
@@ -3062,12 +3062,12 @@ void FiioTest::cliSessionActive()
         QVERIFY(rig.presetTo(0));
         QVERIFY(rig.stub(QStringLiteral("printf '%1\\n'\n").arg(QLatin1String(state))));
         QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
-        QVERIFY2(rig.logged(QStringLiteral("casdap session %1, skipped").arg(QLatin1String(state))), qPrintable(rig.err));
+        QVERIFY2(rig.logged(QStringLiteral("microdap session %1, skipped").arg(QLatin1String(state))), qPrintable(rig.err));
         QVERIFY(rig.sent().isEmpty());
         QCOMPARE(rig.fake.preset(), uint8_t(0));
         const QStringList calls = rig.calls();
         QCOMPARE(calls.size(), 1);
-        QVERIFY(calls[0].endsWith(QStringLiteral(" --user show -p ActiveState --value gamescope-session-plus@casdap.service")));
+        QVERIFY(calls[0].endsWith(QStringLiteral(" --user show -p ActiveState --value gamescope-session-plus@microdap.service")));
     }
 }
 
@@ -3101,7 +3101,7 @@ void FiioTest::cliSessionHangs()
     QVERIFY(rig.stub(QStringLiteral("exec sleep 5\n")));
     QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
     QVERIFY2(rig.elapsed >= 490 && rig.elapsed < 800, std::to_string(rig.elapsed).c_str());
-    QVERIFY2(rig.logged(QStringLiteral("casdap session no answer, skipped")), qPrintable(rig.err));
+    QVERIFY2(rig.logged(QStringLiteral("microdap session no answer, skipped")), qPrintable(rig.err));
     QVERIFY(rig.sent().isEmpty());
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
 }
@@ -3126,7 +3126,7 @@ void FiioTest::cliSystemctlFailsWithManager()
     QVERIFY(rig.presetTo(0));
     QVERIFY(rig.stub(QStringLiteral("exit 1\n")));
     QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
-    QVERIFY2(rig.logged(QStringLiteral("casdap session no answer, skipped")), qPrintable(rig.err));
+    QVERIFY2(rig.logged(QStringLiteral("microdap session no answer, skipped")), qPrintable(rig.err));
     QCOMPARE(rig.calls().size(), 1);
     QVERIFY(rig.sent().isEmpty());
 }
@@ -3159,11 +3159,11 @@ void FiioTest::cliSessionUnderLock()
                                     "if [ $n -ge 2 ]; then echo active; else echo inactive; fi\n")
                          .arg(count)));
     QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
-    QVERIFY2(rig.logged(QStringLiteral("casdap session active, skipped")), qPrintable(rig.err));
+    QVERIFY2(rig.logged(QStringLiteral("microdap session active, skipped")), qPrintable(rig.err));
     QCOMPARE(rig.calls().size(), 2);
     QVERIFY(rig.sent().isEmpty());
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
-    QVERIFY(QFileInfo::exists(rig.root.path() + QStringLiteral("/run/casdap-fiio.lock")));
+    QVERIFY(QFileInfo::exists(rig.root.path() + QStringLiteral("/run/microdap-fiio.lock")));
 }
 
 void FiioTest::cliHidBoundNoWait()
@@ -3285,12 +3285,12 @@ void FiioTest::cliMarker()
     QVERIFY(rig.presetTo(162));
     QVERIFY(writeFile(marker, "2972:0149\n"));
     QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
-    QVERIFY2(rig.logged(QStringLiteral("3-1 casdap slot, set 240")), qPrintable(rig.err));
+    QVERIFY2(rig.logged(QStringLiteral("3-1 microdap slot, set 240")), qPrintable(rig.err));
     QVERIFY(!QFileInfo::exists(marker));
 
     QVERIFY(rig.presetTo(162));
     QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
-    QVERIFY(rig.logged(QStringLiteral("3-1 casdap slot, set 240")));
+    QVERIFY(rig.logged(QStringLiteral("3-1 microdap slot, set 240")));
 
     QVERIFY(writeFile(marker, "2972:0149\n"));
     QCOMPARE(rig.run({QStringLiteral("reset")}), 0);
@@ -3434,7 +3434,7 @@ void FiioTest::cliRestoreSessionActive()
     QVERIFY(writeBackup(rig.paths.configDir, tinyModel(), sampleBackup()));
     QVERIFY(rig.stub(QStringLiteral("printf 'active\\n'\n")));
     QCOMPARE(rig.run({QStringLiteral("restore-slot")}), 1);
-    QVERIFY2(rig.logged(QStringLiteral("casdap session active, refused")), qPrintable(rig.err));
+    QVERIFY2(rig.logged(QStringLiteral("microdap session active, refused")), qPrintable(rig.err));
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Out), 0);
 }
@@ -3515,7 +3515,7 @@ void FiioTest::cliTwoDacs()
                                         "if [ $n -ge 2 ]; then echo active; else echo inactive; fi\n")
                              .arg(count)));
         QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--stamp")}), 0);
-        QVERIFY2(rig.logged(QStringLiteral("casdap session active, skipped")), qPrintable(rig.err));
+        QVERIFY2(rig.logged(QStringLiteral("microdap session active, skipped")), qPrintable(rig.err));
         QCOMPARE(rig.calls().size(), 2);
         QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 1);
         QVERIFY(!QFileInfo::exists(rig.resetStamp()));
@@ -3535,7 +3535,7 @@ void FiioTest::cliUsageErrors()
     QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--deadline"), QStringLiteral("")}), 1);
     QCOMPARE(rig.run({QStringLiteral("reset"), QStringLiteral("--bogus")}), 1);
     QCOMPARE(rig.run({QStringLiteral("dump"), QStringLiteral("x")}), 1);
-    QVERIFY(rig.err.contains(QStringLiteral("casdap-fiio: usage: ")));
+    QVERIFY(rig.err.contains(QStringLiteral("microdap-fiio: usage: ")));
     QCOMPARE(rig.run({}), 1);
     QCOMPARE(rig.run({QStringLiteral("restore-slot"), QStringLiteral("a"), QStringLiteral("b")}), 1);
     QCOMPARE(rig.fake.count(FakeUsbIo::Op::Open), 0);

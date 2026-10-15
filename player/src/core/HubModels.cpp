@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 void HubSource::attach(QAbstractItemModel *model)
 {

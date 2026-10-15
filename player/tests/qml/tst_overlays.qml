@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import Casdap
+import MicroDap
 
 TestCase {
     id: tc
@@ -16,7 +16,7 @@ TestCase {
 
         width: 640
         height: 960
-        source: "file:///tmp/casdap-backdrop-test.png"
+        source: "file:///tmp/microdap-backdrop-test.png"
     }
 
     StatusStrip {
@@ -268,7 +268,7 @@ TestCase {
         compare(backdrop.animating, false)
         compare(backdrop.art.visible, false)
         compare(backdrop.shade.visible, false)
-        backdrop.source = "file:///tmp/casdap-backdrop-test.png"
+        backdrop.source = "file:///tmp/microdap-backdrop-test.png"
         compare(backdrop.animating, true)
     }
 

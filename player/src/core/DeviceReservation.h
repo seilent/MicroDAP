@@ -17,7 +17,7 @@
 
 class QTimer;
 
-namespace casdap {
+namespace microdap {
 
 class ReserveWorker;
 

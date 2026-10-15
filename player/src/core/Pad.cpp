@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -53,12 +53,12 @@ int buttonAction(Uint8 button)
 
 Pad::Pad(QObject *parent)
     : PadSource(parent)
-    , m_log(qEnvironmentVariableIntValue("CASDAP_PAD_LOG") == 1)
+    , m_log(qEnvironmentVariableIntValue("MICRODAP_PAD_LOG") == 1)
 {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     m_valid = SDL_Init(SDL_INIT_GAMEPAD);
     if (!m_valid) {
-        qWarning("casdap pad: SDL_Init failed: %s", SDL_GetError());
+        qWarning("microdap pad: SDL_Init failed: %s", SDL_GetError());
         return;
     }
     connect(&m_pump, &QTimer::timeout, this, &Pad::pump);
@@ -202,7 +202,7 @@ void Pad::addGamepad(SDL_JoystickID id)
         return;
     SDL_Gamepad *pad = SDL_OpenGamepad(id);
     if (!pad) {
-        qWarning("casdap pad: open %u failed: %s", static_cast<unsigned>(id), SDL_GetError());
+        qWarning("microdap pad: open %u failed: %s", static_cast<unsigned>(id), SDL_GetError());
         return;
     }
     m_pads.insert(id, pad);

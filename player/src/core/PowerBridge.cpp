@@ -12,7 +12,7 @@
 #include <QFile>
 #include <QProcess>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -46,37 +46,37 @@ bool PowerBridgeAdaptor::overlayShown() const
 
 void PowerBridgeAdaptor::SetScreenOff(bool off)
 {
-    qInfo() << "casdap power: SetScreenOff" << off;
+    qInfo() << "microdap power: SetScreenOff" << off;
     m_bridge->requestScreenOff(off);
 }
 
 void PowerBridgeAdaptor::ShowPowerMenu()
 {
-    qInfo() << "casdap power: ShowPowerMenu";
+    qInfo() << "microdap power: ShowPowerMenu";
     m_bridge->requestPowerMenu();
 }
 
 void PowerBridgeAdaptor::ShowOverlay()
 {
-    qInfo() << "casdap power: ShowOverlay";
+    qInfo() << "microdap power: ShowOverlay";
     m_bridge->showOverlay();
 }
 
 void PowerBridgeAdaptor::HideOverlay()
 {
-    qInfo() << "casdap power: HideOverlay";
+    qInfo() << "microdap power: HideOverlay";
     m_bridge->hideOverlay();
 }
 
 void PowerBridgeAdaptor::ToggleOverlay()
 {
-    qInfo() << "casdap power: ToggleOverlay";
+    qInfo() << "microdap power: ToggleOverlay";
     m_bridge->toggleOverlay();
 }
 
 void PowerBridgeAdaptor::ShowSwitchPrompt()
 {
-    qInfo() << "casdap power: ShowSwitchPrompt";
+    qInfo() << "microdap power: ShowSwitchPrompt";
     m_bridge->requestSwitchPrompt();
 }
 
@@ -92,7 +92,7 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
     connect(&m_readyTimer, &QTimer::timeout, this, [this] {
         if (!m_awaitReady)
             return;
-        qWarning() << "casdap power: no output release within" << m_readyTimer.interval() << "ms, switching";
+        qWarning() << "microdap power: no output release within" << m_readyTimer.interval() << "ms, switching";
         onSwitchReady();
     });
     reloadDrift();
@@ -100,21 +100,21 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
         connect(m_player, &Player::statusChanged, this, &PowerBridge::notifyPlaybackStatus);
 
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap power: session bus not connected";
+        qWarning() << "microdap power: session bus not connected";
         return;
     }
     if (!m_bus.connect(QString(), hotkeysPath(), hotkeysInterface(), QStringLiteral("VolumeChanged"),
                        this, SLOT(onVolumeChanged(double)))) {
-        qWarning() << "casdap power: cannot subscribe to" << hotkeysInterface()
+        qWarning() << "microdap power: cannot subscribe to" << hotkeysInterface()
                    << m_bus.lastError().message();
     }
     if (!m_bus.registerObject(objectPath(), this, QDBusConnection::ExportAdaptors)) {
-        qWarning() << "casdap power: cannot register" << objectPath()
+        qWarning() << "microdap power: cannot register" << objectPath()
                    << m_bus.lastError().message();
         return;
     }
     if (!m_bus.registerService(serviceName())) {
-        qWarning() << "casdap power: cannot register" << serviceName()
+        qWarning() << "microdap power: cannot register" << serviceName()
                    << m_bus.lastError().message();
         m_bus.unregisterObject(objectPath());
         return;
@@ -135,32 +135,32 @@ PowerBridge::~PowerBridge()
 
 QString PowerBridge::serviceName()
 {
-    return QStringLiteral("org.casdap.Player");
+    return QStringLiteral("net.seilent.MicroDap.Player");
 }
 
 QString PowerBridge::objectPath()
 {
-    return QStringLiteral("/org/casdap/Player");
+    return QStringLiteral("/net/seilent/MicroDap/Player");
 }
 
 QString PowerBridge::interfaceName()
 {
-    return QStringLiteral("org.casdap.Player");
+    return QStringLiteral("net.seilent.MicroDap.Player");
 }
 
 QString PowerBridge::hotkeysPath()
 {
-    return QStringLiteral("/org/casdap/Hotkeys");
+    return QStringLiteral("/net/seilent/MicroDap/Hotkeys");
 }
 
 QString PowerBridge::hotkeysInterface()
 {
-    return QStringLiteral("org.casdap.Hotkeys");
+    return QStringLiteral("net.seilent.MicroDap.Hotkeys");
 }
 
 QString PowerBridge::notSupportedError()
 {
-    return QStringLiteral("org.casdap.Error.NotSupported");
+    return QStringLiteral("net.seilent.MicroDap.Error.NotSupported");
 }
 
 QStringList PowerBridge::verbs()
@@ -175,7 +175,7 @@ QStringList PowerBridge::verbs()
 
 QString PowerBridge::powerBin()
 {
-    return qEnvironmentVariable("CASDAP_POWER_BIN", QStringLiteral("/usr/libexec/casdap/casdap-power"));
+    return qEnvironmentVariable("MICRODAP_POWER_BIN", QStringLiteral("/usr/libexec/microdap/microdap-power"));
 }
 
 QStringList PowerBridge::commandFor(const QString &verb)
@@ -184,7 +184,7 @@ QStringList PowerBridge::commandFor(const QString &verb)
         return {powerBin(), QStringLiteral("screen-off")};
     if (verb == QLatin1StringView("game-mode"))
         return {QStringLiteral("systemctl"), QStringLiteral("start"),
-                QStringLiteral("casdap-switch-back.service")};
+                QStringLiteral("microdap-switch-back.service")};
     if (verb == QLatin1StringView("suspend"))
         return {powerBin(), QStringLiteral("suspend")};
     if (verb == QLatin1StringView("poweroff"))
@@ -194,7 +194,7 @@ QStringList PowerBridge::commandFor(const QString &verb)
 
 QStringList PowerBridge::switchCommand()
 {
-    return {QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("casdap-switch-back.service")};
+    return {QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("microdap-switch-back.service")};
 }
 
 QStringList PowerBridge::wakeCommand()
@@ -205,13 +205,13 @@ QStringList PowerBridge::wakeCommand()
 int PowerBridge::switchTimeoutMs()
 {
     bool ok = false;
-    const int value = qEnvironmentVariableIntValue("CASDAP_SWITCH_TIMEOUT_MS", &ok);
+    const int value = qEnvironmentVariableIntValue("MICRODAP_SWITCH_TIMEOUT_MS", &ok);
     return ok && value > 0 ? value : 30000;
 }
 
 QString PowerBridge::driftFile()
 {
-    return qEnvironmentVariable("CASDAP_DRIFT_FILE", QStringLiteral("/run/casdap/drift"));
+    return qEnvironmentVariable("MICRODAP_DRIFT_FILE", QStringLiteral("/run/microdap/drift"));
 }
 
 bool PowerBridge::isRegistered() const
@@ -320,7 +320,7 @@ bool PowerBridge::switching() const
 
 QString PowerBridge::programPath(const QString &name) const
 {
-    const QString dir = qEnvironmentVariable("CASDAP_VERB_DIR");
+    const QString dir = qEnvironmentVariable("MICRODAP_VERB_DIR");
     if (dir.isEmpty() || name.contains(QLatin1Char('/')))
         return name;
     return dir + QLatin1Char('/') + name;
@@ -378,7 +378,7 @@ void PowerBridge::runScreenOn()
     dropWakeProcess();
     QStringList command = wakeCommand();
     const QString program = command.takeFirst();
-    qInfo() << "casdap power: screen-on" << program << command;
+    qInfo() << "microdap power: screen-on" << program << command;
     m_wake = new QProcess(this);
     connect(m_wake, &QProcess::finished, this, &PowerBridge::onWakeFinished);
     connect(m_wake, &QProcess::errorOccurred, this, &PowerBridge::onWakeError);
@@ -389,7 +389,7 @@ void PowerBridge::onWakeFinished(int code, QProcess::ExitStatus status)
 {
     const bool ok = status == QProcess::NormalExit && code == 0;
     if (!ok)
-        qWarning() << "casdap power: screen-on after wake exited" << code;
+        qWarning() << "microdap power: screen-on after wake exited" << code;
     dropWakeProcess();
     emit wakeFinished(ok);
 }
@@ -398,7 +398,7 @@ void PowerBridge::onWakeError(QProcess::ProcessError error)
 {
     if (error != QProcess::FailedToStart)
         return;
-    qWarning() << "casdap power: cannot start" << wakeCommand().constFirst() << "after wake";
+    qWarning() << "microdap power: cannot start" << wakeCommand().constFirst() << "after wake";
     dropWakeProcess();
     emit wakeFinished(false);
 }
@@ -419,9 +419,9 @@ void PowerBridge::dropWakeProcess()
 bool PowerBridge::runVerb(const QString &verb)
 {
     if (m_outputMode && m_outputMode->levelSet() && verb == QLatin1StringView("game-mode")) {
-        qInfo() << "casdap power: verb" << verb;
+        qInfo() << "microdap power: verb" << verb;
         if (switching()) {
-            qInfo() << "casdap power: switch already running";
+            qInfo() << "microdap power: switch already running";
             return false;
         }
         startSwitch();
@@ -429,15 +429,15 @@ bool PowerBridge::runVerb(const QString &verb)
     }
     QStringList command = commandFor(verb);
     if (command.isEmpty()) {
-        qWarning() << "casdap power: unknown verb" << verb;
+        qWarning() << "microdap power: unknown verb" << verb;
         return false;
     }
     const QString program = programPath(command.takeFirst());
-    qInfo() << "casdap power: verb" << verb << program << command;
+    qInfo() << "microdap power: verb" << verb << program << command;
     const bool started = QProcess::startDetached(program, command);
     if (!started && !m_failedVerbs.contains(verb)) {
         m_failedVerbs.insert(verb);
-        qWarning() << "casdap power: cannot start" << program << "for" << verb;
+        qWarning() << "microdap power: cannot start" << program << "for" << verb;
     }
     return started;
 }
@@ -445,12 +445,12 @@ bool PowerBridge::runVerb(const QString &verb)
 void PowerBridge::runScreenOff()
 {
     if (m_screenOffRun) {
-        qInfo() << "casdap power: screen-off already running";
+        qInfo() << "microdap power: screen-off already running";
         return;
     }
     QStringList command = commandFor(QStringLiteral("screen-off"));
     const QString program = programPath(command.takeFirst());
-    qInfo() << "casdap power: verb screen-off" << program << command;
+    qInfo() << "microdap power: verb screen-off" << program << command;
     auto *process = new QProcess(this);
     m_screenOffRun = process;
     connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
@@ -459,13 +459,13 @@ void PowerBridge::runScreenOff()
         dropScreenOffProcess();
         if (status == QProcess::NormalExit && code == 0)
             return;
-        qWarning() << "casdap power: screen-off exited" << code;
+        qWarning() << "microdap power: screen-off exited" << code;
         emit verbFailed(QStringLiteral("screen-off"));
     });
     connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart || m_screenOffRun != process)
             return;
-        qWarning() << "casdap power: cannot start" << process->program() << "for screen-off";
+        qWarning() << "microdap power: cannot start" << process->program() << "for screen-off";
         dropScreenOffProcess();
         emit verbFailed(QStringLiteral("screen-off"));
     });
@@ -507,7 +507,7 @@ void PowerBridge::reloadDrift()
 void PowerBridge::requestPowerMenu()
 {
     if (m_overlay) {
-        qInfo() << "casdap power: ShowPowerMenu ignored in overlay mode";
+        qInfo() << "microdap power: ShowPowerMenu ignored in overlay mode";
         return;
     }
     emit showPowerMenu();
@@ -516,7 +516,7 @@ void PowerBridge::requestPowerMenu()
 void PowerBridge::requestSwitchPrompt()
 {
     if (m_overlay) {
-        qInfo() << "casdap power: ShowSwitchPrompt needs dap mode";
+        qInfo() << "microdap power: ShowSwitchPrompt needs dap mode";
         if (calledFromDBus())
             sendErrorReply(notSupportedError(), QStringLiteral("ShowSwitchPrompt needs dap mode"));
         return;
@@ -526,9 +526,9 @@ void PowerBridge::requestSwitchPrompt()
 
 void PowerBridge::keepInBackground()
 {
-    qInfo() << "casdap power: keep in background";
+    qInfo() << "microdap power: keep in background";
     if (switching()) {
-        qInfo() << "casdap power: switch already running";
+        qInfo() << "microdap power: switch already running";
         return;
     }
     if (!m_state) {
@@ -548,9 +548,9 @@ void PowerBridge::keepInBackground()
 
 void PowerBridge::closeAndSwitch()
 {
-    qInfo() << "casdap power: close player";
+    qInfo() << "microdap power: close player";
     if (switching()) {
-        qInfo() << "casdap power: switch already running";
+        qInfo() << "microdap power: switch already running";
         return;
     }
     if (m_state)
@@ -576,7 +576,7 @@ void PowerBridge::startSwitch()
         return;
     m_switchReleased = m_outputMode->switchStoppedStream();
     m_readyTimer.start(m_outputMode->switchBoundMs() + switchReadyMarginMs);
-    qInfo() << "casdap power: switch waits for the output release";
+    qInfo() << "microdap power: switch waits for the output release";
 }
 
 void PowerBridge::onSwitchReady()
@@ -587,7 +587,7 @@ void PowerBridge::onSwitchReady()
     m_readyTimer.stop();
     if (!m_switchReleased && m_switchPlayer && !m_switchWasParked && m_switchPlayer->parked()) {
         m_switchReleased = true;
-        qInfo() << "casdap power: switch parked the player";
+        qInfo() << "microdap power: switch parked the player";
     }
     runSwitch();
 }
@@ -596,7 +596,7 @@ void PowerBridge::runSwitch()
 {
     QStringList command = switchCommand();
     const QString program = programPath(command.takeFirst());
-    qInfo() << "casdap power: switch" << program << command;
+    qInfo() << "microdap power: switch" << program << command;
     m_switch = new QProcess(this);
     connect(m_switch, &QProcess::finished, this, &PowerBridge::onSwitchFinished);
     connect(m_switch, &QProcess::errorOccurred, this, &PowerBridge::onSwitchError);
@@ -607,7 +607,7 @@ void PowerBridge::runSwitch()
 void PowerBridge::onSwitchFinished(int code, QProcess::ExitStatus status)
 {
     if (status == QProcess::NormalExit && code == 0) {
-        qInfo() << "casdap power: switch start returned 0, waiting for the session stop";
+        qInfo() << "microdap power: switch start returned 0, waiting for the session stop";
         dropSwitchProcess();
         return;
     }
@@ -628,7 +628,7 @@ void PowerBridge::onSwitchTimeout()
 
 void PowerBridge::failSwitch(SwitchFailure kind, const QString &reason)
 {
-    qWarning().noquote() << "casdap power: switch failed," << reason;
+    qWarning().noquote() << "microdap power: switch failed," << reason;
     const bool wasSwitching = m_switching;
     const bool rebuild = m_switchReleased && m_switchPlayer && m_switchPlay != PlayerPort::PlayState::Stopped
                          && (kind == SwitchFailure::ExitCode || kind == SwitchFailure::StartError);
@@ -642,7 +642,7 @@ void PowerBridge::failSwitch(SwitchFailure kind, const QString &reason)
     if (rebuild) {
         const qint64 position = m_switchPlayer->positionMs();
         const bool playing = m_switchPlay == PlayerPort::PlayState::Playing;
-        qInfo() << "casdap power: rebuild after the failed switch at" << position << (playing ? "playing" : "paused");
+        qInfo() << "microdap power: rebuild after the failed switch at" << position << (playing ? "playing" : "paused");
         m_switchPlayer->rebuildAt(position, playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
     }
     if (m_state)
@@ -668,7 +668,7 @@ void PowerBridge::dropSwitchProcess()
 void PowerBridge::requestScreenOff(bool off)
 {
     if (m_overlay) {
-        qInfo() << "casdap power: SetScreenOff ignored in overlay mode" << off;
+        qInfo() << "microdap power: SetScreenOff ignored in overlay mode" << off;
         return;
     }
     setScreenOff(off);
@@ -699,7 +699,7 @@ bool PowerBridge::rejectWithoutOverlay(const char *member)
 {
     if (m_overlay)
         return false;
-    qInfo() << "casdap power:" << member << "needs overlay mode";
+    qInfo() << "microdap power:" << member << "needs overlay mode";
     if (calledFromDBus())
         sendErrorReply(notSupportedError(), QString::fromLatin1(member) + QStringLiteral(" needs overlay mode"));
     return true;

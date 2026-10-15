@@ -13,7 +13,7 @@
 #include <QTimer>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 class OutputMode;
 class OverlayBridge;
@@ -25,7 +25,7 @@ class State;
 class PowerBridgeAdaptor : public QDBusAbstractAdaptor
 {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "org.casdap.Player")
+    Q_CLASSINFO("D-Bus Interface", "net.seilent.MicroDap.Player")
     Q_PROPERTY(bool ScreenOff READ screenOff)
     Q_PROPERTY(QString PlaybackStatus READ playbackStatus)
     Q_PROPERTY(bool OverlayShown READ overlayShown)

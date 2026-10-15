@@ -1,0 +1,407 @@
+#!/usr/bin/python3
+import os
+import shlex
+import signal
+import socket
+import subprocess
+import sys
+
+import dbus
+import dbus.service
+import gi
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+try:
+    gi.require_version('GLibUnix', '2.0')
+    from gi.repository import GLibUnix
+    unix_signal_add = GLibUnix.signal_add
+except (ImportError, ValueError, AttributeError):
+    unix_signal_add = GLib.unix_signal_add
+
+BLUEZ = 'org.bluez'
+OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager'
+PROPERTIES = 'org.freedesktop.DBus.Properties'
+ADAPTER = 'org.bluez.Adapter1'
+DEVICE = 'org.bluez.Device1'
+AGENT = 'org.bluez.Agent1'
+AGENT_MANAGER = 'org.bluez.AgentManager1'
+AGENT_PATH = '/net/seilent/MicroDap/agent'
+SERVICE = 'net.seilent.MicroDap.Bluetooth'
+SERVICE_PATH = '/net/seilent/MicroDap/Bluetooth'
+BASE_UUID = '-0000-1000-8000-00805f9b34fb'
+ALLOWED = ('110b', '110c', '110d', '110e')
+A2DP_SOURCE = '0000110a' + BASE_UUID
+SAVED = ('Pairable', 'PairableTimeout', 'DiscoverableTimeout')
+MAX_TIMEOUT = 600
+DEVICE_ENV = os.environ.get('MICRODAP_BT_DEVICE_ENV', '/usr/libexec/armada/device-env')
+KEEP_BIN = os.environ.get('MICRODAP_KEEP_BIN', '/usr/libexec/microdap/microdap-keep')
+KEEP_TIMEOUT = 5
+DISCONNECT_TIMEOUT = 10
+ONE_SHOT_TIMEOUT = 2
+
+
+def log(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+def keep_phone():
+    try:
+        result = subprocess.run([KEEP_BIN, 'check'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=KEEP_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f'keep check failed: {e}')
+        return False
+    return result.returncode == 0
+
+
+def release_phones(bus, keep, timeout=DISCONNECT_TIMEOUT, when='on exit'):
+    manager = dbus.Interface(bus.get_object(BLUEZ, '/', introspect=False), OBJECT_MANAGER)
+    try:
+        objects = manager.GetManagedObjects(timeout=timeout)
+    except dbus.DBusException as e:
+        log(f'release: {e.get_dbus_name()}')
+        return 1
+    status = 0
+    for path, interfaces in sorted(objects.items()):
+        props = interfaces.get(DEVICE)
+        if not props or not props.get('Connected'):
+            continue
+        uuids = [str(u).lower() for u in props.get('UUIDs', [])]
+        if A2DP_SOURCE not in uuids:
+            continue
+        path = str(path)
+        if keep:
+            log(f'keeping {path} connected')
+            continue
+        try:
+            device = dbus.Interface(bus.get_object(BLUEZ, path, introspect=False), DEVICE)
+            device.Disconnect(timeout=timeout)
+            log(f'disconnected {path} {when}')
+        except dbus.DBusException as e:
+            log(f'disconnect {path} failed: {e.get_dbus_name()}')
+            status = 1
+    return status
+
+
+def system_bus():
+    address = os.environ.get('MICRODAP_BT_SYSTEM_BUS')
+    return dbus.bus.BusConnection(address) if address else dbus.SystemBus()
+
+
+class Rejected(dbus.DBusException):
+    _dbus_error_name = 'org.bluez.Error.Rejected'
+
+
+class InvalidArgs(dbus.DBusException):
+    _dbus_error_name = 'org.freedesktop.DBus.Error.InvalidArgs'
+
+
+def short_uuid(uuid):
+    uuid = str(uuid).lower()
+    if len(uuid) == 36 and uuid.startswith('0000') and uuid.endswith(BASE_UUID):
+        return uuid[4:8]
+    return uuid
+
+
+def device_name():
+    if os.access(DEVICE_ENV, os.X_OK):
+        try:
+            out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError) as e:
+            log(f'device-env failed: {e}')
+            out = ''
+        for line in out.splitlines():
+            if line.startswith('ARMADA_DEVICE_NAME='):
+                words = shlex.split(line.partition('=')[2])
+                if words and words[0]:
+                    return words[0]
+    return socket.gethostname()
+
+
+class Adapter:
+    def __init__(self, bus):
+        self.bus = bus
+        self.path = self.find()
+        obj = bus.get_object(BLUEZ, self.path, introspect=False)
+        self.properties = dbus.Interface(obj, PROPERTIES)
+        self.adapter = dbus.Interface(obj, ADAPTER)
+
+    def find(self):
+        manager = dbus.Interface(self.bus.get_object(BLUEZ, '/', introspect=False), OBJECT_MANAGER)
+        for path, interfaces in sorted(manager.GetManagedObjects().items()):
+            if ADAPTER in interfaces:
+                return str(path)
+        raise RuntimeError('no bluetooth adapter')
+
+    def get(self, name):
+        return self.properties.Get(ADAPTER, name)
+
+    def set(self, name, value):
+        try:
+            self.properties.Set(ADAPTER, name, value, signature='ssv')
+        except dbus.DBusException as e:
+            log(f'set {name} failed: {e.get_dbus_name()}')
+
+    def remove_device(self, path):
+        try:
+            self.adapter.RemoveDevice(dbus.ObjectPath(path))
+        except dbus.DBusException as e:
+            log(f'remove {path} failed: {e.get_dbus_name()}')
+
+
+class Window(dbus.service.Object):
+    def __init__(self, bus, adapter):
+        super().__init__(bus, SERVICE_PATH)
+        self.adapter = adapter
+        self.active = False
+        self.remaining = 0
+        self.saved = None
+        self.timer = None
+
+    def values(self):
+        return {
+            'PairingActive': dbus.Boolean(self.active),
+            'PairingRemaining': dbus.UInt32(self.remaining),
+        }
+
+    def notify(self, *names):
+        values = self.values()
+        changed = dbus.Dictionary({name: values[name] for name in names}, signature='sv')
+        self.PropertiesChanged(SERVICE, changed, dbus.Array([], signature='s'))
+
+    @dbus.service.signal(PROPERTIES, signature='sa{sv}as')
+    def PropertiesChanged(self, interface, changed, invalidated):
+        pass
+
+    @dbus.service.method(PROPERTIES, in_signature='ss', out_signature='v')
+    def Get(self, interface, name):
+        values = self.values()
+        if interface != SERVICE or name not in values:
+            raise InvalidArgs(f'{interface}.{name}')
+        return values[name]
+
+    @dbus.service.method(PROPERTIES, in_signature='s', out_signature='a{sv}')
+    def GetAll(self, interface):
+        if interface != SERVICE:
+            raise InvalidArgs(interface)
+        return self.values()
+
+    @dbus.service.method(PROPERTIES, in_signature='ssv', out_signature='')
+    def Set(self, interface, name, value):
+        raise InvalidArgs(f'{interface}.{name} is read only')
+
+    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
+    def StartPairing(self, timeout):
+        timeout = int(timeout)
+        if timeout < 1 or timeout > MAX_TIMEOUT:
+            raise InvalidArgs(f'timeout must be 1 to {MAX_TIMEOUT} seconds')
+        if self.saved is None:
+            self.saved = {name: self.adapter.get(name) for name in SAVED}
+        self.adapter.set('PairableTimeout', dbus.UInt32(timeout))
+        self.adapter.set('Pairable', dbus.Boolean(True))
+        self.adapter.set('DiscoverableTimeout', dbus.UInt32(timeout))
+        self.adapter.set('Discoverable', dbus.Boolean(True))
+        self.adapter.set('Alias', dbus.String(device_name()))
+        if self.timer is not None:
+            GLib.source_remove(self.timer)
+        self.timer = GLib.timeout_add(1000, self.tick)
+        self.active = True
+        self.remaining = timeout
+        log(f'pairing window open for {timeout} s')
+        self.notify('PairingActive', 'PairingRemaining')
+
+    @dbus.service.method(SERVICE, in_signature='', out_signature='')
+    def StopPairing(self):
+        self.close('stopped')
+
+    def tick(self):
+        self.remaining -= 1
+        if self.remaining > 0:
+            self.notify('PairingRemaining')
+            return True
+        self.timer = None
+        self.close('timed out')
+        return False
+
+    def close(self, reason):
+        if not self.active:
+            return
+        if self.timer is not None:
+            GLib.source_remove(self.timer)
+            self.timer = None
+        self.active = False
+        self.remaining = 0
+        for name, value in self.saved.items():
+            self.adapter.set(name, value)
+        self.saved = None
+        self.adapter.set('Discoverable', dbus.Boolean(False))
+        log(f'pairing window {reason}')
+        self.notify('PairingActive', 'PairingRemaining')
+
+
+class Agent(dbus.service.Object):
+    def __init__(self, bus, window):
+        super().__init__(bus, AGENT_PATH)
+        self.window = window
+
+    def reject(self, what, device):
+        log(f'Rejected {what} {device}')
+        return Rejected(f'{what} rejected')
+
+    def gate(self, what, device):
+        if not self.window.active:
+            raise self.reject(what, device)
+        log(f'accepted {what} {device}')
+
+    @dbus.service.method(AGENT, in_signature='', out_signature='')
+    def Release(self):
+        log('agent released')
+
+    @dbus.service.method(AGENT, in_signature='o', out_signature='s')
+    def RequestPinCode(self, device):
+        raise self.reject('RequestPinCode', device)
+
+    @dbus.service.method(AGENT, in_signature='os', out_signature='')
+    def DisplayPinCode(self, device, pincode):
+        raise self.reject('DisplayPinCode', device)
+
+    @dbus.service.method(AGENT, in_signature='o', out_signature='u')
+    def RequestPasskey(self, device):
+        raise self.reject('RequestPasskey', device)
+
+    @dbus.service.method(AGENT, in_signature='ouq', out_signature='')
+    def DisplayPasskey(self, device, passkey, entered):
+        raise self.reject('DisplayPasskey', device)
+
+    @dbus.service.method(AGENT, in_signature='ou', out_signature='')
+    def RequestConfirmation(self, device, passkey):
+        self.gate('RequestConfirmation', device)
+
+    @dbus.service.method(AGENT, in_signature='o', out_signature='')
+    def RequestAuthorization(self, device):
+        self.gate('RequestAuthorization', device)
+
+    @dbus.service.method(AGENT, in_signature='os', out_signature='')
+    def AuthorizeService(self, device, uuid):
+        if short_uuid(uuid) in ALLOWED:
+            log(f'authorized {uuid} {device}')
+            return
+        raise self.reject(str(uuid), device)
+
+    @dbus.service.method(AGENT, in_signature='', out_signature='')
+    def Cancel(self):
+        log('request cancelled')
+
+
+class Gate:
+    def __init__(self, bus, adapter, window):
+        self.bus = bus
+        self.adapter = adapter
+        self.window = window
+        self.pending = set()
+        bus.add_signal_receiver(self.changed, bus_name=BLUEZ, dbus_interface=PROPERTIES,
+                                signal_name='PropertiesChanged', arg0=DEVICE, path_keyword='path')
+
+    def changed(self, interface, changed, invalidated, path=None):
+        path = str(path)
+        if changed.get('Paired') or (path in self.pending and changed.get('ServicesResolved')):
+            self.check(path)
+        elif changed.get('Connected') and self.window.active:
+            self.connected(path)
+
+    def connected(self, path):
+        try:
+            obj = self.bus.get_object(BLUEZ, path, introspect=False)
+            props = dbus.Interface(obj, PROPERTIES).GetAll(DEVICE)
+        except dbus.DBusException as e:
+            log(f'gate {path}: {e.get_dbus_name()}')
+            return
+        uuids = [str(u).lower() for u in props.get('UUIDs', [])]
+        if props.get('Paired') and A2DP_SOURCE in uuids:
+            log(f'connected {path}')
+            self.window.close(f'closed: connected {path}')
+
+    def check(self, path):
+        try:
+            obj = self.bus.get_object(BLUEZ, path, introspect=False)
+            props = dbus.Interface(obj, PROPERTIES).GetAll(DEVICE)
+        except dbus.DBusException as e:
+            self.pending.discard(path)
+            log(f'gate {path}: {e.get_dbus_name()}')
+            return
+        if not props.get('Paired'):
+            self.pending.discard(path)
+            return
+        if not props.get('ServicesResolved'):
+            self.pending.add(path)
+            return
+        self.pending.discard(path)
+        uuids = [str(u).lower() for u in props.get('UUIDs', [])]
+        if A2DP_SOURCE in uuids:
+            log(f'paired {path}')
+            self.window.close(f'closed: paired {path}')
+            return
+        log(f'removing {path}, no a2dp source')
+        self.adapter.remove_device(path)
+
+
+def disconnect_sources():
+    try:
+        bus = system_bus()
+    except dbus.DBusException as e:
+        log(f'release: {e.get_dbus_name()}')
+        return 1
+    return release_phones(bus, False, ONE_SHOT_TIMEOUT, 'on close')
+
+
+def main():
+    if sys.argv[1:] == ['--print-keep']:
+        print('keep' if keep_phone() else 'drop')
+        return 0
+    if sys.argv[1:] == ['--disconnect-sources']:
+        return disconnect_sources()
+    DBusGMainLoop(set_as_default=True)
+    system = system_bus()
+    session = dbus.SessionBus()
+    adapter = Adapter(system)
+    pairable = adapter.get('Pairable')
+    adapter.set('Discoverable', dbus.Boolean(False))
+    window = Window(session, adapter)
+    Agent(system, window)
+    Gate(system, adapter, window)
+    manager = dbus.Interface(system.get_object(BLUEZ, '/org/bluez', introspect=False), AGENT_MANAGER)
+    manager.RegisterAgent(dbus.ObjectPath(AGENT_PATH), dbus.String('NoInputNoOutput'))
+    manager.RequestDefaultAgent(dbus.ObjectPath(AGENT_PATH))
+    adapter.set('Pairable', dbus.Boolean(False))
+    name = dbus.service.BusName(SERVICE, session)
+    loop = GLib.MainLoop()
+    status = [0]
+
+    def stop(*_):
+        window.close('closed on exit')
+        release_phones(system, keep_phone())
+        adapter.set('Pairable', pairable)
+        session.flush()
+        loop.quit()
+        return GLib.SOURCE_REMOVE
+
+    def owner_changed(owner):
+        if owner:
+            return
+        log('org.bluez left the bus')
+        status[0] = 1
+        window.close('bluez left')
+        session.flush()
+        loop.quit()
+
+    unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, stop)
+    unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, stop)
+    system.watch_name_owner(BLUEZ, owner_changed)
+    log(f'agent registered on {adapter.path} as {name.get_name()}')
+    loop.run()
+    return status[0]
+
+
+if __name__ == '__main__':
+    sys.exit(main())

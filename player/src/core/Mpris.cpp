@@ -9,7 +9,7 @@
 #include <QSqlQuery>
 #include <QUrl>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -44,7 +44,7 @@ bool MprisRootAdaptor::hasTrackList() const
 
 QString MprisRootAdaptor::identity() const
 {
-    return QStringLiteral("CASDAP");
+    return QStringLiteral("MicroDAP");
 }
 
 QStringList MprisRootAdaptor::supportedUriSchemes() const
@@ -207,16 +207,16 @@ Mpris::Mpris(Player *player, const QDBusConnection &bus, QObject *parent)
     connect(m_player->queue(), &Queue::repeatChanged, this, &Mpris::notifyLoopStatus);
 
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap mpris: session bus not connected";
+        qWarning() << "microdap mpris: session bus not connected";
         return;
     }
     if (!m_bus.registerObject(objectPath(), this, QDBusConnection::ExportAdaptors)) {
-        qWarning() << "casdap mpris: cannot register" << objectPath()
+        qWarning() << "microdap mpris: cannot register" << objectPath()
                    << m_bus.lastError().message();
         return;
     }
     if (!m_bus.registerService(serviceName())) {
-        qWarning() << "casdap mpris: cannot register" << serviceName()
+        qWarning() << "microdap mpris: cannot register" << serviceName()
                    << m_bus.lastError().message();
         m_bus.unregisterObject(objectPath());
         return;
@@ -234,7 +234,7 @@ Mpris::~Mpris()
 
 QString Mpris::serviceName()
 {
-    return QStringLiteral("org.mpris.MediaPlayer2.casdap");
+    return QStringLiteral("org.mpris.MediaPlayer2.microdap");
 }
 
 QString Mpris::objectPath()
@@ -259,7 +259,7 @@ QDBusObjectPath Mpris::noTrack()
 
 QDBusObjectPath Mpris::trackPath(qint64 id)
 {
-    return QDBusObjectPath(QStringLiteral("/org/casdap/track/%1").arg(qMax<qint64>(0, id)));
+    return QDBusObjectPath(QStringLiteral("/net/seilent/MicroDap/track/%1").arg(qMax<qint64>(0, id)));
 }
 
 bool Mpris::isRegistered() const
@@ -312,7 +312,7 @@ void Mpris::setLoopStatus(const QString &status)
     else if (status == QLatin1String("Playlist"))
         m_player->queue()->setRepeat(Queue::All);
     else {
-        qWarning() << "casdap mpris: unknown LoopStatus" << status;
+        qWarning() << "microdap mpris: unknown LoopStatus" << status;
         notifyLoopStatus();
     }
 }
@@ -410,12 +410,12 @@ void Mpris::openUri(const QString &uri)
 {
     const QUrl url(uri);
     if (!url.isLocalFile()) {
-        qWarning() << "casdap mpris: unsupported uri" << uri;
+        qWarning() << "microdap mpris: unsupported uri" << uri;
         return;
     }
     const QFileInfo info(url.toLocalFile());
     if (!info.isFile()) {
-        qWarning() << "casdap mpris: no such file" << info.filePath();
+        qWarning() << "microdap mpris: no such file" << info.filePath();
         return;
     }
     m_player->play({entryForPath(info.absoluteFilePath())}, 0);

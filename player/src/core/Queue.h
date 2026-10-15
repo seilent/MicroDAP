@@ -7,7 +7,7 @@
 #include <QString>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 struct QueueEntry
 {
@@ -72,7 +72,7 @@ class Queue : public QAbstractListModel
     Q_PROPERTY(bool shuffle READ shuffle WRITE setShuffle NOTIFY shuffleChanged)
     Q_PROPERTY(Repeat repeat READ repeat WRITE setRepeat NOTIFY repeatChanged)
     Q_PROPERTY(int currentSlot READ currentSlot NOTIFY currentSlotChanged)
-    Q_PROPERTY(casdap::PlayOrderModel *playOrder READ playOrder CONSTANT)
+    Q_PROPERTY(microdap::PlayOrderModel *playOrder READ playOrder CONSTANT)
 
 public:
     enum Role {

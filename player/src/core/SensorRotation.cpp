@@ -5,7 +5,7 @@
 #include <QDBusVariant>
 #include <QDebug>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -56,24 +56,24 @@ SensorRotation::SensorRotation(const QDBusConnection &bus, QObject *parent)
     connect(&m_watcher, &QDBusServiceWatcher::serviceOwnerChanged, this, &SensorRotation::onServiceOwnerChanged);
 
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap sensor: bus not connected";
+        qWarning() << "microdap sensor: bus not connected";
         return;
     }
     if (!m_bus.connect(service(), path(), propertiesInterface(), QStringLiteral("PropertiesChanged"), this,
                        SLOT(onPropertiesChanged(QString,QVariantMap,QStringList)))) {
-        qWarning() << "casdap sensor: cannot subscribe to PropertiesChanged" << m_bus.lastError().message();
+        qWarning() << "microdap sensor: cannot subscribe to PropertiesChanged" << m_bus.lastError().message();
     }
     readHas();
 }
 
 QDBusConnection SensorRotation::bus()
 {
-    const QString address = qEnvironmentVariable("CASDAP_SENSOR_BUS");
+    const QString address = qEnvironmentVariable("MICRODAP_SENSOR_BUS");
     if (address.isEmpty())
         return QDBusConnection::systemBus();
     if (address == QLatin1StringView("session"))
         return QDBusConnection::sessionBus();
-    return QDBusConnection::connectToBus(address, QStringLiteral("casdap-sensor"));
+    return QDBusConnection::connectToBus(address, QStringLiteral("microdap-sensor"));
 }
 
 QString SensorRotation::service()
@@ -93,13 +93,13 @@ QString SensorRotation::interface()
 
 int SensorRotation::defaultSensorTurn()
 {
-    return qEnvironmentVariableIntValue("CASDAP_SENSOR_TURN") == 3 ? 3 : 1;
+    return qEnvironmentVariableIntValue("MICRODAP_SENSOR_TURN") == 3 ? 3 : 1;
 }
 
 int SensorRotation::defaultReclaimMs()
 {
     bool ok = false;
-    const int ms = qEnvironmentVariableIntValue("CASDAP_SENSOR_RECLAIM_MS", &ok);
+    const int ms = qEnvironmentVariableIntValue("MICRODAP_SENSOR_RECLAIM_MS", &ok);
     return ok && ms > 0 ? ms : reclaimMs;
 }
 
@@ -227,7 +227,7 @@ void SensorRotation::readOrientation()
             return;
         const QDBusMessage reply = finished->reply();
         if (reply.type() == QDBusMessage::ErrorMessage) {
-            qWarning() << "casdap sensor: orientation read failed" << reply.errorMessage();
+            qWarning() << "microdap sensor: orientation read failed" << reply.errorMessage();
             return;
         }
         take(replyValue(reply).toString());
@@ -258,7 +258,7 @@ void SensorRotation::claim()
             if (m_holding)
                 lose();
             else
-                qWarning() << "casdap sensor: claim failed" << reply.errorMessage();
+                qWarning() << "microdap sensor: claim failed" << reply.errorMessage();
             return;
         }
         if (!m_wanted) {

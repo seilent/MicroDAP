@@ -9,7 +9,7 @@
 
 #include <gst/gst.h>
 
-using namespace casdap;
+using namespace microdap;
 
 class BluezTest : public QObject
 {
@@ -41,10 +41,10 @@ QueueEntry BluezTest::entry() const
 void BluezTest::initTestCase()
 {
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
 
-    QDirIterator it(QStringLiteral(CASDAP_FIXTURE_MUSIC), {QStringLiteral("*.flac")}, QDir::Files,
+    QDirIterator it(QStringLiteral(MICRODAP_FIXTURE_MUSIC), {QStringLiteral("*.flac")}, QDir::Files,
                     QDirIterator::Subdirectories);
     if (it.hasNext())
         m_track = it.next();

@@ -1,5 +1,5 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
-COPY build/toolchain.sh /tmp/casdap-toolchain.sh
-RUN /tmp/casdap-toolchain.sh && rm -f /tmp/casdap-toolchain.sh
+COPY build/toolchain.sh /tmp/microdap-toolchain.sh
+RUN /tmp/microdap-toolchain.sh && rm -f /tmp/microdap-toolchain.sh
 WORKDIR /work

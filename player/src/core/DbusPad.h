@@ -11,7 +11,7 @@
 
 #include <array>
 
-namespace casdap {
+namespace microdap {
 
 class DbusPad : public PadSource
 {

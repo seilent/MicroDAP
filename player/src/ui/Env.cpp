@@ -4,7 +4,7 @@
 #include <QFile>
 #include <QTextStream>
 
-namespace casdap {
+namespace microdap {
 
 Env::Env(QObject *parent)
     : QObject(parent)
@@ -13,12 +13,12 @@ Env::Env(QObject *parent)
 
 QString Env::defaultFontDir()
 {
-    return QStringLiteral("/usr/share/fonts/casdap");
+    return QStringLiteral("/usr/share/fonts/microdap");
 }
 
 QString Env::defaultManifestFile()
 {
-    return QStringLiteral("/usr/share/casdap/build-manifest");
+    return QStringLiteral("/usr/share/microdap/build-manifest");
 }
 
 QVariantMap Env::readManifest(const QString &path)
@@ -42,7 +42,7 @@ QVariantMap Env::readManifest(const QString &path)
 
 QString Env::fontDir() const
 {
-    const QString dir = qEnvironmentVariable("CASDAP_FONT_DIR");
+    const QString dir = qEnvironmentVariable("MICRODAP_FONT_DIR");
     return dir.isEmpty() ? defaultFontDir() : dir;
 }
 
@@ -53,18 +53,18 @@ QString Env::version() const
 
 QVariantMap Env::manifest() const
 {
-    const QString path = qEnvironmentVariable("CASDAP_MANIFEST_FILE");
+    const QString path = qEnvironmentVariable("MICRODAP_MANIFEST_FILE");
     return readManifest(path.isEmpty() ? defaultManifestFile() : path);
 }
 
 int Env::landscapeTurn() const
 {
-    return qEnvironmentVariable("CASDAP_LANDSCAPE_TURN") == QLatin1StringView("3") ? 3 : 1;
+    return qEnvironmentVariable("MICRODAP_LANDSCAPE_TURN") == QLatin1StringView("3") ? 3 : 1;
 }
 
 bool Env::rotateMotion() const
 {
-    return qEnvironmentVariable("CASDAP_ROTATE_MOTION") != QLatin1StringView("0");
+    return qEnvironmentVariable("MICRODAP_ROTATE_MOTION") != QLatin1StringView("0");
 }
 
 }

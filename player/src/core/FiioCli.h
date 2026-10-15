@@ -5,7 +5,7 @@
 #include <functional>
 #include <memory>
 
-namespace casdap {
+namespace microdap {
 
 using UsbIoFactory = std::function<std::unique_ptr<UsbIo>()>;
 

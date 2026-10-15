@@ -2,7 +2,7 @@
 
 #include <QString>
 
-namespace casdap {
+namespace microdap {
 
 struct ScreenshotOptions
 {

@@ -12,7 +12,7 @@
 #include <alsa/asoundlib.h>
 #include <poll.h>
 
-namespace casdap {
+namespace microdap {
 
 struct SndMixer::Handle
 {
@@ -156,7 +156,7 @@ AlsaVolume::AlsaVolume(std::unique_ptr<MixerBackend> backend, int pacingMs, QObj
     m_watch.setSingleShot(true);
     m_watch.setTimerType(Qt::PreciseTimer);
     connect(&m_watch, &QTimer::timeout, this, [this] {
-        qInfo().noquote() << "casdap volume: watch ended on" << m_cardId << "step" << m_owned << "rewrites"
+        qInfo().noquote() << "microdap volume: watch ended on" << m_cardId << "step" << m_owned << "rewrites"
                           << m_rewrites;
     });
 }
@@ -211,12 +211,12 @@ bool AlsaVolume::open(const QString &cardId)
     closeMixer();
     const int err = m_backend->open(cardId);
     if (err < 0) {
-        qWarning().noquote() << "casdap volume: cannot open hw:CARD=" + cardId << std::strerror(-err);
+        qWarning().noquote() << "microdap volume: cannot open hw:CARD=" + cardId << std::strerror(-err);
         return false;
     }
     MixerRange range = m_backend->range();
     if (!usableRange(&range)) {
-        qWarning().noquote() << "casdap volume: hw:CARD=" + cardId << "has no linear dB volume, not used";
+        qWarning().noquote() << "microdap volume: hw:CARD=" + cardId << "has no linear dB volume, not used";
         m_backend->close();
         return false;
     }
@@ -238,7 +238,7 @@ bool AlsaVolume::open(const QString &cardId)
         connect(notifier, &QSocketNotifier::activated, this, &AlsaVolume::onActivated);
         m_notifiers.append(notifier);
     }
-    qInfo().noquote() << "casdap volume: hw:CARD=" + cardId << "open, step" << value << "range"
+    qInfo().noquote() << "microdap volume: hw:CARD=" + cardId << "open, step" << value << "range"
                       << m_range.minDb << "to" << m_range.maxDb << "dB";
     if (m_pending)
         write();
@@ -312,7 +312,7 @@ void AlsaVolume::pressed(int deltaPercent)
         return;
     const int next = stepFor(m_owned, deltaPercent, m_range);
     const int percent = qRound(percentOfDb(dbOfStep(next, m_range)));
-    qInfo() << "casdap volume:" << percent;
+    qInfo() << "microdap volume:" << percent;
     emit levelChanged(percent);
     if (next != m_owned)
         setStep(next);
@@ -321,7 +321,7 @@ void AlsaVolume::pressed(int deltaPercent)
 void AlsaVolume::watchReturn(int ms)
 {
     if (!m_open) {
-        qWarning().noquote() << "casdap volume: watch on a closed mixer for" << m_cardId;
+        qWarning().noquote() << "microdap volume: watch on a closed mixer for" << m_cardId;
         return;
     }
     if (!m_watch.isActive())
@@ -342,7 +342,7 @@ void AlsaVolume::nudge()
         return;
     }
     if (err < 0) {
-        qWarning().noquote() << "casdap volume: write failed on" << m_cardId << std::strerror(-err);
+        qWarning().noquote() << "microdap volume: write failed on" << m_cardId << std::strerror(-err);
         return;
     }
     m_hw = neighbor;
@@ -402,7 +402,7 @@ void AlsaVolume::onActivated()
         return;
     if (m_rewrites >= maxRewrites) {
         m_watch.stop();
-        qWarning().noquote() << "casdap volume: watch gave up on" << m_cardId << "after" << m_rewrites << "rewrites";
+        qWarning().noquote() << "microdap volume: watch gave up on" << m_cardId << "after" << m_rewrites << "rewrites";
         return;
     }
     ++m_rewrites;
@@ -422,7 +422,7 @@ void AlsaVolume::write()
         return;
     }
     if (err < 0) {
-        qWarning().noquote() << "casdap volume: write failed on" << m_cardId << std::strerror(-err);
+        qWarning().noquote() << "microdap volume: write failed on" << m_cardId << std::strerror(-err);
         return;
     }
     m_hw = m_owned;
@@ -430,7 +430,7 @@ void AlsaVolume::write()
 
 void AlsaVolume::lose(const char *reason)
 {
-    qWarning().noquote() << "casdap volume: hw:CARD=" + m_cardId << reason << "closing";
+    qWarning().noquote() << "microdap volume: hw:CARD=" + m_cardId << reason << "closing";
     closeMixer();
     QMetaObject::invokeMethod(this, &AlsaVolume::disconnected, Qt::QueuedConnection);
 }

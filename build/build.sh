@@ -5,10 +5,10 @@ cd "$(dirname "$0")/.."
 
 . build/base.env
 
-version="${CASDAP_VERSION:-unknown}"
-root="${CASDAP_BUILDER_ROOT:-}"
+version="${MICRODAP_VERSION:-unknown}"
+root="${MICRODAP_BUILDER_ROOT:-}"
 dist=dist
-share="${dist}/usr/share/casdap"
+share="${dist}/usr/share/microdap"
 
 fail() { echo "build.sh: $*" >&2; exit 1; }
 
@@ -52,13 +52,13 @@ echo "${version}" > "${share}/version"
     echo "BASE_IMAGE=${BASE_IMAGE}"
     echo "IMAGE_VERSION=${IMAGE_VERSION}"
     echo "VERSION_ID=${VERSION_ID}"
-    echo "CASDAP_VERSION=${version}"
+    echo "MICRODAP_VERSION=${version}"
     echo
     rpm -qa | sort
 } > "${share}/build-manifest"
 
-if [[ "${CASDAP_IMAGE:-0}" == 1 ]]; then
-    raw="casdap-${version}-armada${VERSION_ID}-arm64.raw"
+if [[ "${MICRODAP_IMAGE:-0}" == 1 ]]; then
+    raw="microdap-${version}-armada${VERSION_ID}-arm64.raw"
     rm -f "${raw}"
     mksquashfs "${dist}" "${raw}" -comp zstd -noappend -all-root -quiet
     echo "${raw}"

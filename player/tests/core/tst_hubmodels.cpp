@@ -8,7 +8,7 @@
 
 #include <algorithm>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -810,7 +810,7 @@ void HubModelsTest::scaleSongs()
     model.setKind(QStringLiteral("song"));
     model.setSource(&source);
     const qint64 ms = medianBuild(model);
-    qInfo("casdap perf: sectioned songs 8400 %lld ms", ms);
+    qInfo("microdap perf: sectioned songs 8400 %lld ms", ms);
     QCOMPARE(model.count(), 8400 + 27);
     QCOMPARE(model.letters().size(), 27);
     QVERIFY2(ms <= 20, qPrintable(QStringLiteral("%1 ms").arg(ms)));
@@ -824,7 +824,7 @@ void HubModelsTest::scaleAlbums()
     for (int columns : {3, 6}) {
         model.setColumns(columns);
         const qint64 ms = medianBuild(model);
-        qInfo("casdap perf: album grid 1200 at %d columns %lld ms", columns, ms);
+        qInfo("microdap perf: album grid 1200 at %d columns %lld ms", columns, ms);
         QCOMPARE(model.count(), (1200 + 27 + columns - 1) / columns);
         QVERIFY2(ms <= 10, qPrintable(QStringLiteral("%1 ms").arg(ms)));
     }
@@ -855,7 +855,7 @@ void HubModelsTest::scaleLookups()
     for (int i = 0; i < calls; ++i)
         sum += model.nearestFocusable((i * 7919) % (n + 2) - 1, (i & 1) ? 1 : -1);
     const qint64 nearUs = timer.nsecsElapsed() / 1000;
-    qInfo("casdap perf: sectioned lookups 8400 rows %d calls rowOfLetter %lld us firstRowOfLetter %lld us "
+    qInfo("microdap perf: sectioned lookups 8400 rows %d calls rowOfLetter %lld us firstRowOfLetter %lld us "
           "nearestFocusable %lld us",
           calls, rowUs, firstUs, nearUs);
     QVERIFY(sum > 0);
@@ -881,7 +881,7 @@ void HubModelsTest::scaleLookups()
     for (int i = 0; i < calls; ++i)
         hits += grid.rowOfLetter(gridLetters.at(i % gridLetters.size())) >= 0 ? 1 : 0;
     const qint64 gridUs = timer.nsecsElapsed() / 1000;
-    qInfo("casdap perf: album grid lookups 1200 albums %d calls rowOfLetter %lld us", calls, gridUs);
+    qInfo("microdap perf: album grid lookups 1200 albums %d calls rowOfLetter %lld us", calls, gridUs);
     QCOMPARE(hits, calls);
     QCOMPARE(grid.cellOfLetter(QStringLiteral("#")).value(QStringLiteral("col")).toInt(), 0);
     QVERIFY2(gridUs <= 50000, qPrintable(QStringLiteral("grid rowOfLetter %1 us").arg(gridUs)));

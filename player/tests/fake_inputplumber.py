@@ -20,8 +20,8 @@ OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager'
 PROPERTIES = 'org.freedesktop.DBus.Properties'
 COMPOSITE = 'org.shadowblip.Input.CompositeDevice'
 DBUS_DEVICE = 'org.shadowblip.Input.DBusDevice'
-CONTROL = 'org.casdap.FakeInputPlumber'
-CONTROL_PATH = '/org/casdap/FakeInputPlumber'
+CONTROL = 'net.seilent.MicroDap.FakeInputPlumber'
+CONTROL_PATH = '/net/seilent/MicroDap/FakeInputPlumber'
 TARGET_PREFIX = ROOT + '/devices/target/'
 
 

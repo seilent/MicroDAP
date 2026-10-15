@@ -16,7 +16,7 @@
 
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -384,9 +384,9 @@ void OutputModeTest::initTestCase()
                           .arg(m_stubLog, m_delay)
                           .toUtf8(),
                       true));
-    qputenv("CASDAP_ASOUND_DIR", m_asound.toUtf8());
-    qputenv("CASDAP_SYSTEMCTL_BIN", m_stub.toUtf8());
-    qputenv("CASDAP_WP_CONF_DIR", (m_dir.path() + QStringLiteral("/wireplumber.conf.d")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", m_asound.toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", m_stub.toUtf8());
+    qputenv("MICRODAP_WP_CONF_DIR", (m_dir.path() + QStringLiteral("/wireplumber.conf.d")).toUtf8());
 }
 
 void OutputModeTest::init()
@@ -2183,7 +2183,7 @@ void OutputModeTest::switchReadyDacNever()
         QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
         QElapsedTimer clock;
         clock.start();
-        QTest::ignoreMessage(QtInfoMsg, "casdap output: switch bound reached, dac eq not released");
+        QTest::ignoreMessage(QtInfoMsg, "microdap output: switch bound reached, dac eq not released");
         rig.mode->releaseForSwitch();
         QCOMPARE(ready.count(), 0);
         if (path == 2) {

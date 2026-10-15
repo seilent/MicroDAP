@@ -9,7 +9,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -86,10 +86,10 @@ void CodecTest::initTestCase()
     m_stub = m_dir.path() + QStringLiteral("/bin/systemctl");
     m_log = m_dir.path() + QStringLiteral("/calls.log");
     QVERIFY(writeStub());
-    qputenv("CASDAP_WP_CONF_DIR", m_confDir.toUtf8());
-    qputenv("CASDAP_SYSTEMCTL_BIN", m_stub.toUtf8());
+    qputenv("MICRODAP_WP_CONF_DIR", m_confDir.toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", m_stub.toUtf8());
     QCOMPARE(CodecFragment::confDir(), m_confDir);
-    QCOMPARE(CodecFragment::confPath(), m_confDir + QStringLiteral("/50-casdap-codec.conf"));
+    QCOMPARE(CodecFragment::confPath(), m_confDir + QStringLiteral("/50-microdap-codec.conf"));
     QCOMPARE(CodecFragment::systemctlPath(), m_stub);
 }
 
@@ -146,7 +146,7 @@ void CodecTest::unchangedSkipsRestart()
     QVERIFY(writeFile(CodecFragment::confPath(), CodecFragment::fragmentText(QStringLiteral("ldac"))));
     CodecFragment fragment;
     QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
-    QTest::ignoreMessage(QtInfoMsg, "casdap codec: \"ldac\" already in place");
+    QTest::ignoreMessage(QtInfoMsg, "microdap codec: \"ldac\" already in place");
     QVERIFY(fragment.apply(QStringLiteral("ldac")));
     QVERIFY(!fragment.restarting());
     QTest::qWait(100);
@@ -154,7 +154,7 @@ void CodecTest::unchangedSkipsRestart()
     QVERIFY(!QFile::exists(m_log));
 
     CodecFragment other;
-    QTest::ignoreMessage(QtInfoMsg, "casdap codec: \"auto\" already in place");
+    QTest::ignoreMessage(QtInfoMsg, "microdap codec: \"auto\" already in place");
     QVERIFY(QFile::remove(CodecFragment::confPath()));
     QVERIFY(other.apply(QStringLiteral("auto")));
     QVERIFY(!other.restarting());
@@ -217,26 +217,26 @@ void CodecTest::restartFailure()
     QVERIFY(writeStub(QStringLiteral("1")));
     CodecFragment fragment;
     QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
-    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QTest::ignoreMessage(QtWarningMsg, "microdap codec: wireplumber restart exit 1");
     QVERIFY(fragment.apply(QStringLiteral("aptx")));
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
     QVERIFY(!finished.at(0).at(0).toBool());
     QVERIFY(fragment.pending());
     QCOMPARE(readFile(CodecFragment::confPath()), CodecFragment::fragmentText(QStringLiteral("aptx")));
 
-    qputenv("CASDAP_SYSTEMCTL_BIN", (m_dir.path() + QStringLiteral("/missing/systemctl")).toUtf8());
-    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^casdap codec: cannot start ")));
+    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_dir.path() + QStringLiteral("/missing/systemctl")).toUtf8());
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^microdap codec: cannot start ")));
     QVERIFY(fragment.apply(QStringLiteral("ldac")));
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
     QVERIFY(!finished.at(1).at(0).toBool());
     QVERIFY(fragment.pending());
-    qputenv("CASDAP_SYSTEMCTL_BIN", m_stub.toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", m_stub.toUtf8());
 }
 
 void CodecTest::rejectsUnknown()
 {
     CodecFragment fragment;
-    QTest::ignoreMessage(QtWarningMsg, "casdap codec: unknown codec \"mp3\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap codec: unknown codec \"mp3\"");
     QVERIFY(!fragment.apply(QStringLiteral("mp3")));
     QCOMPARE(fragment.codec(), QStringLiteral("auto"));
     QVERIFY(!QFile::exists(CodecFragment::confPath()));
@@ -252,7 +252,7 @@ void CodecTest::netRestartLeavesPending()
     QSignalSpy pending(&fragment, &CodecFragment::pendingChanged);
     QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QTest::ignoreMessage(QtWarningMsg, "microdap codec: wireplumber restart exit 1");
     QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
     QVERIFY(fragment.restarting());
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
@@ -261,14 +261,14 @@ void CodecTest::netRestartLeavesPending()
     QCOMPARE(pending.count(), 0);
     QVERIFY(!QFile::exists(CodecFragment::confPath()));
 
-    qputenv("CASDAP_SYSTEMCTL_BIN", (m_dir.path() + QStringLiteral("/missing/systemctl")).toUtf8());
-    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^casdap codec: cannot start ")));
+    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_dir.path() + QStringLiteral("/missing/systemctl")).toUtf8());
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^microdap codec: cannot start ")));
     QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
     QVERIFY(!finished.at(1).at(0).toBool());
     QVERIFY(!fragment.pending());
     QCOMPARE(pending.count(), 0);
-    qputenv("CASDAP_SYSTEMCTL_BIN", m_stub.toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", m_stub.toUtf8());
 
     QVERIFY(writeStub());
     bluez.setTransportState(QStringLiteral("active"));
@@ -367,7 +367,7 @@ void CodecTest::netRestartClearsPending()
     CodecFragment fragment;
     fragment.setBluez(&bluez);
     QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
-    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QTest::ignoreMessage(QtWarningMsg, "microdap codec: wireplumber restart exit 1");
     QVERIFY(fragment.apply(QStringLiteral("aptx")));
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
     QVERIFY(fragment.pending());
@@ -393,7 +393,7 @@ void CodecTest::netRestartFailureKeepsPending()
     CodecFragment fragment;
     fragment.setBluez(&bluez);
     QSignalSpy finished(&fragment, &CodecFragment::restartFinished);
-    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QTest::ignoreMessage(QtWarningMsg, "microdap codec: wireplumber restart exit 1");
     QVERIFY(fragment.apply(QStringLiteral("aptx")));
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 1, waitMs);
     QVERIFY(fragment.pending());
@@ -401,7 +401,7 @@ void CodecTest::netRestartFailureKeepsPending()
     QVERIFY(writeStub(QStringLiteral("1"), QStringLiteral("0.3")));
     QVERIFY(fragment.restartForNet(QStringLiteral("dac sink missing")));
     bluez.setTransportState(QStringLiteral("idle"));
-    QTest::ignoreMessage(QtWarningMsg, "casdap codec: wireplumber restart exit 1");
+    QTest::ignoreMessage(QtWarningMsg, "microdap codec: wireplumber restart exit 1");
     QTRY_COMPARE_WITH_TIMEOUT(finished.count(), 2, waitMs);
     QVERIFY(!finished.at(1).at(0).toBool());
     QVERIFY(fragment.pending());

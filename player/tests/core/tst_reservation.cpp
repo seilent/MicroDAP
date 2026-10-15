@@ -20,7 +20,7 @@
 #include <cstdio>
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -32,7 +32,7 @@ const DeviceReservation::Bounds quick{1000, replyMs, nameLostMs};
 
 QString controlService()
 {
-    return QStringLiteral("org.casdap.FakeReserve");
+    return QStringLiteral("net.seilent.MicroDap.FakeReserve");
 }
 
 QString controlPath()
@@ -200,9 +200,9 @@ void ReservationTest::initTestCase()
     if (!QDBusConnection::sessionBus().isConnected())
         QSKIP("no session bus, run under dbus-run-session");
     QVERIFY(m_asound.isValid());
-    qputenv("CASDAP_ASOUND_DIR", m_asound.path().toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", m_asound.path().toUtf8());
     m_fake.setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    m_fake.start(QStringLiteral("python3"), {QStringLiteral(CASDAP_FAKE_RESERVE)});
+    m_fake.start(QStringLiteral("python3"), {QStringLiteral(MICRODAP_FAKE_RESERVE)});
     if (!m_fake.waitForStarted(busTimeoutMs))
         QSKIP("fake ReserveDevice1 did not start");
     QElapsedTimer timer;
@@ -492,8 +492,8 @@ void ReservationTest::killedHolder()
 {
     QProcess holder;
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("CASDAP_RESERVE_CHILD"), QStringLiteral("1"));
-    env.insert(QStringLiteral("CASDAP_RESERVE_BUS"), env.value(QStringLiteral("DBUS_SESSION_BUS_ADDRESS")));
+    env.insert(QStringLiteral("MICRODAP_RESERVE_CHILD"), QStringLiteral("1"));
+    env.insert(QStringLiteral("MICRODAP_RESERVE_BUS"), env.value(QStringLiteral("DBUS_SESSION_BUS_ADDRESS")));
     holder.setProcessEnvironment(env);
     holder.setProcessChannelMode(QProcess::ForwardedErrorChannel);
     holder.start(QCoreApplication::applicationFilePath(), {});
@@ -554,7 +554,7 @@ void ReservationTest::propertiesReadable()
     const QVariant priority = property(QStringLiteral("Priority"));
     QCOMPARE(priority.metaType(), QMetaType::fromType<int>());
     QCOMPARE(priority.toInt(), 10);
-    QCOMPARE(property(QStringLiteral("ApplicationName")).toString(), QStringLiteral("casdap"));
+    QCOMPARE(property(QStringLiteral("ApplicationName")).toString(), QStringLiteral("microdap"));
     QCOMPARE(property(QStringLiteral("ApplicationDeviceName")).toString(), QStringLiteral("hw:CARD=B"));
 }
 
@@ -568,13 +568,13 @@ void ReservationTest::connectionLostOnBusDrop()
         QSKIP("no dbus-daemon");
     QByteArray address;
     QTRY_VERIFY_WITH_TIMEOUT((address += daemon.readAllStandardOutput()).contains('\n'), busTimeoutMs);
-    qputenv("CASDAP_RESERVE_BUS", address.trimmed());
+    qputenv("MICRODAP_RESERVE_BUS", address.trimmed());
     m_reservation = std::make_unique<DeviceReservation>(quick);
     QSignalSpy acquired(m_reservation.get(), &DeviceReservation::acquired);
     QSignalSpy dropped(m_reservation.get(), &DeviceReservation::connectionLost);
     m_reservation->acquire(reserveName(), cardId(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(acquired.count(), 1, busTimeoutMs);
-    qunsetenv("CASDAP_RESERVE_BUS");
+    qunsetenv("MICRODAP_RESERVE_BUS");
     QVERIFY(!m_reservation->waitReleased(0));
     daemon.kill();
     QVERIFY(daemon.waitForFinished(busTimeoutMs));
@@ -584,7 +584,7 @@ void ReservationTest::connectionLostOnBusDrop()
 
 int main(int argc, char *argv[])
 {
-    if (qEnvironmentVariableIntValue("CASDAP_RESERVE_CHILD") == 1)
+    if (qEnvironmentVariableIntValue("MICRODAP_RESERVE_CHILD") == 1)
         return child(argc, argv);
     QCoreApplication app(argc, argv);
     ReservationTest test;

@@ -24,7 +24,7 @@ struct pa_glib_mainloop;
 
 class QSocketNotifier;
 
-namespace casdap {
+namespace microdap {
 
 class AlsaVolume;
 class Settings;

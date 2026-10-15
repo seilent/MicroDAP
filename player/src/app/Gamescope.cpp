@@ -12,7 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -49,7 +49,7 @@ bool applyOverlayAtoms(QWindow *window, bool fullscreen)
         return false;
     auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
     if (!x11 || !x11->connection()) {
-        QTextStream(stderr) << "casdap-player: overlay mode needs the xcb platform\n";
+        QTextStream(stderr) << "microdap-player: overlay mode needs the xcb platform\n";
         return false;
     }
     if (!window->handle()) {
@@ -75,12 +75,12 @@ bool applyOverlayAtoms(QWindow *window, bool fullscreen)
 void claimGamescopeFocus(QWindow *window)
 {
     bool ok = false;
-    const uint32_t appId = qEnvironmentVariable("CASDAP_GAMESCOPE_APPID").toUInt(&ok, 0);
+    const uint32_t appId = qEnvironmentVariable("MICRODAP_GAMESCOPE_APPID").toUInt(&ok, 0);
     if (!ok || appId == 0 || !window)
         return;
     auto *x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
     if (!x11) {
-        QTextStream(stderr) << "casdap-player: CASDAP_GAMESCOPE_APPID set but the platform is not xcb\n";
+        QTextStream(stderr) << "microdap-player: MICRODAP_GAMESCOPE_APPID set but the platform is not xcb\n";
         return;
     }
     xcb_connection_t *connection = x11->connection();

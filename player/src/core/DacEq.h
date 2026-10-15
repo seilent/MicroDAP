@@ -15,7 +15,7 @@
 #include <memory>
 #include <optional>
 
-namespace casdap {
+namespace microdap {
 
 class EqControl;
 struct EqProfile;
@@ -135,7 +135,7 @@ private:
     std::optional<Want> want() const;
     void plan();
     void post(const Want &want);
-    void onBatchDone(quint64 seq, bool ok, int reason, const casdap::FiioMirror &mirror);
+    void onBatchDone(quint64 seq, bool ok, int reason, const microdap::FiioMirror &mirror);
     void fail(Record &record, const Inflight &done, FiioReason reason);
     bool gateOpen(const Record &record) const;
     void checkGate();

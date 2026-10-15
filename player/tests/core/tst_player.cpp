@@ -34,7 +34,7 @@
 #include <utility>
 #include <vector>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -212,10 +212,10 @@ namespace {
 
 std::unique_ptr<Player> syncPlayer(Library *library = nullptr)
 {
-    const QByteArray sink = qgetenv("CASDAP_AUDIO_SINK");
-    qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    const QByteArray sink = qgetenv("MICRODAP_AUDIO_SINK");
+    qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
     auto player = std::make_unique<Player>(library);
-    qputenv("CASDAP_AUDIO_SINK", sink);
+    qputenv("MICRODAP_AUDIO_SINK", sink);
     return player;
 }
 
@@ -304,9 +304,9 @@ std::unique_ptr<Player> withEnv(const char *name, const QByteArray &value)
 }
 
 std::unique_ptr<Player> exclusivePlayer(
-    const QByteArray &description = QByteArrayLiteral("fakesink sync=false name=casdap-ex"))
+    const QByteArray &description = QByteArrayLiteral("fakesink sync=false name=microdap-ex"))
 {
-    return withEnv("CASDAP_EXCLUSIVE_SINK", description);
+    return withEnv("MICRODAP_EXCLUSIVE_SINK", description);
 }
 
 QAtomicInt glibWarnings;
@@ -417,7 +417,7 @@ std::vector<double> coeffArray(GstElement *band, const char *name)
 
 GstElement *eqBand(Player &player, int index)
 {
-    const QByteArray name = "casdap-b" + QByteArray::number(index);
+    const QByteArray name = "microdap-b" + QByteArray::number(index);
     return gst_bin_get_by_name(GST_BIN(player.audioFilter()), name.constData());
 }
 
@@ -452,7 +452,7 @@ BiquadCoeffs bandExpected(const EqBand &band, int rate)
 
 double preampOf(Player &player)
 {
-    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp");
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "microdap-preamp");
     double volume = -1.0;
     if (preamp) {
         g_object_get(preamp, "volume", &volume, nullptr);
@@ -534,7 +534,7 @@ Watches watchEq(Player &player, NotifyLog &log)
         watches.append({GST_ELEMENT(gst_object_ref(band)),
                         g_signal_connect(band, "notify::a", G_CALLBACK(onNotify), &log)});
     }
-    if (GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp"))
+    if (GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "microdap-preamp"))
         watches.append({preamp, g_signal_connect(preamp, "notify::volume", G_CALLBACK(onNotify), &log)});
     return watches;
 }
@@ -573,12 +573,12 @@ int PlayerTest::historyCount() const
 void PlayerTest::initTestCase()
 {
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
 
     QVERIFY(m_dir.isValid());
     m_music = m_dir.path() + QStringLiteral("/music");
-    QVERIFY(copyTree(QStringLiteral(CASDAP_FIXTURE_MUSIC), m_music));
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC), m_music));
 
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
@@ -875,10 +875,10 @@ void PlayerTest::positionWithoutPoll()
     entry.durationMs = 6000;
     QVERIFY(encodeSine(entry.path, 6));
 
-    const QByteArray sink = qgetenv("CASDAP_AUDIO_SINK");
-    qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    const QByteArray sink = qgetenv("MICRODAP_AUDIO_SINK");
+    qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
     Player player;
-    qputenv("CASDAP_AUDIO_SINK", sink);
+    qputenv("MICRODAP_AUDIO_SINK", sink);
     QVERIFY(player.isValid());
     player.setPositionPollEnabled(false);
     QVERIFY(!player.positionPollEnabled());
@@ -929,7 +929,7 @@ void PlayerTest::rating()
 
 void PlayerTest::stateRoundTrip()
 {
-    QVERIFY(State::defaultPath().endsWith(QStringLiteral("/casdap/state.json")));
+    QVERIFY(State::defaultPath().endsWith(QStringLiteral("/microdap/state.json")));
     const QString path = m_dir.path() + QStringLiteral("/state/state.json");
     {
         Player player;
@@ -1049,9 +1049,9 @@ void PlayerTest::stateHandoff()
 void PlayerTest::eqFilter()
 {
     {
-        qputenv("CASDAP_EQ_DISABLE", QByteArrayLiteral("1"));
+        qputenv("MICRODAP_EQ_DISABLE", QByteArrayLiteral("1"));
         Player player;
-        qunsetenv("CASDAP_EQ_DISABLE");
+        qunsetenv("MICRODAP_EQ_DISABLE");
         QVERIFY(player.isValid());
         QVERIFY(!player.audioFilter());
     }
@@ -1093,7 +1093,7 @@ void PlayerTest::eqElements()
 {
     Player player;
     QVERIFY(player.audioFilter());
-    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "casdap-preamp");
+    GstElement *preamp = gst_bin_get_by_name(GST_BIN(player.audioFilter()), "microdap-preamp");
     QVERIFY(preamp);
     GstPad *sinkPad = gst_element_get_static_pad(preamp, "sink");
     GstPad *upstream = gst_pad_get_peer(sinkPad);
@@ -1118,9 +1118,9 @@ void PlayerTest::eqElements()
         element = next;
     }
     QCOMPARE(chain.size(), EqProfile::bandCount + 2);
-    QCOMPARE(chain.first(), QStringLiteral("casdap-preamp"));
+    QCOMPARE(chain.first(), QStringLiteral("microdap-preamp"));
     for (int i = 0; i < EqProfile::bandCount; ++i) {
-        QCOMPARE(chain.at(i + 1), QStringLiteral("casdap-b%1").arg(i));
+        QCOMPARE(chain.at(i + 1), QStringLiteral("microdap-b%1").arg(i));
         GstElement *band = gst_bin_get_by_name(GST_BIN(player.audioFilter()), chain.at(i + 1).toUtf8().constData());
         QVERIFY(band);
         QCOMPARE(QString::fromUtf8(GST_OBJECT_NAME(gst_element_get_factory(band))), QStringLiteral("audioiirfilter"));
@@ -1358,10 +1358,10 @@ void PlayerTest::eqPreampWithBands()
 
 void PlayerTest::eqHammer()
 {
-    auto player = withEnv("CASDAP_AUDIO_SINK",
-                          QByteArrayLiteral("appsink name=casdap-hammer sync=true caps=audio/x-raw,format=F32LE"));
+    auto player = withEnv("MICRODAP_AUDIO_SINK",
+                          QByteArrayLiteral("appsink name=microdap-hammer sync=true caps=audio/x-raw,format=F32LE"));
     QVERIFY(player->audioSink());
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "casdap-hammer");
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-hammer");
     QVERIFY(sink);
 
     std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
@@ -1445,10 +1445,10 @@ void PlayerTest::resumeSeeksBeforeAudio()
     entry.title = QStringLiteral("Resume");
     entry.durationMs = 100000;
     QVERIFY(encodeSine(entry.path, 100));
-    auto player = withEnv("CASDAP_AUDIO_SINK",
-                          QByteArrayLiteral("appsink name=casdap-resume sync=false caps=audio/x-raw,format=F32LE"));
+    auto player = withEnv("MICRODAP_AUDIO_SINK",
+                          QByteArrayLiteral("appsink name=microdap-resume sync=false caps=audio/x-raw,format=F32LE"));
     QVERIFY(player->audioSink());
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "casdap-resume");
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-resume");
     QVERIFY(sink);
     std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
 
@@ -1762,13 +1762,13 @@ void PlayerTest::errorAllRows()
     }
     Player player;
     QSignalSpy started(&player, &Player::trackStarted);
-    QTest::ignoreMessage(QtWarningMsg, "casdap: no playable track");
+    QTest::ignoreMessage(QtWarningMsg, "microdap: no playable track");
     player.restore(entries, 0, 0);
     QTRY_COMPARE_WITH_TIMEOUT(player.status(), Player::Stopped, playTimeoutMs);
     QCOMPARE(player.queue()->currentIndex(), 0);
     QCOMPARE(started.count(), 0);
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap: no playable track");
+    QTest::ignoreMessage(QtWarningMsg, "microdap: no playable track");
     player.queue()->setRepeat(Queue::All);
     player.restore(entries, 2, 0);
     QTRY_COMPARE_WITH_TIMEOUT(player.status(), Player::Stopped, playTimeoutMs);
@@ -2040,7 +2040,7 @@ void PlayerTest::playSource()
     QCOMPARE(player.queue()->count(), albumSize);
     QCOMPARE(player.status(), Player::Paused);
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap player: unknown source mode \"jump\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap player: unknown source mode \"jump\"");
     QCOMPARE(player.playSource(QStringLiteral("album"), albumId, QStringLiteral("jump")), 0);
     QCOMPARE(player.playSource(QStringLiteral("album"), 999999, QStringLiteral("play")), 0);
     QCOMPARE(player.queue()->count(), albumSize);
@@ -2377,7 +2377,7 @@ void PlayerTest::chainRoundTrip()
     QCOMPARE(player->builtChain(), Chain::Ex);
     QVERIFY(!builtFilter(*player));
     QVERIFY(!player->audioFilter());
-    GstElement *named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "casdap-ex");
+    GstElement *named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "microdap-ex");
     QVERIFY(named);
     gst_object_unref(named);
 
@@ -2390,7 +2390,7 @@ void PlayerTest::chainRoundTrip()
     QCOMPARE(player->builtChain(), Chain::Pw);
     QCOMPARE(builtFilter(*player), eq);
     QCOMPARE(player->audioFilter(), eq);
-    named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "casdap-ex");
+    named = gst_bin_get_by_name(GST_BIN(builtSink(*player)), "microdap-ex");
     QVERIFY(!named);
     QTRY_COMPARE_WITH_TIMEOUT(player->eqBandSets(0), 1, playTimeoutMs);
     QVERIFY(bandIs(*player, 0, bandExpected(profile.bands[0], 44100)));
@@ -2847,7 +2847,7 @@ void PlayerTest::playingBuildAtPosition()
 
 void PlayerTest::badSinkConfigure()
 {
-    auto player = exclusivePlayer(QByteArrayLiteral("nosuchelement-casdap"));
+    auto player = exclusivePlayer(QByteArrayLiteral("nosuchelement-microdap"));
     FakePolicy policy;
     policy.chain = Chain::Ex;
     player->setPolicy(&policy);
@@ -2881,7 +2881,7 @@ void PlayerTest::badSinkConfigure()
     QCOMPARE(errors.count(), 0);
     player->stop();
 
-    auto bad = withEnv("CASDAP_AUDIO_SINK", QByteArrayLiteral("nosuchelement-casdap"));
+    auto bad = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("nosuchelement-microdap"));
     FakePolicy bpPolicy;
     bpPolicy.chain = Chain::Bp;
     bad->setPolicy(&bpPolicy);

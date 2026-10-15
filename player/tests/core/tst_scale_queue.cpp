@@ -15,7 +15,7 @@
 #include <functional>
 #include <memory>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -56,7 +56,7 @@ double medianMs(const std::function<void()> &run, const std::function<void()> &p
 
 void report(const char *name, double ms, double budget)
 {
-    qInfo().noquote() << QStringLiteral("casdap perf: %1 %2 ms (budget %3)").arg(QLatin1String(name)).arg(ms, 0, 'f', 2).arg(budget);
+    qInfo().noquote() << QStringLiteral("microdap perf: %1 %2 ms (budget %3)").arg(QLatin1String(name)).arg(ms, 0, 'f', 2).arg(budget);
 }
 
 }
@@ -83,8 +83,8 @@ private:
 void ScaleQueueTest::initTestCase()
 {
     gst_init(nullptr, nullptr);
-    if (!qEnvironmentVariableIsSet("CASDAP_AUDIO_SINK"))
-        qputenv("CASDAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
+    if (!qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=false"));
     QVERIFY(m_dir.isValid());
     m_entries = syntheticEntries(queueSize);
 }

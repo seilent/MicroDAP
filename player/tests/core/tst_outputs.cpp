@@ -12,7 +12,7 @@
 
 #include <sys/stat.h>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -178,12 +178,12 @@ void OutputsTest::refreshSync()
 
 void OutputsTest::defaultRoot()
 {
-    qunsetenv("CASDAP_DRM_ROOT");
+    qunsetenv("MICRODAP_DRM_ROOT");
     QCOMPARE(OutputWatch::defaultRoot(), QStringLiteral("/sys/class/drm"));
-    qputenv("CASDAP_DRM_ROOT", m_dir->path().toUtf8());
+    qputenv("MICRODAP_DRM_ROOT", m_dir->path().toUtf8());
     QCOMPARE(OutputWatch::defaultRoot(), m_dir->path());
     QVERIFY(OutputWatch().internal());
-    qunsetenv("CASDAP_DRM_ROOT");
+    qunsetenv("MICRODAP_DRM_ROOT");
 }
 
 QTEST_MAIN(OutputsTest)

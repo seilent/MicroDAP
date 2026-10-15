@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QString>
 
-namespace casdap {
+namespace microdap {
 
 class BluezModel : public QObject
 {

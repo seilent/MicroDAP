@@ -1,0 +1,6 @@
+[Unit]
+Description=MicroDAP privileged helper %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/microdap/microdap-priv %i

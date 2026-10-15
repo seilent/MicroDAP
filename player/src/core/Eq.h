@@ -15,7 +15,7 @@
 #include <array>
 #include <optional>
 
-namespace casdap {
+namespace microdap {
 
 class OutputControl;
 class Settings;
@@ -67,9 +67,9 @@ struct EqProfile
 
 }
 
-Q_DECLARE_METATYPE(casdap::EqProfile)
+Q_DECLARE_METATYPE(microdap::EqProfile)
 
-namespace casdap {
+namespace microdap {
 
 struct EqGrid
 {
@@ -180,7 +180,7 @@ signals:
     void revisionChanged();
     void profilesChanged();
     void profileChanged(const QString &output);
-    void profileApplied(const casdap::EqProfile &profile);
+    void profileApplied(const microdap::EqProfile &profile);
 
 private:
     std::optional<EqProfile> fileProfile(const QString &path) const;

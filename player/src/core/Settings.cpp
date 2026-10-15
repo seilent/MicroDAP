@@ -8,7 +8,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -175,7 +175,7 @@ Settings::~Settings()
 QString Settings::defaultPath()
 {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-           + QStringLiteral("/casdap/settings.ini");
+           + QStringLiteral("/microdap/settings.ini");
 }
 
 QStringList Settings::outputs()

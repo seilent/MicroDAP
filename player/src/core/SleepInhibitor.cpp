@@ -7,7 +7,7 @@
 
 #include <unistd.h>
 
-namespace casdap {
+namespace microdap {
 
 SleepInhibitor::SleepInhibitor(const QString &why, QObject *parent)
     : SleepInhibitor(bus(), why, parent)
@@ -20,13 +20,13 @@ SleepInhibitor::SleepInhibitor(const QDBusConnection &bus, const QString &why, Q
     , m_why(why)
 {
     if (!m_bus.isConnected()) {
-        qWarning() << "casdap sleep: login1 bus not connected";
+        qWarning() << "microdap sleep: login1 bus not connected";
         return;
     }
     m_subscribed = m_bus.connect(service(), path(), interface(), QStringLiteral("PrepareForSleep"), this,
                                  SLOT(onPrepareForSleep(bool)));
     if (!m_subscribed)
-        qWarning() << "casdap sleep: cannot subscribe to PrepareForSleep" << m_bus.lastError().message();
+        qWarning() << "microdap sleep: cannot subscribe to PrepareForSleep" << m_bus.lastError().message();
 }
 
 SleepInhibitor::~SleepInhibitor()
@@ -36,10 +36,10 @@ SleepInhibitor::~SleepInhibitor()
 
 QDBusConnection SleepInhibitor::bus()
 {
-    const QString address = qEnvironmentVariable("CASDAP_LOGIN1_BUS");
+    const QString address = qEnvironmentVariable("MICRODAP_LOGIN1_BUS");
     if (address.isEmpty())
         return QDBusConnection::systemBus();
-    return QDBusConnection::connectToBus(address, QStringLiteral("casdap-login1"));
+    return QDBusConnection::connectToBus(address, QStringLiteral("microdap-login1"));
 }
 
 QString SleepInhibitor::service()
@@ -84,24 +84,24 @@ bool SleepInhibitor::take()
     if (!m_bus.isConnected())
         return false;
     QDBusMessage call = QDBusMessage::createMethodCall(service(), path(), interface(), QStringLiteral("Inhibit"));
-    call << QStringLiteral("sleep") << QStringLiteral("casdap") << m_why << QStringLiteral("delay");
+    call << QStringLiteral("sleep") << QStringLiteral("microdap") << m_why << QStringLiteral("delay");
     const QDBusMessage reply = m_bus.call(call, QDBus::Block, 2000);
     if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
-        qWarning() << "casdap sleep: Inhibit failed" << reply.errorMessage();
+        qWarning() << "microdap sleep: Inhibit failed" << reply.errorMessage();
         return false;
     }
     const auto descriptor = qvariant_cast<QDBusUnixFileDescriptor>(reply.arguments().constFirst());
     if (!descriptor.isValid()) {
-        qWarning() << "casdap sleep: Inhibit returned no descriptor";
+        qWarning() << "microdap sleep: Inhibit returned no descriptor";
         return false;
     }
     m_fd = ::dup(descriptor.fileDescriptor());
     if (m_fd < 0) {
-        qWarning() << "casdap sleep: cannot keep the inhibitor descriptor";
+        qWarning() << "microdap sleep: cannot keep the inhibitor descriptor";
         return false;
     }
     ++m_takeCount;
-    qInfo() << "casdap sleep: delay inhibitor taken," << m_why;
+    qInfo() << "microdap sleep: delay inhibitor taken," << m_why;
     emit heldChanged();
     return true;
 }
@@ -112,13 +112,13 @@ void SleepInhibitor::release()
         return;
     ::close(m_fd);
     m_fd = -1;
-    qInfo() << "casdap sleep: delay inhibitor released";
+    qInfo() << "microdap sleep: delay inhibitor released";
     emit heldChanged();
 }
 
 void SleepInhibitor::onPrepareForSleep(bool start)
 {
-    qInfo() << "casdap sleep: PrepareForSleep" << start;
+    qInfo() << "microdap sleep: PrepareForSleep" << start;
     emit prepareForSleep(start);
 }
 

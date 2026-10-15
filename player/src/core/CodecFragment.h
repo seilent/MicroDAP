@@ -5,7 +5,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace casdap {
+namespace microdap {
 
 class BluezModel;
 

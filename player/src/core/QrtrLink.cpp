@@ -10,7 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -53,7 +53,7 @@ bool QrtrLink::send(quint32 node, quint32 port, const QByteArray &bytes)
     const ssize_t sent = ::sendto(m_fd, bytes.constData(), size_t(bytes.size()), 0,
                                   reinterpret_cast<const sockaddr *>(&addr), sizeof(addr));
     if (sent < 0) {
-        qWarning() << "casdap sensor: ssc sendto failed" << std::strerror(errno);
+        qWarning() << "microdap sensor: ssc sendto failed" << std::strerror(errno);
         return false;
     }
     return true;
@@ -69,13 +69,13 @@ bool QrtrLink::openSocket()
 {
     const int fd = ::socket(AF_QIPCRTR, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (fd < 0) {
-        qWarning() << "casdap sensor: ssc socket unavailable" << std::strerror(errno);
+        qWarning() << "microdap sensor: ssc socket unavailable" << std::strerror(errno);
         return false;
     }
     sockaddr_qrtr addr{};
     socklen_t len = sizeof(addr);
     if (::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) < 0) {
-        qWarning() << "casdap sensor: ssc getsockname failed" << std::strerror(errno);
+        qWarning() << "microdap sensor: ssc getsockname failed" << std::strerror(errno);
         ::close(fd);
         return false;
     }
@@ -111,7 +111,7 @@ void QrtrLink::drain()
                 continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 return;
-            qWarning() << "casdap sensor: ssc recvfrom failed" << std::strerror(errno);
+            qWarning() << "microdap sensor: ssc recvfrom failed" << std::strerror(errno);
             closeSocket();
             emit failed();
             return;

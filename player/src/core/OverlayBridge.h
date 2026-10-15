@@ -14,7 +14,7 @@
 
 #include <functional>
 
-namespace casdap {
+namespace microdap {
 
 class DbusPad;
 class Player;

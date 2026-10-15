@@ -8,7 +8,7 @@
 
 #include <functional>
 
-namespace casdap {
+namespace microdap {
 
 class ReservationPort
 {

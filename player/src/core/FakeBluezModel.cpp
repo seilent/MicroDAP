@@ -1,6 +1,6 @@
 #include "FakeBluezModel.h"
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 

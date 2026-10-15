@@ -6,7 +6,7 @@
 #include <QStringList>
 #include <QTimer>
 
-namespace casdap {
+namespace microdap {
 
 class RgbControl : public QObject
 {

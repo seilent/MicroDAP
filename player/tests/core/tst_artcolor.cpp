@@ -13,7 +13,7 @@
 #include <QTest>
 #include <QUrl>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -603,10 +603,10 @@ void ArtColorTest::logLines()
     QVERIFY(!pastel.isEmpty());
 
     AccentControl accent;
-    QTest::ignoreMessage(QtInfoMsg, "casdap accent: hue 280 s 4 (slider)");
+    QTest::ignoreMessage(QtInfoMsg, "microdap accent: hue 280 s 4 (slider)");
     accent.setSliderHue(280);
-    QTest::ignoreMessage(QtInfoMsg, qPrintable(QStringLiteral("casdap accent: art hue 0 s 1 for %1").arg(pastel)));
-    QTest::ignoreMessage(QtInfoMsg, "casdap accent: hue 0 s 1 (art)");
+    QTest::ignoreMessage(QtInfoMsg, qPrintable(QStringLiteral("microdap accent: art hue 0 s 1 for %1").arg(pastel)));
+    QTest::ignoreMessage(QtInfoMsg, "microdap accent: hue 0 s 1 (art)");
     accent.setFromArt(true);
     accent.setArtPath(pastel);
     QTRY_COMPARE_WITH_TIMEOUT(accent.level(), 1, waitMs);

@@ -2,7 +2,7 @@
 
 class QWindow;
 
-namespace casdap {
+namespace microdap {
 
 void claimGamescopeFocus(QWindow *window);
 bool setOverlayAtoms(QWindow *window);

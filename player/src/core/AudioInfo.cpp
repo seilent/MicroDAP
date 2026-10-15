@@ -11,7 +11,7 @@
 
 #include <algorithm>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -125,7 +125,7 @@ void AudioInfo::setActive(bool active)
 
 QString AudioInfo::asoundDir()
 {
-    return qEnvironmentVariable("CASDAP_ASOUND_DIR", QStringLiteral("/proc/asound"));
+    return qEnvironmentVariable("MICRODAP_ASOUND_DIR", QStringLiteral("/proc/asound"));
 }
 
 QString AudioInfo::parseState(const QString &text)
@@ -157,7 +157,7 @@ QString AudioInfo::hwParamsPath()
 
 QString AudioInfo::pwDumpPath()
 {
-    const QString value = qEnvironmentVariable("CASDAP_PW_DUMP_BIN", QStringLiteral("pw-dump"));
+    const QString value = qEnvironmentVariable("MICRODAP_PW_DUMP_BIN", QStringLiteral("pw-dump"));
     if (value.contains(QLatin1Char('/')))
         return QFile::exists(value) ? value : QString();
     return QStandardPaths::findExecutable(value);
@@ -287,7 +287,7 @@ void AudioInfo::refreshGraphRate()
     connect(m_dump, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
-        qWarning() << "casdap audio: cannot start" << m_dump->program();
+        qWarning() << "microdap audio: cannot start" << m_dump->program();
         m_dump->deleteLater();
         m_dump = nullptr;
         m_pwRate = 0;

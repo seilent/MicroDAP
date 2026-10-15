@@ -10,7 +10,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-using namespace casdap;
+using namespace microdap;
 
 namespace {
 
@@ -162,11 +162,11 @@ void OutputTest::initTestCase()
                       true));
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
-    qputenv("CASDAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
-    qputenv("CASDAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
-    qputenv("CASDAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
-    qputenv("CASDAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
+    qputenv("MICRODAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
+    qputenv("MICRODAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
+    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
+    qputenv("MICRODAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
     QCOMPARE(OutputControl::wpctlPath(), m_bin + QStringLiteral("/wpctl"));
     QCOMPARE(OutputControl::pactlPath(), m_bin + QStringLiteral("/pactl"));
     QCOMPARE(OutputControl::amixerPath(), m_bin + QStringLiteral("/amixer"));
@@ -182,7 +182,7 @@ void OutputTest::init()
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
     QVERIFY(writeFile(m_cardIdFile, QStringLiteral("B\n")));
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
 }
 
 int OutputTest::count(const QString &line) const
@@ -202,7 +202,7 @@ void OutputTest::parsesSinks()
     QCOMPARE(OutputControl::parseSinks(QString()), QStringList());
     QCOMPARE(OutputControl::parseSinks(QStringLiteral("Connection failure: Connection refused\n")), QStringList());
     QCOMPARE(OutputControl::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")}));
-    QCOMPARE(OutputControl::unitFor(QStringLiteral("hp-gain-low")), QStringLiteral("casdap-priv@hp-gain-low.service"));
+    QCOMPARE(OutputControl::unitFor(QStringLiteral("hp-gain-low")), QStringLiteral("microdap-priv@hp-gain-low.service"));
 }
 
 void OutputTest::parsesJack()
@@ -340,7 +340,7 @@ void OutputTest::speakerAndHeadphonesForced()
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
     QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::headphonesSink())));
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap output: unknown output \"bt\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown output \"bt\"");
     control.apply(QStringLiteral("bt"));
     QCOMPARE(control.output(), QStringLiteral("headphones"));
 }
@@ -350,7 +350,7 @@ void OutputTest::missingSink()
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsbOnly)));
     OutputControl control;
     QSignalSpy applied(&control, &OutputControl::applied);
-    QTest::ignoreMessage(QtWarningMsg, "casdap output: sink not listed \"alsa_output.platform-sound.HiFi__Speaker__sink\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap output: sink not listed \"alsa_output.platform-sound.HiFi__Speaker__sink\"");
     control.apply(QStringLiteral("speaker"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
     QVERIFY(!applied.at(0).at(1).toBool());
@@ -408,7 +408,7 @@ void OutputTest::usbEdgeReappliesAndGatesHeadphoneWords()
     QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
     const QString log = readFile(m_log);
     QVERIFY2(log.contains(setDefault(OutputControl::headphonesSink())
-                          + QStringLiteral("systemctl start casdap-priv@hp-gain-high.service\nsystemctl start casdap-priv@hp-amp-hifi.service\n")),
+                          + QStringLiteral("systemctl start microdap-priv@hp-gain-high.service\nsystemctl start microdap-priv@hp-amp-hifi.service\n")),
              qPrintable(log));
 
     QFile::remove(m_log);
@@ -474,7 +474,7 @@ void OutputTest::headphoneWordsDirect()
     QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("hp-gain-normal"));
     QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
     QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-priv@hp-gain-normal.service\nsystemctl start casdap-priv@hp-amp-lohifi.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-priv@hp-gain-normal.service\nsystemctl start microdap-priv@hp-amp-lohifi.service\n"));
 
     QFile::remove(m_log);
     control.apply(QStringLiteral("headphones"));
@@ -484,7 +484,7 @@ void OutputTest::headphoneWordsDirect()
     QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
 
     QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "casdap output: unknown headphone setting \"max\" \"lohifi\"");
+    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown headphone setting \"max\" \"lohifi\"");
     control.setHeadphone(QStringLiteral("max"), QStringLiteral("lohifi"));
     QCOMPARE(control.hpGain(), QStringLiteral("normal"));
     QTest::qWait(200);
@@ -542,15 +542,15 @@ void OutputTest::speakerGainWords()
     QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("spk-gain-90"));
     QVERIFY(applied.at(0).at(1).toBool());
     QVERIFY(!control.busy());
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-priv@spk-gain-90.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-priv@spk-gain-90.service\n"));
 
     QFile::remove(m_log);
     control.setSpkGain(90);
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start casdap-priv@spk-gain-90.service\n"));
+    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-priv@spk-gain-90.service\n"));
 
     QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "casdap output: unknown speaker gain 91");
+    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown speaker gain 91");
     control.setSpkGain(91);
     QCOMPARE(control.spkGain(), 90);
     QTest::qWait(200);
@@ -560,9 +560,9 @@ void OutputTest::speakerGainWords()
 
 void OutputTest::missingBinaries()
 {
-    qputenv("CASDAP_WPCTL_BIN", (m_dir.path() + QStringLiteral("/missing/wpctl")).toUtf8());
-    qputenv("CASDAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
-    qputenv("CASDAP_AMIXER_BIN", (m_dir.path() + QStringLiteral("/missing/amixer")).toUtf8());
+    qputenv("MICRODAP_WPCTL_BIN", (m_dir.path() + QStringLiteral("/missing/wpctl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
+    qputenv("MICRODAP_AMIXER_BIN", (m_dir.path() + QStringLiteral("/missing/amixer")).toUtf8());
     OutputControl control;
     QSignalSpy applied(&control, &OutputControl::applied);
     control.apply(QStringLiteral("speaker"));
@@ -574,9 +574,9 @@ void OutputTest::missingBinaries()
     QTest::qWait(200);
     QVERIFY(!control.jackPresent());
     QVERIFY(!control.usbPresent());
-    qputenv("CASDAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
-    qputenv("CASDAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
+    qputenv("MICRODAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
+    qputenv("MICRODAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
 }
 
 void OutputTest::heldKeepsUsb()
@@ -753,7 +753,7 @@ void OutputTest::rereadDuringRead()
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
     QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
 
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
     QVERIFY(writeFile(m_gateFile, QString()));
     QFile::remove(m_log);
     control.refresh();
@@ -775,7 +775,7 @@ void OutputTest::rereadDuringRead()
 
 void OutputTest::rereadDuringApply()
 {
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
     QVERIFY(writeFile(m_gateFile, QString()));
     OutputControl control;
     QSignalSpy applied(&control, &OutputControl::applied);
@@ -801,7 +801,7 @@ void OutputTest::rereadDuringApply()
 
 void OutputTest::eqLoadsResolvedOutput()
 {
-    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-resolved")).toUtf8());
+    qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-resolved")).toUtf8());
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
     Settings settings(m_dir.path() + QStringLiteral("/eq-resolved.ini"));
     EqControl eq(&settings);
@@ -823,8 +823,8 @@ void OutputTest::eqLoadsResolvedOutput()
 
 void OutputTest::eqBoundLoadsSinkDefault()
 {
-    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-bound")).toUtf8());
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-bound")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
     QVERIFY(writeFile(m_defaultFile, OutputControl::headphonesSink() + QStringLiteral("\n")));
     QVERIFY(writeFile(m_gateFile, QString()));
@@ -854,7 +854,7 @@ void OutputTest::eqBoundLoadsSinkDefault()
 
 void OutputTest::eqFailedResolveLoadsSinkDefault()
 {
-    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-failed")).toUtf8());
+    qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-failed")).toUtf8());
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsbOnly)));
     QVERIFY(writeFile(m_defaultFile, QStringLiteral("alsa_output.usb-DAC.analog-stereo\n")));
     Settings settings(m_dir.path() + QStringLiteral("/eq-failed.ini"));
@@ -878,8 +878,8 @@ void OutputTest::eqFailedResolveLoadsSinkDefault()
 
 void OutputTest::eqMissingPactlLoadsSpeaker()
 {
-    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-missing")).toUtf8());
-    qputenv("CASDAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
+    qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-missing")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
     Settings settings(m_dir.path() + QStringLiteral("/eq-missing.ini"));
     EqControl eq(&settings);
     OutputControl control;
@@ -894,8 +894,8 @@ void OutputTest::eqMissingPactlLoadsSpeaker()
 
 void OutputTest::eqHangingSinkLoadsSpeaker()
 {
-    qputenv("CASDAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-hanging")).toUtf8());
-    qputenv("CASDAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
+    qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-hanging")).toUtf8());
+    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
     QVERIFY(writeFile(m_defaultFile, OutputControl::headphonesSink() + QStringLiteral("\n")));
     QVERIFY(writeFile(m_defaultGateFile, QString()));
     Settings settings(m_dir.path() + QStringLiteral("/eq-hanging.ini"));
@@ -904,7 +904,7 @@ void OutputTest::eqHangingSinkLoadsSpeaker()
     QStringList loads;
     connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
 
-    QTest::ignoreMessage(QtWarningMsg, "casdap eq: get-default-sink timed out");
+    QTest::ignoreMessage(QtWarningMsg, "microdap eq: get-default-sink timed out");
     QElapsedTimer timer;
     timer.start();
     eq.awaitOutput(&control, 200);

@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 LibraryModel::LibraryModel(Library *library, const QByteArray &titleRole, QObject *parent)
     : QAbstractListModel(parent)

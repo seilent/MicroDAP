@@ -20,7 +20,7 @@
 #include <poll.h>
 #include <unistd.h>
 
-namespace casdap {
+namespace microdap {
 
 class FakeMixer : public MixerBackend
 {

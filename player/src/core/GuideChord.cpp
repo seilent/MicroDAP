@@ -6,7 +6,7 @@
 
 #include <unistd.h>
 
-namespace casdap {
+namespace microdap {
 
 GuideChord::GuideChord(QObject *parent)
     : QObject(parent)
@@ -16,13 +16,13 @@ GuideChord::GuideChord(QObject *parent)
 
 QString GuideChord::defaultDirectory()
 {
-    const QString dir = qEnvironmentVariable("CASDAP_GUIDE_DIR");
+    const QString dir = qEnvironmentVariable("MICRODAP_GUIDE_DIR");
     if (!dir.isEmpty())
         return dir;
     QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (runtime.isEmpty())
         runtime = QStringLiteral("/run/user/") + QString::number(getuid());
-    return runtime + QStringLiteral("/casdap-guide");
+    return runtime + QStringLiteral("/microdap-guide");
 }
 
 QString GuideChord::directory() const

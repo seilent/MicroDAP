@@ -9,11 +9,11 @@ T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
 mkdir -p "${T}/bin" "${T}/sddm"
 export STATE="${T}/state"
-export CASDAP_EXTENSIONS_DIR="${T}/extensions"
-export CASDAP_RUN="${T}/run-casdap"
-export CASDAP_SDDM_CONF_DIR="${T}/sddm"
-export CASDAP_CONTROLLER_TYPE="${T}/bin/controller-type"
-export CASDAP_SESSION_CONTROL="${T}/bin/session-control"
+export MICRODAP_EXTENSIONS_DIR="${T}/extensions"
+export MICRODAP_RUN="${T}/run-microdap"
+export MICRODAP_SDDM_CONF_DIR="${T}/sddm"
+export MICRODAP_CONTROLLER_TYPE="${T}/bin/controller-type"
+export MICRODAP_SESSION_CONTROL="${T}/bin/session-control"
 export SUDO_USER=armada
 
 cat > "${T}/bin/id" <<'EOF'
@@ -27,7 +27,7 @@ cat > "${T}/bin/runuser" <<'EOF'
     || { echo "runuser: unexpected $*" >&2; exit 99; }
 shift 5
 echo "user $*" >> "${STATE}/calls"
-if [[ "$*" == "systemctl --user show -p ActiveState --value gamescope-session-plus@casdap.service" ]]; then
+if [[ "$*" == "systemctl --user show -p ActiveState --value gamescope-session-plus@microdap.service" ]]; then
     f="${STATE}/states"
     head -n 1 "${f}"
     if [[ $(wc -l < "${f}") -gt 1 ]]; then
@@ -41,7 +41,7 @@ cat > "${T}/bin/session-control" <<'EOF'
 #!/usr/bin/bash
 echo "session-control $*" >> "${STATE}/calls"
 [[ -e "${STATE}/sc_fail" ]] && exit 75
-printf '[Autologin]\nSession=gamescope-session-steam.desktop\n' > "${CASDAP_SDDM_CONF_DIR}/zz-holo-autologin.conf"
+printf '[Autologin]\nSession=gamescope-session-steam.desktop\n' > "${MICRODAP_SDDM_CONF_DIR}/zz-holo-autologin.conf"
 EOF
 
 cat > "${T}/bin/systemctl" <<'EOF'
@@ -67,7 +67,7 @@ n=$(cat "${STATE}/settle_after")
 n=$((n - 1))
 echo "${n}" > "${STATE}/settle_after"
 if (( n == 0 )); then
-    printf '[Autologin]\nSession=gamescope-session-steam.desktop\n' > "${CASDAP_SDDM_CONF_DIR}/zz-holo-autologin.conf"
+    printf '[Autologin]\nSession=gamescope-session-steam.desktop\n' > "${MICRODAP_SDDM_CONF_DIR}/zz-holo-autologin.conf"
 fi
 EOF
 
@@ -79,8 +79,8 @@ case_name=
 
 setup() {
     case_name=$1
-    rm -rf "${STATE}" "${CASDAP_EXTENSIONS_DIR}" "${CASDAP_RUN}"
-    mkdir -p "${STATE}" "${CASDAP_EXTENSIONS_DIR}/casdap/usr" "${CASDAP_EXTENSIONS_DIR}/spanel/usr" "${CASDAP_RUN}"
+    rm -rf "${STATE}" "${MICRODAP_EXTENSIONS_DIR}" "${MICRODAP_RUN}"
+    mkdir -p "${STATE}" "${MICRODAP_EXTENSIONS_DIR}/microdap/usr" "${MICRODAP_EXTENSIONS_DIR}/microemu/usr" "${MICRODAP_RUN}"
     : > "${STATE}/calls"
     tr ' ' '\n' <<< "$2" > "${STATE}/states"
     printf '[Autologin]\nSession=%s\n' "$3" > "${T}/sddm/zz-holo-autologin.conf"
@@ -115,18 +115,18 @@ expect_before() {
     [[ -n "${a}" && -n "${b}" && "${a}" -lt "${b}" ]] || fail "'$1' not before '$2'"
 }
 
-switch_back="systemctl --no-block start casdap-switch-back.service"
+switch_back="systemctl --no-block start microdap-switch-back.service"
 default_gamemode="session-control default-gamemode"
-user_stop="user systemctl --user stop casdap-overlay.service casdap-bt.service casdap-pad.service casdap-powerd.service"
-hotkeyd_stop="user systemctl --user stop casdap-hotkeyd.service"
+user_stop="user systemctl --user stop microdap-overlay.service microdap-bt.service microdap-pad.service microdap-powerd.service"
+hotkeyd_stop="user systemctl --user stop microdap-hotkeyd.service"
 user_reload="user systemctl --user daemon-reload"
 refresh="systemd-sysext refresh"
-system_stop="systemctl stop casdap-guard.service casdap-usb-audio.service"
+system_stop="systemctl stop microdap-guard.service microdap-usb-audio.service"
 
 expect_teardown() {
-    [[ -e "${CASDAP_EXTENSIONS_DIR}/casdap" ]] && fail "casdap extension kept"
-    [[ -d "${CASDAP_EXTENSIONS_DIR}/spanel/usr" ]] || fail "other extension removed"
-    [[ -e "${CASDAP_RUN}" ]] && fail "run directory kept"
+    [[ -e "${MICRODAP_EXTENSIONS_DIR}/microdap" ]] && fail "microdap extension kept"
+    [[ -d "${MICRODAP_EXTENSIONS_DIR}/microemu/usr" ]] || fail "other extension removed"
+    [[ -e "${MICRODAP_RUN}" ]] && fail "run directory kept"
     expect_call "${user_stop}"
     expect_call "${hotkeyd_stop}"
     expect_call "${system_stop}"
@@ -144,7 +144,7 @@ expect_teardown() {
     return 0
 }
 
-setup "casdap session active" "active active deactivating inactive" casdap.desktop 1
+setup "microdap session active" "active active deactivating inactive" microdap.desktop 1
 run
 expect_rc 0
 expect_call "${switch_back}"
@@ -161,7 +161,7 @@ expect_no_call "${default_gamemode}"
 expect_sleeps 0
 expect_teardown
 
-setup "autologin still casdap, session failed" failed casdap.desktop -1
+setup "autologin still microdap, session failed" failed microdap.desktop -1
 run
 expect_rc 0
 expect_no_call "${switch_back}"
@@ -170,13 +170,13 @@ expect_sleeps 0
 expect_before "${default_gamemode}" "${user_stop}"
 expect_teardown
 
-setup "default-gamemode fails" inactive casdap.desktop -1
+setup "default-gamemode fails" inactive microdap.desktop -1
 : > "${STATE}/sc_fail"
 run
 expect_rc 1
 expect_call "${default_gamemode}"
 grep -q "default-gamemode failed, refusing" "${STATE}/err" || fail "no refusal message: $(cat "${STATE}/err")"
-[[ -d "${CASDAP_EXTENSIONS_DIR}/casdap/usr" ]] || fail "casdap extension removed on refusal"
+[[ -d "${MICRODAP_EXTENSIONS_DIR}/microdap/usr" ]] || fail "microdap extension removed on refusal"
 expect_no_call "${user_stop}"
 expect_no_call "${refresh}"
 expect_no_call "controller-type"
@@ -189,14 +189,14 @@ expect_call "${switch_back}"
 expect_sleeps 3
 expect_teardown
 
-setup "switch never lands" active casdap.desktop -1
+setup "switch never lands" active microdap.desktop -1
 run
 expect_rc 1
 expect_call "${switch_back}"
 expect_sleeps 60
 grep -q "refusing" "${STATE}/err" || fail "no refusal message: $(cat "${STATE}/err")"
-[[ -d "${CASDAP_EXTENSIONS_DIR}/casdap/usr" ]] || fail "casdap extension removed on refusal"
-[[ -d "${CASDAP_RUN}" ]] || fail "run directory removed on refusal"
+[[ -d "${MICRODAP_EXTENSIONS_DIR}/microdap/usr" ]] || fail "microdap extension removed on refusal"
+[[ -d "${MICRODAP_RUN}" ]] || fail "run directory removed on refusal"
 expect_no_call "${user_stop}"
 expect_no_call "${hotkeyd_stop}"
 expect_no_call "${system_stop}"

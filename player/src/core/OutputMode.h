@@ -15,7 +15,7 @@
 #include <QTimer>
 #include <QVariantList>
 
-namespace casdap {
+namespace microdap {
 
 class BluezModel;
 class CodecFragment;

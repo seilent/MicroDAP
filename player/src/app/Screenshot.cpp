@@ -26,7 +26,7 @@
 #include <algorithm>
 #include <memory>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -43,7 +43,7 @@ constexpr const char *sampleEq =
 
 void fail(const QString &message)
 {
-    QTextStream(stderr) << "casdap-player: " << message << '\n';
+    QTextStream(stderr) << "microdap-player: " << message << '\n';
 }
 
 bool parseSize(const QString &size, int &width, int &height)
@@ -60,7 +60,7 @@ bool parseSize(const QString &size, int &width, int &height)
 void grab(QQuickWindow *window, const QString &out)
 {
     if (QFontInfo(QFont(QStringLiteral("Selawik"))).family() != QLatin1StringView("Selawik"))
-        fail(QStringLiteral("warning: Selawik not loaded, set CASDAP_FONT_DIR"));
+        fail(QStringLiteral("warning: Selawik not loaded, set MICRODAP_FONT_DIR"));
     const QImage image = window->grabWindow();
     if (image.isNull()) {
         fail(QStringLiteral("grabWindow returned no image"));
@@ -359,11 +359,11 @@ int screenshot(const ScreenshotOptions &options)
         {QStringLiteral("shotOrientation"), orientation},
         {QStringLiteral("shotState"), state},
     });
-    engine.loadFromModule("Casdap", "Main");
+    engine.loadFromModule("MicroDap", "Main");
 
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0));
     if (!window) {
-        fail(QStringLiteral("Casdap.Main did not produce a window"));
+        fail(QStringLiteral("MicroDap.Main did not produce a window"));
         return 1;
     }
 

@@ -11,7 +11,7 @@
 
 #include <functional>
 
-namespace casdap {
+namespace microdap {
 
 class OutputControl : public QObject, public HeldOutputPort
 {

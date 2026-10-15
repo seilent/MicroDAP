@@ -24,7 +24,7 @@
 
 extern char **environ;
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -35,11 +35,11 @@ constexpr int driverMs = 5000;
 constexpr int lockMs = 2000;
 constexpr int64_t stampSkipMs = 10000;
 constexpr long long maxDeadlineMs = 86400000;
-constexpr const char *sessionUnit = "gamescope-session-plus@casdap.service";
+constexpr const char *sessionUnit = "gamescope-session-plus@microdap.service";
 
 void say(const std::string &line)
 {
-    std::cerr << "casdap-fiio: " << line << '\n';
+    std::cerr << "microdap-fiio: " << line << '\n';
 }
 
 int64_t bootMs()
@@ -78,7 +78,7 @@ fs::path interfacePath(const FiioMatch &match)
 
 std::string resetStampPath(const FiioPaths &paths)
 {
-    return paths.runDir + "/casdap-fiio.reset";
+    return paths.runDir + "/microdap-fiio.reset";
 }
 
 enum class Answer { Proceed, Skip, Deadline };
@@ -96,7 +96,7 @@ Session sessionCheck(const FiioPaths &paths, std::optional<int64_t> deadline)
         say("no user manager");
         return {Answer::Proceed, "none"};
     }
-    const char *bin = std::getenv("CASDAP_SYSTEMCTL_BIN");
+    const char *bin = std::getenv("MICRODAP_SYSTEMCTL_BIN");
     const std::string program = bin && *bin ? bin : "systemctl";
     std::vector<std::string> args{program, "--user", "show", "-p", "ActiveState", "--value", sessionUnit};
     std::vector<std::string> env;
@@ -234,7 +234,7 @@ int deadlineExit()
 std::string foundWord(int preset, bool marker, const FiioModel &model)
 {
     if (preset == model.slot)
-        return "casdap slot";
+        return "microdap slot";
     if (marker)
         return "marker";
     return "preset " + std::to_string(preset);
@@ -324,7 +324,7 @@ int resetVerb(const std::vector<std::string> &args, UsbIoFactory &factory, const
     if (session.answer == Answer::Deadline)
         return deadlineExit();
     if (session.answer == Answer::Skip) {
-        say("casdap session " + session.state + ", skipped");
+        say("microdap session " + session.state + ", skipped");
         return 0;
     }
     bool allDone = true;
@@ -355,7 +355,7 @@ int resetVerb(const std::vector<std::string> &args, UsbIoFactory &factory, const
         if (session.answer == Answer::Deadline)
             return deadlineExit();
         if (session.answer == Answer::Skip) {
-            say("casdap session " + session.state + ", skipped");
+            say("microdap session " + session.state + ", skipped");
             return 0;
         }
         std::unique_ptr<UsbIo> io = factory();
@@ -404,7 +404,7 @@ int lockedVerb(UsbIoFactory &factory, const FiioPaths &paths, bool checkSession,
     if (checkSession) {
         const Session session = sessionCheck(paths, std::nullopt);
         if (session.answer != Answer::Proceed) {
-            say("casdap session " + session.state + ", refused");
+            say("microdap session " + session.state + ", refused");
             return 1;
         }
     }
@@ -428,7 +428,7 @@ int lockedVerb(UsbIoFactory &factory, const FiioPaths &paths, bool checkSession,
         if (checkSession) {
             const Session session = sessionCheck(paths, std::nullopt);
             if (session.answer != Answer::Proceed) {
-                say("casdap session " + session.state + ", refused");
+                say("microdap session " + session.state + ", refused");
                 return 1;
             }
         }

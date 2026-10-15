@@ -12,7 +12,7 @@
 #include <QVariant>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 class Player;
 class Mpris;

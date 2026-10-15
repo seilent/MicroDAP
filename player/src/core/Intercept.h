@@ -12,7 +12,7 @@
 #include <QStringList>
 #include <QVariantMap>
 
-namespace casdap {
+namespace microdap {
 
 using InterfaceList = QMap<QString, QVariantMap>;
 using ManagedObjectList = QMap<QDBusObjectPath, InterfaceList>;

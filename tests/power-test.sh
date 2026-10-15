@@ -3,22 +3,22 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-power="${repo}/sysext/usr/libexec/casdap/casdap-power"
-dropin="${repo}/sysext/usr/lib/systemd/user/gamescope-session-plus@casdap.service.d/30-casdap-power.conf"
+power="${repo}/sysext/usr/libexec/microdap/microdap-power"
+dropin="${repo}/sysext/usr/lib/systemd/user/gamescope-session-plus@microdap.service.d/30-microdap-power.conf"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
 mkdir -p "${T}/bin"
 export STATE="${T}/state"
-export CASDAP_RUNTIME_DIR="${T}/rt"
-export CASDAP_SETTINGS_FILE="${T}/settings.ini"
-export CASDAP_CPU_BEFORE_FILE="${T}/cpu-before"
-export CASDAP_POWER_DEBOUNCE_MS=2000
+export MICRODAP_RUNTIME_DIR="${T}/rt"
+export MICRODAP_SETTINGS_FILE="${T}/settings.ini"
+export MICRODAP_CPU_BEFORE_FILE="${T}/cpu-before"
+export MICRODAP_POWER_DEBOUNCE_MS=2000
 
 cat > "${T}/bin/busctl" <<'EOF'
 #!/usr/bin/bash
 case "$*" in
-    "--user get-property org.casdap.Player /org/casdap/Player org.casdap.Player PlaybackStatus")
+    "--user get-property net.seilent.MicroDap.Player /net/seilent/MicroDap/Player net.seilent.MicroDap.Player PlaybackStatus")
         [[ -s "${STATE}/status" ]] || exit 1
         echo "s \"$(cat "${STATE}/status")\""
         ;;
@@ -32,7 +32,7 @@ case "$*" in
         ;;
     *SetScreenOff*)
         echo "busctl $*" >> "${STATE}/calls"
-        [[ -e "${CASDAP_RUNTIME_DIR}/off" ]] && echo 1 >> "${STATE}/marker-at-call" || echo 0 >> "${STATE}/marker-at-call"
+        [[ -e "${MICRODAP_RUNTIME_DIR}/off" ]] && echo 1 >> "${STATE}/marker-at-call" || echo 0 >> "${STATE}/marker-at-call"
         [[ -e "${STATE}/no-player" ]] && { echo "Call failed: The name is not activatable" >&2; exit 1; }
         ;;
     *) echo "busctl $*" >> "${STATE}/calls" ;;
@@ -43,22 +43,22 @@ EOF
 cat > "${T}/bin/systemctl" <<'EOF'
 #!/usr/bin/bash
 case "$*" in
-    "--user is-active gamescope-session-plus@casdap.service")
+    "--user is-active gamescope-session-plus@microdap.service")
         cat "${STATE}/session"
         [[ "$(cat "${STATE}/session")" == active ]]
         ;;
-    "--user stop casdap-idle.timer")
+    "--user stop microdap-idle.timer")
         echo "systemctl $*" >> "${STATE}/calls"
-        [[ -e "${STATE}/idle-timer" ]] || { echo "Failed to stop casdap-idle.timer: Unit casdap-idle.timer not loaded." >&2; exit 5; }
+        [[ -e "${STATE}/idle-timer" ]] || { echo "Failed to stop microdap-idle.timer: Unit microdap-idle.timer not loaded." >&2; exit 5; }
         rm -f "${STATE}/idle-timer"
         ;;
     *)
         echo "systemctl $*" >> "${STATE}/calls"
-        if [[ "$*" == *casdap-priv@cpu-* ]]; then
-            { [[ -e "${CASDAP_RUNTIME_DIR}/last-ms" ]] && echo 1 || echo 0; } >> "${STATE}/last-at-cpu"
+        if [[ "$*" == *microdap-priv@cpu-* ]]; then
+            { [[ -e "${MICRODAP_RUNTIME_DIR}/last-ms" ]] && echo 1 || echo 0; } >> "${STATE}/last-at-cpu"
         fi
-        if [[ "$*" == *casdap-priv@rgb-* ]]; then
-            { [[ -e "${CASDAP_RUNTIME_DIR}/last-ms" ]] && echo 1 || echo 0; } >> "${STATE}/last-at-rgb"
+        if [[ "$*" == *microdap-priv@rgb-* ]]; then
+            { [[ -e "${MICRODAP_RUNTIME_DIR}/last-ms" ]] && echo 1 || echo 0; } >> "${STATE}/last-at-rgb"
         fi
         [[ -s "${STATE}/fail-unit" && "$*" == *"$(cat "${STATE}/fail-unit")"* ]] && exit 1
         ;;
@@ -94,7 +94,7 @@ fail() { echo "FAIL ${case_name}: $*" >&2; echo "--- log" >&2; cat "${STATE}/log
 
 begin() {
     case_name=$1
-    rm -rf "${STATE}" "${CASDAP_RUNTIME_DIR}" "${CASDAP_SETTINGS_FILE}" "${CASDAP_CPU_BEFORE_FILE}"
+    rm -rf "${STATE}" "${MICRODAP_RUNTIME_DIR}" "${MICRODAP_SETTINGS_FILE}" "${MICRODAP_CPU_BEFORE_FILE}"
     mkdir -p "${STATE}"
     : > "${STATE}/calls"
     : > "${STATE}/log"
@@ -116,24 +116,24 @@ expect_sequence() {
     expected=$(printf '%s\n' "$@")
     [[ "$(cat "${STATE}/calls")" == "${expected}" ]] || fail "calls were:"$'\n'"$(cat "${STATE}/calls")"$'\n'"expected:"$'\n'"${expected}"
 }
-expect_marker() { [[ -e "${CASDAP_RUNTIME_DIR}/$1" ]] || fail "marker $1 missing"; }
-expect_no_marker() { [[ ! -e "${CASDAP_RUNTIME_DIR}/$1" ]] || fail "marker $1 present"; }
-marker() { mkdir -p "${CASDAP_RUNTIME_DIR}"; : > "${CASDAP_RUNTIME_DIR}/$1"; }
+expect_marker() { [[ -e "${MICRODAP_RUNTIME_DIR}/$1" ]] || fail "marker $1 missing"; }
+expect_no_marker() { [[ ! -e "${MICRODAP_RUNTIME_DIR}/$1" ]] || fail "marker $1 present"; }
+marker() { mkdir -p "${MICRODAP_RUNTIME_DIR}"; : > "${MICRODAP_RUNTIME_DIR}/$1"; }
 
-off_true="busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player SetScreenOff b true"
-off_false="busctl --user --timeout=2 call org.casdap.Player /org/casdap/Player org.casdap.Player SetScreenOff b false"
-bl_off="systemctl start casdap-priv@backlight-off.service"
-bl_on="systemctl start casdap-priv@backlight-on.service"
-cpu_off="systemctl start casdap-priv@cpu-off.service"
-cpu_dap="systemctl start casdap-priv@cpu-dap.service"
-cpu_restore="systemctl start casdap-priv@cpu-restore.service"
-cpu_resave="systemctl start casdap-priv@cpu-resave.service"
+off_true="busctl --user --timeout=2 call net.seilent.MicroDap.Player /net/seilent/MicroDap/Player net.seilent.MicroDap.Player SetScreenOff b true"
+off_false="busctl --user --timeout=2 call net.seilent.MicroDap.Player /net/seilent/MicroDap/Player net.seilent.MicroDap.Player SetScreenOff b false"
+bl_off="systemctl start microdap-priv@backlight-off.service"
+bl_on="systemctl start microdap-priv@backlight-on.service"
+cpu_off="systemctl start microdap-priv@cpu-off.service"
+cpu_dap="systemctl start microdap-priv@cpu-dap.service"
+cpu_restore="systemctl start microdap-priv@cpu-restore.service"
+cpu_resave="systemctl start microdap-priv@cpu-resave.service"
 wifi_off="nmcli radio wifi off"
 wifi_on="nmcli radio wifi on"
-rgb_sleep="systemctl start casdap-priv@rgb-sleep.service"
-rgb_wake="systemctl start casdap-priv@rgb-wake.service"
-stop_timer="systemctl --user stop casdap-idle.timer"
-arm_timer="systemd-run --user --unit=casdap-idle --on-active=60 --on-unit-inactive=60 --timer-property=AccuracySec=1min /usr/libexec/casdap/casdap-power idle-check"
+rgb_sleep="systemctl start microdap-priv@rgb-sleep.service"
+rgb_wake="systemctl start microdap-priv@rgb-wake.service"
+stop_timer="systemctl --user stop microdap-idle.timer"
+arm_timer="systemd-run --user --unit=microdap-idle --on-active=60 --on-unit-inactive=60 --timer-property=AccuracySec=1min /usr/libexec/microdap/microdap-power idle-check"
 
 begin "screen-off"
 run screen-off
@@ -145,11 +145,11 @@ expect_no_marker wifi
 [[ "$(cat "${STATE}/last-at-cpu")" == 1 ]] || fail "last-ms written after cpu-off"
 [[ "$(cat "${STATE}/last-at-rgb")" == 0 ]] || fail "last-ms written before rgb-sleep"
 [[ -e "${STATE}/idle-timer" ]] || fail "idle timer not armed"
-[[ "$(cat "${CASDAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${CASDAP_RUNTIME_DIR}/last-ms")'"
+[[ "$(cat "${MICRODAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${MICRODAP_RUNTIME_DIR}/last-ms")'"
 
 begin "screen-off waits for the lock"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-( flock 9; sleep 1 ) 9>"${CASDAP_RUNTIME_DIR}/lock" &
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+( flock 9; sleep 1 ) 9>"${MICRODAP_RUNTIME_DIR}/lock" &
 sleep 0.2
 run screen-off
 wait
@@ -194,14 +194,14 @@ expect_call "${arm_timer}"
 expect_log "failed: ${cpu_off}"
 
 begin "screen-off with wifi off"
-printf '[General]\nwifiOffScreenOff=true\nsuspendMinutes=10\n' > "${CASDAP_SETTINGS_FILE}"
+printf '[General]\nwifiOffScreenOff=true\nsuspendMinutes=10\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
 expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
 expect_marker wifi
 
 begin "screen-off twice with wifi off"
-printf 'wifiOffScreenOff=true\r\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'wifiOffScreenOff=true\r\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 run screen-off
 expect_rc 0
@@ -209,13 +209,13 @@ expect_rc 0
 expect_marker wifi
 
 begin "screen-off with wifi kept"
-printf 'wifiOffScreenOff=false\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'wifiOffScreenOff=false\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_no_call "nmcli"
 expect_no_marker wifi
 
 begin "screen-off with nmcli denied"
-printf 'wifiOffScreenOff=true\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'wifiOffScreenOff=true\n' > "${MICRODAP_SETTINGS_FILE}"
 : > "${STATE}/nmcli-fails"
 run screen-off
 expect_rc 0
@@ -229,23 +229,23 @@ run screen-off
 expect_rc 1
 expect_calls 0
 expect_no_marker off
-expect_log "screen-off outside the casdap session (inactive)"
+expect_log "screen-off outside the microdap session (inactive)"
 
 begin "screen-off with rgb accent"
-printf '[General]\nrgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf '[General]\nrgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
 expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
 expect_marker off
 
 begin "screen-off with rgb accent and wifi off"
-printf 'rgb=accent\nwifiOffScreenOff=true\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=accent\nwifiOffScreenOff=true\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
 expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${wifi_off}" "${stop_timer}" "${arm_timer}"
 
 begin "screen-off with rgb accent and a failing rgb-sleep"
-printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
 echo rgb-sleep > "${STATE}/fail-unit"
 run screen-off
 expect_rc 0
@@ -255,22 +255,22 @@ expect_log "failed: ${rgb_sleep}"
 expect_marker off
 
 begin "screen-off with rgb off"
-printf 'rgb=off\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=off\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
 expect_sequence "${off_true}" "${bl_off}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
 
 begin "screen-off with rgb armada"
-printf 'rgb=armada\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=armada\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
 expect_sequence "${off_true}" "${bl_off}" "${rgb_sleep}" "${cpu_off}" "${stop_timer}" "${arm_timer}"
 
 begin "screen-off with a bogus rgb value"
-printf 'rgb=Accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=Accent\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-off
 expect_rc 0
-expect_no_call "casdap-priv@rgb"
+expect_no_call "microdap-priv@rgb"
 
 begin "screen-off while deactivating" deactivating
 run screen-off
@@ -280,7 +280,7 @@ expect_calls 0
 begin "screen-on with the marker"
 marker off
 : > "${STATE}/idle-timer"
-: > "${CASDAP_CPU_BEFORE_FILE}"
+: > "${MICRODAP_CPU_BEFORE_FILE}"
 run screen-on
 expect_rc 0
 expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_dap}"
@@ -289,7 +289,7 @@ expect_no_marker off
 [[ "$(cat "${STATE}/last-at-cpu")" == 1 ]] || fail "last-ms written after cpu-dap"
 [[ "$(cat "${STATE}/last-at-rgb")" == 0 ]] || fail "last-ms written before rgb-wake"
 [[ -e "${STATE}/idle-timer" ]] && fail "idle timer left armed" || true
-[[ "$(cat "${CASDAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${CASDAP_RUNTIME_DIR}/last-ms")'"
+[[ "$(cat "${MICRODAP_RUNTIME_DIR}/last-ms")" =~ ^[0-9]{13}$ ]] || fail "last-ms is '$(cat "${MICRODAP_RUNTIME_DIR}/last-ms")'"
 
 begin "screen-on with the wifi marker"
 marker off
@@ -301,7 +301,7 @@ expect_no_marker wifi
 expect_no_marker off
 
 begin "screen-on without the marker and a saved floor"
-: > "${CASDAP_CPU_BEFORE_FILE}"
+: > "${MICRODAP_CPU_BEFORE_FILE}"
 run screen-on
 expect_rc 0
 expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_restore}" "${cpu_dap}"
@@ -323,7 +323,7 @@ expect_no_marker off
 begin "screen-on while deactivating" deactivating
 marker off
 marker wifi
-: > "${CASDAP_CPU_BEFORE_FILE}"
+: > "${MICRODAP_CPU_BEFORE_FILE}"
 run screen-on
 expect_rc 0
 expect_sequence "${bl_on}" "${rgb_wake}" "${stop_timer}" "${wifi_on}" "${cpu_restore}"
@@ -345,7 +345,7 @@ expect_log "failed: ${off_false}"
 expect_no_marker off
 
 begin "screen-on with rgb accent"
-printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
 marker off
 run screen-on
 expect_rc 0
@@ -353,7 +353,7 @@ expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_d
 expect_no_marker off
 
 begin "screen-on with rgb accent and the wifi marker"
-printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
 marker off
 marker wifi
 run screen-on
@@ -361,13 +361,13 @@ expect_rc 0
 expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${wifi_on}" "${cpu_dap}"
 
 begin "screen-on with rgb accent while inactive" inactive
-printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
 run screen-on
 expect_rc 0
 expect_sequence "${bl_on}" "${rgb_wake}" "${stop_timer}" "${cpu_restore}"
 
 begin "screen-on with rgb accent and a failing rgb-wake"
-printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
 marker off
 echo rgb-wake > "${STATE}/fail-unit"
 run screen-on
@@ -379,43 +379,43 @@ expect_log "failed: ${rgb_wake}"
 expect_no_marker off
 
 begin "screen-on with rgb off"
-printf 'rgb=off\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=off\n' > "${MICRODAP_SETTINGS_FILE}"
 marker off
 run screen-on
 expect_rc 0
 expect_sequence "${bl_on}" "${off_false}" "${stop_timer}" "${cpu_dap}"
 
 begin "screen-on with rgb armada"
-printf 'rgb=armada\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=armada\n' > "${MICRODAP_SETTINGS_FILE}"
 marker off
 run screen-on
 expect_rc 0
 expect_sequence "${bl_on}" "${off_false}" "${rgb_wake}" "${stop_timer}" "${cpu_dap}"
 
 begin "screen-on with a bogus rgb value"
-printf 'rgb=Accent\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'rgb=Accent\n' > "${MICRODAP_SETTINGS_FILE}"
 marker off
 run screen-on
 expect_rc 0
-expect_no_call "casdap-priv@rgb"
+expect_no_call "microdap-priv@rgb"
 
 begin "toggle with rgb accent"
-printf 'rgb=accent\n' > "${CASDAP_SETTINGS_FILE}"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo 1000 > "${CASDAP_RUNTIME_DIR}/last-ms"
+printf 'rgb=accent\n' > "${MICRODAP_SETTINGS_FILE}"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+echo 1000 > "${MICRODAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_call "${rgb_sleep}"
 expect_no_call "${rgb_wake}"
 : > "${STATE}/calls"
-echo 1000 > "${CASDAP_RUNTIME_DIR}/last-ms"
+echo 1000 > "${MICRODAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_call "${rgb_wake}"
 expect_no_call "${rgb_sleep}"
 expect_no_marker off
 
 begin "toggle to off"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo 1000 > "${CASDAP_RUNTIME_DIR}/last-ms"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+echo 1000 > "${MICRODAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_call "${off_true}"
@@ -431,8 +431,8 @@ expect_call "${cpu_dap}"
 expect_no_marker off
 
 begin "toggle within the debounce"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-date +%s%3N > "${CASDAP_RUNTIME_DIR}/last-ms"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+date +%s%3N > "${MICRODAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_calls 0
@@ -441,7 +441,7 @@ expect_log "toggle within 2000 ms of the last transition, ignored"
 
 begin "toggle to on within the debounce"
 marker off
-date +%s%3N > "${CASDAP_RUNTIME_DIR}/last-ms"
+date +%s%3N > "${MICRODAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_calls 0
@@ -449,8 +449,8 @@ expect_marker off
 expect_log "toggle within 2000 ms of the last transition, ignored"
 
 begin "toggle with a corrupt last-ms"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo bogus > "${CASDAP_RUNTIME_DIR}/last-ms"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+echo bogus > "${MICRODAP_RUNTIME_DIR}/last-ms"
 run toggle
 expect_rc 0
 expect_marker off
@@ -474,8 +474,8 @@ expect_marker off
 expect_log "toggle within 2000 ms of the last transition, ignored"
 
 begin "toggle during a transition"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-( flock 9; sleep 3 ) 9>"${CASDAP_RUNTIME_DIR}/lock" &
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+( flock 9; sleep 3 ) 9>"${MICRODAP_RUNTIME_DIR}/lock" &
 sleep 0.2
 run toggle
 expect_rc 0
@@ -488,7 +488,7 @@ begin "toggle outside the session" inactive
 run toggle
 expect_rc 1
 expect_calls 0
-expect_log "toggle outside the casdap session (inactive)"
+expect_log "toggle outside the microdap session (inactive)"
 
 begin "toggle to on outside the session" inactive
 marker off
@@ -537,7 +537,7 @@ run idle-check
 expect_rc 0
 expect_calls 0
 expect_marker idle-since
-[[ "$(cat "${CASDAP_RUNTIME_DIR}/idle-since")" =~ ^[0-9]{10}$ ]] || fail "idle-since is '$(cat "${CASDAP_RUNTIME_DIR}/idle-since")'"
+[[ "$(cat "${MICRODAP_RUNTIME_DIR}/idle-since")" =~ ^[0-9]{10}$ ]] || fail "idle-since is '$(cat "${MICRODAP_RUNTIME_DIR}/idle-since")'"
 
 begin "idle-check paused without a file"
 echo Paused > "${STATE}/status"
@@ -548,18 +548,18 @@ expect_marker idle-since
 
 begin "idle-check paused twice keeps the first time"
 echo Stopped > "${STATE}/status"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
 since=$(( $(date +%s) - 300 ))
-echo "${since}" > "${CASDAP_RUNTIME_DIR}/idle-since"
+echo "${since}" > "${MICRODAP_RUNTIME_DIR}/idle-since"
 run idle-check
 expect_rc 0
 expect_calls 0
-[[ "$(cat "${CASDAP_RUNTIME_DIR}/idle-since")" == "${since}" ]] || fail "idle-since rewritten"
+[[ "$(cat "${MICRODAP_RUNTIME_DIR}/idle-since")" == "${since}" ]] || fail "idle-since rewritten"
 
 begin "idle-check past suspendMinutes"
 echo Paused > "${STATE}/status"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo $(( $(date +%s) - 601 )) > "${CASDAP_RUNTIME_DIR}/idle-since"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+echo $(( $(date +%s) - 601 )) > "${MICRODAP_RUNTIME_DIR}/idle-since"
 run idle-check
 expect_rc 0
 expect_sequence "systemctl suspend"
@@ -567,26 +567,26 @@ expect_log "idle for 10 min, suspending"
 expect_no_marker idle-since
 
 begin "idle-check past a custom suspendMinutes"
-printf 'suspendMinutes=5\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'suspendMinutes=5\n' > "${MICRODAP_SETTINGS_FILE}"
 echo Paused > "${STATE}/status"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo $(( $(date +%s) - 301 )) > "${CASDAP_RUNTIME_DIR}/idle-since"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+echo $(( $(date +%s) - 301 )) > "${MICRODAP_RUNTIME_DIR}/idle-since"
 run idle-check
 expect_rc 0
 expect_sequence "systemctl suspend"
 
 begin "idle-check under a custom suspendMinutes"
-printf 'suspendMinutes=30\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'suspendMinutes=30\n' > "${MICRODAP_SETTINGS_FILE}"
 echo Paused > "${STATE}/status"
-mkdir -p "${CASDAP_RUNTIME_DIR}"
-echo $(( $(date +%s) - 601 )) > "${CASDAP_RUNTIME_DIR}/idle-since"
+mkdir -p "${MICRODAP_RUNTIME_DIR}"
+echo $(( $(date +%s) - 601 )) > "${MICRODAP_RUNTIME_DIR}/idle-since"
 run idle-check
 expect_rc 0
 expect_calls 0
 expect_marker idle-since
 
 begin "idle-check with suspend off"
-printf 'suspendMinutes=0\n' > "${CASDAP_SETTINGS_FILE}"
+printf 'suspendMinutes=0\n' > "${MICRODAP_SETTINGS_FILE}"
 echo Paused > "${STATE}/status"
 marker idle-since
 run idle-check
@@ -636,13 +636,13 @@ expect_rc 1
 expect_calls 0
 
 begin "drop in"
-grep -qxF 'ExecStopPost=-/usr/libexec/casdap/casdap-power screen-on' "${dropin}" || fail "drop in lacks ExecStopPost screen-on"
-grep -qxF 'Wants=casdap-powerd.service' "${dropin}" || fail "drop in lacks Wants=casdap-powerd.service"
+grep -qxF 'ExecStopPost=-/usr/libexec/microdap/microdap-power screen-on' "${dropin}" || fail "drop in lacks ExecStopPost screen-on"
+grep -qxF 'Wants=microdap-powerd.service' "${dropin}" || fail "drop in lacks Wants=microdap-powerd.service"
 for word in hp-gain-normal hp-amp-lohifi spk-gain-102 rgb-restore; do
-    grep -qxF "ExecStopPost=-systemctl start casdap-priv@${word}.service" "${dropin}" || fail "drop in lacks ExecStopPost casdap-priv@${word}"
+    grep -qxF "ExecStopPost=-systemctl start microdap-priv@${word}.service" "${dropin}" || fail "drop in lacks ExecStopPost microdap-priv@${word}"
 done
 [[ "$(grep -c '^ExecStopPost=' "${dropin}")" == 5 ]] || fail "drop in has $(grep -c '^ExecStopPost=' "${dropin}") ExecStopPost lines, expected 5"
-[[ "$(grep -n '^ExecStopPost=' "${dropin}" | head -n 1)" == *"casdap-priv@rgb-restore.service" ]] || fail "rgb-restore is not the first ExecStopPost"
+[[ "$(grep -n '^ExecStopPost=' "${dropin}" | head -n 1)" == *"microdap-priv@rgb-restore.service" ]] || fail "rgb-restore is not the first ExecStopPost"
 [[ "$(grep -c '^ExecStopPost=-' "${dropin}")" == 5 ]] || fail "an ExecStopPost step can stop the rest"
 LC_ALL=C grep -q -P '\xe2\x80[\x93\x94]' "${dropin}" && fail "drop in has a dash" || true
 grep -q '^#' "${dropin}" && fail "drop in has a comment" || true

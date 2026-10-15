@@ -15,7 +15,7 @@
 
 #include <atomic>
 
-namespace casdap {
+namespace microdap {
 
 class Library : public QObject
 {

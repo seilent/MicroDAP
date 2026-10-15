@@ -18,7 +18,7 @@
 #include <cmath>
 #include <utility>
 
-namespace casdap {
+namespace microdap {
 
 namespace {
 
@@ -34,7 +34,7 @@ double clampLogged(double value, double low, double high, const char *what)
 {
     const double clamped = qBound(low, value, high);
     if (clamped != value)
-        qInfo() << "casdap eq:" << what << value << "clamped to" << clamped;
+        qInfo() << "microdap eq:" << what << value << "clamped to" << clamped;
     return clamped;
 }
 
@@ -264,10 +264,10 @@ std::optional<EqProfile> EqParser::parse(const QString &text, QString *error)
             profile.bands[count++] = band;
             continue;
         }
-        qInfo() << "casdap eq: line" << lineNo << "skipped:" << line;
+        qInfo() << "microdap eq: line" << lineNo << "skipped:" << line;
     }
     if (dropped > 0)
-        qInfo() << "casdap eq:" << dropped << "filters past the first" << EqProfile::bandCount << "dropped";
+        qInfo() << "microdap eq:" << dropped << "filters past the first" << EqProfile::bandCount << "dropped";
     if (count == 0) {
         if (error)
             *error = QStringLiteral("no valid filter");
@@ -338,7 +338,7 @@ EqProfile EqStore::read(const QString &path)
         return EqProfile::flat();
     QSettings settings(path, QSettings::IniFormat);
     if (settings.status() != QSettings::NoError) {
-        qWarning() << "casdap eq: cannot parse" << path;
+        qWarning() << "microdap eq: cannot parse" << path;
         return EqProfile::flat();
     }
     EqProfile profile;
@@ -346,7 +346,7 @@ EqProfile EqStore::read(const QString &path)
     profile.preamp = qBound(EqParser::minPreamp, settings.value(QStringLiteral("preamp")).toDouble(&ok),
                             EqParser::maxPreamp);
     if (!ok) {
-        qWarning() << "casdap eq: no preamp in" << path;
+        qWarning() << "microdap eq: no preamp in" << path;
         return EqProfile::flat();
     }
     for (int i = 0; i < EqProfile::bandCount; ++i) {
@@ -374,7 +374,7 @@ EqProfile EqStore::read(const QString &path)
         valid = valid && ok;
         settings.endGroup();
         if (!valid) {
-            qWarning() << "casdap eq: band" << i + 1 << "unreadable in" << path;
+            qWarning() << "microdap eq: band" << i + 1 << "unreadable in" << path;
             return EqProfile::flat();
         }
         profile.bands[i] = band;
@@ -385,20 +385,20 @@ EqProfile EqStore::read(const QString &path)
 bool EqStore::write(const QString &path, const EqProfile &profile)
 {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        qWarning() << "casdap eq: cannot create" << QFileInfo(path).absolutePath();
+        qWarning() << "microdap eq: cannot create" << QFileInfo(path).absolutePath();
         return false;
     }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qWarning() << "casdap eq: cannot write" << path;
+        qWarning() << "microdap eq: cannot write" << path;
         return false;
     }
     file.write(text(profile).toUtf8());
     if (!file.commit()) {
-        qWarning() << "casdap eq: cannot commit" << path;
+        qWarning() << "microdap eq: cannot commit" << path;
         return false;
     }
-    qInfo() << "casdap eq: store written" << path;
+    qInfo() << "microdap eq: store written" << path;
     return true;
 }
 
@@ -438,9 +438,9 @@ QStringList EqControl::outputs()
 
 QString EqControl::configDir()
 {
-    return qEnvironmentVariable("CASDAP_EQ_DIR",
+    return qEnvironmentVariable("MICRODAP_EQ_DIR",
                                 QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-                                    + QStringLiteral("/casdap"));
+                                    + QStringLiteral("/microdap"));
 }
 
 QString EqControl::sourceDir()
@@ -480,13 +480,13 @@ QString EqControl::defaultSinkOutput()
     QProcess process;
     process.start(OutputControl::pactlPath(), {QStringLiteral("get-default-sink")});
     if (!process.waitForStarted(sinkTimeoutMs)) {
-        qWarning() << "casdap eq: cannot start" << OutputControl::pactlPath();
+        qWarning() << "microdap eq: cannot start" << OutputControl::pactlPath();
         return {};
     }
     if (!process.waitForFinished(sinkTimeoutMs)) {
         process.kill();
         process.waitForFinished(sinkTimeoutMs);
-        qWarning() << "casdap eq: get-default-sink timed out";
+        qWarning() << "microdap eq: get-default-sink timed out";
         return {};
     }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
@@ -555,7 +555,7 @@ void EqControl::seedFromSink()
 {
     if (!m_activeOutput.isEmpty() || m_sinkProcess)
         return;
-    qInfo() << "casdap eq: output not resolved, default sink";
+    qInfo() << "microdap eq: output not resolved, default sink";
     querySink(true);
 }
 
@@ -563,7 +563,7 @@ void EqControl::querySink(bool seed)
 {
     if (m_sinkProcess) {
         if (m_sinkProcess->state() != QProcess::NotRunning) {
-            qWarning() << "casdap eq: get-default-sink timed out";
+            qWarning() << "microdap eq: get-default-sink timed out";
             dropSinkProcess();
         }
         return;
@@ -594,7 +594,7 @@ void EqControl::querySink(bool seed)
             m_sinkProcess = nullptr;
         process->deleteLater();
         if (!m_sinkWarned)
-            qWarning() << "casdap eq: cannot start" << process->program();
+            qWarning() << "microdap eq: cannot start" << process->program();
         m_sinkWarned = true;
         if (seed && m_activeOutput.isEmpty())
             setActiveOutput(QStringLiteral("speaker"));
@@ -603,7 +603,7 @@ void EqControl::querySink(bool seed)
         QTimer::singleShot(sinkTimeoutMs, process, [this, process] {
             if (m_sinkProcess != process)
                 return;
-            qWarning() << "casdap eq: get-default-sink timed out";
+            qWarning() << "microdap eq: get-default-sink timed out";
             dropSinkProcess();
             if (m_activeOutput.isEmpty())
                 setActiveOutput(QStringLiteral("speaker"));
@@ -641,13 +641,13 @@ void EqControl::setActiveOutput(const QString &output)
 {
     if (!outputs().contains(output)) {
         if (!output.isEmpty())
-            qWarning() << "casdap eq: unknown output" << output;
+            qWarning() << "microdap eq: unknown output" << output;
         return;
     }
     if (m_activeOutput == output)
         return;
     m_activeOutput = output;
-    qInfo() << "casdap eq: active output" << output << "key" << key(output);
+    qInfo() << "microdap eq: active output" << output << "key" << key(output);
     emit activeOutputChanged();
     emit activeProfileChanged();
     applyActive(QStringLiteral("output"));
@@ -683,7 +683,7 @@ void EqControl::setBypassed(bool on)
     if (m_bypassed == on)
         return;
     m_bypassed = on;
-    qInfo() << "casdap eq: bypass" << (on ? "on" : "off");
+    qInfo() << "microdap eq: bypass" << (on ? "on" : "off");
     emitApplied(QStringLiteral("profile"));
 }
 
@@ -697,7 +697,7 @@ void EqControl::setDacHeld(bool on)
     if (m_dacHeld == on)
         return;
     m_dacHeld = on;
-    qInfo() << "casdap eq: dac held" << (on ? "on" : "off");
+    qInfo() << "microdap eq: dac held" << (on ? "on" : "off");
     emitApplied(QStringLiteral("profile"));
 }
 
@@ -794,7 +794,7 @@ void EqControl::relist()
             }
         }
     }
-    qInfo() << "casdap eq: listed" << paths.size() << "profiles";
+    qInfo() << "microdap eq: listed" << paths.size() << "profiles";
     if (paths != m_sourcePaths) {
         m_sourcePaths = paths;
         m_sources = list;
@@ -907,7 +907,7 @@ std::optional<EqProfile> EqControl::fileProfile(const QString &path) const
     QString error;
     std::optional<EqProfile> parsed = EqParser::parseFile(path, &error);
     if (!parsed)
-        qWarning() << "casdap eq: profile left out," << error;
+        qWarning() << "microdap eq: profile left out," << error;
     m_files.insert(path, parsed);
     return parsed;
 }
@@ -938,7 +938,7 @@ void EqControl::keyChanged(const QString &output)
     const QString k = key(output);
     if (k != QLatin1StringView("off") && k != QLatin1StringView("custom"))
         m_files.remove(k);
-    qInfo() << "casdap eq:" << output << "key" << k;
+    qInfo() << "microdap eq:" << output << "key" << k;
     changed(output);
 }
 
@@ -955,7 +955,7 @@ EqProfile *EqControl::beginEdit(const QString &output)
     if (!parsed)
         return nullptr;
     m_custom.insert(output, *parsed);
-    qInfo() << "casdap eq:" << output << "copied" << k << "into" << storePath(output);
+    qInfo() << "microdap eq:" << output << "copied" << k << "into" << storePath(output);
     m_editing = true;
     setKey(output, QStringLiteral("custom"));
     m_editing = false;
@@ -999,7 +999,7 @@ void EqControl::applyActive(const QString &cause)
     if (!m_appliedOnce || next != m_applied) {
         m_applied = next;
         m_appliedOnce = true;
-        qInfo() << "casdap eq: load" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
+        qInfo() << "microdap eq: load" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
         emit activeProfileChanged();
     }
     emitApplied(cause);
@@ -1017,7 +1017,7 @@ void EqControl::emitApplied(const QString &cause)
         return;
     m_emitted = target;
     m_emittedOnce = true;
-    qInfo().noquote() << "casdap eq: apply" << m_activeOutput << (flat ? QStringLiteral("off") : name(m_activeOutput))
+    qInfo().noquote() << "microdap eq: apply" << m_activeOutput << (flat ? QStringLiteral("off") : name(m_activeOutput))
                       << QStringLiteral("(%1)").arg(reason);
     emit profileApplied(target);
 }
@@ -1033,7 +1033,7 @@ void EqControl::stepBand(const QString &output, int band, const QString &field, 
     else if (field == QLatin1StringView("q"))
         stepQ(output, band, direction, coarse);
     else
-        qWarning() << "casdap eq: unknown band field" << field;
+        qWarning() << "microdap eq: unknown band field" << field;
 }
 
 }

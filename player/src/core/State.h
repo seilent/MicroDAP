@@ -16,7 +16,7 @@
 
 class QSocketNotifier;
 
-namespace casdap {
+namespace microdap {
 
 class Player;
 
