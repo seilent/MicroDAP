@@ -1,11 +1,11 @@
 #include "State.h"
 
+#include "Keep.h"
 #include "Library.h"
 #include "Player.h"
 #include "Queue.h"
 
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <csignal>
+#include <ctime>
 #include <fcntl.h>
 #include <numeric>
 #include <sys/socket.h>
@@ -64,12 +65,20 @@ QString statusName(Player::Status status)
     return QStringLiteral("stopped");
 }
 
+qint64 bootSeconds()
+{
+    timespec now{};
+    clock_gettime(CLOCK_BOOTTIME, &now);
+    return now.tv_sec;
+}
+
 bool handoffPlaying(const QJsonObject &object)
 {
-    const qint64 savedAt = static_cast<qint64>(object.value(QStringLiteral("savedAt")).toDouble(0));
-    const qint64 age = QDateTime::currentSecsSinceEpoch() - savedAt;
+    const qint64 savedAt = static_cast<qint64>(object.value(QStringLiteral("savedAt")).toDouble(-1));
+    const qint64 age = bootSeconds() - savedAt;
     return object.value(QStringLiteral("handoff")).toBool(false)
            && object.value(QStringLiteral("status")).toString() == QLatin1String("playing")
+           && object.value(QStringLiteral("bootId")).toString() == Keep::bootId() && savedAt >= 0 && age >= 0
            && age < handoffWindowS;
 }
 
@@ -316,7 +325,8 @@ QJsonObject State::snapshot(const Player *player, bool handoff, const QJsonArray
     object.insert(QStringLiteral("shuffle"), queue->shuffle());
     object.insert(QStringLiteral("repeat"), static_cast<int>(queue->repeat()));
     object.insert(QStringLiteral("status"), statusName(player->status()));
-    object.insert(QStringLiteral("savedAt"), QDateTime::currentSecsSinceEpoch());
+    object.insert(QStringLiteral("savedAt"), bootSeconds());
+    object.insert(QStringLiteral("bootId"), Keep::bootId());
     object.insert(QStringLiteral("handoff"), handoff);
     object.insert(QStringLiteral("stack"), stack);
     object.insert(QStringLiteral("queueRev"), queueRev);

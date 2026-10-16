@@ -5,6 +5,7 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
+#include <QDBusVariant>
 #include <QElapsedTimer>
 #include <QList>
 #include <QProcess>
@@ -25,7 +26,6 @@ constexpr int firstLateMs = 100;
 constexpr int gapSlackMs = 10;
 constexpr int meanToleranceMs = 25;
 constexpr int repeatCount = 6;
-constexpr int writeDelayMs = 200;
 
 QString controlService()
 {
@@ -52,6 +52,30 @@ QString targetPath(const QString &name)
     return Intercept::rootPath() + QStringLiteral("/devices/target/") + name;
 }
 
+QString arbiterControl()
+{
+    return QStringLiteral("net.seilent.MicroDap.FakeArbiter");
+}
+
+QDBusMessage arbiterCall(const QDBusConnection &bus, const QString &method)
+{
+    const QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                             Intercept::arbiterInterface(), method);
+    return bus.call(call, QDBus::Block, busTimeoutMs);
+}
+
+QString holder()
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                       QStringLiteral("org.freedesktop.DBus.Properties"),
+                                                       QStringLiteral("Get"));
+    call << Intercept::arbiterInterface() << QStringLiteral("Holder");
+    const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return QStringLiteral("error");
+    return qvariant_cast<QDBusVariant>(reply.arguments().value(0)).variant().toString();
+}
+
 PadSource::Action actionAt(const QSignalSpy &spy, int i)
 {
     return spy.at(i).at(0).value<PadSource::Action>();
@@ -72,7 +96,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     void connectedAtStart();
-    void showWritesThree();
+    void showAcquires();
     void pressRelease();
     void repeat();
     void names_data();
@@ -81,20 +105,26 @@ private slots:
     void dropped();
     void lateDevice();
     void screenOff();
-    void hideWritesZero();
-    void serializedWrites();
+    void otherHolderOnTop();
+    void arbiterRestart();
+    void rumble();
+    void hideReleases();
+    void quickToggle();
     void targetsComeAndGo();
-    void destructorWritesZero();
-    void hideThenDestroy();
+    void noModeWrites();
 
 private:
     QDBusMessage control(const QString &method, const QList<QVariant> &arguments = {});
     int mode(const QString &path);
     QList<uint> writes(const QString &path);
+    QList<double> rumbles(const QString &path);
     void emitEvent(const QString &target, const QString &name, double value);
     bool startFake();
+    bool startArbiter();
+    void stopArbiter();
 
     QProcess m_fake;
+    QProcess m_arbiter;
     std::unique_ptr<DbusPad> m_pad;
 };
 
@@ -122,6 +152,14 @@ QList<uint> DbusPadTest::writes(const QString &path)
     return qdbus_cast<QList<uint>>(reply.arguments().value(0));
 }
 
+QList<double> DbusPadTest::rumbles(const QString &path)
+{
+    const QDBusMessage reply = control(QStringLiteral("Rumbles"), {path});
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return {};
+    return qdbus_cast<QList<double>>(reply.arguments().value(0));
+}
+
 void DbusPadTest::emitEvent(const QString &target, const QString &name, double value)
 {
     const QDBusMessage reply = control(QStringLiteral("Emit"), {target, name, value});
@@ -147,6 +185,38 @@ bool DbusPadTest::startFake()
     return false;
 }
 
+bool DbusPadTest::startArbiter()
+{
+    m_arbiter.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    m_arbiter.start(QStringLiteral("python3"), {QStringLiteral(MICRODAP_FAKE_ARBITER)});
+    if (!m_arbiter.waitForStarted(busTimeoutMs))
+        return false;
+    QDBusConnectionInterface *iface = QDBusConnection::sessionBus().interface();
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < busTimeoutMs) {
+        if (iface->isServiceRegistered(Intercept::arbiterService()))
+            return true;
+        if (m_arbiter.state() != QProcess::Running)
+            return false;
+        QTest::qWait(50);
+    }
+    return false;
+}
+
+void DbusPadTest::stopArbiter()
+{
+    if (m_arbiter.state() != QProcess::Running)
+        return;
+    const QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                             arbiterControl(), QStringLiteral("Quit"));
+    QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+    if (!m_arbiter.waitForFinished(busTimeoutMs)) {
+        m_arbiter.terminate();
+        m_arbiter.waitForFinished(busTimeoutMs);
+    }
+}
+
 void DbusPadTest::initTestCase()
 {
     QDBusConnection session = QDBusConnection::sessionBus();
@@ -154,6 +224,7 @@ void DbusPadTest::initTestCase()
         QSKIP("no session bus, run under dbus-run-session");
     if (!startFake())
         QSKIP("fake InputPlumber did not start (python3 with dbus and gi needed)");
+    QVERIFY(startArbiter());
 
     qputenv("MICRODAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
     QDBusConnection bus = Intercept::bus();
@@ -161,12 +232,13 @@ void DbusPadTest::initTestCase()
     QVERIFY(bus.name() != session.name());
 
     qRegisterMetaType<PadSource::Action>();
-    m_pad = std::make_unique<DbusPad>(bus);
+    m_pad = std::make_unique<DbusPad>(session, bus);
 }
 
 void DbusPadTest::cleanupTestCase()
 {
     m_pad.reset();
+    stopArbiter();
     if (m_fake.state() == QProcess::Running) {
         control(QStringLiteral("Quit"));
         if (!m_fake.waitForFinished(busTimeoutMs)) {
@@ -184,16 +256,26 @@ void DbusPadTest::connectedAtStart()
     QCOMPARE(m_pad->intercept()->devices(), devices);
     QCOMPARE(m_pad->intercept()->targets(), targets);
     QVERIFY(!m_pad->shown());
-    QCOMPARE(mode(devicePath(0)), 0);
-    QCOMPARE(mode(devicePath(1)), 0);
+    QVERIFY(!m_pad->holding());
+    QCOMPARE(holder(), QString());
+
+    QSignalSpy pressed(m_pad.get(), &PadSource::pressed);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 1.0);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
+    QTest::qWait(quietMs);
+    QCOMPARE(pressed.count(), 0);
 }
 
-void DbusPadTest::showWritesThree()
+void DbusPadTest::showAcquires()
 {
+    QSignalSpy holding(m_pad->intercept(), &Intercept::holdingChanged);
     m_pad->setShown(true);
     QVERIFY(m_pad->shown());
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(1)), 3, busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QCOMPARE(holding.count(), 1);
+    QCOMPARE(holder(), QDBusConnection::sessionBus().baseService());
+    QCOMPARE(mode(devicePath(0)), 0);
+    QCOMPARE(mode(devicePath(1)), 0);
 }
 
 void DbusPadTest::pressRelease()
@@ -355,7 +437,7 @@ void DbusPadTest::dropped()
 
 void DbusPadTest::lateDevice()
 {
-    QVERIFY(m_pad->shown());
+    QVERIFY(m_pad->holding());
     QSignalSpy devices(m_pad->intercept(), &Intercept::devicesChanged);
     const QDBusMessage reply = control(QStringLiteral("AddDevice"));
     QVERIFY2(reply.type() != QDBusMessage::ErrorMessage, qPrintable(reply.errorMessage()));
@@ -363,9 +445,9 @@ void DbusPadTest::lateDevice()
     QCOMPARE(path, devicePath(2));
     QTRY_COMPARE_WITH_TIMEOUT(devices.count(), 1, busTimeoutMs);
     QVERIFY(m_pad->intercept()->devices().contains(path));
-    QTRY_COMPARE_WITH_TIMEOUT(mode(path), 3, busTimeoutMs);
-    QCOMPARE(mode(devicePath(0)), 3);
-    QCOMPARE(mode(devicePath(1)), 3);
+    QTest::qWait(quietMs);
+    QCOMPARE(mode(path), 0);
+    QCOMPARE(writes(path), QList<uint>());
 }
 
 void DbusPadTest::screenOff()
@@ -402,7 +484,67 @@ void DbusPadTest::screenOff()
     QTRY_COMPARE_WITH_TIMEOUT(released.count(), 2, busTimeoutMs);
 }
 
-void DbusPadTest::hideWritesZero()
+void DbusPadTest::otherHolderOnTop()
+{
+    QSignalSpy pressed(m_pad.get(), &PadSource::pressed);
+    QSignalSpy released(m_pad.get(), &PadSource::released);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_down"), 1.0);
+    QTRY_COMPARE_WITH_TIMEOUT(pressed.count(), 1, busTimeoutMs);
+
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("other"));
+    auto disconnectOther = qScopeGuard([] { QDBusConnection::disconnectFromBus(QStringLiteral("other")); });
+    QVERIFY(other.isConnected());
+    QCOMPARE(arbiterCall(other, QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_pad->holding(), busTimeoutMs);
+    QCOMPARE(holder(), other.baseService());
+    QCOMPARE(released.count(), 1);
+    QCOMPARE(actionAt(released, 0), PadSource::Down);
+
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_down"), 0.0);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 1.0);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
+    QTest::qWait(quietMs);
+    QCOMPARE(pressed.count(), 1);
+
+    QCOMPARE(arbiterCall(other, QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 1.0);
+    QTRY_COMPARE_WITH_TIMEOUT(pressed.count(), 2, busTimeoutMs);
+    QCOMPARE(actionAt(pressed, 1), PadSource::A);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
+    QTRY_COMPARE_WITH_TIMEOUT(released.count(), 2, busTimeoutMs);
+}
+
+void DbusPadTest::arbiterRestart()
+{
+    QVERIFY(m_pad->holding());
+    stopArbiter();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_pad->holding(), busTimeoutMs);
+    QSignalSpy pressed(m_pad.get(), &PadSource::pressed);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 1.0);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
+    QTest::qWait(quietMs);
+    QCOMPARE(pressed.count(), 0);
+
+    QVERIFY(startArbiter());
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QCOMPARE(holder(), QDBusConnection::sessionBus().baseService());
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 1.0);
+    QTRY_COMPARE_WITH_TIMEOUT(pressed.count(), 1, busTimeoutMs);
+    emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
+}
+
+void DbusPadTest::rumble()
+{
+    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
+    m_pad->intercept()->rumble({15, 50, 15});
+    const QList<double> expected{1.0, 0.0, 1.0, 0.0};
+    QTRY_COMPARE_WITH_TIMEOUT(rumbles(devicePath(0)), expected, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(rumbles(devicePath(1)), expected, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(rumbles(devicePath(2)), expected, busTimeoutMs);
+}
+
+void DbusPadTest::hideReleases()
 {
     QSignalSpy pressed(m_pad.get(), &PadSource::pressed);
     QSignalSpy released(m_pad.get(), &PadSource::released);
@@ -412,52 +554,40 @@ void DbusPadTest::hideWritesZero()
 
     m_pad->setShown(false);
     QVERIFY(!m_pad->shown());
+    QVERIFY(!m_pad->holding());
     QCOMPARE(released.count(), 1);
     QCOMPARE(actionAt(released, 0), PadSource::Down);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(1)), 0, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(2)), 0, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(holder(), QString(), busTimeoutMs);
     emitEvent(QStringLiteral("dbus1"), QStringLiteral("ui_down"), 0.0);
+    emitEvent(QStringLiteral("dbus1"), QStringLiteral("ui_accept"), 1.0);
     QTest::qWait(quietMs);
     QCOMPARE(released.count(), 1);
-
-    m_pad->setShown(false);
-    QTest::qWait(quietMs);
-    QCOMPARE(mode(devicePath(0)), 0);
+    QCOMPARE(pressed.count(), 1);
+    emitEvent(QStringLiteral("dbus1"), QStringLiteral("ui_accept"), 0.0);
 }
 
-void DbusPadTest::serializedWrites()
+void DbusPadTest::quickToggle()
 {
     QVERIFY(!m_pad->shown());
+    m_pad->setShown(true);
+    m_pad->setShown(false);
+    m_pad->setShown(true);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QCOMPARE(holder(), QDBusConnection::sessionBus().baseService());
+
+    m_pad->setShown(false);
+    m_pad->setShown(true);
+    m_pad->setShown(false);
+    QTRY_COMPARE_WITH_TIMEOUT(holder(), QString(), busTimeoutMs);
     QTest::qWait(quietMs);
-    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("SetDelay"), {QVariant::fromValue(uint(writeDelayMs))}).type(),
-             QDBusMessage::ReplyMessage);
-    auto restore = qScopeGuard([this] { control(QStringLiteral("SetDelay"), {QVariant::fromValue(0u)}); });
-
-    m_pad->setShown(true);
-    m_pad->setShown(false);
-    m_pad->setShown(true);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
-    QTest::qWait(writeDelayMs + quietMs);
-    const QList<uint> shown{3};
-    QCOMPARE(writes(devicePath(0)), shown);
-    QCOMPARE(writes(devicePath(1)), shown);
-    QCOMPARE(writes(devicePath(2)), shown);
-    QCOMPARE(mode(devicePath(1)), 3);
-
-    m_pad->setShown(false);
-    m_pad->setShown(true);
-    m_pad->setShown(false);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
-    QTest::qWait(writeDelayMs + quietMs);
-    const QList<uint> hidden{3, 0};
-    QCOMPARE(writes(devicePath(0)), hidden);
-    QCOMPARE(mode(devicePath(1)), 0);
+    QVERIFY(!m_pad->holding());
+    QCOMPARE(holder(), QString());
 }
 
 void DbusPadTest::targetsComeAndGo()
 {
+    m_pad->setShown(true);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
     QSignalSpy connected(m_pad.get(), &PadSource::connectedChanged);
     QVERIFY(m_pad->connected());
 
@@ -482,30 +612,11 @@ void DbusPadTest::targetsComeAndGo()
     emitEvent(QStringLiteral("dbus0"), QStringLiteral("ui_accept"), 0.0);
 }
 
-void DbusPadTest::destructorWritesZero()
+void DbusPadTest::noModeWrites()
 {
-    m_pad->setShown(true);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(1)), 3, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(2)), 3, busTimeoutMs);
-
-    m_pad.reset();
-    QCOMPARE(mode(devicePath(0)), 0);
-    QCOMPARE(mode(devicePath(1)), 0);
-    QCOMPARE(mode(devicePath(2)), 0);
-}
-
-void DbusPadTest::hideThenDestroy()
-{
-    auto *pad = new DbusPad(Intercept::bus());
-    pad->setShown(true);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(1)), 3, busTimeoutMs);
-
-    pad->setShown(false);
-    delete pad;
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(1)), 0, busTimeoutMs);
+    QCOMPARE(writes(devicePath(0)), QList<uint>());
+    QCOMPARE(writes(devicePath(1)), QList<uint>());
+    QCOMPARE(writes(devicePath(2)), QList<uint>());
 }
 
 QTEST_GUILESS_MAIN(DbusPadTest)

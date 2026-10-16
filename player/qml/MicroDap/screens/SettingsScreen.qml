@@ -10,7 +10,6 @@ Page {
     property QtObject player: null
     property QtObject audioInfo: null
     property QtObject outputControl: null
-    property QtObject codecFragment: null
     property QtObject library: null
     property QtObject rgbControl: null
     property QtObject bridge: null
@@ -31,6 +30,8 @@ Page {
     property string rateDraft: "auto"
     property bool autoRotateDraft: false
     property bool touchDraft: true
+    property string bootDraft: ""
+    property var bootChoices: []
     property int eqRevision: 0
     property var folders: []
     property var shownValues: ({})
@@ -45,7 +46,7 @@ Page {
     readonly property var hpAmps: ["lohifi", "ulp", "hifi"]
     readonly property var spkGainSteps: [84, 90, 96, 99, 102, 105, 108]
     readonly property var volumeSteps: [2, 5, 10]
-    readonly property var rgbModes: ["accent", "off", "armada"]
+    readonly property var rgbModes: ["accent", "off", "system"]
     readonly property var saverSteps: [10, 15, 30, 60, 120, 300]
     readonly property var screenOffSteps: [0, 60, 120, 300, 600, 1800]
     readonly property var suspendSteps: [0, 5, 10, 30, 60]
@@ -57,7 +58,8 @@ Page {
         output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
         codec: "btCodec", level: "outputLevel", rate: "sampleRate", accent: "accentHue", accentArt: "accentFromArt",
         scale: "scale", saver: "saverSeconds", rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds",
-        suspend: "suspendMinutes", wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate", touch: "touch"
+        suspend: "suspendMinutes", wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate", touch: "touch",
+        boot: "bootSession"
     })
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
@@ -66,7 +68,7 @@ Page {
     readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
     readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
     readonly property int volumeStep: page.settings !== null && page.settings.volumeStep !== undefined ? Number(page.settings.volumeStep) : 5
-    readonly property string rgb: page.settings !== null && page.settings.rgb !== undefined ? String(page.settings.rgb) : "armada"
+    readonly property string rgb: page.settings !== null && page.settings.rgb !== undefined ? String(page.settings.rgb) : "system"
     readonly property bool rgbSupported: !page.overlay && page.rgbControl !== null && page.rgbControl.supported === true
     readonly property string rgbValue: page.rgbSupported ? page.rgb : "unsupported"
     readonly property bool overlayToasts: page.settings !== null && page.settings.overlayToasts === true
@@ -121,16 +123,19 @@ Page {
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
     readonly property bool wifiOffScreenOff: page.settings !== null && page.settings.wifiOffScreenOff === true
-    readonly property bool codecPending: page.codecFragment !== null && page.codecFragment.pending === true
-    readonly property string codecValue: page.codecPending ? page.codec + " (pending)" : page.codec
+    readonly property bool hasBoot: page.settings !== null && page.settings.bootSession !== undefined
+    readonly property string bootSession: page.hasBoot ? String(page.settings.bootSession) : ""
+    readonly property bool bootReadOnly: page.bootChoices.length === 0
+    readonly property string bootValue: page.bootText(page.editing && page.editKey === "boot" ? page.bootDraft : page.bootSession)
     readonly property bool scanning: page.library !== null && page.library.scanning === true
     readonly property int songCount: page.library !== null && page.library.songCount !== undefined ? Number(page.library.songCount) : 0
     readonly property string rescanValue: page.scanning ? "scanning" : page.songCount + (page.songCount === 1 ? " song" : " songs")
     readonly property var current: page.player !== null && page.player.current !== undefined && page.player.current !== null ? page.player.current : null
     readonly property string pcmFormat: page.audioInfo !== null && page.audioInfo.pcmFormat !== undefined ? String(page.audioInfo.pcmFormat) : ""
-    readonly property var driftPaths: page.power !== null && page.power.driftPaths !== undefined ? page.power.driftPaths : []
+    readonly property string imageVersion: page.power !== null && page.power.imageVersion !== undefined ? String(page.power.imageVersion) : ""
+    readonly property bool hasUpdate: page.power !== null && page.power.updateStatus !== undefined
+    readonly property string updateValue: page.hasUpdate ? page.updateText(String(page.power.updateStatus), String(page.power.updateVersion)) : ""
     readonly property string version: Env.version
-    readonly property var manifest: Env.manifest
     readonly property var rows: page.buildRows()
     readonly property var rowTops: page.buildTops(page.rows)
     readonly property real contentHeight: page.rows.length === 0 ? 0 : page.rowTops[page.rows.length - 1] + page.rowHeightOf(page.rows[page.rows.length - 1])
@@ -194,10 +199,27 @@ Page {
         return (db > 0 ? "+" + db : String(db)) + " db"
     }
 
-    function digestTail(image: string): string {
-        const at = image.indexOf("sha256:")
-        const digest = at >= 0 ? image.substring(at + 7) : image
-        return digest.length > 12 ? digest.substring(0, 12) : digest
+    function updateText(status: string, version: string): string {
+        switch (status) {
+        case "available":
+            return version !== "" ? version + " available" : "available"
+        case "none":
+            return "up to date"
+        case "offline":
+            return "offline"
+        default:
+            return "not checked"
+        }
+    }
+
+    function bootText(name: string): string {
+        if (page.bootChoices.length === 0 || page.bootChoices.indexOf(name) >= 0)
+            return name
+        return name + " (not available)"
+    }
+
+    function refreshBootChoices(): void {
+        page.bootChoices = page.hasBoot && typeof page.settings.bootSessions === "function" ? page.settings.bootSessions() : []
     }
 
     function trackLine(): string {
@@ -254,7 +276,7 @@ Page {
         out.push(page.row("hpAmp", "headphone amp", page.hpAmpValue, page.usbActive))
         out.push(page.row("spkGain", "speaker digital gain", page.spkGainText(page.spkGain), false))
         out.push(page.row("volumeStep", "volume step", page.volumeStep + "%", false))
-        out.push(page.row("codec", "bluetooth codec", page.codecValue, false))
+        out.push(page.row("codec", "bluetooth codec", page.codec, false))
         out.push(page.row("level", "bit perfect", page.levelValue, page.overlay))
         out.push(page.row("rate", "sample rate", page.rateValue, page.rateReadOnly))
         out.push(page.row("replaygain", "replaygain", "off", true))
@@ -285,18 +307,16 @@ Page {
         out.push(page.row("screenOff", "screen off after", page.offOr(Math.round(page.screenOffSeconds / 60), "min"), false))
         out.push(page.row("suspend", "suspend after", page.offOr(page.suspendMinutes, "min"), false))
         out.push(page.row("wifi", "wi-fi when off", page.wifiOffScreenOff ? "off" : "keep", false))
+        if (page.hasBoot)
+            out.push(page.row("boot", "boot into", page.bootValue, page.bootReadOnly))
         if (page.overlay)
             out.push(page.row("closePlayer", "close player", "", true))
         out.push(page.row("about", "about", page.version, true))
         if (page.aboutOpen) {
-            const image = page.manifest.IMAGE_VERSION === undefined ? "" : String(page.manifest.IMAGE_VERSION)
-            const base = page.manifest.BASE_IMAGE === undefined ? "" : String(page.manifest.BASE_IMAGE)
-            if (image !== "")
-                out.push(page.info("armada", "armada", image))
-            if (base !== "")
-                out.push(page.info("image", "image", page.digestTail(base)))
-            if (page.driftPaths.length > 0)
-                out.push(page.info("drift", "drift", page.driftPaths.length + (page.driftPaths.length === 1 ? " file" : " files")))
+            if (page.imageVersion !== "")
+                out.push(page.info("image", "image", page.imageVersion))
+            if (page.hasUpdate)
+                out.push(page.info("update", "system update", page.updateValue))
             const track = page.trackLine()
             if (track !== "")
                 out.push(page.info("track", "track", track))
@@ -527,6 +547,11 @@ Page {
         case "touch":
             page.touchDraft = !page.touchDraft
             return true
+        case "boot":
+            if (page.bootReadOnly)
+                return false
+            page.bootDraft = page.cycle(page.bootChoices, page.bootDraft, delta)
+            return true
         default:
             return false
         }
@@ -579,18 +604,26 @@ Page {
             return page.autoRotate
         case "touch":
             return page.touchEnabled
+        case "boot":
+            return page.bootSession
         default:
             return undefined
         }
     }
 
     function beginEdit(key: string): void {
+        if (key === "boot") {
+            page.refreshBootChoices()
+            if (page.bootReadOnly)
+                return
+        }
         page.editOriginal = page.currentOf(key)
         page.orientationDraft = page.orientation
         page.levelDraft = page.outputLevel
         page.rateDraft = page.sampleRate
         page.autoRotateDraft = page.autoRotate
         page.touchDraft = page.touchEnabled
+        page.bootDraft = page.bootSession
         page.editKey = key
         page.editing = true
     }
@@ -608,7 +641,7 @@ Page {
         const original = page.editOriginal
         if (key === "scale")
             page.applyScale(Number(original))
-        else if (["orientation", "autoRotate", "touch", "level", "rate"].indexOf(key) < 0)
+        else if (["orientation", "autoRotate", "touch", "level", "rate", "boot"].indexOf(key) < 0)
             page.set(page.settingOf(key), original)
         page.confirmEdit()
     }
@@ -620,6 +653,7 @@ Page {
         const touchDraft = page.touchDraft
         const levelDraft = page.levelDraft
         const rateDraft = page.rateDraft
+        const bootDraft = page.bootDraft
         page.confirmEdit()
         if (key === "orientation")
             page.set("orientation", draft)
@@ -631,6 +665,8 @@ Page {
             page.set("autoRotate", autoDraft)
         else if (key === "touch")
             page.set("touch", touchDraft)
+        else if (key === "boot")
+            page.set("bootSession", bootDraft)
     }
 
     function revertOrConfirmForRotation(): void {
@@ -721,8 +757,8 @@ Page {
             return true
         case "about":
             page.aboutOpen = !page.aboutOpen
-            if (page.aboutOpen && page.power !== null && typeof page.power.reloadDrift === "function")
-                page.power.reloadDrift()
+            if (page.aboutOpen && page.power !== null && typeof page.power.reloadUpdate === "function")
+                page.power.reloadUpdate()
             page.refreshFrom(page.focusIndex + 1)
             return true
         case "rescan":
@@ -856,6 +892,7 @@ Page {
                 list.push(f)
         }
         page.folders = list
+        page.refreshBootChoices()
         page.focusIndex = Math.max(0, page.nearestFocusable(0, 1))
     }
 
@@ -863,6 +900,15 @@ Page {
         id: d
 
         property int pendingFrom: -1
+    }
+
+    Connections {
+        target: page.settings
+        ignoreUnknownSignals: true
+
+        function onAvailableChanged() {
+            page.refreshBootChoices()
+        }
     }
 
     Connections {

@@ -1,140 +1,166 @@
 #include "Settings.h"
 
+#include "Eq.h"
 #include "Scanner.h"
 
-#include <QCoreApplication>
+#include <microset/client.h>
+
 #include <QColor>
+#include <QDebug>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSettings>
 #include <QStandardPaths>
+
+#include <cstdlib>
 
 namespace microdap {
 
 namespace {
 
-QString keyOutput()
+struct Key
 {
-    return QStringLiteral("output");
+    const char *name;
+    QMetaType::Type type;
+    void (Settings::*notify)();
+};
+
+const QString keyOutput = QStringLiteral("audio.output");
+const QString keyHpGain = QStringLiteral("audio.hp_gain");
+const QString keyHpAmp = QStringLiteral("audio.hp_amp");
+const QString keySpkGain = QStringLiteral("audio.speaker_gain");
+const QString keyVolumeStep = QStringLiteral("audio.volume_step");
+const QString keyBtCodec = QStringLiteral("audio.bt_codec");
+const QString keyOrientation = QStringLiteral("display.orientation");
+const QString keyAutoRotate = QStringLiteral("display.auto_rotate");
+const QString keyBootSession = QStringLiteral("session.default");
+const QString keyRoots = QStringLiteral("microdap.roots");
+const QString keyAccentHue = QStringLiteral("microdap.accent_hue");
+const QString keyAccentFromArt = QStringLiteral("microdap.accent_from_art");
+const QString keyScale = QStringLiteral("microdap.scale");
+const QString keySaverSeconds = QStringLiteral("microdap.saver_seconds");
+const QString keyScreenOffSeconds = QStringLiteral("microdap.screen_off_seconds");
+const QString keySuspendMinutes = QStringLiteral("microdap.suspend_minutes");
+const QString keyWifiOffScreenOff = QStringLiteral("microdap.wifi_off_screen_off");
+const QString keyOverlayToasts = QStringLiteral("microdap.overlay_toasts");
+const QString keyRgb = QStringLiteral("microdap.rgb");
+const QString keyTouch = QStringLiteral("microdap.touch");
+const QString keyOutputLevel = QStringLiteral("microdap.output_level");
+const QString keySampleRate = QStringLiteral("microdap.sample_rate");
+
+constexpr Key keys[] = {
+    {"audio.output", QMetaType::QString, &Settings::outputChanged},
+    {"audio.hp_gain", QMetaType::QString, &Settings::hpGainChanged},
+    {"audio.hp_amp", QMetaType::QString, &Settings::hpAmpChanged},
+    {"audio.speaker_gain", QMetaType::UInt, &Settings::spkGainChanged},
+    {"audio.volume_step", QMetaType::UInt, &Settings::volumeStepChanged},
+    {"audio.bt_codec", QMetaType::QString, &Settings::btCodecChanged},
+    {"display.orientation", QMetaType::QString, &Settings::orientationChanged},
+    {"display.auto_rotate", QMetaType::Bool, &Settings::autoRotateChanged},
+    {"session.default", QMetaType::QString, &Settings::bootSessionChanged},
+    {"microdap.roots", QMetaType::QStringList, &Settings::rootsChanged},
+    {"microdap.accent_hue", QMetaType::UInt, &Settings::accentHueChanged},
+    {"microdap.accent_from_art", QMetaType::Bool, &Settings::accentFromArtChanged},
+    {"microdap.scale", QMetaType::Double, &Settings::scaleChanged},
+    {"microdap.saver_seconds", QMetaType::UInt, &Settings::saverSecondsChanged},
+    {"microdap.screen_off_seconds", QMetaType::UInt, &Settings::screenOffSecondsChanged},
+    {"microdap.suspend_minutes", QMetaType::UInt, &Settings::suspendMinutesChanged},
+    {"microdap.wifi_off_screen_off", QMetaType::Bool, &Settings::wifiOffScreenOffChanged},
+    {"microdap.overlay_toasts", QMetaType::Bool, &Settings::overlayToastsChanged},
+    {"microdap.rgb", QMetaType::QString, &Settings::rgbChanged},
+    {"microdap.touch", QMetaType::Bool, &Settings::touchChanged},
+    {"microdap.output_level", QMetaType::QString, &Settings::outputLevelChanged},
+    {"microdap.sample_rate", QMetaType::QString, &Settings::sampleRateChanged},
+};
+
+const Key *find(const QString &key)
+{
+    for (const Key &entry : keys) {
+        if (key == QLatin1StringView(entry.name))
+            return &entry;
+    }
+    return nullptr;
 }
 
-QString keyRoots()
+QStringList eqFields()
 {
-    return QStringLiteral("roots");
+    return {QStringLiteral("on"), QStringLiteral("name"), QStringLiteral("filters")};
 }
 
-QString keyAccent()
+bool eqKey(const QString &key)
 {
-    return QStringLiteral("accent");
+    for (const QString &slot : EqControl::outputs()) {
+        for (const QString &field : eqFields()) {
+            if (key == EqFilters::key(slot, field))
+                return true;
+        }
+    }
+    return false;
 }
 
-QString keyAccentHue()
+QMetaType::Type typeOf(const QString &key)
 {
-    return QStringLiteral("accentHue");
+    if (const Key *entry = find(key))
+        return entry->type;
+    if (key.endsWith(QLatin1StringView(".on")))
+        return QMetaType::Bool;
+    if (key.endsWith(QLatin1StringView(".filters")))
+        return QMetaType::QStringList;
+    return QMetaType::QString;
 }
 
-QString keyAccentFromArt()
+QVariant typed(const QString &key, const QVariant &value)
 {
-    return QStringLiteral("accentFromArt");
+    switch (typeOf(key)) {
+    case QMetaType::UInt:
+        return QVariant::fromValue(value.toUInt());
+    case QMetaType::Bool:
+        return QVariant::fromValue(value.toBool());
+    case QMetaType::Double:
+        return QVariant::fromValue(value.toDouble());
+    case QMetaType::QStringList:
+        return QVariant::fromValue(value.toStringList());
+    default:
+        return QVariant::fromValue(value.toString());
+    }
 }
 
-QString keyScale()
+QVariantMap defaults()
 {
-    return QStringLiteral("scale");
-}
-
-QString keySaverSeconds()
-{
-    return QStringLiteral("saverSeconds");
-}
-
-QString keyScreenOffSeconds()
-{
-    return QStringLiteral("screenOffSeconds");
-}
-
-QString keySuspendMinutes()
-{
-    return QStringLiteral("suspendMinutes");
-}
-
-QString keyWifiOffScreenOff()
-{
-    return QStringLiteral("wifiOffScreenOff");
-}
-
-QString keyBtCodec()
-{
-    return QStringLiteral("btCodec");
-}
-
-QString keyOverlayToasts()
-{
-    return QStringLiteral("overlayToasts");
-}
-
-QString keyHpGain()
-{
-    return QStringLiteral("hpGain");
-}
-
-QString keyHpAmp()
-{
-    return QStringLiteral("hpAmp");
-}
-
-QString keySpkGain()
-{
-    return QStringLiteral("spkGain");
-}
-
-QString keyVolumeStep()
-{
-    return QStringLiteral("volumeStep");
-}
-
-QString keyRgb()
-{
-    return QStringLiteral("rgb");
-}
-
-QString keyOrientation()
-{
-    return QStringLiteral("orientation");
-}
-
-QString keyAutoRotate()
-{
-    return QStringLiteral("autoRotate");
-}
-
-QString keyTouch()
-{
-    return QStringLiteral("touch");
-}
-
-QString keyEqHeadphones()
-{
-    return QStringLiteral("eqHeadphones");
-}
-
-QString keyEqUsb()
-{
-    return QStringLiteral("eqUsb");
-}
-
-QString keyEqSpeaker()
-{
-    return QStringLiteral("eqSpeaker");
-}
-
-QString keyOutputLevel()
-{
-    return QStringLiteral("outputLevel");
-}
-
-QString keySampleRate()
-{
-    return QStringLiteral("sampleRate");
+    QVariantMap out{
+        {keyOutput, QStringLiteral("auto")},
+        {keyHpGain, QStringLiteral("high")},
+        {keyHpAmp, QStringLiteral("lohifi")},
+        {keySpkGain, 102u},
+        {keyVolumeStep, 5u},
+        {keyBtCodec, QStringLiteral("auto")},
+        {keyOrientation, QStringLiteral("portrait")},
+        {keyAutoRotate, false},
+        {keyBootSession, QStringLiteral("steam")},
+        {keyRoots, QStringList()},
+        {keyAccentHue, uint(Settings::defaultAccentHue)},
+        {keyAccentFromArt, false},
+        {keyScale, 1.0},
+        {keySaverSeconds, 30u},
+        {keyScreenOffSeconds, 300u},
+        {keySuspendMinutes, 10u},
+        {keyWifiOffScreenOff, false},
+        {keyOverlayToasts, false},
+        {keyRgb, QStringLiteral("system")},
+        {keyTouch, true},
+        {keyOutputLevel, QStringLiteral("off")},
+        {keySampleRate, QStringLiteral("auto")},
+    };
+    for (const QString &slot : EqControl::outputs()) {
+        out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
+        out.insert(EqFilters::key(slot, QStringLiteral("name")), QString());
+        out.insert(EqFilters::key(slot, QStringLiteral("filters")), QStringList{QStringLiteral("preamp 0")});
+    }
+    return out;
 }
 
 double normalizeScale(double scale)
@@ -148,31 +174,66 @@ int normalizeSaver(int seconds)
     return qBound(Settings::minSaverSeconds, seconds, Settings::maxSaverSeconds);
 }
 
+QString pick(const QString &value, const QStringList &allowed, const QString &fallback)
+{
+    return allowed.contains(value) ? value : fallback;
 }
 
-Settings::Settings(QObject *parent)
-    : Settings(defaultPath(), parent)
+void legacyEq(QSettings &ini, const QString &iniKey, const QString &slot, QVariantMap &out)
 {
+    if (!ini.contains(iniKey))
+        return;
+    const QString value = ini.value(iniKey).toString();
+    std::optional<EqProfile> profile;
+    QString name;
+    if (value == QLatin1StringView("custom")) {
+        const QString path = QFileInfo(ini.fileName()).absolutePath() + QStringLiteral("/eq-") + slot
+                             + QStringLiteral(".ini");
+        profile = EqStore::read(path);
+    } else if (!value.isEmpty() && QDir::isAbsolutePath(value)) {
+        QString error;
+        profile = EqParser::parseFile(QDir::cleanPath(value), &error);
+        if (!profile)
+            qWarning().noquote() << "microdap settings: import of" << iniKey << "skipped," << error;
+        name = EqControl::displayName(value);
+    } else {
+        out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
+        return;
+    }
+    if (!profile)
+        return;
+    out.insert(EqFilters::key(slot, QStringLiteral("on")), true);
+    out.insert(EqFilters::key(slot, QStringLiteral("name")), name);
+    out.insert(EqFilters::key(slot, QStringLiteral("filters")), EqFilters::encode(*profile));
 }
 
-Settings::Settings(const QString &path, QObject *parent)
-    : QObject(parent)
-    , m_settings(path, QSettings::IniFormat)
+}
+
+Settings::Settings()
+    : m_owned(std::make_unique<MicroSet::Client>(bus()))
+    , m_client(m_owned.get())
 {
-    m_syncTimer.setSingleShot(true);
-    m_syncTimer.setInterval(syncDelayMs);
-    connect(&m_syncTimer, &QTimer::timeout, this, &Settings::sync);
-    if (QCoreApplication *app = QCoreApplication::instance())
-        connect(app, &QCoreApplication::aboutToQuit, this, &Settings::sync);
     load();
 }
 
-Settings::~Settings()
+Settings::Settings(MicroSet::Client *client, QObject *parent)
+    : QObject(parent)
+    , m_client(client)
 {
-    sync();
+    load();
 }
 
-QString Settings::defaultPath()
+Settings::~Settings() = default;
+
+QDBusConnection Settings::bus()
+{
+    const QString address = qEnvironmentVariable("MICRODAP_MICROSET_BUS");
+    if (address.isEmpty())
+        return QDBusConnection::systemBus();
+    return QDBusConnection::connectToBus(address, QStringLiteral("microdap-microset"));
+}
+
+QString Settings::legacyPath()
 {
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
            + QStringLiteral("/microdap/settings.ini");
@@ -180,7 +241,8 @@ QString Settings::defaultPath()
 
 QStringList Settings::outputs()
 {
-    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")};
+    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb"),
+            QStringLiteral("bt")};
 }
 
 QStringList Settings::codecs()
@@ -228,7 +290,7 @@ QList<int> Settings::volumeSteps()
 
 QStringList Settings::rgbModes()
 {
-    return {QStringLiteral("accent"), QStringLiteral("off"), QStringLiteral("armada")};
+    return {QStringLiteral("accent"), QStringLiteral("off"), QStringLiteral("system")};
 }
 
 QStringList Settings::orientations()
@@ -253,6 +315,31 @@ QStringList Settings::defaultRoots()
 {
     return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
             QStringLiteral("/run/media")};
+}
+
+QList<int> Settings::saverSteps()
+{
+    return {10, 15, 30, 60, 120, 300};
+}
+
+QList<int> Settings::screenOffSteps()
+{
+    return {0, 60, 120, 300, 600, 1800};
+}
+
+QList<int> Settings::suspendSteps()
+{
+    return {0, 5, 10, 30, 60};
+}
+
+int Settings::snap(int value, const QList<int> &steps)
+{
+    int best = steps.first();
+    for (const int step : steps) {
+        if (std::abs(step - value) < std::abs(best - value))
+            best = step;
+    }
+    return best;
 }
 
 QStringList Settings::candidateRoots()
@@ -286,466 +373,441 @@ QStringList Settings::candidateRoots()
     return out;
 }
 
+QVariantMap Settings::legacyValues(const QString &path)
+{
+    QVariantMap out;
+    QSettings ini(path, QSettings::IniFormat);
+    const auto text = [&ini](const char *key) { return ini.value(QLatin1StringView(key)).toString().toLower(); };
+    const auto has = [&ini](const char *key) { return ini.contains(QLatin1StringView(key)); };
+    const auto put = [&out](const QString &key, const QVariant &value) { out.insert(key, typed(key, value)); };
+
+    if (has("output") && outputs().contains(text("output")))
+        put(keyOutput, text("output"));
+    if (has("hpAmp") && hpAmps().contains(text("hpAmp")))
+        put(keyHpAmp, text("hpAmp"));
+    if (has("spkGain") && spkGains().contains(ini.value(QStringLiteral("spkGain")).toInt()))
+        put(keySpkGain, ini.value(QStringLiteral("spkGain")).toInt());
+    if (has("volumeStep") && volumeSteps().contains(ini.value(QStringLiteral("volumeStep")).toInt()))
+        put(keyVolumeStep, ini.value(QStringLiteral("volumeStep")).toInt());
+    if (has("btCodec") && codecs().contains(text("btCodec")))
+        put(keyBtCodec, text("btCodec"));
+    const QString orientation = ini.value(QStringLiteral("orientation")).toString();
+    if (orientations().contains(orientation))
+        put(keyOrientation, orientation);
+    if (has("autoRotate"))
+        put(keyAutoRotate, ini.value(QStringLiteral("autoRotate")).toBool());
+
+    if (has("rgb")) {
+        const QString rgb = text("rgb");
+        if (rgb == QLatin1StringView("armada"))
+            put(keyRgb, QStringLiteral("system"));
+        else if (rgb == QLatin1StringView("accent") || rgb == QLatin1StringView("off"))
+            put(keyRgb, rgb);
+    }
+    bool hueOk = false;
+    const int hue = ini.value(QStringLiteral("accentHue")).toInt(&hueOk);
+    if (has("accentHue") && hueOk)
+        put(keyAccentHue, normalizeHue(hue));
+    else if (!has("accentHue") && has("accent"))
+        put(keyAccentHue, hueFromColor(ini.value(QStringLiteral("accent")).toString()));
+
+    legacyEq(ini, QStringLiteral("eqHeadphones"), QStringLiteral("headphones"), out);
+    legacyEq(ini, QStringLiteral("eqUsb"), QStringLiteral("usb"), out);
+    legacyEq(ini, QStringLiteral("eqSpeaker"), QStringLiteral("speaker"), out);
+
+    if (has("touch"))
+        put(keyTouch, ini.value(QStringLiteral("touch")).toBool());
+    const QStringList roots = ini.value(QStringLiteral("roots")).toStringList();
+    if (!roots.isEmpty())
+        put(keyRoots, roots);
+    if (has("accentFromArt"))
+        put(keyAccentFromArt, ini.value(QStringLiteral("accentFromArt")).toBool());
+    if (has("scale"))
+        put(keyScale, normalizeScale(ini.value(QStringLiteral("scale")).toDouble()));
+    if (has("saverSeconds"))
+        put(keySaverSeconds, snap(ini.value(QStringLiteral("saverSeconds")).toInt(), saverSteps()));
+    if (has("screenOffSeconds"))
+        put(keyScreenOffSeconds, snap(ini.value(QStringLiteral("screenOffSeconds")).toInt(), screenOffSteps()));
+    if (has("suspendMinutes"))
+        put(keySuspendMinutes, snap(ini.value(QStringLiteral("suspendMinutes")).toInt(), suspendSteps()));
+    if (has("wifiOffScreenOff"))
+        put(keyWifiOffScreenOff, ini.value(QStringLiteral("wifiOffScreenOff")).toBool());
+    if (has("overlayToasts"))
+        put(keyOverlayToasts, ini.value(QStringLiteral("overlayToasts")).toBool());
+    if (has("outputLevel") && outputLevels().contains(text("outputLevel")))
+        put(keyOutputLevel, text("outputLevel"));
+    if (has("sampleRate") && sampleRates().contains(text("sampleRate")))
+        put(keySampleRate, text("sampleRate"));
+    return out;
+}
+
+void Settings::importLegacy(const QString &path)
+{
+    if (!m_client || m_importing || !QFileInfo::exists(path))
+        return;
+    const QVariantMap values = legacyValues(path);
+    qInfo() << "microdap settings: import" << path << values.size() << "keys";
+    m_importing = true;
+    m_client->import(values, [this, path](const QStringList &taken, const QMap<QString, QString> &refused,
+                                          const MicroSet::Error &error) {
+        m_importing = false;
+        if (!error.ok()) {
+            qWarning().noquote() << "microdap settings: import failed," << error.name << error.message
+                                 << "- kept" << path;
+            emit imported(false);
+            return;
+        }
+        for (auto it = refused.cbegin(); it != refused.cend(); ++it)
+            qWarning().noquote() << "microdap settings: import refused" << it.key() << it.value();
+        const QString done = path + QStringLiteral(".imported");
+        QFile::remove(done);
+        if (!QFile::rename(path, done))
+            qWarning() << "microdap settings: cannot rename" << path;
+        qInfo() << "microdap settings: imported" << taken.size() << "keys, refused" << refused.size();
+        emit imported(true);
+    });
+}
+
+MicroSet::Client *Settings::client() const
+{
+    return m_client;
+}
+
+bool Settings::available() const
+{
+    return m_available;
+}
+
 void Settings::load()
 {
-    const QString output = m_settings.value(keyOutput()).toString();
-    m_output = outputs().contains(output) ? output : outputs().first();
-
-    const QStringList roots = m_settings.value(keyRoots()).toStringList();
-    m_roots = roots.isEmpty() ? defaultRoots() : roots;
-
-    const QVariant storedHue = m_settings.value(keyAccentHue());
-    bool hueOk = false;
-    const int hue = storedHue.toInt(&hueOk);
-    if (storedHue.isValid()) {
-        m_accentHue = hueOk ? normalizeHue(hue) : defaultAccentHue;
-    } else if (m_settings.contains(keyAccent())) {
-        m_accentHue = hueFromColor(m_settings.value(keyAccent()).toString());
-        m_dirty.insert(keyAccentHue(), m_accentHue);
-    } else {
-        m_accentHue = defaultAccentHue;
+    m_values = defaults();
+    if (!m_client)
+        return;
+    connect(m_client, &MicroSet::Client::changed, this, &Settings::take);
+    const QStringList watched = m_values.keys();
+    for (const QString &key : watched)
+        m_client->watch(key);
+    MicroSet::Error error;
+    const QVariantMap values = m_client->list(QString(), &error);
+    if (!error.ok()) {
+        qWarning().noquote() << "microdap settings: microsetd not reachable," << error.name << "- defaults";
+        return;
     }
-    m_dropAccent = m_settings.contains(keyAccent());
-    m_accentFromArt = m_settings.value(keyAccentFromArt(), false).toBool();
-
-    m_scale = normalizeScale(m_settings.value(keyScale(), 1.0).toDouble());
-    m_saverSeconds = normalizeSaver(m_settings.value(keySaverSeconds(), 30).toInt());
-    m_screenOffSeconds = qMax(0, m_settings.value(keyScreenOffSeconds(), 300).toInt());
-    m_suspendMinutes = qMax(0, m_settings.value(keySuspendMinutes(), 10).toInt());
-    m_wifiOffScreenOff = m_settings.value(keyWifiOffScreenOff(), false).toBool();
-
-    const QString codec = m_settings.value(keyBtCodec()).toString().toLower();
-    m_btCodec = codecs().contains(codec) ? codec : codecs().first();
-    m_overlayToasts = m_settings.value(keyOverlayToasts(), false).toBool();
-
-    const QString hpGain = m_settings.value(keyHpGain()).toString().toLower();
-    m_hpGain = hpGains().contains(hpGain) ? hpGain : QStringLiteral("normal");
-    const QString hpAmp = m_settings.value(keyHpAmp()).toString().toLower();
-    m_hpAmp = hpAmps().contains(hpAmp) ? hpAmp : QStringLiteral("lohifi");
-    const int spkGain = m_settings.value(keySpkGain(), 102).toInt();
-    m_spkGain = spkGains().contains(spkGain) ? spkGain : 102;
-    const int volumeStep = m_settings.value(keyVolumeStep(), 5).toInt();
-    m_volumeStep = volumeSteps().contains(volumeStep) ? volumeStep : 5;
-    const QString rgb = m_settings.value(keyRgb()).toString().toLower();
-    m_rgb = rgbModes().contains(rgb) ? rgb : QStringLiteral("armada");
-    const QString orientation = m_settings.value(keyOrientation()).toString();
-    m_orientation = orientations().contains(orientation) ? orientation : orientations().first();
-    m_autoRotate = m_settings.value(keyAutoRotate(), false).toBool();
-    m_touch = m_settings.value(keyTouch(), true).toBool();
-    m_eqHeadphones = normalizeEq(m_settings.value(keyEqHeadphones()).toString());
-    m_eqUsb = normalizeEq(m_settings.value(keyEqUsb()).toString());
-    m_eqSpeaker = normalizeEq(m_settings.value(keyEqSpeaker()).toString());
-    const QString level = m_settings.value(keyOutputLevel()).toString().toLower();
-    m_outputLevel = outputLevels().contains(level) ? level : outputLevels().first();
-    const QString rate = m_settings.value(keySampleRate()).toString().toLower();
-    m_sampleRate = sampleRates().contains(rate) ? rate : sampleRates().first();
+    m_available = true;
+    for (auto it = values.cbegin(); it != values.cend(); ++it) {
+        if (m_values.contains(it.key()))
+            m_values.insert(it.key(), it.value());
+    }
 }
 
-QString Settings::path() const
+void Settings::take(const QString &key, const QVariant &value)
 {
-    return m_settings.fileName();
-}
-
-QString Settings::output() const
-{
-    return m_output;
-}
-
-void Settings::setOutput(const QString &output)
-{
-    if (!outputs().contains(output) || m_output == output)
+    if (!m_values.contains(key))
         return;
-    m_output = output;
-    store(keyOutput(), m_output);
-    emit outputChanged();
-}
-
-QStringList Settings::roots() const
-{
-    return m_roots;
-}
-
-void Settings::setRoots(const QStringList &roots)
-{
-    const QStringList value = roots.isEmpty() ? defaultRoots() : roots;
-    if (m_roots == value)
+    if (!m_available) {
+        m_available = true;
+        emit availableChanged();
+    }
+    if (m_values.value(key) == value)
         return;
-    m_roots = value;
-    store(keyRoots(), m_roots);
-    emit rootsChanged();
+    m_values.insert(key, value);
+    notify(key);
 }
 
-int Settings::accentHue() const
+void Settings::notify(const QString &key)
 {
-    return m_accentHue;
+    if (const Key *entry = find(key))
+        emit (this->*(entry->notify))();
+    emit valueChanged(key);
 }
 
-void Settings::setAccentHue(int hue)
+QVariant Settings::value(const QString &key) const
 {
-    const int value = normalizeHue(hue);
-    if (m_accentHue == value)
+    return m_values.value(key);
+}
+
+void Settings::setValue(const QString &key, const QVariant &value)
+{
+    if (!m_values.contains(key) && !eqKey(key)) {
+        qWarning() << "microdap settings: unknown key" << key;
         return;
-    m_accentHue = value;
-    store(keyAccentHue(), m_accentHue);
-    emit accentHueChanged();
-}
-
-bool Settings::accentFromArt() const
-{
-    return m_accentFromArt;
-}
-
-void Settings::setAccentFromArt(bool on)
-{
-    if (m_accentFromArt == on)
-        return;
-    m_accentFromArt = on;
-    store(keyAccentFromArt(), m_accentFromArt);
-    emit accentFromArtChanged();
-}
-
-double Settings::scale() const
-{
-    return m_scale;
-}
-
-void Settings::setScale(double scale)
-{
-    const double value = normalizeScale(scale);
-    if (qFuzzyCompare(m_scale, value))
-        return;
-    m_scale = value;
-    store(keyScale(), m_scale);
-    emit scaleChanged();
-}
-
-int Settings::saverSeconds() const
-{
-    return m_saverSeconds;
-}
-
-void Settings::setSaverSeconds(int seconds)
-{
-    const int value = normalizeSaver(seconds);
-    if (m_saverSeconds == value)
-        return;
-    m_saverSeconds = value;
-    store(keySaverSeconds(), m_saverSeconds);
-    emit saverSecondsChanged();
+    }
+    store(key, typed(key, value));
 }
 
 void Settings::store(const QString &key, const QVariant &value)
 {
-    m_dirty.insert(key, value);
-    m_syncTimer.start();
+    if (m_values.value(key) == value)
+        return;
+    m_values.insert(key, value);
+    notify(key);
+    if (!m_client)
+        return;
+    m_client->set(key, value, [this, key](const MicroSet::Error &error) {
+        if (error.ok())
+            return;
+        qWarning().noquote() << "microdap settings: set" << key << "refused," << error.name << error.message;
+        refresh(key);
+    });
 }
 
-void Settings::sync()
+void Settings::refresh(const QString &key)
 {
-    m_syncTimer.stop();
-    if (m_dirty.isEmpty())
+    MicroSet::Error error;
+    const QVariant value = m_client ? m_client->get(key, &error) : QVariant();
+    if (!error.ok() || !value.isValid())
         return;
-    for (auto it = m_dirty.cbegin(); it != m_dirty.cend(); ++it)
-        m_settings.setValue(it.key(), it.value());
-    m_dirty.clear();
-    if (m_dropAccent) {
-        m_settings.remove(keyAccent());
-        m_dropAccent = false;
-    }
-    m_settings.sync();
+    take(key, value);
+}
+
+QString Settings::output() const
+{
+    return pick(m_values.value(keyOutput).toString(), outputs(), outputs().first());
+}
+
+void Settings::setOutput(const QString &output)
+{
+    if (outputs().contains(output))
+        store(keyOutput, output);
+}
+
+QStringList Settings::roots() const
+{
+    const QStringList roots = m_values.value(keyRoots).toStringList();
+    return roots.isEmpty() ? defaultRoots() : roots;
+}
+
+void Settings::setRoots(const QStringList &roots)
+{
+    store(keyRoots, roots.isEmpty() ? defaultRoots() : roots);
+}
+
+int Settings::accentHue() const
+{
+    return normalizeHue(m_values.value(keyAccentHue).toInt());
+}
+
+void Settings::setAccentHue(int hue)
+{
+    store(keyAccentHue, QVariant::fromValue(uint(normalizeHue(hue))));
+}
+
+bool Settings::accentFromArt() const
+{
+    return m_values.value(keyAccentFromArt).toBool();
+}
+
+void Settings::setAccentFromArt(bool on)
+{
+    store(keyAccentFromArt, on);
+}
+
+double Settings::scale() const
+{
+    return normalizeScale(m_values.value(keyScale).toDouble());
+}
+
+void Settings::setScale(double scale)
+{
+    store(keyScale, normalizeScale(scale));
+}
+
+int Settings::saverSeconds() const
+{
+    return normalizeSaver(m_values.value(keySaverSeconds).toInt());
+}
+
+void Settings::setSaverSeconds(int seconds)
+{
+    store(keySaverSeconds, QVariant::fromValue(uint(snap(seconds, saverSteps()))));
 }
 
 int Settings::screenOffSeconds() const
 {
-    return m_screenOffSeconds;
+    return qMax(0, m_values.value(keyScreenOffSeconds).toInt());
 }
 
 void Settings::setScreenOffSeconds(int seconds)
 {
-    const int value = qMax(0, seconds);
-    if (m_screenOffSeconds == value)
-        return;
-    m_screenOffSeconds = value;
-    store(keyScreenOffSeconds(), m_screenOffSeconds);
-    emit screenOffSecondsChanged();
+    store(keyScreenOffSeconds, QVariant::fromValue(uint(snap(seconds, screenOffSteps()))));
 }
 
 int Settings::suspendMinutes() const
 {
-    return m_suspendMinutes;
+    return qMax(0, m_values.value(keySuspendMinutes).toInt());
 }
 
 void Settings::setSuspendMinutes(int minutes)
 {
-    const int value = qMax(0, minutes);
-    if (m_suspendMinutes == value)
-        return;
-    m_suspendMinutes = value;
-    store(keySuspendMinutes(), m_suspendMinutes);
-    emit suspendMinutesChanged();
+    store(keySuspendMinutes, QVariant::fromValue(uint(snap(minutes, suspendSteps()))));
 }
 
 bool Settings::wifiOffScreenOff() const
 {
-    return m_wifiOffScreenOff;
+    return m_values.value(keyWifiOffScreenOff).toBool();
 }
 
 void Settings::setWifiOffScreenOff(bool on)
 {
-    if (m_wifiOffScreenOff == on)
-        return;
-    m_wifiOffScreenOff = on;
-    store(keyWifiOffScreenOff(), m_wifiOffScreenOff);
-    emit wifiOffScreenOffChanged();
+    store(keyWifiOffScreenOff, on);
 }
 
 QString Settings::btCodec() const
 {
-    return m_btCodec;
+    return pick(m_values.value(keyBtCodec).toString(), codecs(), codecs().first());
 }
 
 void Settings::setBtCodec(const QString &codec)
 {
-    const QString value = codec.toLower();
-    if (!codecs().contains(value) || m_btCodec == value)
-        return;
-    m_btCodec = value;
-    store(keyBtCodec(), m_btCodec);
-    emit btCodecChanged();
+    if (codecs().contains(codec.toLower()))
+        store(keyBtCodec, codec.toLower());
 }
 
 bool Settings::overlayToasts() const
 {
-    return m_overlayToasts;
+    return m_values.value(keyOverlayToasts).toBool();
 }
 
 void Settings::setOverlayToasts(bool on)
 {
-    if (m_overlayToasts == on)
-        return;
-    m_overlayToasts = on;
-    store(keyOverlayToasts(), m_overlayToasts);
-    emit overlayToastsChanged();
+    store(keyOverlayToasts, on);
 }
 
 QString Settings::hpGain() const
 {
-    return m_hpGain;
+    return pick(m_values.value(keyHpGain).toString(), hpGains(), QStringLiteral("high"));
 }
 
 void Settings::setHpGain(const QString &gain)
 {
-    const QString value = gain.toLower();
-    if (!hpGains().contains(value) || m_hpGain == value)
-        return;
-    m_hpGain = value;
-    store(keyHpGain(), m_hpGain);
-    emit hpGainChanged();
+    if (hpGains().contains(gain.toLower()))
+        store(keyHpGain, gain.toLower());
 }
 
 QString Settings::hpAmp() const
 {
-    return m_hpAmp;
+    return pick(m_values.value(keyHpAmp).toString(), hpAmps(), QStringLiteral("lohifi"));
 }
 
 void Settings::setHpAmp(const QString &amp)
 {
-    const QString value = amp.toLower();
-    if (!hpAmps().contains(value) || m_hpAmp == value)
-        return;
-    m_hpAmp = value;
-    store(keyHpAmp(), m_hpAmp);
-    emit hpAmpChanged();
+    if (hpAmps().contains(amp.toLower()))
+        store(keyHpAmp, amp.toLower());
 }
 
 int Settings::spkGain() const
 {
-    return m_spkGain;
+    const int value = m_values.value(keySpkGain).toInt();
+    return spkGains().contains(value) ? value : 102;
 }
 
 void Settings::setSpkGain(int step)
 {
-    if (!spkGains().contains(step) || m_spkGain == step)
-        return;
-    m_spkGain = step;
-    store(keySpkGain(), m_spkGain);
-    emit spkGainChanged();
+    if (spkGains().contains(step))
+        store(keySpkGain, QVariant::fromValue(uint(step)));
 }
 
 int Settings::volumeStep() const
 {
-    return m_volumeStep;
+    const int value = m_values.value(keyVolumeStep).toInt();
+    return volumeSteps().contains(value) ? value : 5;
 }
 
 void Settings::setVolumeStep(int step)
 {
-    if (!volumeSteps().contains(step) || m_volumeStep == step)
-        return;
-    m_volumeStep = step;
-    store(keyVolumeStep(), m_volumeStep);
-    emit volumeStepChanged();
+    if (volumeSteps().contains(step))
+        store(keyVolumeStep, QVariant::fromValue(uint(step)));
 }
 
 QString Settings::rgb() const
 {
-    return m_rgb;
+    return pick(m_values.value(keyRgb).toString(), rgbModes(), QStringLiteral("system"));
 }
 
 void Settings::setRgb(const QString &mode)
 {
-    const QString value = mode.toLower();
-    if (!rgbModes().contains(value) || m_rgb == value)
-        return;
-    m_rgb = value;
-    store(keyRgb(), m_rgb);
-    emit rgbChanged();
+    if (rgbModes().contains(mode.toLower()))
+        store(keyRgb, mode.toLower());
 }
 
 QString Settings::orientation() const
 {
-    return m_orientation;
+    return pick(m_values.value(keyOrientation).toString(), orientations(), orientations().first());
 }
 
 void Settings::setOrientation(const QString &orientation)
 {
-    if (!orientations().contains(orientation) || m_orientation == orientation)
-        return;
-    m_orientation = orientation;
-    store(keyOrientation(), m_orientation);
-    emit orientationChanged();
+    if (orientations().contains(orientation))
+        store(keyOrientation, orientation);
 }
 
 bool Settings::autoRotate() const
 {
-    return m_autoRotate;
+    return m_values.value(keyAutoRotate).toBool();
 }
 
 void Settings::setAutoRotate(bool on)
 {
-    if (m_autoRotate == on)
-        return;
-    m_autoRotate = on;
-    store(keyAutoRotate(), m_autoRotate);
-    emit autoRotateChanged();
+    store(keyAutoRotate, on);
 }
 
 bool Settings::touch() const
 {
-    return m_touch;
+    return m_values.value(keyTouch).toBool();
 }
 
 void Settings::setTouch(bool on)
 {
-    if (m_touch == on)
-        return;
-    m_touch = on;
-    store(keyTouch(), m_touch);
-    emit touchChanged();
-}
-
-QString Settings::normalizeEq(const QString &key)
-{
-    if (key == QLatin1StringView("custom"))
-        return key;
-    if (!key.isEmpty() && QDir::isAbsolutePath(key))
-        return QDir::cleanPath(key);
-    return QStringLiteral("off");
-}
-
-QString Settings::eqHeadphones() const
-{
-    return m_eqHeadphones;
-}
-
-void Settings::setEqHeadphones(const QString &key)
-{
-    const QString value = normalizeEq(key);
-    if (m_eqHeadphones == value)
-        return;
-    m_eqHeadphones = value;
-    store(keyEqHeadphones(), m_eqHeadphones);
-    emit eqHeadphonesChanged();
-}
-
-QString Settings::eqUsb() const
-{
-    return m_eqUsb;
-}
-
-void Settings::setEqUsb(const QString &key)
-{
-    const QString value = normalizeEq(key);
-    if (m_eqUsb == value)
-        return;
-    m_eqUsb = value;
-    store(keyEqUsb(), m_eqUsb);
-    emit eqUsbChanged();
-}
-
-QString Settings::eqSpeaker() const
-{
-    return m_eqSpeaker;
-}
-
-void Settings::setEqSpeaker(const QString &key)
-{
-    const QString value = normalizeEq(key);
-    if (m_eqSpeaker == value)
-        return;
-    m_eqSpeaker = value;
-    store(keyEqSpeaker(), m_eqSpeaker);
-    emit eqSpeakerChanged();
+    store(keyTouch, on);
 }
 
 QString Settings::outputLevel() const
 {
-    return m_outputLevel;
+    return pick(m_values.value(keyOutputLevel).toString(), outputLevels(), outputLevels().first());
 }
 
 void Settings::setOutputLevel(const QString &level)
 {
-    const QString value = level.toLower();
-    if (!outputLevels().contains(value) || m_outputLevel == value)
-        return;
-    m_outputLevel = value;
-    store(keyOutputLevel(), m_outputLevel);
-    emit outputLevelChanged();
+    if (outputLevels().contains(level.toLower()))
+        store(keyOutputLevel, level.toLower());
 }
 
 QString Settings::sampleRate() const
 {
-    return m_sampleRate;
+    return pick(m_values.value(keySampleRate).toString(), sampleRates(), sampleRates().first());
 }
 
 void Settings::setSampleRate(const QString &rate)
 {
-    const QString value = rate.toLower();
-    if (!sampleRates().contains(value) || m_sampleRate == value)
-        return;
-    m_sampleRate = value;
-    store(keySampleRate(), m_sampleRate);
-    emit sampleRateChanged();
+    if (sampleRates().contains(rate.toLower()))
+        store(keySampleRate, rate.toLower());
 }
 
-QString Settings::eq(const QString &output) const
+QString Settings::bootSession() const
 {
-    if (output == QLatin1StringView("headphones"))
-        return m_eqHeadphones;
-    if (output == QLatin1StringView("usb"))
-        return m_eqUsb;
-    if (output == QLatin1StringView("speaker"))
-        return m_eqSpeaker;
-    return QStringLiteral("off");
+    return m_values.value(keyBootSession).toString();
 }
 
-void Settings::setEq(const QString &output, const QString &key)
+void Settings::setBootSession(const QString &name)
 {
-    if (output == QLatin1StringView("headphones"))
-        setEqHeadphones(key);
-    else if (output == QLatin1StringView("usb"))
-        setEqUsb(key);
-    else if (output == QLatin1StringView("speaker"))
-        setEqSpeaker(key);
+    if (bootSessions().contains(name))
+        store(keyBootSession, name);
+}
+
+QStringList Settings::bootSessions() const
+{
+    if (!m_client)
+        return {};
+    MicroSet::Error error;
+    const QString text = m_client->schema(keyBootSession, &error);
+    if (!error.ok())
+        return {};
+    const QJsonArray values = QJsonDocument::fromJson(text.toUtf8()).object().value(keyBootSession).toObject()
+                                  .value(QStringLiteral("enum")).toArray();
+    QStringList out;
+    for (const QJsonValue &value : values)
+        out.append(value.toString());
+    return out;
 }
 
 }

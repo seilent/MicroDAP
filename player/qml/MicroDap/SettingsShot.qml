@@ -11,6 +11,8 @@ Item {
     readonly property bool levelShot: root.fixture.startsWith("bit-perfect")
     readonly property bool rateShot: root.fixture.startsWith("sample-rate")
     readonly property bool dacShot: root.fixture.startsWith("eq-dac")
+    readonly property bool bootShot: root.fixture.startsWith("boot")
+    readonly property bool aboutShot: root.fixture.startsWith("about")
     readonly property bool usbShot: (root.levelShot || root.rateShot || root.dacShot) && root.fixture !== "bit-perfect-usb-only"
     readonly property string levelShown: root.fixture === "bit-perfect-phone" ? "exclusive (phone)"
         : root.fixture === "bit-perfect-unavailable" ? "exclusive (unavailable)"
@@ -22,6 +24,18 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.bootShot || root.aboutShot) {
+            screen.focusIndex = screen.indexOfKey(root.bootShot ? "boot" : "about")
+            if (root.fixture === "boot-edit") {
+                screen.activate()
+                screen.step(1)
+            } else if (root.aboutShot) {
+                screen.activate()
+                screen.focusIndex = screen.indexOfKey("update")
+            }
+            screen.keepFocusVisible()
+            return
+        }
         if (root.levelShot || root.rateShot || root.dacShot) {
             screen.focusIndex = screen.indexOfKey(root.levelShot ? "level" : root.dacShot || root.fixture === "sample-rate-locked" ? "eq" : "rate")
             if (root.fixture === "bit-perfect-edit" || root.fixture === "sample-rate-edit") {
@@ -72,7 +86,7 @@ Item {
         property int volumeStep: 5
         property string rgb: "accent"
         property string btCodec: "auto"
-        property var roots: ["/home/armada/Music", "/run/media/armada/SD"]
+        property var roots: ["/home/micro/Music", "/run/media/micro/SD"]
         property int accentHue: 350
         property bool accentFromArt: false
         property real scale: 1.0
@@ -87,6 +101,11 @@ Item {
         property string outputLevel: root.fixture === "bit-perfect-phone" || root.fixture === "bit-perfect-unavailable" ? "exclusive"
             : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" ? "bitperfect" : "off"
         property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
+        property string bootSession: root.fixture === "boot-missing" ? "handheld-desktop-session" : "steam"
+
+        function bootSessions() {
+            return ["microdap", "microemu", "steam"]
+        }
     }
 
     QtObject {
@@ -108,7 +127,10 @@ Item {
     QtObject {
         id: samplePower
 
-        readonly property var driftPaths: []
+        readonly property string imageVersion: root.fixture === "about-missing" ? "" : "testing-38784f1"
+        readonly property string updateStatus: root.fixture === "about-available" ? "available"
+            : root.fixture === "about-missing" ? "unchecked" : "none"
+        readonly property string updateVersion: root.fixture === "about-available" ? "testing-0628a41" : ""
     }
 
     QtObject {
@@ -155,7 +177,7 @@ Item {
         function profileMap(output) {
             if (root.fixture === "eq-dac-custom")
                 return { key: "custom", name: "", missing: false, preamp: 0, bands: [] }
-            return { key: "/home/armada/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt", name: "Sennheiser HD 600 ParametricEQ", missing: false, preamp: -6.5, bands: [] }
+            return { key: "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt", name: "Sennheiser HD 600 ParametricEQ", missing: false, preamp: -6.5, bands: [] }
         }
     }
 
@@ -175,7 +197,7 @@ Item {
         eq: sampleEq
         dacEq: root.dacShot ? sampleDacEq : null
         sensor: sampleSensor
-        folders: ["/home/armada/Music", "/run/media/armada/SD"]
+        folders: ["/home/micro/Music", "/run/media/micro/SD"]
 
         Component.onCompleted: {
             screen.completeAll()

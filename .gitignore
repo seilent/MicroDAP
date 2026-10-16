@@ -1,4 +1,3 @@
-dist/
-build/player/
-*.raw
 build/cache/
+build/cmake/
+build/microset/

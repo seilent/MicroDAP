@@ -1,10 +1,16 @@
 #pragma once
 
+#include <QHash>
 #include <QObject>
-#include <QProcess>
 #include <QString>
-#include <QStringList>
 #include <QTimer>
+#include <QVariant>
+
+#include <optional>
+
+namespace MicroSet {
+class Client;
+}
 
 namespace microdap {
 
@@ -24,14 +30,12 @@ public:
     static constexpr int hueDelayMs = 500;
     static constexpr int levels = 4;
 
-    explicit RgbControl(QObject *parent = nullptr);
+    explicit RgbControl(MicroSet::Client *client, QObject *parent = nullptr);
     ~RgbControl() override;
 
-    static QString rgbPath();
-    static QString systemctlPath();
-    static QString hueWord(int hue);
-    static QString colorWord(int hue, int level);
-    static QString unitFor(const QString &word);
+    static QString enabledKey();
+    static QString colorKey();
+    static uint colorFor(int hue, int level);
 
     bool supported() const;
     bool probed() const;
@@ -41,8 +45,7 @@ public:
     int level() const;
     bool screenOff() const;
     bool saver() const;
-    int sentHue() const;
-    QString sentWord() const;
+    std::optional<QVariant> sent(const QString &key) const;
 
     Q_INVOKABLE void start(const QString &mode, int hue, int level = 0);
     Q_INVOKABLE void setMode(const QString &mode);
@@ -60,34 +63,27 @@ signals:
     void levelChanged();
     void screenOffChanged();
     void saverChanged();
-    void applied(const QString &word, bool ok);
+    void applied(const QString &key, bool ok);
 
 private:
-    void probe();
-    void applyMode();
-    void sendHue();
-    void queueHue();
-    void sleepLights();
-    void startWords(const QStringList &words);
-    void nextWord();
+    std::optional<QVariant> wanted(const QString &key) const;
+    void apply();
+    void send(const QString &key);
+    void finished(const QString &key, bool ok);
     void updateBusy();
-    void dropProcess(QProcess *&slot);
-    bool ready() const;
 
+    MicroSet::Client *m_client;
     bool m_supported = false;
     bool m_probed = false;
     bool m_busy = false;
     bool m_screenOff = false;
     bool m_saver = false;
-    bool m_asleep = false;
     QString m_mode;
     int m_hue = 350;
     int m_level = 0;
-    QString m_sentWord;
-    QStringList m_words;
+    int m_inflight = 0;
+    QHash<QString, QVariant> m_sent;
     QTimer m_hueTimer;
-    QProcess *m_probe = nullptr;
-    QProcess *m_word = nullptr;
 };
 
 }

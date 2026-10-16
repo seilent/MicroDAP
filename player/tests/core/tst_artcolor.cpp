@@ -260,7 +260,7 @@ void ArtColorTest::utilization()
 {
     const QList<Cover> set = covers();
     QVERIFY(set.size() >= 24);
-    QSet<QString> words;
+    QSet<uint> words;
     QSet<int> levelsUsed;
     for (const Cover &cover : set) {
         const ArtPick pick = ArtColor::pick(cover.image);
@@ -277,7 +277,7 @@ void ArtColorTest::utilization()
         QVERIFY2(AccentControl::luminance(AccentControl::artAccentFor(pick.hue, pick.color))
                      >= AccentControl::minLuminance - 1e-9,
                  qPrintable(cover.name));
-        words.insert(RgbControl::colorWord(pick.hue, pick.level));
+        words.insert(RgbControl::colorFor(pick.hue, pick.level));
         levelsUsed.insert(pick.level);
     }
     QVERIFY2(words.size() >= 16, qPrintable(QStringLiteral("%1 words").arg(words.size())));
@@ -287,7 +287,7 @@ void ArtColorTest::utilization()
     const ArtPick pastel = ArtColor::pick(hsvSolid(240, 0.28, 0.95));
     QCOMPARE(neon.hue, pastel.hue);
     QVERIFY(neon.level != pastel.level);
-    QVERIFY(RgbControl::colorWord(neon.hue, neon.level) != RgbControl::colorWord(pastel.hue, pastel.level));
+    QVERIFY(RgbControl::colorFor(neon.hue, neon.level) != RgbControl::colorFor(pastel.hue, pastel.level));
 }
 
 void ArtColorTest::fileUrl()
@@ -513,37 +513,22 @@ void ArtColorTest::migration()
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write("[General]\naccent=#1BA1E2\nscale=1.1\n");
     }
-    {
-        Settings settings(path);
-        QCOMPARE(settings.accentHue(), 200);
-        QVERIFY(!settings.accentFromArt());
-        settings.sync();
-    }
-    {
-        QFile file(path);
-        QVERIFY(file.open(QIODevice::ReadOnly));
-        const QString text = QString::fromUtf8(file.readAll());
-        QVERIFY2(text.contains(QStringLiteral("accentHue=200")), qPrintable(text));
-        QVERIFY2(!text.contains(QStringLiteral("accent=")), qPrintable(text));
-    }
+    QVariantMap values = Settings::legacyValues(path);
+    QCOMPARE(values.value(QStringLiteral("microdap.accent_hue")).toUInt(), 200u);
+    QVERIFY(!values.contains(QStringLiteral("microdap.accent_from_art")));
+    QCOMPARE(values.value(QStringLiteral("microdap.scale")).toDouble(), 1.1);
     {
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         file.write("[General]\naccentHue=abc\n");
     }
-    {
-        Settings settings(path);
-        QCOMPARE(settings.accentHue(), 350);
-    }
+    QVERIFY(!Settings::legacyValues(path).contains(QStringLiteral("microdap.accent_hue")));
     {
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         file.write("[General]\naccentHue=203\naccent=#A200FF\n");
     }
-    {
-        Settings settings(path);
-        QCOMPARE(settings.accentHue(), 200);
-    }
+    QCOMPARE(Settings::legacyValues(path).value(QStringLiteral("microdap.accent_hue")).toUInt(), 200u);
 }
 
 void ArtColorTest::effectiveHue()

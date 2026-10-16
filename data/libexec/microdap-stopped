@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+set -u
+
+sys="${MICRODAP_SYS_ROOT:-/sys}"
+marker="${HOME}/.local/state/microdap/wifi-off"
+
+log() { logger -t microdap-stopped -- "$*"; }
+
+for power in "${sys}"/class/backlight/*/bl_power; do
+    [[ -e "${power}" ]] || continue
+    printf 0 2>/dev/null > "${power}" || log "${power} write failed"
+done
+
+[[ -e "${marker}" ]] || exit 0
+if nmcli radio wifi on; then
+    rm -f -- "${marker}"
+    log "wifi radio on"
+else
+    log "wifi radio on failed, marker kept"
+fi
+exit 0

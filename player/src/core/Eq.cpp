@@ -402,6 +402,81 @@ bool EqStore::write(const QString &path, const EqProfile &profile)
     return true;
 }
 
+QString EqFilters::key(const QString &slot, const QString &field)
+{
+    return QStringLiteral("audio.eq.") + slot + QLatin1Char('.') + field;
+}
+
+QString EqFilters::number(double value)
+{
+    QString text = QString::number(value, 'f', 4);
+    while (text.contains(QLatin1Char('.')) && (text.endsWith(QLatin1Char('0')) || text.endsWith(QLatin1Char('.'))))
+        text.chop(1);
+    return text == QLatin1StringView("-0") ? QStringLiteral("0") : text;
+}
+
+QStringList EqFilters::encode(const EqProfile &profile)
+{
+    QStringList items{QStringLiteral("preamp ")
+                      + number(qBound(EqParser::minPreamp, profile.preamp, EqParser::maxPreamp))};
+    int last = -1;
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        if (profile.bands[i].enabled)
+            last = i;
+    }
+    for (int i = 0; i <= last; ++i) {
+        const EqBand &band = profile.bands[i];
+        const double freq = qBound(EqParser::minFreq, band.freq, EqParser::maxFreq);
+        const double q = qBound(EqParser::minQ, band.q, EqParser::maxQ);
+        const double gain = band.enabled ? qBound(EqParser::minGain, band.gain, EqParser::maxGain) : 0.0;
+        items.append((band.enabled ? typeKey(band.type) : QStringLiteral("peak")) + QLatin1Char(' ') + number(freq)
+                     + QLatin1Char(' ') + number(gain) + QLatin1Char(' ') + number(q));
+    }
+    return items;
+}
+
+EqProfile EqFilters::decode(const QStringList &items)
+{
+    EqProfile profile = EqProfile::off();
+    if (items.isEmpty())
+        return profile;
+    const QStringList preamp = items.first().split(QLatin1Char(' '));
+    bool ok = false;
+    const double value = preamp.size() == 2 && preamp.first() == QLatin1StringView("preamp")
+                             ? preamp.at(1).toDouble(&ok) : 0.0;
+    profile.preamp = ok ? qBound(EqParser::minPreamp, value, EqParser::maxPreamp) : 0.0;
+    int index = 0;
+    for (qsizetype i = 1; i < items.size() && index < EqProfile::bandCount; ++i) {
+        const QStringList fields = items.at(i).split(QLatin1Char(' '));
+        const std::optional<EqBand::Type> type = fields.size() == 4 ? typeOfKey(fields.first()) : std::nullopt;
+        bool freqOk = false;
+        bool gainOk = false;
+        bool qOk = false;
+        const double freq = type ? fields.at(1).toDouble(&freqOk) : 0.0;
+        const double gain = type ? fields.at(2).toDouble(&gainOk) : 0.0;
+        const double q = type ? fields.at(3).toDouble(&qOk) : 0.0;
+        if (!type || !freqOk || !gainOk || !qOk) {
+            qWarning() << "microdap eq: filter item skipped:" << items.at(i);
+            continue;
+        }
+        EqBand &band = profile.bands[index++];
+        band.type = *type;
+        band.freq = qBound(EqParser::minFreq, freq, EqParser::maxFreq);
+        band.gain = qBound(EqParser::minGain, gain, EqParser::maxGain);
+        band.q = qBound(EqParser::minQ, q, EqParser::maxQ);
+        band.enabled = !(band.type == EqBand::Peak && band.gain == 0.0);
+        band.freqIndex = -1;
+        for (int g = 0; g < EqGrid::size; ++g) {
+            if (std::abs(EqGrid::frequency(g) - band.freq) < 0.01) {
+                band.freqIndex = g;
+                band.freq = EqGrid::frequency(g);
+                break;
+            }
+        }
+    }
+    return profile;
+}
+
 EqControl::EqControl(Settings *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
@@ -409,6 +484,9 @@ EqControl::EqControl(Settings *settings, QObject *parent)
     m_syncTimer.setSingleShot(true);
     m_syncTimer.setInterval(syncDelayMs);
     connect(&m_syncTimer, &QTimer::timeout, this, &EqControl::sync);
+    m_writeTimer.setSingleShot(true);
+    m_writeTimer.setInterval(writeDelayMs);
+    connect(&m_writeTimer, &QTimer::timeout, this, &EqControl::writeFilters);
     m_sinkTimer.setInterval(sinkPollMs);
     connect(&m_sinkTimer, &QTimer::timeout, this, &EqControl::pollSink);
     m_startTimer.setSingleShot(true);
@@ -416,9 +494,7 @@ EqControl::EqControl(Settings *settings, QObject *parent)
     if (QCoreApplication *app = QCoreApplication::instance())
         connect(app, &QCoreApplication::aboutToQuit, this, &EqControl::sync);
     if (m_settings) {
-        connect(m_settings, &Settings::eqHeadphonesChanged, this, [this] { keyChanged(QStringLiteral("headphones")); });
-        connect(m_settings, &Settings::eqUsbChanged, this, [this] { keyChanged(QStringLiteral("usb")); });
-        connect(m_settings, &Settings::eqSpeakerChanged, this, [this] { keyChanged(QStringLiteral("speaker")); });
+        connect(m_settings, &Settings::valueChanged, this, &EqControl::onValueChanged);
         connect(m_settings, &QObject::destroyed, this, [this] { m_settings = nullptr; });
         relist();
     }
@@ -433,7 +509,7 @@ EqControl::~EqControl()
 
 QStringList EqControl::outputs()
 {
-    return {QStringLiteral("headphones"), QStringLiteral("usb"), QStringLiteral("speaker")};
+    return {QStringLiteral("headphones"), QStringLiteral("usb"), QStringLiteral("speaker"), QStringLiteral("bt")};
 }
 
 QString EqControl::configDir()
@@ -461,7 +537,7 @@ QString EqControl::displayName(const QString &path)
     const auto suffix = QLatin1StringView(" ParametricEQ");
     if (name.size() > suffix.size() && name.endsWith(suffix, Qt::CaseInsensitive))
         name.chop(suffix.size());
-    return name.toUpper();
+    return name.toUpper().left(nameMax);
 }
 
 QString EqControl::outputForSink(const QString &sink)
@@ -470,6 +546,8 @@ QString EqControl::outputForSink(const QString &sink)
         return {};
     if (sink.startsWith(OutputControl::usbPrefix()))
         return QStringLiteral("usb");
+    if (sink.startsWith(OutputControl::btPrefix()))
+        return QStringLiteral("bt");
     if (sink == OutputControl::headphonesSink())
         return QStringLiteral("headphones");
     return QStringLiteral("speaker");
@@ -650,7 +728,6 @@ void EqControl::setActiveOutput(const QString &output)
     qInfo() << "microdap eq: active output" << output << "key" << key(output);
     emit activeOutputChanged();
     emit activeProfileChanged();
-    applyActive(QStringLiteral("output"));
 }
 
 QString EqControl::activeName() const
@@ -660,12 +737,7 @@ QString EqControl::activeName() const
 
 QVariantMap EqControl::activeProfileMap() const
 {
-    return m_applied.toMap();
-}
-
-EqProfile EqControl::activeProfile() const
-{
-    return m_applied;
+    return m_activeOutput.isEmpty() ? EqProfile::off().toMap() : profile(m_activeOutput).toMap();
 }
 
 int EqControl::revision() const
@@ -673,43 +745,71 @@ int EqControl::revision() const
     return m_revision;
 }
 
-bool EqControl::bypassed() const
+bool EqControl::on(const QString &output) const
 {
-    return m_bypassed;
+    const QString k = EqFilters::key(output, QStringLiteral("on"));
+    return m_settings ? m_settings->value(k).toBool() : m_local.value(k).toBool();
 }
 
-void EqControl::setBypassed(bool on)
+QString EqControl::storedName(const QString &output) const
 {
-    if (m_bypassed == on)
+    const QString k = EqFilters::key(output, QStringLiteral("name"));
+    return m_settings ? m_settings->value(k).toString() : m_local.value(k).toString();
+}
+
+QStringList EqControl::storedFilters(const QString &output) const
+{
+    const QString k = EqFilters::key(output, QStringLiteral("filters"));
+    return m_settings ? m_settings->value(k).toStringList() : m_local.value(k).toStringList();
+}
+
+void EqControl::put(const QString &output, const QString &field, const QVariant &value)
+{
+    const QString k = EqFilters::key(output, field);
+    if (m_settings) {
+        m_settings->setValue(k, value);
         return;
-    m_bypassed = on;
-    qInfo() << "microdap eq: bypass" << (on ? "on" : "off");
-    emitApplied(QStringLiteral("profile"));
-}
-
-bool EqControl::dacHeld() const
-{
-    return m_dacHeld;
-}
-
-void EqControl::setDacHeld(bool on)
-{
-    if (m_dacHeld == on)
+    }
+    if (m_local.value(k) == value)
         return;
-    m_dacHeld = on;
-    qInfo() << "microdap eq: dac held" << (on ? "on" : "off");
-    emitApplied(QStringLiteral("profile"));
+    m_local.insert(k, value);
+    onValueChanged(k);
+}
+
+void EqControl::onValueChanged(const QString &key)
+{
+    const QStringList parts = key.split(QLatin1Char('.'));
+    if (parts.size() != 4 || parts.at(0) != QLatin1StringView("audio") || parts.at(1) != QLatin1StringView("eq")
+        || !outputs().contains(parts.at(2)))
+        return;
+    const QString output = parts.at(2);
+    if (parts.at(3) == QLatin1StringView("filters")) {
+        if (m_unwritten.contains(output))
+            return;
+        const QStringList filters = storedFilters(output);
+        const auto live = m_live.constFind(output);
+        if (live != m_live.constEnd() && EqFilters::encode(*live) == filters)
+            return;
+        m_live.insert(output, EqFilters::decode(filters));
+        if (on(output) && storedName(output).isEmpty()) {
+            m_custom.insert(output, m_live.value(output));
+            m_dirty.insert(output);
+            if (m_settings)
+                m_syncTimer.start();
+        }
+    }
+    qInfo() << "microdap eq:" << output << "key" << this->key(output);
+    changed(output);
 }
 
 EqProfile EqControl::profile(const QString &output) const
 {
-    const QString k = key(output);
-    if (k == QLatin1StringView("off"))
+    if (!outputs().contains(output) || !on(output))
         return EqProfile::off();
-    if (k == QLatin1StringView("custom"))
-        return custom(output);
-    const std::optional<EqProfile> parsed = fileProfile(k);
-    return parsed ? *parsed : EqProfile::off();
+    auto it = m_live.constFind(output);
+    if (it == m_live.constEnd())
+        it = m_live.insert(output, EqFilters::decode(storedFilters(output)));
+    return *it;
 }
 
 void EqControl::setCustom(const QString &output, const EqProfile &profile)
@@ -717,17 +817,18 @@ void EqControl::setCustom(const QString &output, const EqProfile &profile)
     if (!outputs().contains(output))
         return;
     m_custom.insert(output, profile);
-    m_editing = true;
-    setKey(output, QStringLiteral("custom"));
-    m_editing = false;
-    endEdit(output);
+    select(output, true, QString(), profile);
+    m_dirty.insert(output);
+    if (m_settings)
+        m_syncTimer.start();
 }
 
 QString EqControl::key(const QString &output) const
 {
-    if (m_settings)
-        return m_settings->eq(output);
-    return m_keys.value(output, QStringLiteral("off"));
+    if (!outputs().contains(output) || !on(output))
+        return QStringLiteral("off");
+    const QString stored = storedName(output);
+    return stored.isEmpty() ? QStringLiteral("custom") : stored;
 }
 
 QString EqControl::name(const QString &output) const
@@ -737,33 +838,25 @@ QString EqControl::name(const QString &output) const
         return QStringLiteral("OFF");
     if (k == QLatin1StringView("custom"))
         return QStringLiteral("CUSTOM");
-    return fileProfile(k) ? displayName(k) : displayName(k) + QStringLiteral(" (MISSING)");
+    return k;
 }
 
-bool EqControl::missing(const QString &output) const
+bool EqControl::missing(const QString &) const
 {
-    const QString k = key(output);
-    if (k == QLatin1StringView("off") || k == QLatin1StringView("custom"))
-        return false;
-    return !fileProfile(k);
+    return false;
 }
 
 bool EqControl::editable(const QString &output) const
 {
-    const QString k = key(output);
-    if (k == QLatin1StringView("off"))
-        return false;
-    return k == QLatin1StringView("custom") || fileProfile(k).has_value();
+    return key(output) != QLatin1StringView("off");
 }
 
 QVariantMap EqControl::profileMap(const QString &output) const
 {
     QVariantMap map = profile(output).toMap();
-    const QString k = key(output);
-    const bool file = k != QLatin1StringView("off") && k != QLatin1StringView("custom");
-    map.insert(QStringLiteral("key"), k);
-    map.insert(QStringLiteral("name"), file ? displayName(k) : name(output));
-    map.insert(QStringLiteral("missing"), missing(output));
+    map.insert(QStringLiteral("key"), key(output));
+    map.insert(QStringLiteral("name"), name(output));
+    map.insert(QStringLiteral("missing"), false);
     map.insert(QStringLiteral("editable"), editable(output));
     return map;
 }
@@ -809,13 +902,45 @@ void EqControl::cycleProfile(const QString &output, int direction)
     const int s = sign(direction);
     if (!outputs().contains(output) || s == 0)
         return;
-    QStringList cycle{QStringLiteral("off")};
-    cycle.append(m_sourcePaths);
-    cycle.append(QStringLiteral("custom"));
-    const int n = static_cast<int>(cycle.size());
-    const int i = static_cast<int>(cycle.indexOf(key(output)));
+    const int n = static_cast<int>(m_sourcePaths.size()) + 2;
+    int i = 0;
+    const QString k = key(output);
+    if (k == QLatin1StringView("custom")) {
+        i = n - 1;
+    } else if (k != QLatin1StringView("off")) {
+        i = -1;
+        for (int p = 0; p < m_sourcePaths.size(); ++p) {
+            if (displayName(m_sourcePaths.at(p)) == k) {
+                i = p + 1;
+                break;
+            }
+        }
+    }
     const int next = i < 0 ? (s > 0 ? 0 : n - 1) : ((i + s) % n + n) % n;
-    setKey(output, cycle.at(next));
+    if (next == 0) {
+        select(output, false, storedName(output), profile(output));
+        return;
+    }
+    if (next == n - 1) {
+        select(output, true, QString(), custom(output));
+        return;
+    }
+    const QString path = m_sourcePaths.at(next - 1);
+    const std::optional<EqProfile> parsed = fileProfile(path);
+    if (!parsed)
+        return;
+    select(output, true, displayName(path), *parsed);
+}
+
+void EqControl::select(const QString &output, bool enabled, const QString &name, const EqProfile &profile)
+{
+    m_writeTimer.stop();
+    writeFilters();
+    m_live.insert(output, profile);
+    put(output, QStringLiteral("filters"), EqFilters::encode(profile));
+    put(output, QStringLiteral("name"), name);
+    put(output, QStringLiteral("on"), enabled);
+    changed(output);
 }
 
 void EqControl::stepPreamp(const QString &output, int direction, bool coarse)
@@ -889,6 +1014,8 @@ void EqControl::stepQ(const QString &output, int band, int direction, bool coars
 void EqControl::sync()
 {
     m_syncTimer.stop();
+    m_writeTimer.stop();
+    writeFilters();
     if (!m_settings) {
         m_dirty.clear();
         return;
@@ -920,45 +1047,18 @@ EqProfile &EqControl::custom(const QString &output) const
     return *it;
 }
 
-void EqControl::setKey(const QString &output, const QString &value)
-{
-    if (m_settings) {
-        m_settings->setEq(output, value);
-        return;
-    }
-    const QString normalized = Settings::normalizeEq(value);
-    if (m_keys.value(output, QStringLiteral("off")) == normalized)
-        return;
-    m_keys.insert(output, normalized);
-    keyChanged(output);
-}
-
-void EqControl::keyChanged(const QString &output)
-{
-    const QString k = key(output);
-    if (k != QLatin1StringView("off") && k != QLatin1StringView("custom"))
-        m_files.remove(k);
-    qInfo() << "microdap eq:" << output << "key" << k;
-    changed(output);
-}
-
 EqProfile *EqControl::beginEdit(const QString &output)
 {
     if (!outputs().contains(output))
         return nullptr;
     const QString k = key(output);
-    if (k == QLatin1StringView("custom"))
-        return &custom(output);
     if (k == QLatin1StringView("off"))
         return nullptr;
-    const std::optional<EqProfile> parsed = fileProfile(k);
-    if (!parsed)
-        return nullptr;
-    m_custom.insert(output, *parsed);
-    qInfo() << "microdap eq:" << output << "copied" << k << "into" << storePath(output);
-    m_editing = true;
-    setKey(output, QStringLiteral("custom"));
-    m_editing = false;
+    if (k != QLatin1StringView("custom")) {
+        m_custom.insert(output, profile(output));
+        qInfo() << "microdap eq:" << output << "copied" << k << "into" << storePath(output);
+        put(output, QStringLiteral("name"), QString());
+    }
     return &custom(output);
 }
 
@@ -972,10 +1072,23 @@ EqBand *EqControl::beginBandEdit(const QString &output, int band)
 
 void EqControl::endEdit(const QString &output)
 {
+    m_live.insert(output, custom(output));
     m_dirty.insert(output);
-    if (m_settings)
+    m_unwritten.insert(output);
+    if (m_settings) {
         m_syncTimer.start();
+        m_writeTimer.start();
+    } else {
+        writeFilters();
+    }
     changed(output);
+}
+
+void EqControl::writeFilters()
+{
+    const QSet<QString> unwritten = std::exchange(m_unwritten, {});
+    for (const QString &output : unwritten)
+        put(output, QStringLiteral("filters"), EqFilters::encode(m_live.value(output)));
 }
 
 void EqControl::changed(const QString &output)
@@ -984,42 +1097,8 @@ void EqControl::changed(const QString &output)
     emit revisionChanged();
     emit profilesChanged();
     emit profileChanged(output);
-    if (output != m_activeOutput)
-        return;
-    emit activeProfileChanged();
-    if (!m_editing)
-        applyActive();
-}
-
-void EqControl::applyActive(const QString &cause)
-{
-    if (m_activeOutput.isEmpty())
-        return;
-    const EqProfile next = profile(m_activeOutput);
-    if (!m_appliedOnce || next != m_applied) {
-        m_applied = next;
-        m_appliedOnce = true;
-        qInfo() << "microdap eq: load" << m_activeOutput << name(m_activeOutput) << "preamp" << m_applied.preamp;
+    if (output == m_activeOutput)
         emit activeProfileChanged();
-    }
-    emitApplied(cause);
-}
-
-void EqControl::emitApplied(const QString &cause)
-{
-    if (!m_appliedOnce || m_activeOutput.isEmpty())
-        return;
-    const bool held = m_dacHeld && m_activeOutput == QLatin1StringView("usb");
-    const QString reason = m_bypassed ? QStringLiteral("bypassed") : held ? QStringLiteral("dac held") : cause;
-    const bool flat = m_bypassed || held;
-    const EqProfile target = flat ? EqProfile::off() : m_applied;
-    if (m_emittedOnce && target == m_emitted)
-        return;
-    m_emitted = target;
-    m_emittedOnce = true;
-    qInfo().noquote() << "microdap eq: apply" << m_activeOutput << (flat ? QStringLiteral("off") : name(m_activeOutput))
-                      << QStringLiteral("(%1)").arg(reason);
-    emit profileApplied(target);
 }
 
 void EqControl::stepBand(const QString &output, int band, const QString &field, int direction, bool coarse)

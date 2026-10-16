@@ -28,6 +28,7 @@ class Manager(dbus.service.Object):
         self.inhibits = []
         self.open_fds = {}
         self.count = 0
+        self.calls = []
 
     @dbus.service.method(MANAGER, in_signature='ssss', out_signature='h')
     def Inhibit(self, what, who, why, mode):
@@ -44,6 +45,14 @@ class Manager(dbus.service.Object):
         self.open_fds.pop(source, None)
         os.close(source)
         return False
+
+    @dbus.service.method(MANAGER, in_signature='b', out_signature='')
+    def Suspend(self, interactive):
+        self.calls.append('Suspend')
+
+    @dbus.service.method(MANAGER, in_signature='b', out_signature='')
+    def PowerOff(self, interactive):
+        self.calls.append('PowerOff')
 
     @dbus.service.signal(MANAGER, signature='b')
     def PrepareForSleep(self, start):
@@ -69,6 +78,10 @@ class Control(dbus.service.Object):
         if not self.manager.inhibits:
             return dbus.Array([], signature='s')
         return dbus.Array([dbus.String(s) for s in self.manager.inhibits[-1]], signature='s')
+
+    @dbus.service.method(CONTROL, in_signature='s', out_signature='u')
+    def CallCount(self, method):
+        return self.manager.calls.count(str(method))
 
     @dbus.service.method(CONTROL, in_signature='b', out_signature='')
     def EmitPrepareForSleep(self, start):

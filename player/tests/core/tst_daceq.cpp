@@ -145,7 +145,7 @@ struct Rig
         devPath = sys + QStringLiteral("/devices/platform/xhci/3-1");
         iface = devPath + QStringLiteral("/3-1:1.0");
         ready = plug();
-        settings = std::make_unique<Settings>(root.path() + QStringLiteral("/settings.ini"));
+        settings = std::make_unique<Settings>(nullptr);
         eq = std::make_unique<EqControl>(settings.get());
         auto owned = std::make_unique<FakeUsbIo>();
         fake = owned.get();
@@ -158,8 +158,6 @@ struct Rig
         ports.releasing = [this] { return releasing; };
         dac = std::make_unique<DacEq>(bounds, std::move(ports));
         QObject::connect(eq.get(), &EqControl::profileChanged, dac.get(), &DacEq::onProfileChanged);
-        QObject::connect(eq.get(), &EqControl::profileApplied, eq.get(),
-                         [this](const EqProfile &profile) { applied.append(profile); });
         DacCard card;
         card.cardIndex = 7;
         card.alsaCard = 1;
@@ -320,7 +318,6 @@ struct Rig
     FakePlayer player;
     FakeUsbIo *fake = nullptr;
     std::unique_ptr<DacEq> dac;
-    QList<EqProfile> applied;
 };
 
 const QStringList takeFromBypass{
@@ -431,13 +428,14 @@ void DacEqTest::startLevelOffForces()
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("flat"), waitMs);
     QCOMPARE(rig.outs(), QStringList{QStringLiteral("get 16")});
     QVERIFY(!rig.dac->dacHeld());
-    QVERIFY(!rig.eq->dacHeld());
     QCOMPARE(rig.dac->mode(), QStringLiteral("bypass"));
 }
 
 void DacEqTest::startLevelSetIgnoresWordApplied()
 {
-    Rig rig;
+    DacEq::Bounds bounds = testBounds();
+    bounds.firstResolveMs = 60000;
+    Rig rig(bounds);
     QVERIFY(rig.ready);
     rig.eq->setCustom(usb, testProfile());
     rig.seed(QStringLiteral("bitperfect"), false, QStringLiteral("speaker"));
@@ -519,14 +517,10 @@ void DacEqTest::startDacHeldBeforeLoad()
     rig.dac->start();
     QCOMPARE(held.count(), 1);
     QVERIFY(rig.dac->dacHeld());
-    QVERIFY(rig.eq->dacHeld());
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 0);
     rig.eq->setActiveOutput(usb);
-    QVERIFY(!rig.applied.isEmpty());
-    QVERIFY(rig.applied.last() == EqProfile::off());
     rig.dac->onFirstApplied();
     QTRY_VERIFY_WITH_TIMEOUT(!rig.dac->dacHeld(), waitMs);
-    QVERIFY(rig.applied.last() == testProfile());
 }
 
 void DacEqTest::takeOrder()
@@ -568,8 +562,8 @@ void DacEqTest::effectiveMissingBypass()
 {
     Rig rig;
     QVERIFY(rig.ready);
-    rig.settings->setEq(usb, rig.root.path() + QStringLiteral("/eq/Gone.txt"));
-    QVERIFY(rig.eq->missing(usb));
+    QCOMPARE(rig.eq->key(usb), QStringLiteral("off"));
+    QVERIFY(!rig.eq->missing(usb));
     rig.holdLevel();
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("flat"), waitMs);
     QCOMPARE(rig.outs(), QStringList{QStringLiteral("set 16 f0")});
@@ -703,7 +697,6 @@ void DacEqTest::dacHeldKeptAfterFailedBypass()
     QCOMPARE(rig.dac->reason(), QStringLiteral("permission"));
     QCOMPARE(rig.dac->mode(), QStringLiteral("failed"));
     QVERIFY(rig.dac->dacHeld());
-    QVERIFY(rig.eq->dacHeld());
 }
 
 void DacEqTest::dacHeldClearedOn240()
@@ -712,17 +705,14 @@ void DacEqTest::dacHeldClearedOn240()
     QVERIFY(rig.ready);
     rig.eq->setActiveOutput(usb);
     QVERIFY(rig.takeOn());
-    QVERIFY(rig.applied.last() == EqProfile::off());
     const std::shared_ptr<FakeUsbIo::Hold> held = rig.fake->hold(FakeUsbIo::Op::Out);
     rig.dac->setLevel(QStringLiteral("off"));
     rig.dac->onEffectiveChanged(false);
     QTRY_VERIFY_WITH_TIMEOUT(held->waitEntered(1), waitMs);
     QVERIFY(rig.dac->dacHeld());
-    QVERIFY(rig.applied.last() == EqProfile::off());
     held->release();
     QTRY_VERIFY_WITH_TIMEOUT(!rig.dac->dacHeld(), waitMs);
     QCOMPARE(rig.fake->preset(), fiioBypass);
-    QVERIFY(rig.applied.last() == testProfile());
 }
 
 void DacEqTest::dacHeldClearedCardGone()
@@ -737,7 +727,6 @@ void DacEqTest::dacHeldClearedCardGone()
     const std::vector<uint8_t> band = rig.fake->band(162, 0);
     rig.dac->onGenerationChanged(QStringLiteral("B"), 2, false);
     QVERIFY(!rig.dac->dacHeld());
-    QVERIFY(!rig.eq->dacHeld());
     QCOMPARE(rig.dac->status(), QStringLiteral("none"));
     QCOMPARE(rig.dac->mode(), QStringLiteral("none"));
     held->release();
@@ -1360,7 +1349,6 @@ void DacEqTest::failedBypassKeepsStatus()
     QCOMPARE(rig.fake->preset(), fiioBypass);
     QCOMPARE(rig.dac->status(), QStringLiteral("failed"));
     QCOMPARE(rig.dac->reason(), QStringLiteral("device"));
-    QVERIFY(!rig.eq->dacHeld());
     QVERIFY(rig.idle());
     QCOMPARE(rig.dac->status(), QStringLiteral("failed"));
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), 2);

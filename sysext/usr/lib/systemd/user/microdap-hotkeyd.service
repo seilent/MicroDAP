@@ -1,8 +1,0 @@
-[Unit]
-Description=MicroDAP pad guide hold daemon
-StartLimitIntervalSec=0
-
-[Service]
-ExecStart=/usr/libexec/microdap/microdap-hotkeyd
-Restart=always
-RestartSec=1

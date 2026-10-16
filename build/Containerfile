@@ -1,5 +1,4 @@
-ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
-COPY build/toolchain.sh /tmp/microdap-toolchain.sh
-RUN /tmp/microdap-toolchain.sh && rm -f /tmp/microdap-toolchain.sh
+FROM registry.fedoraproject.org/fedora:44@sha256:1ff9eb02e4e2d7fb1175becac7139b2960c4fdcccedce81c86ec25b98ef3124d
+COPY build/deps.sh /tmp/microdap-deps.sh
+RUN bash /tmp/microdap-deps.sh && rm -f /tmp/microdap-deps.sh
 WORKDIR /work

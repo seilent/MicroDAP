@@ -73,11 +73,6 @@ QString readFile(const QString &path)
     return QString::fromUtf8(file.readAll());
 }
 
-QString setDefault(const QString &sink)
-{
-    return QStringLiteral("pactl set-default-sink ") + sink + QStringLiteral("\n");
-}
-
 }
 
 class OutputTest : public QObject
@@ -89,33 +84,25 @@ private slots:
     void init();
     void parsesSinks();
     void parsesJack();
-    void resolves();
-    void autoPicksUsb();
-    void autoHeadphonesThenSpeaker();
-    void usbSavedButAbsent();
-    void speakerAndHeadphonesForced();
-    void missingSink();
-    void usbEdgeReappliesAndGatesHeadphoneWords();
-    void jackEdgeReapplies();
-    void headphoneWordsDirect();
+    void outputOf();
+    void applyReadsDefault();
+    void defaultFollowed();
+    void unreadableDefault();
     void polling();
-    void speakerGainWords();
     void missingBinaries();
     void heldKeepsUsb();
-    void heldAppliesWhenNotUsb();
-    void returningPollNoApply();
+    void returningKeepsUsb();
     void watchedCardGone();
     void watchedCardPolled();
     void rereadDuringRead();
-    void rereadDuringApply();
     void eqLoadsResolvedOutput();
-    void eqBoundLoadsSinkDefault();
     void eqFailedResolveLoadsSinkDefault();
     void eqMissingPactlLoadsSpeaker();
     void eqHangingSinkLoadsSpeaker();
 
 private:
     int count(const QString &line) const;
+    bool setDefaultSink(const QString &sink);
 
     QTemporaryDir m_dir;
     QString m_bin;
@@ -141,7 +128,6 @@ void OutputTest::initTestCase()
     m_defaultGateFile = m_dir.path() + QStringLiteral("/default-gate");
     const QString logLine = QStringLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"") + m_log
                             + QStringLiteral("\"\n");
-    QVERIFY(writeFile(m_bin + QStringLiteral("/wpctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/pactl"),
                       QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("[ \"$1\" = list ] && cat \"") + m_sinksFile
                           + QStringLiteral("\"\n[ \"$1\" = get-default-sink ] && cat \"") + m_defaultFile
@@ -156,21 +142,16 @@ void OutputTest::initTestCase()
                           + QStringLiteral("\" ]; do sleep 0.05; done\ncat \"") + m_defaultFile
                           + QStringLiteral("\"\nfi\nexit 0\n"),
                       true));
-    QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"), QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit 0\n"), true));
     QVERIFY(writeFile(m_bin + QStringLiteral("/amixer"),
                       QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("cat \"") + m_jackFile + QStringLiteral("\"\n"),
                       true));
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
-    qputenv("MICRODAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
     qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
     qputenv("MICRODAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
-    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
     qputenv("MICRODAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
-    QCOMPARE(OutputControl::wpctlPath(), m_bin + QStringLiteral("/wpctl"));
     QCOMPARE(OutputControl::pactlPath(), m_bin + QStringLiteral("/pactl"));
     QCOMPARE(OutputControl::amixerPath(), m_bin + QStringLiteral("/amixer"));
-    QCOMPARE(OutputControl::systemctlPath(), m_bin + QStringLiteral("/systemctl"));
 }
 
 void OutputTest::init()
@@ -178,7 +159,7 @@ void OutputTest::init()
     QFile::remove(m_log);
     QFile::remove(m_gateFile);
     QFile::remove(m_defaultGateFile);
-    QVERIFY(writeFile(m_defaultFile, OutputControl::speakerSink() + QStringLiteral("\n")));
+    QVERIFY(setDefaultSink(OutputControl::speakerSink()));
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
     QVERIFY(writeFile(m_cardIdFile, QStringLiteral("B\n")));
@@ -188,6 +169,11 @@ void OutputTest::init()
 int OutputTest::count(const QString &line) const
 {
     return readFile(m_log).count(line);
+}
+
+bool OutputTest::setDefaultSink(const QString &sink)
+{
+    return writeFile(m_defaultFile, sink.isEmpty() ? QString() : sink + QStringLiteral("\n"));
 }
 
 void OutputTest::parsesSinks()
@@ -201,8 +187,7 @@ void OutputTest::parsesSinks()
     QCOMPARE(OutputControl::usbSinkIn(OutputControl::parseSinks(QString::fromUtf8(sinksUsbOnly))), QStringLiteral("alsa_output.usb-DAC.analog-stereo"));
     QCOMPARE(OutputControl::parseSinks(QString()), QStringList());
     QCOMPARE(OutputControl::parseSinks(QStringLiteral("Connection failure: Connection refused\n")), QStringList());
-    QCOMPARE(OutputControl::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")}));
-    QCOMPARE(OutputControl::unitFor(QStringLiteral("hp-gain-low")), QStringLiteral("microdap-priv@hp-gain-low.service"));
+    QCOMPARE(OutputControl::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb"), QStringLiteral("bt")}));
 }
 
 void OutputTest::parsesJack()
@@ -213,282 +198,98 @@ void OutputTest::parsesJack()
     QVERIFY(!OutputControl::parseJack(QStringLiteral("amixer: Cannot find the given element\n")));
 }
 
-void OutputTest::resolves()
+void OutputTest::outputOf()
 {
-    QCOMPARE(OutputControl::resolve(QStringLiteral("auto"), true, true), QStringLiteral("usb"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("auto"), false, true), QStringLiteral("usb"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("auto"), true, false), QStringLiteral("headphones"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("auto"), false, false), QStringLiteral("speaker"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("usb"), true, true), QStringLiteral("usb"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("usb"), false, true), QStringLiteral("usb"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("usb"), true, false), QStringLiteral("headphones"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("usb"), false, false), QStringLiteral("speaker"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("speaker"), true, true), QStringLiteral("speaker"));
-    QCOMPARE(OutputControl::resolve(QStringLiteral("headphones"), false, true), QStringLiteral("headphones"));
+    QCOMPARE(OutputControl::outputOf(OutputControl::speakerSink()), QStringLiteral("speaker"));
+    QCOMPARE(OutputControl::outputOf(OutputControl::headphonesSink()), QStringLiteral("headphones"));
+    QCOMPARE(OutputControl::outputOf(QString::fromUtf8(usbName)), QStringLiteral("usb"));
+    QCOMPARE(OutputControl::outputOf(QStringLiteral("bluez_output.BC_27_7A_6F_A9_6F.1")), QStringLiteral("bt"));
+    QCOMPARE(OutputControl::outputOf(QStringLiteral("alsa_output.platform-sound.HiFi__HDMI1__sink")), QStringLiteral("speaker"));
+    QCOMPARE(OutputControl::outputOf(QString()), QString());
 }
 
-void OutputTest::autoPicksUsb()
+void OutputTest::applyReadsDefault()
 {
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
     OutputControl control;
     QCOMPARE(control.output(), QStringLiteral("auto"));
     QCOMPARE(control.activeOutput(), QString());
     QVERIFY(!control.usbPresent());
     QVERIFY(!control.busy());
     QSignalSpy applied(&control, &OutputControl::applied);
+    QSignalSpy first(&control, &OutputControl::firstApplied);
     QSignalSpy usbSpy(&control, &OutputControl::usbSinkChanged);
     QSignalSpy activeSpy(&control, &OutputControl::activeOutputChanged);
 
-    control.apply(QStringLiteral("auto"));
+    control.apply(QStringLiteral("usb"));
     QVERIFY(control.busy());
+    QCOMPARE(control.output(), QStringLiteral("usb"));
+    QTest::qWait(200);
+    QCOMPARE(readFile(m_log), QString());
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("auto"));
+    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("usb"));
     QVERIFY(applied.at(0).at(1).toBool());
+    QCOMPARE(first.count(), 1);
+    QVERIFY(first.at(0).at(0).toBool());
     QVERIFY(!control.busy());
     QVERIFY(control.jackPresent());
     QVERIFY(control.usbPresent());
     QCOMPARE(control.usbSink(), QString::fromUtf8(usbName));
+    QCOMPARE(control.defaultSink(), QString::fromUtf8(usbName));
     QCOMPARE(usbSpy.count(), 1);
     QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
     QCOMPARE(activeSpy.count(), 1);
-    const QString log = readFile(m_log);
-    QCOMPARE(log, QStringLiteral("amixer -c0 contents\npactl list sinks short\n") + setDefault(QString::fromUtf8(usbName)));
-}
+    QCOMPARE(readFile(m_log),
+             QStringLiteral("amixer -c0 contents\npactl list sinks short\npactl get-default-sink\n"));
 
-void OutputTest::autoHeadphonesThenSpeaker()
-{
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QVERIFY(applied.at(0).at(1).toBool());
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QVERIFY(!control.usbPresent());
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::headphonesSink())));
-
-    QFile::remove(m_log);
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(1).at(1).toBool());
-    QVERIFY(!control.jackPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::speakerSink())));
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
-}
-
-void OutputTest::usbSavedButAbsent()
-{
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    QSignalSpy outputSpy(&control, &OutputControl::outputChanged);
-    control.apply(QStringLiteral("usb"));
-    QCOMPARE(outputSpy.count(), 1);
+    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown output \"tape\"");
+    control.apply(QStringLiteral("tape"));
+    QVERIFY(!control.busy());
     QCOMPARE(control.output(), QStringLiteral("usb"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("usb"));
-    QVERIFY(applied.at(0).at(1).toBool());
-    QVERIFY(!control.usbPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::headphonesSink())));
-
-    QFile::remove(m_log);
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
-    control.apply(QStringLiteral("usb"));
-    QCOMPARE(outputSpy.count(), 1);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::speakerSink())));
-
-    QFile::remove(m_log);
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    control.apply(QStringLiteral("usb"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QVERIFY(control.usbPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(QString::fromUtf8(usbName))));
-}
-
-void OutputTest::speakerAndHeadphonesForced()
-{
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    QSignalSpy outputSpy(&control, &OutputControl::outputChanged);
-
-    control.apply(QStringLiteral("speaker"));
-    QCOMPARE(outputSpy.count(), 1);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("speaker"));
-    QVERIFY(applied.at(0).at(1).toBool());
-    QVERIFY(control.usbPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::speakerSink())));
-
-    QFile::remove(m_log);
-    control.apply(QStringLiteral("headphones"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(1).at(1).toBool());
-    QVERIFY(!control.jackPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::headphonesSink())));
-
-    QFile::remove(m_log);
-    control.apply(QStringLiteral("headphones"));
-    QCOMPARE(outputSpy.count(), 2);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::headphonesSink())));
-
-    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown output \"bt\"");
+    QVERIFY(setDefaultSink(QStringLiteral("bluez_output.BC_27_7A_6F_A9_6F.1")));
     control.apply(QStringLiteral("bt"));
-    QCOMPARE(control.output(), QStringLiteral("headphones"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("bt"));
+    QCOMPARE(first.count(), 1);
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default-sink")));
 }
 
-void OutputTest::missingSink()
+void OutputTest::defaultFollowed()
 {
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsbOnly)));
     OutputControl control;
     QSignalSpy applied(&control, &OutputControl::applied);
-    QTest::ignoreMessage(QtWarningMsg, "microdap output: sink not listed \"alsa_output.platform-sound.HiFi__Speaker__sink\"");
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
+    QSignalSpy activeSpy(&control, &OutputControl::activeOutputChanged);
+
+    QVERIFY(setDefaultSink(OutputControl::headphonesSink()));
+    control.refresh();
+    QTRY_COMPARE_WITH_TIMEOUT(control.activeOutput(), QStringLiteral("headphones"), waitMs);
+    QCOMPARE(activeSpy.count(), 1);
+    QCOMPARE(applied.count(), 1);
+
+    QVERIFY(setDefaultSink(QString()));
+    control.refresh();
+    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl get-default-sink\n")), 3, waitMs);
+    QTest::qWait(200);
+    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
+    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default-sink")));
+}
+
+void OutputTest::unreadableDefault()
+{
+    QVERIFY(setDefaultSink(QString()));
+    OutputControl control;
+    QSignalSpy applied(&control, &OutputControl::applied);
+    QSignalSpy first(&control, &OutputControl::firstApplied);
     control.apply(QStringLiteral("speaker"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
     QVERIFY(!applied.at(0).at(1).toBool());
-    QVERIFY(!control.busy());
-    QCOMPARE(control.output(), QStringLiteral("speaker"));
+    QCOMPARE(first.count(), 1);
+    QVERIFY(!first.at(0).at(0).toBool());
     QCOMPARE(control.activeOutput(), QString());
-    QVERIFY(control.usbPresent());
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
-
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(1).at(1).toBool());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-}
-
-void OutputTest::usbEdgeReappliesAndGatesHeadphoneWords()
-{
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    QSignalSpy usbSpy(&control, &OutputControl::usbSinkChanged);
-
-    control.setHeadphone(QStringLiteral("low"), QStringLiteral("ulp"));
-    QCOMPARE(control.hpGain(), QStringLiteral("low"));
-    QCOMPARE(control.hpAmp(), QStringLiteral("ulp"));
-    QTest::qWait(200);
-    QVERIFY(!QFile::exists(m_log));
-    QCOMPARE(applied.count(), 0);
-
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 1);
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
-
-    QFile::remove(m_log);
-    control.setHeadphone(QStringLiteral("high"), QStringLiteral("hifi"));
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 1);
-    QVERIFY(!QFile::exists(m_log));
-
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
-    control.refresh();
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(usbSpy.count(), 2);
-    QVERIFY(!control.usbPresent());
-    QCOMPARE(control.output(), QStringLiteral("auto"));
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("auto"));
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("hp-gain-high"));
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("hp-amp-hifi"));
-    QVERIFY(applied.at(2).at(1).toBool());
-    QVERIFY(applied.at(3).at(1).toBool());
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    const QString log = readFile(m_log);
-    QVERIFY2(log.contains(setDefault(OutputControl::headphonesSink())
-                          + QStringLiteral("systemctl start microdap-priv@hp-gain-high.service\nsystemctl start microdap-priv@hp-amp-hifi.service\n")),
-             qPrintable(log));
-
-    QFile::remove(m_log);
-    control.refresh();
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 4);
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
-
-    QFile::remove(m_log);
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    control.refresh();
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 5);
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
-}
-
-void OutputTest::jackEdgeReapplies()
-{
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    control.setHeadphone(QStringLiteral("low"), QStringLiteral("lohifi"));
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
-
-    QFile::remove(m_log);
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOn)));
-    control.refresh();
-    QTRY_VERIFY_WITH_TIMEOUT(control.jackPresent(), waitMs);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("auto"));
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("hp-gain-low"));
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
-    QVERIFY(readFile(m_log).contains(setDefault(OutputControl::headphonesSink())));
-
-    QFile::remove(m_log);
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
-    control.refresh();
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("systemctl")));
-}
-
-void OutputTest::headphoneWordsDirect()
-{
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    control.apply(QStringLiteral("headphones"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-
-    QFile::remove(m_log);
-    control.setHeadphone(QStringLiteral("normal"), QStringLiteral("lohifi"));
-    QVERIFY(control.busy());
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("hp-gain-normal"));
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-priv@hp-gain-normal.service\nsystemctl start microdap-priv@hp-amp-lohifi.service\n"));
-
-    QFile::remove(m_log);
-    control.apply(QStringLiteral("headphones"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("headphones"));
-    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("hp-gain-normal"));
-    QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("hp-amp-lohifi"));
-
-    QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown headphone setting \"max\" \"lohifi\"");
-    control.setHeadphone(QStringLiteral("max"), QStringLiteral("lohifi"));
-    QCOMPARE(control.hpGain(), QStringLiteral("normal"));
-    QTest::qWait(200);
-    QVERIFY(!QFile::exists(m_log));
 }
 
 void OutputTest::polling()
@@ -502,6 +303,7 @@ void OutputTest::polling()
     QCOMPARE(jack.count(), 1);
     QTest::qWait(300);
     QCOMPARE(applied.count(), 0);
+    QCOMPARE(control.activeOutput(), QString());
 
     QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
     control.refresh();
@@ -518,49 +320,20 @@ void OutputTest::polling()
     control.setActive(true);
     QTRY_VERIFY_WITH_TIMEOUT(control.jackPresent(), waitMs);
 
+    QVERIFY(setDefaultSink(OutputControl::headphonesSink()));
     control.apply(QStringLiteral("auto"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
     QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QFile::remove(m_log);
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QVERIFY(readFile(m_log).contains(setDefault(QString::fromUtf8(usbName))));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
+    QTRY_COMPARE_WITH_TIMEOUT(control.activeOutput(), QStringLiteral("usb"), waitMs);
+    QCOMPARE(applied.count(), 1);
+    QVERIFY(control.usbPresent());
     control.setActive(false);
-}
-
-void OutputTest::speakerGainWords()
-{
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    QSignalSpy busy(&control, &OutputControl::busyChanged);
-    QCOMPARE(control.spkGain(), 0);
-    control.setSpkGain(90);
-    QCOMPARE(control.spkGain(), 90);
-    QVERIFY(control.busy());
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("spk-gain-90"));
-    QVERIFY(applied.at(0).at(1).toBool());
-    QVERIFY(!control.busy());
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-priv@spk-gain-90.service\n"));
-
-    QFile::remove(m_log);
-    control.setSpkGain(90);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-priv@spk-gain-90.service\n"));
-
-    QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "microdap output: unknown speaker gain 91");
-    control.setSpkGain(91);
-    QCOMPARE(control.spkGain(), 90);
-    QTest::qWait(200);
-    QVERIFY(!QFile::exists(m_log));
-    QCOMPARE(busy.count(), 4);
 }
 
 void OutputTest::missingBinaries()
 {
-    qputenv("MICRODAP_WPCTL_BIN", (m_dir.path() + QStringLiteral("/missing/wpctl")).toUtf8());
     qputenv("MICRODAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
     qputenv("MICRODAP_AMIXER_BIN", (m_dir.path() + QStringLiteral("/missing/amixer")).toUtf8());
     OutputControl control;
@@ -574,7 +347,6 @@ void OutputTest::missingBinaries()
     QTest::qWait(200);
     QVERIFY(!control.jackPresent());
     QVERIFY(!control.usbPresent());
-    qputenv("MICRODAP_WPCTL_BIN", (m_bin + QStringLiteral("/wpctl")).toUtf8());
     qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
     qputenv("MICRODAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
 }
@@ -582,6 +354,7 @@ void OutputTest::missingBinaries()
 void OutputTest::heldKeepsUsb()
 {
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
     OutputControl control;
     QSignalSpy applied(&control, &OutputControl::applied);
     control.apply(QStringLiteral("auto"));
@@ -596,68 +369,35 @@ void OutputTest::heldKeepsUsb()
     QCOMPARE(usbSpy.count(), 0);
     QFile::remove(m_log);
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
+    QVERIFY(setDefaultSink(OutputControl::speakerSink()));
     control.refresh();
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl get-default-sink\n")), waitMs);
     QTest::qWait(300);
-    QCOMPARE(applied.count(), 1);
     QVERIFY(control.usbPresent());
     QCOMPARE(control.usbSink(), QString::fromUtf8(usbName));
     QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
     QCOMPARE(usbSpy.count(), 0);
     QCOMPARE(activeSpy.count(), 0);
 
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(1).at(1).toBool());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-
-    QVERIFY(writeFile(m_jackFile, QString::fromUtf8(jackOff)));
-    control.refresh();
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QVERIFY(applied.at(2).at(1).toBool());
-    QVERIFY(!control.jackPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QCOMPARE(activeSpy.count(), 0);
+    control.setHeld(HeldOutputPort::HeldState::None);
+    QTRY_COMPARE_WITH_TIMEOUT(control.activeOutput(), QStringLiteral("speaker"), waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!control.usbPresent(), waitMs);
     QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
 
-    QFile::remove(m_log);
-    control.setHeld(HeldOutputPort::HeldState::None);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QVERIFY(applied.at(3).at(1).toBool());
-    QVERIFY(!control.usbPresent());
-    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
-    QVERIFY(readFile(m_log).endsWith(setDefault(OutputControl::speakerSink())));
+    OutputControl other;
+    QSignalSpy otherApplied(&other, &OutputControl::applied);
+    other.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(otherApplied.count(), 1, waitMs);
+    QCOMPARE(other.activeOutput(), QStringLiteral("speaker"));
+    other.setHeld(HeldOutputPort::HeldState::Held);
+    QCOMPARE(other.activeOutput(), QStringLiteral("usb"));
+    QVERIFY(other.usbPresent());
 }
 
-void OutputTest::heldAppliesWhenNotUsb()
-{
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    control.apply(QStringLiteral("auto"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-    QFile::remove(m_log);
-
-    control.setHeld(HeldOutputPort::HeldState::Held);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(1).at(1).toBool());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QVERIFY(control.usbPresent());
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
-
-    control.setHeld(HeldOutputPort::HeldState::Returning);
-    control.setHeld(HeldOutputPort::HeldState::Held);
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 2);
-
-    control.setHeld(HeldOutputPort::HeldState::None);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
-}
-
-void OutputTest::returningPollNoApply()
+void OutputTest::returningKeepsUsb()
 {
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
     OutputControl control;
     QSignalSpy applied(&control, &OutputControl::applied);
     control.apply(QStringLiteral("auto"));
@@ -666,25 +406,23 @@ void OutputTest::returningPollNoApply()
 
     control.setHeld(HeldOutputPort::HeldState::Returning);
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
+    QVERIFY(setDefaultSink(OutputControl::speakerSink()));
     QFile::remove(m_log);
     control.setActive(true);
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
-    QTest::qWait(300);
-    QFile::remove(m_log);
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl get-default-sink\n")), waitMs);
     QTest::qWait(300);
     QCOMPARE(applied.count(), 1);
     QVERIFY(control.usbPresent());
     QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
 
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    QFile::remove(m_log);
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
     control.setHeld(HeldOutputPort::HeldState::None);
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(count(QStringLiteral("pactl get-default-sink\n")) >= 2, waitMs);
     QTest::qWait(300);
     QCOMPARE(applied.count(), 1);
     QVERIFY(control.usbPresent());
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
     QVERIFY(!readFile(m_log).contains(QStringLiteral("set-default")));
     control.setActive(false);
 }
@@ -751,7 +489,7 @@ void OutputTest::rereadDuringRead()
     QSignalSpy applied(&control, &OutputControl::applied);
     control.apply(QStringLiteral("auto"));
     QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
+    QCOMPARE(control.activeOutput(), QStringLiteral("speaker"));
 
     qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
     QVERIFY(writeFile(m_gateFile, QString()));
@@ -759,51 +497,25 @@ void OutputTest::rereadDuringRead()
     control.refresh();
     QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
     control.refresh();
     control.refresh();
     control.refresh();
     QVERIFY(QFile::remove(m_gateFile));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(1).at(1).toBool());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(control.activeOutput(), QStringLiteral("usb"), waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl get-default-sink\n")), 2, waitMs);
     QTest::qWait(1500);
-    QCOMPARE(applied.count(), 2);
-    QCOMPARE(count(QStringLiteral("pactl list sinks short\n")), 3);
-    QCOMPARE(count(QStringLiteral("amixer -c0 contents\n")), 3);
-}
-
-void OutputTest::rereadDuringApply()
-{
-    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
-    QVERIFY(writeFile(m_gateFile, QString()));
-    OutputControl control;
-    QSignalSpy applied(&control, &OutputControl::applied);
-    control.apply(QStringLiteral("auto"));
-    QTRY_VERIFY_WITH_TIMEOUT(readFile(m_log).contains(QStringLiteral("pactl list sinks short\n")), waitMs);
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    control.refresh();
-    control.refresh();
-    control.refresh();
-    QVERIFY(QFile::remove(m_gateFile));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(applied.at(0).at(1).toBool());
-    QVERIFY(applied.at(1).at(1).toBool());
-    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QTest::qWait(1500);
-    QCOMPARE(applied.count(), 2);
-    QCOMPARE(count(QStringLiteral("pactl list sinks short\n")), 3);
-    const QString log = readFile(m_log);
-    QVERIFY2(log.contains(setDefault(OutputControl::headphonesSink())), qPrintable(log));
-    QVERIFY2(log.endsWith(setDefault(QString::fromUtf8(usbName))), qPrintable(log));
+    QCOMPARE(applied.count(), 1);
+    QCOMPARE(count(QStringLiteral("pactl list sinks short\n")), 2);
+    QCOMPARE(count(QStringLiteral("amixer -c0 contents\n")), 2);
 }
 
 void OutputTest::eqLoadsResolvedOutput()
 {
     qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-resolved")).toUtf8());
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    Settings settings(m_dir.path() + QStringLiteral("/eq-resolved.ini"));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
+    Settings settings(nullptr);
     EqControl eq(&settings);
     OutputControl control;
     QStringList loads;
@@ -818,37 +530,6 @@ void OutputTest::eqLoadsResolvedOutput()
 
     QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("usb")}), waitMs);
     QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
-    QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 0);
-}
-
-void OutputTest::eqBoundLoadsSinkDefault()
-{
-    qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-bound")).toUtf8());
-    qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
-    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
-    QVERIFY(writeFile(m_defaultFile, OutputControl::headphonesSink() + QStringLiteral("\n")));
-    QVERIFY(writeFile(m_gateFile, QString()));
-    QVERIFY(writeFile(m_defaultGateFile, QString()));
-    Settings settings(m_dir.path() + QStringLiteral("/eq-bound.ini"));
-    EqControl eq(&settings);
-    OutputControl control;
-    QStringList loads;
-    connect(&eq, &EqControl::activeOutputChanged, this, [&eq, &loads] { loads.append(eq.activeOutput()); });
-
-    QElapsedTimer timer;
-    timer.start();
-    eq.awaitOutput(&control, 200);
-    control.apply(QStringLiteral("auto"));
-    QVERIFY(timer.elapsed() < 500);
-    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl get-default-sink\n")), 1, waitMs);
-    QVERIFY(timer.elapsed() >= 200);
-    QVERIFY(loads.isEmpty());
-
-    QVERIFY(QFile::remove(m_defaultGateFile));
-    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("headphones")}), waitMs);
-
-    QVERIFY(QFile::remove(m_gateFile));
-    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("headphones"), QStringLiteral("usb")}), waitMs);
     QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 1);
 }
 
@@ -856,8 +537,8 @@ void OutputTest::eqFailedResolveLoadsSinkDefault()
 {
     qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-failed")).toUtf8());
     QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsbOnly)));
-    QVERIFY(writeFile(m_defaultFile, QStringLiteral("alsa_output.usb-DAC.analog-stereo\n")));
-    Settings settings(m_dir.path() + QStringLiteral("/eq-failed.ini"));
+    QVERIFY(setDefaultSink(QString()));
+    Settings settings(nullptr);
     EqControl eq(&settings);
     OutputControl control;
     QSignalSpy first(&control, &OutputControl::firstApplied);
@@ -868,11 +549,12 @@ void OutputTest::eqFailedResolveLoadsSinkDefault()
     control.apply(QStringLiteral("speaker"));
     QTRY_COMPARE_WITH_TIMEOUT(first.count(), 1, waitMs);
     QVERIFY(!first.at(0).at(0).toBool());
-    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("usb")}), waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("speaker")}), waitMs);
+    QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 2);
 
-    control.apply(QStringLiteral("speaker"));
-    QTRY_COMPARE_WITH_TIMEOUT(count(QStringLiteral("pactl list sinks short\n")), 2, waitMs);
-    QTest::qWait(200);
+    QVERIFY(setDefaultSink(QStringLiteral("alsa_output.usb-DAC.analog-stereo")));
+    control.apply(QStringLiteral("usb"));
+    QTRY_COMPARE_WITH_TIMEOUT(loads, QStringList({QStringLiteral("speaker"), QStringLiteral("usb")}), waitMs);
     QCOMPARE(first.count(), 1);
 }
 
@@ -880,7 +562,7 @@ void OutputTest::eqMissingPactlLoadsSpeaker()
 {
     qputenv("MICRODAP_EQ_DIR", (m_dir.path() + QStringLiteral("/eq-missing")).toUtf8());
     qputenv("MICRODAP_PACTL_BIN", (m_dir.path() + QStringLiteral("/missing/pactl")).toUtf8());
-    Settings settings(m_dir.path() + QStringLiteral("/eq-missing.ini"));
+    Settings settings(nullptr);
     EqControl eq(&settings);
     OutputControl control;
     QStringList loads;
@@ -898,7 +580,7 @@ void OutputTest::eqHangingSinkLoadsSpeaker()
     qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/slow/pactl")).toUtf8());
     QVERIFY(writeFile(m_defaultFile, OutputControl::headphonesSink() + QStringLiteral("\n")));
     QVERIFY(writeFile(m_defaultGateFile, QString()));
-    Settings settings(m_dir.path() + QStringLiteral("/eq-hanging.ini"));
+    Settings settings(nullptr);
     EqControl eq(&settings);
     OutputControl control;
     QStringList loads;

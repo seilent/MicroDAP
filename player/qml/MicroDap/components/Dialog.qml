@@ -9,6 +9,7 @@ Item {
     property string title: ""
     property var items: []
     property int focusIndex: 0
+    property real barIndex: 0
     readonly property bool animating: openAnim.running || closeAnim.running
     readonly property int duration: Motion.dialog
     readonly property int hideDuration: Motion.dialogHide
@@ -21,6 +22,7 @@ Item {
     property alias body: body
     property alias titleText: titleText
     property alias bar: bar
+    property alias list: list
     property alias openAnimation: openAnim
     property alias closeAnimation: closeAnim
     readonly property string touchKind: root.shown ? "" : "block"
@@ -104,7 +106,7 @@ Item {
                         font: Ui.font(Ui.dialogItem)
 
                         Behavior on color {
-                            enabled: !root.screenOff
+                            enabled: !root.screenOff && !root.animating
                             ColorAnimation {
                                 duration: Motion.focusAlpha
                             }
@@ -118,10 +120,10 @@ Item {
             id: bar
 
             x: root.edge - Ui.px(Ui.focusBarOffset)
-            rowY: list.y + root.focusIndex * root.pitch
+            rowY: list.y + root.barIndex * root.pitch
             rowHeight: root.pitch
             visible: root.items.length > 0
-            animated: !root.screenOff
+            animated: false
         }
     }
 
@@ -201,6 +203,8 @@ Item {
     }
 
     function complete() {
+        if (barAnim.running)
+            barAnim.complete()
         if (openAnim.running)
             openAnim.complete()
         if (closeAnim.running)
@@ -244,4 +248,26 @@ Item {
         if (root.screenOff)
             root.complete()
     }
+
+    NumberAnimation {
+        id: barAnim
+
+        target: root
+        property: "barIndex"
+        duration: Motion.focusCursor
+        easing.type: Motion.sine
+    }
+
+    function moveBar(): void {
+        barAnim.stop()
+        if (root.screenOff || !root.shown || root.animating) {
+            root.barIndex = root.focusIndex
+            return
+        }
+        barAnim.from = root.barIndex
+        barAnim.to = root.focusIndex
+        barAnim.start()
+    }
+
+    onFocusIndexChanged: root.moveBar()
 }

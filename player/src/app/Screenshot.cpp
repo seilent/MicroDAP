@@ -166,6 +166,14 @@ const QStringList &states()
         QStringLiteral("eq-dac-range"),
         QStringLiteral("eq-dac-preamp"),
         QStringLiteral("eq-dac-long"),
+        QStringLiteral("boot"),
+        QStringLiteral("boot-edit"),
+        QStringLiteral("boot-missing"),
+        QStringLiteral("about"),
+        QStringLiteral("about-available"),
+        QStringLiteral("about-missing"),
+        QStringLiteral("power-none"),
+        QStringLiteral("power-long"),
     };
     return names;
 }

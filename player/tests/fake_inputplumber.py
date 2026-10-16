@@ -20,6 +20,7 @@ OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager'
 PROPERTIES = 'org.freedesktop.DBus.Properties'
 COMPOSITE = 'org.shadowblip.Input.CompositeDevice'
 DBUS_DEVICE = 'org.shadowblip.Input.DBusDevice'
+FORCE_FEEDBACK = 'org.shadowblip.Output.ForceFeedback'
 CONTROL = 'net.seilent.MicroDap.FakeInputPlumber'
 CONTROL_PATH = '/net/seilent/MicroDap/FakeInputPlumber'
 TARGET_PREFIX = ROOT + '/devices/target/'
@@ -43,6 +44,7 @@ class CompositeDevice(dbus.service.Object):
         self.path = path
         self.fake = fake
         self.writes = []
+        self.rumbles = []
         self.attempts = 0
         self.refuse = 0
         self.stick = 0
@@ -89,6 +91,10 @@ class CompositeDevice(dbus.service.Object):
             GLib.timeout_add(self.fake.delay_ms, lambda: reply() or False)
         else:
             reply()
+
+    @dbus.service.method(FORCE_FEEDBACK, in_signature='d', out_signature='')
+    def Rumble(self, level):
+        self.rumbles.append(float(level))
 
     @dbus.service.signal(PROPERTIES, signature='sa{sv}as')
     def PropertiesChanged(self, interface, changed, invalidated):
@@ -162,11 +168,19 @@ class Control(dbus.service.Object):
             raise UnknownObject(str(path))
         return dbus.Array([dbus.UInt32(v) for v in obj.writes], signature='u')
 
+    @dbus.service.method(CONTROL, in_signature='s', out_signature='ad')
+    def Rumbles(self, path):
+        obj = self.fake.objects.get(str(path))
+        if not isinstance(obj, CompositeDevice):
+            raise UnknownObject(str(path))
+        return dbus.Array([dbus.Double(v) for v in obj.rumbles], signature='d')
+
     @dbus.service.method(CONTROL, in_signature='', out_signature='')
     def ClearWrites(self):
         for obj in self.fake.objects.values():
             if isinstance(obj, CompositeDevice):
                 obj.writes = []
+                obj.rumbles = []
                 obj.attempts = 0
 
     @dbus.service.method(CONTROL, in_signature='s', out_signature='u')

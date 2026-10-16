@@ -23,9 +23,6 @@ class OutputControl : public QObject, public HeldOutputPort
     Q_PROPERTY(bool usbPresent READ usbPresent NOTIFY usbSinkChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
-    Q_PROPERTY(QString hpGain READ hpGain NOTIFY hpGainChanged)
-    Q_PROPERTY(QString hpAmp READ hpAmp NOTIFY hpAmpChanged)
-    Q_PROPERTY(int spkGain READ spkGain NOTIFY spkGainChanged)
 
 public:
     explicit OutputControl(QObject *parent = nullptr);
@@ -35,15 +32,13 @@ public:
     static QString speakerSink();
     static QString headphonesSink();
     static QString usbPrefix();
-    static QString wpctlPath();
+    static QString btPrefix();
     static QString pactlPath();
     static QString amixerPath();
-    static QString systemctlPath();
     static QStringList parseSinks(const QString &text);
     static QString usbSinkIn(const QStringList &sinks);
     static bool parseJack(const QString &text);
-    static QString resolve(const QString &output, bool jack, bool usb);
-    static QString unitFor(const QString &word);
+    static QString outputOf(const QString &sink);
 
     QString output() const;
     QString activeOutput() const;
@@ -53,9 +48,7 @@ public:
     bool busy() const;
     bool active() const;
     void setActive(bool active);
-    QString hpGain() const;
-    QString hpAmp() const;
-    int spkGain() const;
+    QString defaultSink() const;
     HeldState held() const;
 
     void setHeld(HeldState state) override;
@@ -65,8 +58,6 @@ public:
 
     Q_INVOKABLE void apply(const QString &output);
     Q_INVOKABLE void refresh() override;
-    Q_INVOKABLE void setHeadphone(const QString &gain, const QString &amp);
-    Q_INVOKABLE void setSpkGain(int step);
 
 signals:
     void outputChanged();
@@ -75,9 +66,6 @@ signals:
     void usbSinkChanged();
     void busyChanged();
     void activeChanged();
-    void hpGainChanged();
-    void hpAmpChanged();
-    void spkGainChanged();
     void applied(const QString &output, bool ok);
     void firstApplied(bool ok);
     void cardGone(int index);
@@ -90,15 +78,13 @@ private:
     void drop(QProcess *&slot);
     void readJack(Handler done);
     void readSinks(Handler done);
-    void readBoth(std::function<void()> done);
-    void resolveAndSet();
+    void readDefault(Handler done);
+    void readAll(std::function<void()> done);
+    void resolve();
     void finish(bool ok);
     void setJackPresent(bool present);
     void setUsbSink(const QString &sink);
     void setActiveOutput(const QString &output);
-    void applyHeadphone();
-    void startWords(const QStringList &words);
-    void nextWord();
     void updateBusy();
     void checkWatchedCard();
 
@@ -106,6 +92,7 @@ private:
     QString m_activeOutput;
     bool m_jackPresent = false;
     QString m_usbSink;
+    QString m_defaultSink;
     QStringList m_sinks;
     bool m_busy = false;
     bool m_applying = false;
@@ -114,20 +101,16 @@ private:
     bool m_everApplied = false;
     bool m_resolvedOnce = false;
     bool m_active = false;
-    QString m_hpGain;
-    QString m_hpAmp;
-    int m_spkGain = 0;
     HeldState m_held = HeldState::None;
     int m_watchIndex = -1;
     QString m_watchId;
     bool m_watchGone = false;
     quint64 m_readsStarted = 0;
-    QStringList m_words;
     QTimer m_pollTimer;
-    QProcess *m_apply = nullptr;
+    QTimer m_settleTimer;
     QProcess *m_jack = nullptr;
     QProcess *m_sinkList = nullptr;
-    QProcess *m_word = nullptr;
+    QProcess *m_default = nullptr;
 };
 
 }

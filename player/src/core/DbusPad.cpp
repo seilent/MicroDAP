@@ -34,15 +34,19 @@ constexpr NameRow nameTable[] = {
 
 }
 
-DbusPad::DbusPad(const QDBusConnection &bus, QObject *parent)
+DbusPad::DbusPad(const QDBusConnection &session, const QDBusConnection &inputPlumber, QObject *parent)
     : PadSource(parent)
-    , m_bus(bus)
-    , m_intercept(new Intercept(bus, this))
+    , m_bus(inputPlumber)
+    , m_intercept(new Intercept(session, inputPlumber, this))
     , m_log(qEnvironmentVariableIntValue("MICRODAP_PAD_LOG") == 1)
 {
     m_repeat.setTimerType(Qt::PreciseTimer);
     connect(&m_repeat, &QTimer::timeout, this, &DbusPad::repeatTick);
     connect(m_intercept, &Intercept::targetsChanged, this, &PadSource::connectedChanged);
+    connect(m_intercept, &Intercept::holdingChanged, this, [this] {
+        if (!m_intercept->holding())
+            releaseAll();
+    });
     if (!m_bus.isConnected()) {
         qWarning() << "microdap dbuspad: bus not connected";
         return;
@@ -74,14 +78,19 @@ Intercept *DbusPad::intercept() const
 
 bool DbusPad::shown() const
 {
-    return m_intercept->shown();
+    return m_intercept->wanted();
 }
 
 void DbusPad::setShown(bool shown)
 {
-    if (!shown && m_intercept->shown())
+    if (!shown)
         releaseAll();
-    m_intercept->setShown(shown);
+    m_intercept->setWanted(shown);
+}
+
+bool DbusPad::holding() const
+{
+    return m_intercept->holding();
 }
 
 QStringList DbusPad::dropped() const
@@ -194,7 +203,7 @@ void DbusPad::emitAction(Action a, bool repeat)
 
 bool DbusPad::allowed(Action) const
 {
-    return !m_screenOff;
+    return !m_screenOff && m_intercept->holding();
 }
 
 void DbusPad::releaseAll()

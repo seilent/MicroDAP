@@ -1,0 +1,11 @@
+[Unit]
+Description=MicroDAP Wi-Fi radio restore
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/microdap/microdap-radio
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+#!/usr/bin/bash
+set -u
+
+homes="${MICRODAP_HOME_ROOT:-/home}"
+
+log() { logger -t microdap-radio -- "$*"; }
+
+markers=()
+plain=()
+for dir in "${homes}"/*/; do
+    home=$(realpath -e -- "${dir}" 2>/dev/null) || continue
+    marker="${home}/.local/state/microdap/wifi-off"
+    [[ -e "${marker}" || -L "${marker}" ]] || continue
+    markers+=("${marker}")
+    if [[ -f "${marker}" && ! -L "${marker}" && "$(realpath -e -- "${marker}" 2>/dev/null)" == "${marker}" ]]; then
+        plain+=("${marker}")
+    else
+        log "${marker} is not a plain file, left in place"
+    fi
+done
+
+(( ${#markers[@]} )) || exit 0
+if ! nmcli radio wifi on; then
+    log "wifi radio on failed"
+    exit 1
+fi
+log "wifi radio on"
+(( ${#plain[@]} )) && rm -f -- "${plain[@]}"
+exit 0

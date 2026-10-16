@@ -9,6 +9,7 @@ Item {
     property string title: ""
     property var items: []
     property int focusIndex: 0
+    property real barIndex: 0
     property real progress: 0
     readonly property bool animating: progressAnim.running
     readonly property int duration: Motion.sheet
@@ -20,6 +21,7 @@ Item {
     property alias scrim: scrim
     property alias panel: panel
     property alias bar: bar
+    property alias list: list
     readonly property string touchKind: root.shown ? "" : "block"
 
     signal accepted(int index)
@@ -119,10 +121,10 @@ Item {
             id: bar
 
             x: root.edge - Ui.px(Ui.focusBarOffset)
-            rowY: list.y + root.focusIndex * root.pitch
+            rowY: list.y + root.barIndex * root.pitch
             rowHeight: root.pitch
             visible: root.items.length > 0
-            animated: !root.screenOff
+            animated: false
         }
     }
 
@@ -159,6 +161,8 @@ Item {
     }
 
     function complete() {
+        if (barAnim.running)
+            barAnim.complete()
         if (progressAnim.running)
             progressAnim.complete()
     }
@@ -199,4 +203,26 @@ Item {
         if (root.screenOff)
             root.complete()
     }
+
+    NumberAnimation {
+        id: barAnim
+
+        target: root
+        property: "barIndex"
+        duration: Motion.focusCursor
+        easing.type: Motion.sine
+    }
+
+    function moveBar(): void {
+        barAnim.stop()
+        if (root.screenOff || !root.shown || root.animating) {
+            root.barIndex = root.focusIndex
+            return
+        }
+        barAnim.from = root.barIndex
+        barAnim.to = root.focusIndex
+        barAnim.start()
+    }
+
+    onFocusIndexChanged: root.moveBar()
 }

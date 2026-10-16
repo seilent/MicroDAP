@@ -1,0 +1,23 @@
+[Unit]
+Description=MicroDAP overlay player
+BindsTo=gamescope-session-plus@steam.service
+After=gamescope-session-plus@steam.service
+Conflicts=gamescope-session-plus@microdap.service
+After=gamescope-session-plus@microdap.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=15
+TimeoutStartSec=40
+Environment=DISPLAY=:0
+Environment=QT_QPA_PLATFORM=xcb
+ExecCondition=/usr/libexec/microdap/microdap-keep check
+ExecStartPre=/usr/libexec/microdap/microdap-wait-x
+ExecStart=/usr/bin/microdap-player --overlay
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=gamescope-session-plus@steam.service

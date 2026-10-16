@@ -4,13 +4,19 @@
 #include "OutputMode.h"
 #include "OverlayBridge.h"
 #include "Player.h"
+#include "Settings.h"
 #include "SleepInhibitor.h"
 #include "State.h"
 
 #include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
+#include <QDBusServiceWatcher>
 #include <QDebug>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
+#include <QRegularExpression>
 
 namespace microdap {
 
@@ -19,6 +25,14 @@ namespace {
 QString propertiesInterface()
 {
     return QStringLiteral("org.freedesktop.DBus.Properties");
+}
+
+QString programPath(const QString &name)
+{
+    const QString dir = qEnvironmentVariable("MICRODAP_VERB_DIR");
+    if (dir.isEmpty() || name.contains(QLatin1Char('/')))
+        return name;
+    return dir + QLatin1Char('/') + name;
 }
 
 }
@@ -48,6 +62,12 @@ void PowerBridgeAdaptor::SetScreenOff(bool off)
 {
     qInfo() << "microdap power: SetScreenOff" << off;
     m_bridge->requestScreenOff(off);
+}
+
+void PowerBridgeAdaptor::ToggleScreen()
+{
+    qInfo() << "microdap power: ToggleScreen";
+    m_bridge->toggleScreen();
 }
 
 void PowerBridgeAdaptor::ShowPowerMenu()
@@ -84,7 +104,10 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
     : QObject(parent)
     , m_player(player)
     , m_bus(bus)
+    , m_powerd(powerdBus())
     , m_adaptor(new PowerBridgeAdaptor(this))
+    , m_sessions(readSessions(sessionsDir(), QStringLiteral("microdap")))
+    , m_imageVersion(readKey(osReleasePath(), QStringLiteral("IMAGE_VERSION")))
 {
     m_switchTimer.setSingleShot(true);
     connect(&m_switchTimer, &QTimer::timeout, this, &PowerBridge::onSwitchTimeout);
@@ -95,9 +118,23 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
         qWarning() << "microdap power: no output release within" << m_readyTimer.interval() << "ms, switching";
         onSwitchReady();
     });
-    reloadDrift();
+    connect(&m_updateWatch, &QFileSystemWatcher::directoryChanged, this, [this] {
+        const QString before = m_updateStatus;
+        if (!readUpdateFile() && before == QLatin1StringView("available"))
+            setUpdate(QStringLiteral("none"), {});
+        watchUpdate();
+    });
+    readUpdateFile();
+    watchUpdate();
+    m_idleTimer.setInterval(idleCheckMs());
+    connect(&m_idleTimer, &QTimer::timeout, this, &PowerBridge::checkIdle);
     if (m_player)
         connect(m_player, &Player::statusChanged, this, &PowerBridge::notifyPlaybackStatus);
+    if (m_powerd.isConnected()) {
+        auto *watcher = new QDBusServiceWatcher(powerdService(), m_powerd, QDBusServiceWatcher::WatchForOwnerChange,
+                                                this);
+        connect(watcher, &QDBusServiceWatcher::serviceOwnerChanged, this, &PowerBridge::onPowerdOwner);
+    }
 
     if (!m_bus.isConnected()) {
         qWarning() << "microdap power: session bus not connected";
@@ -125,8 +162,21 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
 PowerBridge::~PowerBridge()
 {
     dropSwitchProcess();
-    dropWakeProcess();
-    dropScreenOffProcess();
+    if (m_check) {
+        m_check->disconnect(this);
+        m_check->kill();
+        m_check->waitForFinished(1000);
+    }
+    if (!m_heldMode.isEmpty() && m_powerd.isConnected()) {
+        QDBusMessage call = QDBusMessage::createMethodCall(powerdService(), powerdPath(), powerdInterface(),
+                                                           QStringLiteral("Release"));
+        call << m_heldMode;
+        m_powerd.send(call);
+    }
+    if (m_radio) {
+        m_radio->disconnect(this);
+        m_radio->waitForFinished(1000);
+    }
     if (!m_registered)
         return;
     m_bus.unregisterService(serviceName());
@@ -163,6 +213,29 @@ QString PowerBridge::notSupportedError()
     return QStringLiteral("net.seilent.MicroDap.Error.NotSupported");
 }
 
+QString PowerBridge::powerdService()
+{
+    return QStringLiteral("net.seilent.MicroOs.Power");
+}
+
+QString PowerBridge::powerdPath()
+{
+    return QStringLiteral("/net/seilent/MicroOs/Power");
+}
+
+QString PowerBridge::powerdInterface()
+{
+    return QStringLiteral("net.seilent.MicroOs.Power1");
+}
+
+QDBusConnection PowerBridge::powerdBus()
+{
+    const QString address = qEnvironmentVariable("MICRODAP_POWERD_BUS");
+    if (address.isEmpty())
+        return QDBusConnection::systemBus();
+    return QDBusConnection::connectToBus(address, QStringLiteral("microdap-powerd"));
+}
+
 QStringList PowerBridge::verbs()
 {
     return {
@@ -173,33 +246,114 @@ QStringList PowerBridge::verbs()
     };
 }
 
-QString PowerBridge::powerBin()
+QStringList PowerBridge::switchCommand(const QString &session)
 {
-    return qEnvironmentVariable("MICRODAP_POWER_BIN", QStringLiteral("/usr/libexec/microdap/microdap-power"));
+    return {QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("--no-block"),
+            QStringLiteral("microos-session-switch@") + session + QStringLiteral(".service")};
 }
 
-QStringList PowerBridge::commandFor(const QString &verb)
+bool PowerBridge::validSession(const QString &name)
 {
-    if (verb == QLatin1StringView("screen-off"))
-        return {powerBin(), QStringLiteral("screen-off")};
-    if (verb == QLatin1StringView("game-mode"))
-        return {QStringLiteral("systemctl"), QStringLiteral("start"),
-                QStringLiteral("microdap-switch-back.service")};
-    if (verb == QLatin1StringView("suspend"))
-        return {powerBin(), QStringLiteral("suspend")};
-    if (verb == QLatin1StringView("poweroff"))
-        return {powerBin(), QStringLiteral("poweroff")};
-    return {};
+    static const QRegularExpression re(QStringLiteral("^[a-z0-9][a-z0-9-]*$"));
+    return re.match(name).hasMatch();
 }
 
-QStringList PowerBridge::switchCommand()
+QString PowerBridge::sessionsDir()
 {
-    return {QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("microdap-switch-back.service")};
+    return qEnvironmentVariable("MICRODAP_SESSIONS_DIR", QStringLiteral("/usr/lib/microos/sessions.d"));
 }
 
-QStringList PowerBridge::wakeCommand()
+QVariantList PowerBridge::readSessions(const QString &dir, const QString &current)
 {
-    return {powerBin(), QStringLiteral("screen-on")};
+    QVariantList out;
+    const QFileInfoList entries = QDir(dir).entryInfoList({QStringLiteral("*.conf")}, QDir::Files, QDir::Name);
+    for (const QFileInfo &entry : entries) {
+        const QString name = entry.completeBaseName();
+        if (name == current || !validSession(name))
+            continue;
+        QFile file(entry.absoluteFilePath());
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        QString label = name;
+        bool listed = false;
+        while (!file.atEnd()) {
+            const QString line = QString::fromUtf8(file.readLine()).trimmed();
+            const qsizetype eq = line.indexOf(QLatin1Char('='));
+            if (eq <= 0)
+                continue;
+            const QString key = line.left(eq);
+            const QString value = line.mid(eq + 1).trimmed();
+            if (key == QLatin1StringView("LABEL") && !value.isEmpty())
+                label = value;
+            else if (key == QLatin1StringView("DEFAULT"))
+                listed = value == QLatin1StringView("yes");
+        }
+        if (listed)
+            out.append(QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("label"), label}});
+    }
+    return out;
+}
+
+QString PowerBridge::backlightDir()
+{
+    return qEnvironmentVariable("MICRODAP_SYS_ROOT", QStringLiteral("/sys")) + QStringLiteral("/class/backlight");
+}
+
+QString PowerBridge::wifiMarker()
+{
+    return QDir::homePath() + QStringLiteral("/.local/state/microdap/wifi-off");
+}
+
+QString PowerBridge::nmcliPath()
+{
+    return qEnvironmentVariable("MICRODAP_NMCLI_BIN", QStringLiteral("nmcli"));
+}
+
+QString PowerBridge::osReleasePath()
+{
+    return qEnvironmentVariable("MICRODAP_OS_RELEASE", QStringLiteral("/usr/lib/os-release"));
+}
+
+QString PowerBridge::updateFile()
+{
+    return qEnvironmentVariable("MICRODAP_UPDATE_FILE", QStringLiteral("/run/microos/update-available"));
+}
+
+QString PowerBridge::readKey(const QString &path, const QString &key)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    const QString prefix = key + QLatin1Char('=');
+    QString value;
+    while (!file.atEnd()) {
+        const QString line = QString::fromUtf8(file.readLine()).trimmed();
+        if (line.startsWith(prefix))
+            value = line.mid(prefix.size());
+    }
+    if (value.size() >= 2 && (value.startsWith(QLatin1Char('"')) || value.startsWith(QLatin1Char('\'')))
+        && value.endsWith(value.front()))
+        value = value.mid(1, value.size() - 2);
+    return value;
+}
+
+QString PowerBridge::checkStatus(const QString &show)
+{
+    QString status;
+    QString started;
+    for (const QString &line : show.split(QLatin1Char('\n'))) {
+        if (line.startsWith(QLatin1StringView("ExecMainStatus=")))
+            status = line.mid(15).trimmed();
+        else if (line.startsWith(QLatin1StringView("ExecMainStartTimestampMonotonic=")))
+            started = line.mid(32).trimmed();
+    }
+    if (started.isEmpty() || started == QLatin1StringView("0"))
+        return QStringLiteral("unchecked");
+    if (status == QLatin1StringView("0") || status == QLatin1StringView("7"))
+        return QStringLiteral("none");
+    if (status == QLatin1StringView("4"))
+        return QStringLiteral("offline");
+    return QStringLiteral("unchecked");
 }
 
 int PowerBridge::switchTimeoutMs()
@@ -209,9 +363,18 @@ int PowerBridge::switchTimeoutMs()
     return ok && value > 0 ? value : 30000;
 }
 
-QString PowerBridge::driftFile()
+int PowerBridge::idleCheckMs()
 {
-    return qEnvironmentVariable("MICRODAP_DRIFT_FILE", QStringLiteral("/run/microdap/drift"));
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue("MICRODAP_IDLE_CHECK_MS", &ok);
+    return ok && value > 0 ? value : 60000;
+}
+
+int PowerBridge::idleMinuteMs()
+{
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue("MICRODAP_IDLE_MINUTE_MS", &ok);
+    return ok && value > 0 ? value : 60000;
 }
 
 bool PowerBridge::isRegistered() const
@@ -243,6 +406,9 @@ void PowerBridge::setOverlay(OverlayBridge *overlay)
         m_sleep->deleteLater();
         m_sleep = nullptr;
     }
+    m_holds = false;
+    m_idleTimer.stop();
+    applyHold();
     connect(m_overlay, &OverlayBridge::shownChanged, this, &PowerBridge::notifyOverlayShown);
     connect(m_overlay, &QObject::destroyed, this, [this] { m_overlay = nullptr; });
 }
@@ -268,6 +434,11 @@ void PowerBridge::setState(State *state)
         connect(m_state, &QObject::destroyed, this, [this] { m_state = nullptr; });
 }
 
+void PowerBridge::setSettings(Settings *settings)
+{
+    m_settings = settings;
+}
+
 bool PowerBridge::screenOff() const
 {
     return m_screenOff;
@@ -281,16 +452,12 @@ void PowerBridge::setScreenOff(bool off)
     emit screenOffChanged();
     emitScreenOffChanged();
     emitPropertiesChanged({{QStringLiteral("ScreenOff"), m_screenOff}});
+    applyHold();
 }
 
 int PowerBridge::volume() const
 {
     return m_volume;
-}
-
-QStringList PowerBridge::driftPaths() const
-{
-    return m_driftPaths;
 }
 
 QString PowerBridge::playbackStatus() const
@@ -318,12 +485,109 @@ bool PowerBridge::switching() const
     return m_switching;
 }
 
-QString PowerBridge::programPath(const QString &name) const
+QVariantList PowerBridge::sessions() const
 {
-    const QString dir = qEnvironmentVariable("MICRODAP_VERB_DIR");
-    if (dir.isEmpty() || name.contains(QLatin1Char('/')))
-        return name;
-    return dir + QLatin1Char('/') + name;
+    return m_sessions;
+}
+
+QString PowerBridge::holdMode() const
+{
+    return m_holdMode;
+}
+
+QString PowerBridge::imageVersion() const
+{
+    return m_imageVersion;
+}
+
+QString PowerBridge::updateStatus() const
+{
+    return m_updateStatus;
+}
+
+QString PowerBridge::updateVersion() const
+{
+    return m_updateVersion;
+}
+
+QString PowerBridge::updateState() const
+{
+    return m_updateState;
+}
+
+QString PowerBridge::updateChecked() const
+{
+    return m_updateChecked;
+}
+
+void PowerBridge::watchUpdate()
+{
+    QString dir = QFileInfo(updateFile()).absolutePath();
+    while (!QFileInfo(dir).isDir() && dir != QFileInfo(dir).absolutePath())
+        dir = QFileInfo(dir).absolutePath();
+    const QStringList watched = m_updateWatch.directories();
+    if (watched == QStringList{dir})
+        return;
+    if (!watched.isEmpty())
+        m_updateWatch.removePaths(watched);
+    m_updateWatch.addPath(dir);
+}
+
+bool PowerBridge::readUpdateFile()
+{
+    const QString path = updateFile();
+    const QString state = readKey(path, QStringLiteral("state"));
+    const QString checked = readKey(path, QStringLiteral("checked"));
+    const bool available = !state.isEmpty() && state != QLatin1StringView("withdrawn");
+    const bool moved = m_updateState != state || m_updateChecked != checked;
+    m_updateState = state;
+    m_updateChecked = checked;
+    if (available) {
+        const QString version = readKey(path, QStringLiteral("version"));
+        if (moved || m_updateStatus != QLatin1StringView("available") || m_updateVersion != version) {
+            m_updateStatus = QStringLiteral("available");
+            m_updateVersion = version;
+            emit updateChanged();
+        }
+        return true;
+    }
+    if (moved)
+        emit updateChanged();
+    return false;
+}
+
+void PowerBridge::setUpdate(const QString &status, const QString &version)
+{
+    if (m_updateStatus == status && m_updateVersion == version)
+        return;
+    m_updateStatus = status;
+    m_updateVersion = version;
+    emit updateChanged();
+}
+
+void PowerBridge::reloadUpdate()
+{
+    if (readUpdateFile())
+        return;
+    if (m_check)
+        return;
+    m_check = new QProcess(this);
+    connect(m_check, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+        const QString out = QString::fromUtf8(m_check->readAllStandardOutput());
+        m_check->deleteLater();
+        m_check = nullptr;
+        setUpdate(status == QProcess::NormalExit && code == 0 ? checkStatus(out) : QStringLiteral("unchecked"), {});
+    });
+    connect(m_check, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart)
+            return;
+        m_check->deleteLater();
+        m_check = nullptr;
+        setUpdate(QStringLiteral("unchecked"), {});
+    });
+    m_check->start(programPath(QStringLiteral("systemctl")),
+                   {QStringLiteral("show"), QStringLiteral("-p"), QStringLiteral("ExecMainStatus"), QStringLiteral("-p"),
+                    QStringLiteral("ExecMainStartTimestampMonotonic"), QStringLiteral("microos-update-check.service")});
 }
 
 void PowerBridge::setOutputMode(OutputMode *mode, PlayerPort *player)
@@ -345,6 +609,14 @@ void PowerBridge::enableSleepWatch()
     m_sleep->take();
 }
 
+void PowerBridge::enableHolds()
+{
+    if (m_overlay || m_holds)
+        return;
+    m_holds = true;
+    applyHold();
+}
+
 SleepInhibitor *PowerBridge::sleep() const
 {
     return m_sleep;
@@ -352,7 +624,57 @@ SleepInhibitor *PowerBridge::sleep() const
 
 bool PowerBridge::waking() const
 {
-    return m_wake != nullptr;
+    return m_radio && m_wakePending;
+}
+
+bool PowerBridge::transition() const
+{
+    return m_radio != nullptr;
+}
+
+void PowerBridge::applyHold()
+{
+    const QString wanted = m_holds && !m_overlay
+                               ? (m_screenOff ? QStringLiteral("dap-off") : QStringLiteral("dap")) : QString();
+    if (wanted == m_holdMode)
+        return;
+    m_holdMode = wanted;
+    emit holdModeChanged();
+    sendHold();
+}
+
+void PowerBridge::sendHold()
+{
+    if (!m_powerd.isConnected())
+        return;
+    const QString mode = m_holdMode;
+    if (mode.isEmpty() && m_heldMode.isEmpty())
+        return;
+    const QString method = mode.isEmpty() ? QStringLiteral("Release") : QStringLiteral("Hold");
+    QDBusMessage call = QDBusMessage::createMethodCall(powerdService(), powerdPath(), powerdInterface(), method);
+    call << (mode.isEmpty() ? m_heldMode : mode);
+    qInfo() << "microdap power:" << method << call.arguments().constFirst().toString();
+    m_heldMode = mode;
+    auto *watcher = new QDBusPendingCallWatcher(m_powerd.asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, method, mode] {
+        watcher->deleteLater();
+        const QDBusMessage reply = watcher->reply();
+        if (reply.type() == QDBusMessage::ReplyMessage)
+            return;
+        qWarning().noquote() << "microdap power:" << method << "failed," << reply.errorName()
+                             << reply.errorMessage();
+        if (!mode.isEmpty() && m_heldMode == mode)
+            m_heldMode.clear();
+    });
+}
+
+void PowerBridge::onPowerdOwner(const QString &, const QString &, const QString &newOwner)
+{
+    m_heldMode.clear();
+    if (newOwner.isEmpty() || m_holdMode.isEmpty())
+        return;
+    qInfo() << "microdap power: powerd is back, hold again";
+    sendHold();
 }
 
 void PowerBridge::onPrepareForSleep(bool start)
@@ -364,10 +686,11 @@ void PowerBridge::onPrepareForSleep(bool start)
             m_state->save(false);
         if (m_outputMode)
             m_outputMode->prepareForSleep(true);
+        m_idleSince.invalidate();
         m_sleep->release();
         return;
     }
-    runScreenOn();
+    screenOnNow(true);
     if (m_outputMode)
         m_outputMode->prepareForSleep(false);
     m_sleep->take();
@@ -375,133 +698,195 @@ void PowerBridge::onPrepareForSleep(bool start)
 
 void PowerBridge::runScreenOn()
 {
-    dropWakeProcess();
-    QStringList command = wakeCommand();
-    const QString program = command.takeFirst();
-    qInfo() << "microdap power: screen-on" << program << command;
-    m_wake = new QProcess(this);
-    connect(m_wake, &QProcess::finished, this, &PowerBridge::onWakeFinished);
-    connect(m_wake, &QProcess::errorOccurred, this, &PowerBridge::onWakeError);
-    m_wake->start(program, command);
-}
-
-void PowerBridge::onWakeFinished(int code, QProcess::ExitStatus status)
-{
-    const bool ok = status == QProcess::NormalExit && code == 0;
-    if (!ok)
-        qWarning() << "microdap power: screen-on after wake exited" << code;
-    dropWakeProcess();
-    emit wakeFinished(ok);
-}
-
-void PowerBridge::onWakeError(QProcess::ProcessError error)
-{
-    if (error != QProcess::FailedToStart)
-        return;
-    qWarning() << "microdap power: cannot start" << wakeCommand().constFirst() << "after wake";
-    dropWakeProcess();
-    emit wakeFinished(false);
-}
-
-void PowerBridge::dropWakeProcess()
-{
-    if (!m_wake)
-        return;
-    m_wake->disconnect(this);
-    if (m_wake->state() != QProcess::NotRunning) {
-        m_wake->kill();
-        m_wake->waitForFinished(1000);
-    }
-    m_wake->deleteLater();
-    m_wake = nullptr;
-}
-
-bool PowerBridge::runVerb(const QString &verb)
-{
-    if (m_outputMode && m_outputMode->levelSet() && verb == QLatin1StringView("game-mode")) {
-        qInfo() << "microdap power: verb" << verb;
-        if (switching()) {
-            qInfo() << "microdap power: switch already running";
-            return false;
-        }
-        startSwitch();
-        return true;
-    }
-    QStringList command = commandFor(verb);
-    if (command.isEmpty()) {
-        qWarning() << "microdap power: unknown verb" << verb;
-        return false;
-    }
-    const QString program = programPath(command.takeFirst());
-    qInfo() << "microdap power: verb" << verb << program << command;
-    const bool started = QProcess::startDetached(program, command);
-    if (!started && !m_failedVerbs.contains(verb)) {
-        m_failedVerbs.insert(verb);
-        qWarning() << "microdap power: cannot start" << program << "for" << verb;
-    }
-    return started;
+    screenOnNow(false);
 }
 
 void PowerBridge::runScreenOff()
 {
-    if (m_screenOffRun) {
-        qInfo() << "microdap power: screen-off already running";
-        return;
-    }
-    QStringList command = commandFor(QStringLiteral("screen-off"));
-    const QString program = programPath(command.takeFirst());
-    qInfo() << "microdap power: verb screen-off" << program << command;
-    auto *process = new QProcess(this);
-    m_screenOffRun = process;
-    connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
-        if (m_screenOffRun != process)
-            return;
-        dropScreenOffProcess();
-        if (status == QProcess::NormalExit && code == 0)
-            return;
-        qWarning() << "microdap power: screen-off exited" << code;
-        emit verbFailed(QStringLiteral("screen-off"));
-    });
-    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart || m_screenOffRun != process)
-            return;
-        qWarning() << "microdap power: cannot start" << process->program() << "for screen-off";
-        dropScreenOffProcess();
-        emit verbFailed(QStringLiteral("screen-off"));
-    });
-    process->start(program, command);
+    screenOffNow();
 }
 
-void PowerBridge::dropScreenOffProcess()
+void PowerBridge::writeBacklight(int value)
 {
-    if (!m_screenOffRun)
-        return;
-    QProcess *process = m_screenOffRun;
-    m_screenOffRun = nullptr;
-    process->disconnect(this);
-    if (process->state() != QProcess::NotRunning) {
-        connect(process, &QProcess::finished, process, &QObject::deleteLater);
-        process->kill();
-        return;
+    const QFileInfoList entries = QDir(backlightDir()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::System);
+    for (const QFileInfo &entry : entries) {
+        QFile file(entry.absoluteFilePath() + QStringLiteral("/bl_power"));
+        if (!file.exists())
+            continue;
+        if (!file.open(QIODevice::WriteOnly) || file.write(QByteArray::number(value)) < 0)
+            qWarning() << "microdap power: cannot write" << file.fileName() << value;
     }
-    process->deleteLater();
 }
 
-void PowerBridge::reloadDrift()
+void PowerBridge::screenOffNow()
 {
-    QStringList paths;
-    QFile file(driftFile());
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        while (!file.atEnd()) {
-            const QString line = QString::fromUtf8(file.readLine()).trimmed();
-            if (!line.isEmpty())
-                paths.append(line);
+    if (m_overlay) {
+        qInfo() << "microdap power: screen off ignored in overlay mode";
+        return;
+    }
+    if (m_radio) {
+        qInfo() << "microdap power: screen off during a transition, ignored";
+        return;
+    }
+    qInfo() << "microdap power: screen off";
+    writeBacklight(4);
+    m_lastTransition.start();
+    setScreenOff(true);
+    m_idleSince.invalidate();
+    m_idleTimer.start();
+    if (!m_settings || !m_settings->wifiOffScreenOff() || QFile::exists(wifiMarker()))
+        return;
+    QDir().mkpath(QFileInfo(wifiMarker()).absolutePath());
+    QFile marker(wifiMarker());
+    if (!marker.open(QIODevice::WriteOnly)) {
+        qWarning() << "microdap power: cannot write" << wifiMarker() << ", wifi kept on";
+        return;
+    }
+    marker.close();
+    radio(false, false);
+}
+
+void PowerBridge::screenOnNow(bool wake)
+{
+    if (m_radio) {
+        qInfo() << "microdap power: screen on during a transition, ignored";
+        if (wake)
+            emit wakeFinished(false);
+        return;
+    }
+    qInfo() << "microdap power: screen on" << (wake ? "after wake" : "");
+    writeBacklight(0);
+    m_lastTransition.start();
+    setScreenOff(false);
+    m_idleTimer.stop();
+    m_idleSince.invalidate();
+    if (QFile::exists(wifiMarker())) {
+        radio(true, wake);
+        return;
+    }
+    if (wake)
+        emit wakeFinished(true);
+}
+
+void PowerBridge::radio(bool on, bool wake)
+{
+    const QStringList args{QStringLiteral("radio"), QStringLiteral("wifi"), on ? QStringLiteral("on") : QStringLiteral("off")};
+    qInfo() << "microdap power:" << nmcliPath() << args;
+    m_wakePending = wake;
+    m_radio = new QProcess(this);
+    connect(m_radio, &QProcess::finished, this, [this, on, wake](int code, QProcess::ExitStatus status) {
+        const bool ok = status == QProcess::NormalExit && code == 0;
+        if (!ok)
+            qWarning() << "microdap power: nmcli radio wifi" << (on ? "on" : "off") << "exit" << code;
+        if (on == ok)
+            QFile::remove(wifiMarker());
+        endTransition(ok, wake);
+    });
+    connect(m_radio, &QProcess::errorOccurred, this, [this, wake](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart)
+            return;
+        qWarning() << "microdap power: cannot start" << nmcliPath();
+        endTransition(false, wake);
+    });
+    m_radio->start(nmcliPath(), args);
+}
+
+void PowerBridge::endTransition(bool ok, bool wake)
+{
+    m_radio->deleteLater();
+    m_radio = nullptr;
+    m_wakePending = false;
+    if (wake)
+        emit wakeFinished(ok);
+}
+
+void PowerBridge::toggleScreen()
+{
+    if (m_overlay) {
+        qInfo() << "microdap power: ToggleScreen ignored in overlay mode";
+        return;
+    }
+    if (m_radio) {
+        qInfo() << "microdap power: toggle during a transition, ignored";
+        return;
+    }
+    if (m_lastTransition.isValid() && m_lastTransition.elapsed() < toggleDebounceMs) {
+        qInfo() << "microdap power: toggle within" << toggleDebounceMs << "ms of the last transition, ignored";
+        return;
+    }
+    if (m_screenOff)
+        screenOnNow(false);
+    else
+        screenOffNow();
+}
+
+void PowerBridge::checkIdle()
+{
+    if (!m_screenOff || m_overlay) {
+        m_idleSince.invalidate();
+        return;
+    }
+    const bool playing = m_player && m_player->status() == Player::Playing;
+    const bool phone = m_player && m_player->transportActive();
+    const int minutes = m_settings ? m_settings->suspendMinutes() : 0;
+    if (playing || phone || minutes <= 0) {
+        m_idleSince.invalidate();
+        return;
+    }
+    if (!m_idleSince.isValid()) {
+        m_idleSince.start();
+        return;
+    }
+    if (m_idleSince.elapsed() < qint64(minutes) * idleMinuteMs())
+        return;
+    qInfo() << "microdap power: idle for" << minutes << "min, suspending";
+    m_idleSince.invalidate();
+    logind(QStringLiteral("Suspend"));
+}
+
+void PowerBridge::logind(const QString &method)
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(SleepInhibitor::service(), SleepInhibitor::path(),
+                                                       SleepInhibitor::interface(), method);
+    call << false;
+    qInfo() << "microdap power: logind" << method;
+    auto *watcher = new QDBusPendingCallWatcher(SleepInhibitor::bus().asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher, method] {
+        watcher->deleteLater();
+        const QDBusMessage reply = watcher->reply();
+        if (reply.type() == QDBusMessage::ReplyMessage)
+            return;
+        qWarning().noquote() << "microdap power: logind" << method << "failed," << reply.errorName()
+                             << reply.errorMessage();
+        emit verbFailed(method.toLower());
+    });
+}
+
+bool PowerBridge::runVerb(const QString &verb)
+{
+    qInfo() << "microdap power: verb" << verb;
+    if (verb == QLatin1StringView("game-mode")) {
+        if (switching()) {
+            qInfo() << "microdap power: switch already running";
+            return false;
         }
+        startSwitch(QStringLiteral("steam"));
+        return true;
     }
-    if (paths == m_driftPaths)
-        return;
-    m_driftPaths = paths;
-    emit driftPathsChanged();
+    if (verb == QLatin1StringView("screen-off")) {
+        screenOffNow();
+        return true;
+    }
+    if (verb == QLatin1StringView("suspend")) {
+        logind(QStringLiteral("Suspend"));
+        return true;
+    }
+    if (verb == QLatin1StringView("poweroff")) {
+        logind(QStringLiteral("PowerOff"));
+        return true;
+    }
+    qWarning() << "microdap power: unknown verb" << verb;
+    return false;
 }
 
 void PowerBridge::requestPowerMenu()
@@ -531,6 +916,7 @@ void PowerBridge::keepInBackground()
         qInfo() << "microdap power: switch already running";
         return;
     }
+    m_switchTarget = QStringLiteral("steam");
     if (!m_state) {
         failSwitch(SwitchFailure::BeforeStart, QStringLiteral("no state to hand off"));
         return;
@@ -543,24 +929,35 @@ void PowerBridge::keepInBackground()
         failSwitch(SwitchFailure::BeforeStart, QStringLiteral("cannot write the keep marker"));
         return;
     }
-    startSwitch();
+    startSwitch(QStringLiteral("steam"));
 }
 
 void PowerBridge::closeAndSwitch()
 {
-    qInfo() << "microdap power: close player";
+    switchTo(QStringLiteral("steam"));
+}
+
+bool PowerBridge::switchTo(const QString &session)
+{
+    qInfo() << "microdap power: close player, switch to" << session;
+    if (!validSession(session) || session == QLatin1StringView("microdap")) {
+        qWarning() << "microdap power: not a session to switch to" << session;
+        return false;
+    }
     if (switching()) {
         qInfo() << "microdap power: switch already running";
-        return;
+        return false;
     }
     if (m_state)
         m_state->save(false);
     Keep::clear();
-    startSwitch();
+    startSwitch(session);
+    return true;
 }
 
-void PowerBridge::startSwitch()
+void PowerBridge::startSwitch(const QString &session)
 {
+    m_switchTarget = session;
     m_switching = true;
     emit switchingChanged();
     if (!m_outputMode) {
@@ -594,7 +991,7 @@ void PowerBridge::onSwitchReady()
 
 void PowerBridge::runSwitch()
 {
-    QStringList command = switchCommand();
+    QStringList command = switchCommand(m_switchTarget);
     const QString program = programPath(command.takeFirst());
     qInfo() << "microdap power: switch" << program << command;
     m_switch = new QProcess(this);
@@ -603,7 +1000,6 @@ void PowerBridge::runSwitch()
     m_switchTimer.start(switchTimeoutMs());
     m_switch->start(program, command);
 }
-
 void PowerBridge::onSwitchFinished(int code, QProcess::ExitStatus status)
 {
     if (status == QProcess::NormalExit && code == 0) {
@@ -671,7 +1067,10 @@ void PowerBridge::requestScreenOff(bool off)
         qInfo() << "microdap power: SetScreenOff ignored in overlay mode" << off;
         return;
     }
-    setScreenOff(off);
+    if (off)
+        screenOffNow();
+    else
+        screenOnNow(false);
 }
 
 void PowerBridge::showOverlay()

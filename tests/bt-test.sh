@@ -12,19 +12,13 @@ python3 -c 'import dbus.mainloop.glib, dbus.service; from gi.repository import G
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
-cat > "${T}/device-env" <<'EOF'
-#!/usr/bin/bash
-echo 'ARMADA_DEVICE_NAME=Test\ Device'
-EOF
-chmod 0755 "${T}/device-env"
 cat > "${T}/microdap-keep" <<EOF
 #!/usr/bin/bash
-exec bash "${repo}/sysext/usr/libexec/microdap/microdap-keep" "\$@"
+exec bash "${repo}/data/libexec/microdap-keep" "\$@"
 EOF
 chmod 0755 "${T}/microdap-keep"
 
-export MICRODAP_BT="${repo}/sysext/usr/libexec/microdap/microdap-bt"
-export MICRODAP_BT_DEVICE_ENV="${T}/device-env"
+export MICRODAP_BT="${repo}/data/libexec/microdap-bt"
 export MICRODAP_BT_LOG="${T}/log"
 export MICRODAP_KEEP_BIN="${T}/microdap-keep"
 export MICRODAP_KEEP_FILE="${T}/keep"

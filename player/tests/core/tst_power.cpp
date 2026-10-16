@@ -1,14 +1,16 @@
 #include "AlsaVolume.h"
-#include "CodecFragment.h"
+#include "FakeService.h"
 #include "Keep.h"
 #include "OutputFakes.h"
 #include "OutputMode.h"
+#include "OverlayBridge.h"
 #include "Player.h"
 #include "PowerBridge.h"
 #include "Settings.h"
 #include "SleepInhibitor.h"
 #include "State.h"
 #include "StatusModel.h"
+#include "WirePlumberRestart.h"
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -63,6 +65,11 @@ QVariant savedValue(const QString &path, const QString &key)
     if (!State::read(path, object))
         return {};
     return object.value(key).toVariant();
+}
+
+QString switchLine(const QString &session = QStringLiteral("steam"))
+{
+    return QStringLiteral("systemctl start --no-block microos-session-switch@") + session + QStringLiteral(".service\n");
 }
 
 const QString fiioSink = QStringLiteral("alsa_output.usb-FIIO_SNOWSKY_TINY_B_000000000000-01.analog-stereo");
@@ -120,7 +127,7 @@ OutputMode::Bounds rigBounds()
 class OutputRig
 {
 public:
-    explicit OutputRig(bool withDacEq = false, bool withCodec = false)
+    explicit OutputRig(bool withDacEq = false, bool withRestart = false)
         : mixer(new FakeMixer(&log))
         , alsa(std::unique_ptr<MixerBackend>(mixer), rigBounds().pacingMs)
     {
@@ -137,8 +144,8 @@ public:
         ports.mixer = &alsa;
         if (withDacEq)
             ports.dacEq = &dacEq;
-        if (withCodec)
-            ports.codec = &codec;
+        if (withRestart)
+            ports.wireplumber = &restart;
         mode = std::make_unique<OutputMode>(rigBounds(), ports);
         player.policy = mode.get();
         player.onStatus = [this] { mode->onStatusChanged(); };
@@ -175,7 +182,7 @@ public:
     FakeDacSink dac{&log};
     FakeDacVolume volume{&log};
     FakeDacEqPort dacEq{&log};
-    CodecFragment codec;
+    WirePlumberRestart restart;
     std::unique_ptr<OutputMode> mode;
     QObject context;
 };
@@ -202,20 +209,12 @@ private slots:
     void overlayNotSupported();
     void volume();
     void verbs();
-    void powerBinPath();
-    void screenOffTracked();
     void sleepWatch();
     void keepMarker();
     void keepInBackground();
     void closeAndSwitch();
     void switchFails();
     void switchStalls();
-    void drift();
-    void settingsPersist();
-    void settingsOrientation();
-    void settingsAutoRotate();
-    void settingsTouch();
-    void settingsOutputLevel();
     void statusSysfs();
     void clockFormat();
     void switchHeldOrder();
@@ -232,6 +231,16 @@ private slots:
     void gameModeVerbByLevel();
     void sleepStopsParkTimer();
     void sleepReleasesInhibitorAfterWait();
+    void backlightAtStart();
+    void toggleScreen();
+    void wifiOffWithScreen();
+    void wifiOnFails();
+    void holds();
+    void holdsAgainForNewPowerd();
+    void overlayHoldsNothing();
+    void idleSuspend();
+    void sessionsAndSwitchTo();
+    void imageAndUpdate();
 
 private:
     bool sawChange(const QString &name, const QVariant &value) const;
@@ -241,14 +250,18 @@ private:
     bool startLogin1();
     QDBusMessage login1(const QString &method, const QList<QVariant> &arguments = {});
     int login1Count(const QString &method);
+    int login1Calls(const QString &method);
+    QString blPower() const;
+    QStringList powerdHolds() const;
 
     QTemporaryDir m_dir;
     QProcess m_login1;
+    FakeService m_powerd = FakeService::powerd(QStringLiteral(MICRODAP_FAKE_POWERD));
     bool m_login1Running = false;
     QString m_stubDir;
     QString m_emptyDir;
     QString m_log;
-    QString m_driftFile;
+    QString m_blPower;
     QString m_keepFile;
     QString m_bootIdFile;
     QString m_stateFile;
@@ -335,6 +348,24 @@ int PowerTest::login1Count(const QString &method)
     return reply.arguments().value(0).toInt();
 }
 
+int PowerTest::login1Calls(const QString &method)
+{
+    const QDBusMessage reply = login1(QStringLiteral("CallCount"), {method});
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return -1;
+    return reply.arguments().value(0).toInt();
+}
+
+QString PowerTest::blPower() const
+{
+    return readFile(m_blPower);
+}
+
+QStringList PowerTest::powerdHolds() const
+{
+    return m_powerd.value(QStringLiteral("Holds")).toStringList();
+}
+
 void PowerTest::initTestCase()
 {
     QDBusConnection bus = QDBusConnection::sessionBus();
@@ -350,17 +381,17 @@ void PowerTest::initTestCase()
     m_emptyDir = m_dir.path() + QStringLiteral("/empty");
     QVERIFY(QDir().mkpath(m_emptyDir));
     m_log = m_dir.path() + QStringLiteral("/verbs.log");
-    m_driftFile = m_dir.path() + QStringLiteral("/drift");
+    m_blPower = qEnvironmentVariable("MICRODAP_SYS_ROOT") + QStringLiteral("/class/backlight/panel0/bl_power");
+    QVERIFY(writeFile(m_blPower, QStringLiteral("1")));
+    QVERIFY(QDir().mkpath(qEnvironmentVariable("MICRODAP_SYS_ROOT") + QStringLiteral("/class/backlight/empty")));
     m_keepFile = m_dir.path() + QStringLiteral("/config/microdap/keep");
     m_bootIdFile = m_dir.path() + QStringLiteral("/boot_id");
     m_stateFile = m_dir.path() + QStringLiteral("/config/microdap/state.json");
-    QVERIFY(writeStub(QStringLiteral("microdap-power")));
     QVERIFY(writeStub(QStringLiteral("systemctl")));
-    QVERIFY(writeFile(m_driftFile, QStringLiteral("/usr/libexec/armada/session-control\n\n")));
+    QVERIFY(writeStub(QStringLiteral("nmcli")));
     QVERIFY(writeFile(m_bootIdFile, QStringLiteral("  0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10 \n")));
-    qputenv("MICRODAP_DRIFT_FILE", m_driftFile.toUtf8());
     qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
-    qputenv("MICRODAP_POWER_BIN", (m_stubDir + QStringLiteral("/microdap-power")).toUtf8());
+    qputenv("MICRODAP_NMCLI_BIN", (m_stubDir + QStringLiteral("/nmcli")).toUtf8());
     qputenv("MICRODAP_KEEP_FILE", m_keepFile.toUtf8());
     qputenv("MICRODAP_BOOT_ID_FILE", m_bootIdFile.toUtf8());
     qputenv("MICRODAP_SWITCH_TIMEOUT_MS", QByteArrayLiteral("400"));
@@ -372,6 +403,8 @@ void PowerTest::initTestCase()
     m_login1Running = startLogin1();
     if (m_login1Running)
         qputenv("MICRODAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
+    QVERIFY(m_powerd.start());
+    qputenv("MICRODAP_POWERD_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
 
     m_bridge = std::make_unique<PowerBridge>(nullptr, bus);
     QVERIFY(m_bridge->isRegistered());
@@ -399,6 +432,7 @@ void PowerTest::initTestCase()
 void PowerTest::cleanupTestCase()
 {
     m_bridge.reset();
+    m_powerd.stop();
     if (m_login1.state() == QProcess::Running) {
         login1(QStringLiteral("Quit"));
         if (!m_login1.waitForFinished(busTimeoutMs)) {
@@ -421,6 +455,7 @@ void PowerTest::registered()
     QVERIFY2(xml.isValid(), qPrintable(xml.error().message()));
     QVERIFY(xml.value().contains(QStringLiteral("net.seilent.MicroDap.Player")));
     QVERIFY(xml.value().contains(QStringLiteral("SetScreenOff")));
+    QVERIFY(xml.value().contains(QStringLiteral("ToggleScreen")));
     QVERIFY(xml.value().contains(QStringLiteral("ShowPowerMenu")));
     QVERIFY(xml.value().contains(QStringLiteral("ScreenOff")));
     QVERIFY(xml.value().contains(QStringLiteral("PlaybackStatus")));
@@ -485,6 +520,7 @@ void PowerTest::screenOff()
     m_bridge->setScreenOff(true);
     QCOMPARE(m_remote->property("ScreenOff").toBool(), true);
     m_bridge->setScreenOff(false);
+    QCOMPARE(blPower(), QStringLiteral("0"));
 }
 
 void PowerTest::powerMenu()
@@ -547,7 +583,7 @@ void PowerTest::keepInBackground()
     QCOMPARE(readFile(m_keepFile), QStringLiteral("0f6f1a2e-5d1c-4a1b-9c3e-7b2d8e4f6a10\n"));
     QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), switchLine());
 
     QTest::ignoreMessage(QtInfoMsg, "microdap power: keep in background");
     QTest::ignoreMessage(QtInfoMsg, "microdap power: switch already running");
@@ -578,9 +614,9 @@ void PowerTest::closeAndSwitch()
     QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
     QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), switchLine());
 
-    QTest::ignoreMessage(QtInfoMsg, "microdap power: close player");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: close player, switch to \"steam\"");
     QTest::ignoreMessage(QtInfoMsg, "microdap power: switch already running");
     m_bridge->closeAndSwitch();
     QCoreApplication::processEvents();
@@ -738,17 +774,27 @@ void PowerTest::verbs()
     QCOMPARE(PowerBridge::verbs().size(), 4);
     QFile::remove(m_log);
     qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
+    const int suspends = login1Calls(QStringLiteral("Suspend"));
+    const int poweroffs = login1Calls(QStringLiteral("PowerOff"));
 
-    for (const QString &verb : PowerBridge::verbs())
-        QVERIFY2(m_bridge->runVerb(verb), qPrintable(verb));
-
-    QTRY_VERIFY_WITH_TIMEOUT(logLines() >= 4, busTimeoutMs);
-    const QString log = readFile(m_log);
-    QVERIFY2(log.contains(QStringLiteral("microdap-power screen-off\n")), qPrintable(log));
-    QVERIFY2(log.contains(QStringLiteral("systemctl start microdap-switch-back.service\n")),
-             qPrintable(log));
-    QVERIFY2(log.contains(QStringLiteral("microdap-power suspend\n")), qPrintable(log));
-    QVERIFY2(log.contains(QStringLiteral("microdap-power poweroff\n")), qPrintable(log));
+    QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
+    QVERIFY(m_bridge->screenOff());
+    QCOMPARE(blPower(), QStringLiteral("4"));
+    m_bridge->runScreenOn();
+    QCOMPARE(blPower(), QStringLiteral("0"));
+    QVERIFY(m_bridge->runVerb(QStringLiteral("suspend")));
+    QVERIFY(m_bridge->runVerb(QStringLiteral("poweroff")));
+    if (m_login1Running) {
+        QTRY_COMPARE_WITH_TIMEOUT(login1Calls(QStringLiteral("Suspend")), suspends + 1, busTimeoutMs);
+        QTRY_COMPARE_WITH_TIMEOUT(login1Calls(QStringLiteral("PowerOff")), poweroffs + 1, busTimeoutMs);
+    }
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    QVERIFY(m_bridge->runVerb(QStringLiteral("game-mode")));
+    QVERIFY(m_bridge->switching());
+    QVERIFY(!m_bridge->runVerb(QStringLiteral("game-mode")));
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QCOMPARE(readFile(m_log), switchLine());
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 
     QVERIFY(!m_bridge->runVerb(QStringLiteral("rm")));
     QVERIFY(!m_bridge->runVerb(QStringLiteral("rm -rf /")));
@@ -756,55 +802,8 @@ void PowerTest::verbs()
     QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off; rm")));
     QVERIFY(!m_bridge->runVerb(QString()));
     QCoreApplication::processEvents();
-    QCOMPARE(logLines(), 4);
-
-    qputenv("MICRODAP_POWER_BIN", (m_emptyDir + QStringLiteral("/microdap-power")).toUtf8());
-    QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
-    QVERIFY(!m_bridge->runVerb(QStringLiteral("screen-off")));
-    QCOMPARE(logLines(), 4);
-    qputenv("MICRODAP_POWER_BIN", (m_stubDir + QStringLiteral("/microdap-power")).toUtf8());
-    QVERIFY(m_bridge->runVerb(QStringLiteral("screen-off")));
-    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 5, busTimeoutMs);
-}
-
-void PowerTest::screenOffTracked()
-{
-    QFile::remove(m_log);
-    QSignalSpy failed(m_bridge.get(), &PowerBridge::verbFailed);
-    m_bridge->runScreenOff();
-    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QTest::qWait(200);
-    QCOMPARE(failed.count(), 0);
-    QCOMPARE(readFile(m_log), QStringLiteral("microdap-power screen-off\n"));
-
-    QVERIFY(writeStub(QStringLiteral("microdap-power"), QStringLiteral("1")));
-    QTest::ignoreMessage(QtWarningMsg, "microdap power: screen-off exited 1");
-    QTest::failOnWarning(QRegularExpression(QStringLiteral("^microdap power")));
-    m_bridge->runScreenOff();
-    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
-    QCOMPARE(failed.at(0).at(0).toString(), QStringLiteral("screen-off"));
-    QCOMPARE(logLines(), 2);
-    QTest::qWait(200);
-    QCOMPARE(failed.count(), 1);
-    QVERIFY(writeStub(QStringLiteral("microdap-power")));
-}
-
-void PowerTest::powerBinPath()
-{
-    const QByteArray saved = qgetenv("MICRODAP_POWER_BIN");
-    qunsetenv("MICRODAP_POWER_BIN");
-    QCOMPARE(PowerBridge::powerBin(), QStringLiteral("/usr/libexec/microdap/microdap-power"));
-    QCOMPARE(PowerBridge::commandFor(QStringLiteral("screen-off")),
-             QStringList({QStringLiteral("/usr/libexec/microdap/microdap-power"), QStringLiteral("screen-off")}));
-    QCOMPARE(PowerBridge::commandFor(QStringLiteral("suspend")).constFirst(),
-             QStringLiteral("/usr/libexec/microdap/microdap-power"));
-    QCOMPARE(PowerBridge::commandFor(QStringLiteral("poweroff")).constFirst(),
-             QStringLiteral("/usr/libexec/microdap/microdap-power"));
-    QCOMPARE(PowerBridge::wakeCommand(),
-             QStringList({QStringLiteral("/usr/libexec/microdap/microdap-power"), QStringLiteral("screen-on")}));
-    QCOMPARE(PowerBridge::commandFor(QStringLiteral("game-mode")).constFirst(), QStringLiteral("systemctl"));
-    qputenv("MICRODAP_POWER_BIN", saved);
-    QCOMPARE(PowerBridge::powerBin(), QString::fromUtf8(saved));
+    QCOMPARE(logLines(), 1);
+    QVERIFY(!m_bridge->screenOff());
 }
 
 void PowerTest::sleepWatch()
@@ -849,232 +848,11 @@ void PowerTest::sleepWatch()
     QTRY_COMPARE_WITH_TIMEOUT(wake.count(), 1, busTimeoutMs);
     QCOMPARE(wake.at(0).at(0).toBool(), true);
     QVERIFY(!m_bridge->waking());
-    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("microdap-power screen-on\n"));
+    QCOMPARE(blPower(), QStringLiteral("0"));
+    QVERIFY(!m_bridge->screenOff());
+    QCoreApplication::processEvents();
+    QCOMPARE(logLines(), 0);
     QCOMPARE(m_player->status(), Player::Stopped);
-}
-
-void PowerTest::drift()
-{
-    QCOMPARE(m_bridge->driftPaths(),
-             QStringList{QStringLiteral("/usr/libexec/armada/session-control")});
-
-    QSignalSpy spy(m_bridge.get(), &PowerBridge::driftPathsChanged);
-    QVERIFY(writeFile(m_driftFile,
-                      QStringLiteral("/usr/libexec/armada/session-control\n"
-                                     "/usr/share/inputplumber/profiles/default.yaml\n")));
-    m_bridge->reloadDrift();
-    QCOMPARE(spy.count(), 1);
-    QCOMPARE(m_bridge->driftPaths().size(), 2);
-    m_bridge->reloadDrift();
-    QCOMPARE(spy.count(), 1);
-
-    QVERIFY(QFile::remove(m_driftFile));
-    m_bridge->reloadDrift();
-    QCOMPARE(spy.count(), 2);
-    QVERIFY(m_bridge->driftPaths().isEmpty());
-}
-
-void PowerTest::settingsPersist()
-{
-    QVERIFY(Settings::defaultPath().endsWith(QStringLiteral("/microdap/settings.ini")));
-    const QString path = m_dir.path() + QStringLiteral("/settings.ini");
-    {
-        Settings settings(path);
-        QCOMPARE(settings.path(), path);
-        QCOMPARE(settings.output(), QStringLiteral("auto"));
-        QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
-        QCOMPARE(Settings::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")}));
-        QCOMPARE(Settings::codecs(), QStringList({QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"), QStringLiteral("ldac"), QStringLiteral("sbc")}));
-        QCOMPARE(settings.roots(), Settings::defaultRoots());
-        QCOMPARE(settings.accentHue(), 350);
-        QVERIFY(!settings.accentFromArt());
-        QCOMPARE(settings.scale(), 1.0);
-        QCOMPARE(settings.saverSeconds(), 30);
-        QCOMPARE(settings.metaObject()->indexOfProperty("keepPhoneInGameMode"), -1);
-
-        QSignalSpy scaleSpy(&settings, &Settings::scaleChanged);
-        settings.setScale(1.1);
-        QCOMPARE(scaleSpy.count(), 1);
-        QVERIFY(!QFile::exists(path));
-        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(path), Settings::syncDelayMs + busTimeoutMs);
-        settings.setScale(1.1);
-        QCOMPARE(scaleSpy.count(), 1);
-        settings.setScale(9.0);
-        QCOMPARE(settings.scale(), Settings::maxScale);
-        settings.setScale(0.1);
-        QCOMPARE(settings.scale(), Settings::minScale);
-        settings.setScale(1.14);
-        QCOMPARE(settings.scale(), 1.1);
-
-        settings.setOutput(QStringLiteral("headphones"));
-        settings.setOutput(QStringLiteral("tape"));
-        settings.setOutput(QStringLiteral("bt"));
-        QCOMPARE(settings.output(), QStringLiteral("headphones"));
-
-        QSignalSpy codecSpy(&settings, &Settings::btCodecChanged);
-        settings.setBtCodec(QStringLiteral("AAC"));
-        QCOMPARE(codecSpy.count(), 1);
-        QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
-        settings.setBtCodec(QStringLiteral("aac"));
-        settings.setBtCodec(QStringLiteral("mp3"));
-        QCOMPARE(codecSpy.count(), 1);
-        QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
-
-        QSignalSpy hueSpy(&settings, &Settings::accentHueChanged);
-        settings.setAccentHue(198);
-        QCOMPARE(settings.accentHue(), 200);
-        settings.setAccentHue(200);
-        QCOMPARE(hueSpy.count(), 1);
-        settings.setAccentHue(-10);
-        QCOMPARE(settings.accentHue(), 350);
-        settings.setAccentHue(360);
-        QCOMPARE(settings.accentHue(), 0);
-        settings.setAccentHue(204);
-        QCOMPARE(settings.accentHue(), 200);
-        settings.setAccentFromArt(true);
-
-        settings.setSaverSeconds(5);
-        QCOMPARE(settings.saverSeconds(), Settings::minSaverSeconds);
-        settings.setSaverSeconds(45);
-        settings.setRoots({QStringLiteral("/tmp/a"), QStringLiteral("/tmp/b")});
-    }
-    QVERIFY(QFile::exists(path));
-    QVERIFY(!readFile(path).contains(QStringLiteral("keepPhoneInGameMode")));
-    QVERIFY(readFile(path).contains(QStringLiteral("btCodec=aac")));
-
-    Settings again(path);
-    QCOMPARE(again.output(), QStringLiteral("headphones"));
-    QCOMPARE(again.btCodec(), QStringLiteral("aac"));
-    QCOMPARE(again.roots(), QStringList({QStringLiteral("/tmp/a"), QStringLiteral("/tmp/b")}));
-    QCOMPARE(again.accentHue(), 200);
-    QVERIFY(again.accentFromArt());
-    QCOMPARE(again.scale(), 1.1);
-    QCOMPARE(again.saverSeconds(), 45);
-}
-
-void PowerTest::settingsOrientation()
-{
-    const QString path = m_dir.path() + QStringLiteral("/orientation.ini");
-    QCOMPARE(Settings::orientations(),
-             QStringList({QStringLiteral("portrait"), QStringLiteral("portrait-flipped"),
-                          QStringLiteral("landscape"), QStringLiteral("landscape-flipped")}));
-    for (const QString &value : Settings::orientations()) {
-        {
-            Settings settings(path);
-            QSignalSpy spy(&settings, &Settings::orientationChanged);
-            settings.setOrientation(value);
-            settings.setOrientation(QStringLiteral("sideways"));
-            QCOMPARE(settings.orientation(), value);
-            QCOMPARE(spy.count(), value == QStringLiteral("portrait") ? 0 : 1);
-            settings.setOrientation(value);
-            QCOMPARE(spy.count(), value == QStringLiteral("portrait") ? 0 : 1);
-        }
-        Settings again(path);
-        QCOMPARE(again.orientation(), value);
-        again.setOrientation(QStringLiteral("portrait"));
-    }
-    QVERIFY(writeFile(path, QStringLiteral("[General]\norientation=sideways\n")));
-    Settings bogus(path);
-    QCOMPARE(bogus.orientation(), QStringLiteral("portrait"));
-}
-
-void PowerTest::settingsAutoRotate()
-{
-    const QString path = m_dir.path() + QStringLiteral("/autorotate.ini");
-    {
-        Settings settings(path);
-        QVERIFY(!settings.autoRotate());
-        QSignalSpy spy(&settings, &Settings::autoRotateChanged);
-        settings.setAutoRotate(true);
-        settings.setAutoRotate(true);
-        QVERIFY(settings.autoRotate());
-        QCOMPARE(spy.count(), 1);
-    }
-    {
-        Settings again(path);
-        QVERIFY(again.autoRotate());
-        again.setAutoRotate(false);
-    }
-    Settings off(path);
-    QVERIFY(!off.autoRotate());
-}
-
-void PowerTest::settingsTouch()
-{
-    const QString path = m_dir.path() + QStringLiteral("/touch.ini");
-    {
-        Settings settings(path);
-        QVERIFY(settings.touch());
-        QSignalSpy spy(&settings, &Settings::touchChanged);
-        settings.setTouch(false);
-        settings.setTouch(false);
-        QVERIFY(!settings.touch());
-        QCOMPARE(spy.count(), 1);
-    }
-    {
-        Settings again(path);
-        QVERIFY(!again.touch());
-        again.setTouch(true);
-    }
-    Settings on(path);
-    QVERIFY(on.touch());
-}
-
-void PowerTest::settingsOutputLevel()
-{
-    const QString path = m_dir.path() + QStringLiteral("/level.ini");
-    QCOMPARE(Settings::outputLevels(),
-             QStringList({QStringLiteral("off"), QStringLiteral("bitperfect"), QStringLiteral("exclusive")}));
-    QCOMPARE(Settings::sampleRates(),
-             QStringList({QStringLiteral("auto"), QStringLiteral("44100"), QStringLiteral("48000"),
-                          QStringLiteral("88200"), QStringLiteral("96000"), QStringLiteral("176400"),
-                          QStringLiteral("192000"), QStringLiteral("352800"), QStringLiteral("384000")}));
-    {
-        Settings settings(path);
-        QCOMPARE(settings.outputLevel(), QStringLiteral("off"));
-        QCOMPARE(settings.sampleRate(), QStringLiteral("auto"));
-        QSignalSpy levelSpy(&settings, &Settings::outputLevelChanged);
-        QSignalSpy rateSpy(&settings, &Settings::sampleRateChanged);
-        settings.setOutputLevel(QStringLiteral("off"));
-        settings.setSampleRate(QStringLiteral("auto"));
-        QCOMPARE(levelSpy.count(), 0);
-        QCOMPARE(rateSpy.count(), 0);
-        settings.setOutputLevel(QStringLiteral("EXCLUSIVE"));
-        settings.setOutputLevel(QStringLiteral("exclusive"));
-        settings.setOutputLevel(QStringLiteral("on"));
-        QCOMPARE(settings.outputLevel(), QStringLiteral("exclusive"));
-        QCOMPARE(levelSpy.count(), 1);
-        settings.setSampleRate(QStringLiteral("352800"));
-        settings.setSampleRate(QStringLiteral("352800"));
-        settings.setSampleRate(QStringLiteral("22050"));
-        QCOMPARE(settings.sampleRate(), QStringLiteral("352800"));
-        QCOMPARE(rateSpy.count(), 1);
-        QVERIFY(!readFile(path).contains(QStringLiteral("outputLevel")));
-        QTRY_VERIFY_WITH_TIMEOUT(readFile(path).contains(QStringLiteral("outputLevel=exclusive")),
-                                 Settings::syncDelayMs + busTimeoutMs);
-        QVERIFY(readFile(path).contains(QStringLiteral("sampleRate=352800")));
-    }
-    {
-        Settings again(path);
-        QCOMPARE(again.outputLevel(), QStringLiteral("exclusive"));
-        QCOMPARE(again.sampleRate(), QStringLiteral("352800"));
-        again.setOutputLevel(QStringLiteral("bitperfect"));
-        again.setSampleRate(QStringLiteral("AUTO"));
-    }
-    {
-        Settings back(path);
-        QCOMPARE(back.outputLevel(), QStringLiteral("bitperfect"));
-        QCOMPARE(back.sampleRate(), QStringLiteral("auto"));
-    }
-    QVERIFY(writeFile(path, QStringLiteral("[General]\noutputLevel=on\nsampleRate=22050\n")));
-    Settings bogus(path);
-    QCOMPARE(bogus.outputLevel(), QStringLiteral("off"));
-    QCOMPARE(bogus.sampleRate(), QStringLiteral("auto"));
-    QVERIFY(writeFile(path, QStringLiteral("[General]\noutputLevel=Exclusive\nsampleRate=96000\n")));
-    Settings cased(path);
-    QCOMPARE(cased.outputLevel(), QStringLiteral("exclusive"));
-    QCOMPARE(cased.sampleRate(), QStringLiteral("96000"));
 }
 
 void PowerTest::statusSysfs()
@@ -1165,7 +943,7 @@ void PowerTest::switchHeldOrder()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     const qint64 started = timer.elapsed();
     QVERIFY(started >= 300);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), switchLine());
     QCOMPARE(failed.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 300 + PowerBridge::switchTimeoutMs());
@@ -1373,7 +1151,7 @@ void PowerTest::switchJoinedRestartAsyncDacNoRebuild()
         rig.output.onRefresh = nullptr;
         rig.player.seek(900);
         rig.player.pause();
-        QTRY_VERIFY_WITH_TIMEOUT(rig.codec.restarting(), busTimeoutMs);
+        QTRY_VERIFY_WITH_TIMEOUT(rig.restart.restarting(), busTimeoutMs);
         QVERIFY(rig.mode->releasing());
         QVERIFY(rig.player.isParked);
         QFile::remove(m_log);
@@ -1388,7 +1166,7 @@ void PowerTest::switchJoinedRestartAsyncDacNoRebuild()
         QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
         QCOMPARE(logLines(), 1);
         rebuilds.append(int(countOf(rig.player.calls, QStringLiteral("rebuild"))));
-        QTRY_VERIFY_WITH_TIMEOUT(!rig.codec.restarting(), busTimeoutMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!rig.restart.restarting(), busTimeoutMs);
     }
     QCOMPARE(rebuilds, (QList<int>{0, 0}));
 }
@@ -1428,7 +1206,7 @@ void PowerTest::switchDacOrder()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 300);
     QVERIFY(timer.elapsed() < rig.mode->switchBoundMs());
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), switchLine());
     QCOMPARE(failed.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 }
@@ -1455,7 +1233,7 @@ void PowerTest::switchDacNeverAnswers()
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= dacBound);
     QVERIFY(timer.elapsed() < rig.mode->switchBoundMs() + PowerBridge::switchReadyMarginMs);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), switchLine());
     QCOMPARE(rig.dacEq.pending.size(), 1);
     rig.dacEq.pending.takeFirst()();
     QTest::qWait(50);
@@ -1487,7 +1265,7 @@ void PowerTest::switchDacFirstReleaseLater()
     QCOMPARE(logLines(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
     QVERIFY(timer.elapsed() >= 300);
-    QCOMPARE(readFile(m_log), QStringLiteral("systemctl start microdap-switch-back.service\n"));
+    QCOMPARE(readFile(m_log), switchLine());
     QCOMPARE(failed.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 }
@@ -1502,14 +1280,15 @@ void PowerTest::gameModeVerbByLevel()
     QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
 
     QVERIFY(m_bridge->runVerb(QStringLiteral("game-mode")));
-    QVERIFY(!m_bridge->switching());
+    QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
 
     rig.mode->setLevel(QStringLiteral("bitperfect"));
     QVERIFY(m_bridge->runVerb(QStringLiteral("game-mode")));
     QVERIFY(m_bridge->switching());
     QTRY_COMPARE_WITH_TIMEOUT(logLines(), 2, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, busTimeoutMs);
     QVERIFY(!m_bridge->switching());
 }
 
@@ -1576,6 +1355,356 @@ void PowerTest::sleepReleasesInhibitorAfterWait()
     login1(QStringLiteral("EmitPrepareForSleep"), {false});
     QTRY_VERIFY_WITH_TIMEOUT(m_bridge->sleep()->held(), busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), busTimeoutMs);
+}
+
+void PowerTest::backlightAtStart()
+{
+    QVERIFY(writeFile(m_blPower, QStringLiteral("1")));
+    const QString marker = PowerBridge::wifiMarker();
+    QVERIFY(writeFile(marker, QString()));
+    QFile::remove(m_log);
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-start"));
+    {
+        PowerBridge bridge(nullptr, other);
+        bridge.runScreenOn();
+        QCOMPARE(blPower(), QStringLiteral("0"));
+        QVERIFY(bridge.transition());
+        QTRY_VERIFY_WITH_TIMEOUT(!bridge.transition(), busTimeoutMs);
+        QCOMPARE(readFile(m_log), QStringLiteral("nmcli radio wifi on\n"));
+        QVERIFY(!QFile::exists(marker));
+        QFile::remove(m_log);
+        bridge.runScreenOn();
+        QCoreApplication::processEvents();
+        QCOMPARE(logLines(), 0);
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-start"));
+    QCOMPARE(PowerBridge::backlightDir(), qEnvironmentVariable("MICRODAP_SYS_ROOT") + QStringLiteral("/class/backlight"));
+    QCOMPARE(PowerBridge::wifiMarker(), QDir::homePath() + QStringLiteral("/.local/state/microdap/wifi-off"));
+}
+
+void PowerTest::toggleScreen()
+{
+    QTest::qWait(PowerBridge::toggleDebounceMs + 100);
+    QVERIFY(!m_bridge->screenOff());
+    QDBusReply<void> reply = m_remote->call(QStringLiteral("ToggleScreen"));
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_VERIFY_WITH_TIMEOUT(m_bridge->screenOff(), busTimeoutMs);
+    QCOMPARE(blPower(), QStringLiteral("4"));
+
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: ToggleScreen");
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: toggle within 2000 ms of the last transition, ignored");
+    reply = m_remote->call(QStringLiteral("ToggleScreen"));
+    QVERIFY(reply.isValid());
+    QTest::qWait(100);
+    QVERIFY(m_bridge->screenOff());
+    QCOMPARE(blPower(), QStringLiteral("4"));
+
+    QElapsedTimer timer;
+    timer.start();
+    QTest::qWait(PowerBridge::toggleDebounceMs + 100);
+    m_bridge->toggleScreen();
+    QVERIFY(!m_bridge->screenOff());
+    QCOMPARE(blPower(), QStringLiteral("0"));
+    m_bridge->toggleScreen();
+    QVERIFY(!m_bridge->screenOff());
+    QVERIFY(timer.elapsed() >= PowerBridge::toggleDebounceMs);
+}
+
+void PowerTest::wifiOffWithScreen()
+{
+    QTest::qWait(PowerBridge::toggleDebounceMs + 100);
+    Settings settings(nullptr);
+    settings.setWifiOffScreenOff(true);
+    m_bridge->setSettings(&settings);
+    auto detach = qScopeGuard([this] { m_bridge->setSettings(nullptr); });
+    const QString marker = PowerBridge::wifiMarker();
+    QFile::remove(marker);
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("nmcli")));
+
+    m_bridge->toggleScreen();
+    QVERIFY(m_bridge->screenOff());
+    QVERIFY(QFile::exists(marker));
+    QVERIFY(m_bridge->transition());
+    QTest::ignoreMessage(QtInfoMsg, "microdap power: toggle during a transition, ignored");
+    m_bridge->toggleScreen();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->transition(), busTimeoutMs);
+    QCOMPARE(readFile(m_log), QStringLiteral("nmcli radio wifi off\n"));
+    QVERIFY(QFile::exists(marker));
+
+    m_bridge->runScreenOff();
+    QCoreApplication::processEvents();
+    QCOMPARE(logLines(), 1);
+
+    m_bridge->runScreenOn();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->transition(), busTimeoutMs);
+    QCOMPARE(readFile(m_log), QStringLiteral("nmcli radio wifi off\nnmcli radio wifi on\n"));
+    QVERIFY(!QFile::exists(marker));
+
+    settings.setWifiOffScreenOff(false);
+    m_bridge->runScreenOff();
+    QVERIFY(!QFile::exists(marker));
+    QVERIFY(!m_bridge->transition());
+    m_bridge->runScreenOn();
+    QCOMPARE(logLines(), 2);
+}
+
+void PowerTest::wifiOnFails()
+{
+    const QString marker = PowerBridge::wifiMarker();
+    QVERIFY(writeFile(marker, QString()));
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("nmcli"), QStringLiteral("1")));
+    auto restore = qScopeGuard([this] { writeStub(QStringLiteral("nmcli")); });
+    QTest::ignoreMessage(QtWarningMsg, "microdap power: nmcli radio wifi on exit 1");
+    m_bridge->runScreenOn();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->transition(), busTimeoutMs);
+    QVERIFY(QFile::exists(marker));
+    QVERIFY(writeStub(QStringLiteral("nmcli")));
+    m_bridge->runScreenOn();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_bridge->transition(), busTimeoutMs);
+    QVERIFY(!QFile::exists(marker));
+}
+
+void PowerTest::holds()
+{
+    m_powerd.call(QStringLiteral("Clear"));
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-holds"));
+    {
+        PowerBridge bridge(nullptr, other);
+        QCOMPARE(bridge.holdMode(), QString());
+        QCOMPARE(powerdHolds(), QStringList());
+        bridge.enableHolds();
+        QCOMPARE(bridge.holdMode(), QStringLiteral("dap"));
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList{QStringLiteral("dap")}, busTimeoutMs);
+        bridge.runScreenOff();
+        QCOMPARE(bridge.holdMode(), QStringLiteral("dap-off"));
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList{QStringLiteral("dap-off")}, busTimeoutMs);
+        bridge.runScreenOn();
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList{QStringLiteral("dap")}, busTimeoutMs);
+        bridge.enableHolds();
+        QTest::qWait(100);
+        QCOMPARE(m_powerd.value(QStringLiteral("Calls")).toStringList().filter(QStringLiteral("Hold dap")).size(), 3);
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-holds"));
+}
+
+void PowerTest::holdsAgainForNewPowerd()
+{
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-again"));
+    {
+        PowerBridge bridge(nullptr, other);
+        bridge.enableHolds();
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList{QStringLiteral("dap")}, busTimeoutMs);
+        m_powerd.stop();
+        bridge.runScreenOff();
+        QVERIFY(m_powerd.start());
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList{QStringLiteral("dap-off")}, busTimeoutMs);
+        bridge.runScreenOn();
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-again"));
+    QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList(), busTimeoutMs);
+}
+
+void PowerTest::overlayHoldsNothing()
+{
+    m_powerd.call(QStringLiteral("Clear"));
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-overlay"));
+    {
+        PowerBridge bridge(nullptr, other);
+        bridge.enableHolds();
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList{QStringLiteral("dap")}, busTimeoutMs);
+        Player player;
+        OverlayBridge overlay(nullptr, &player);
+        bridge.setOverlay(&overlay);
+        QCOMPARE(bridge.holdMode(), QString());
+        QTRY_COMPARE_WITH_TIMEOUT(powerdHolds(), QStringList(), busTimeoutMs);
+        QVERIFY(m_powerd.value(QStringLiteral("Calls")).toStringList().contains(QStringLiteral("Release dap")));
+        bridge.enableHolds();
+        QTest::ignoreMessage(QtInfoMsg, "microdap power: ToggleScreen ignored in overlay mode");
+        bridge.toggleScreen();
+        bridge.runScreenOff();
+        QVERIFY(!bridge.screenOff());
+        QTest::qWait(100);
+        QCOMPARE(powerdHolds(), QStringList());
+        bridge.setOverlay(nullptr);
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-overlay"));
+}
+
+void PowerTest::idleSuspend()
+{
+    if (!m_login1Running)
+        QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
+    qputenv("MICRODAP_IDLE_CHECK_MS", QByteArrayLiteral("50"));
+    qputenv("MICRODAP_IDLE_MINUTE_MS", QByteArrayLiteral("40"));
+    auto restore = qScopeGuard([] {
+        qunsetenv("MICRODAP_IDLE_CHECK_MS");
+        qunsetenv("MICRODAP_IDLE_MINUTE_MS");
+    });
+    Settings settings(nullptr);
+    settings.setSuspendMinutes(5);
+    QCOMPARE(settings.suspendMinutes(), 5);
+    Player player;
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-idle"));
+    {
+        PowerBridge bridge(&player, other);
+        bridge.setSettings(&settings);
+        const int before = login1Calls(QStringLiteral("Suspend"));
+        bridge.runScreenOn();
+        QTest::qWait(400);
+        QCOMPARE(login1Calls(QStringLiteral("Suspend")), before);
+
+        QElapsedTimer timer;
+        timer.start();
+        bridge.runScreenOff();
+        QTRY_COMPARE_WITH_TIMEOUT(login1Calls(QStringLiteral("Suspend")), before + 1, busTimeoutMs);
+        QVERIFY(timer.elapsed() >= 200);
+
+        player.setTransportActive(true);
+        QTest::qWait(500);
+        QCOMPARE(login1Calls(QStringLiteral("Suspend")), before + 1);
+        player.setTransportActive(false);
+        QTRY_COMPARE_WITH_TIMEOUT(login1Calls(QStringLiteral("Suspend")), before + 2, busTimeoutMs);
+
+        settings.setSuspendMinutes(0);
+        QTest::qWait(500);
+        QCOMPARE(login1Calls(QStringLiteral("Suspend")), before + 2);
+        bridge.runScreenOn();
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-idle"));
+}
+
+void PowerTest::sessionsAndSwitchTo()
+{
+    const QString dir = m_dir.path() + QStringLiteral("/sessions.d");
+    QVERIFY(writeFile(dir + QStringLiteral("/steam.conf"), QStringLiteral("LABEL=Steam\nDEFAULT=yes\n")));
+    QVERIFY(writeFile(dir + QStringLiteral("/microdap.conf"), QStringLiteral("LABEL=MicroDAP\nDEFAULT=yes\n")));
+    QVERIFY(writeFile(dir + QStringLiteral("/microemu.conf"), QStringLiteral("LABEL=MicroEMU\nSTOP=unit\nDEFAULT=yes\n")));
+    QVERIFY(writeFile(dir + QStringLiteral("/recovery.conf"), QStringLiteral("LABEL=Recovery\n")));
+    QVERIFY(writeFile(dir + QStringLiteral("/Bad Name.conf"), QStringLiteral("DEFAULT=yes\n")));
+    const QVariantList sessions = PowerBridge::readSessions(dir, QStringLiteral("microdap"));
+    QCOMPARE(sessions.size(), 2);
+    QCOMPARE(sessions.at(0).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("microemu"));
+    QCOMPARE(sessions.at(0).toMap().value(QStringLiteral("label")).toString(), QStringLiteral("MicroEMU"));
+    QCOMPARE(sessions.at(1).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("steam"));
+    QVERIFY(PowerBridge::readSessions(m_emptyDir, QStringLiteral("microdap")).isEmpty());
+    qputenv("MICRODAP_SESSIONS_DIR", dir.toUtf8());
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-sessions"));
+    {
+        PowerBridge bridge(nullptr, other);
+        QCOMPARE(bridge.sessions(), sessions);
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-sessions"));
+    qunsetenv("MICRODAP_SESSIONS_DIR");
+
+    QFile::remove(m_log);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    QVERIFY(Keep::write());
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    QVERIFY(!m_bridge->switchTo(QStringLiteral("microdap")));
+    QVERIFY(!m_bridge->switchTo(QStringLiteral("../steam")));
+    QVERIFY(!m_bridge->switchTo(QString()));
+    QVERIFY(QFile::exists(m_keepFile));
+    QVERIFY(m_bridge->switchTo(QStringLiteral("microemu")));
+    QVERIFY(!QFile::exists(m_keepFile));
+    QVERIFY(!m_bridge->switchTo(QStringLiteral("steam")));
+    QTRY_COMPARE_WITH_TIMEOUT(logLines(), 1, busTimeoutMs);
+    QCOMPARE(readFile(m_log), switchLine(QStringLiteral("microemu")));
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, busTimeoutMs);
+    QCOMPARE(PowerBridge::switchCommand(QStringLiteral("steam")),
+             QStringList({QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("--no-block"),
+                          QStringLiteral("microos-session-switch@steam.service")}));
+}
+
+void PowerTest::imageAndUpdate()
+{
+    const QString release = m_dir.path() + QStringLiteral("/os-release");
+    QVERIFY(writeFile(release, QStringLiteral("NAME=\"MicroOS\"\nIMAGE_VERSION=\"testing-38784f1\"\nID=microos\n")));
+    const QString update = m_dir.path() + QStringLiteral("/update-available");
+    const QString showDir = m_dir.path() + QStringLiteral("/show");
+    const QString show = m_dir.path() + QStringLiteral("/show.txt");
+    QVERIFY(writeFile(showDir + QStringLiteral("/systemctl"),
+                      QStringLiteral("#!/bin/sh\ncat \"") + show + QStringLiteral("\"\n"), true));
+    qputenv("MICRODAP_OS_RELEASE", release.toUtf8());
+    qputenv("MICRODAP_UPDATE_FILE", update.toUtf8());
+    qputenv("MICRODAP_VERB_DIR", showDir.toUtf8());
+    auto restore = qScopeGuard([this] {
+        qunsetenv("MICRODAP_OS_RELEASE");
+        qunsetenv("MICRODAP_UPDATE_FILE");
+        qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
+    });
+    QCOMPARE(PowerBridge::checkStatus(QStringLiteral("ExecMainStatus=0\nExecMainStartTimestampMonotonic=0\n")),
+             QStringLiteral("unchecked"));
+    QCOMPARE(PowerBridge::checkStatus(QStringLiteral("ExecMainStatus=7\nExecMainStartTimestampMonotonic=912\n")),
+             QStringLiteral("none"));
+    QCOMPARE(PowerBridge::checkStatus(QStringLiteral("ExecMainStatus=4\nExecMainStartTimestampMonotonic=912\n")),
+             QStringLiteral("offline"));
+    QCOMPARE(PowerBridge::checkStatus(QStringLiteral("ExecMainStatus=1\nExecMainStartTimestampMonotonic=912\n")),
+             QStringLiteral("unchecked"));
+    QCOMPARE(PowerBridge::checkStatus(QString()), QStringLiteral("unchecked"));
+
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-update"));
+    {
+        PowerBridge bridge(nullptr, other);
+        QCOMPARE(bridge.imageVersion(), QStringLiteral("testing-38784f1"));
+        QCOMPARE(bridge.updateStatus(), QStringLiteral("unchecked"));
+        QSignalSpy changed(&bridge, &PowerBridge::updateChanged);
+
+        QVERIFY(writeFile(update, QStringLiteral("state=fetch\nimage=ghcr.io/x\nversion=testing-aaaa111\nchecked=2026-10-16T01:00:00Z\n")));
+        bridge.reloadUpdate();
+        QCOMPARE(bridge.updateStatus(), QStringLiteral("available"));
+        QCOMPARE(bridge.updateVersion(), QStringLiteral("testing-aaaa111"));
+        QCOMPARE(bridge.updateState(), QStringLiteral("fetch"));
+        QCOMPARE(bridge.updateChecked(), QStringLiteral("2026-10-16T01:00:00Z"));
+        QCOMPARE(changed.count(), 1);
+
+        QVERIFY(writeFile(update, QStringLiteral("state=withdrawn\nversion=testing-aaaa111\n")));
+        QVERIFY(writeFile(show, QStringLiteral("ExecMainStatus=7\nExecMainStartTimestampMonotonic=4242\n")));
+        bridge.reloadUpdate();
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("none"), busTimeoutMs);
+        QCOMPARE(bridge.updateVersion(), QString());
+
+        QVERIFY(QFile::remove(update));
+        QVERIFY(writeFile(show, QStringLiteral("ExecMainStatus=4\nExecMainStartTimestampMonotonic=4242\n")));
+        bridge.reloadUpdate();
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("offline"), busTimeoutMs);
+
+        qputenv("MICRODAP_VERB_DIR", m_emptyDir.toUtf8());
+        bridge.reloadUpdate();
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("unchecked"), busTimeoutMs);
+        QCOMPARE(bridge.updateState(), QString());
+
+        const QString temp = update + QStringLiteral(".tmp");
+        QVERIFY(writeFile(temp, QStringLiteral("state=staged\nversion=testing-bbbb222\nchecked=2026-10-16T02:00:00Z\n")));
+        QVERIFY(QFile::rename(temp, update));
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("available"), busTimeoutMs);
+        QCOMPARE(bridge.updateState(), QStringLiteral("staged"));
+        QCOMPARE(bridge.updateVersion(), QStringLiteral("testing-bbbb222"));
+        QCOMPARE(bridge.updateChecked(), QStringLiteral("2026-10-16T02:00:00Z"));
+        QVERIFY(QFile::remove(update));
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("none"), busTimeoutMs);
+        QCOMPARE(bridge.updateState(), QString());
+    }
+    const QString later = m_dir.path() + QStringLiteral("/run-later/microos/update-available");
+    qputenv("MICRODAP_UPDATE_FILE", later.toUtf8());
+    QDBusConnection watch = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-watch"));
+    {
+        PowerBridge bridge(nullptr, watch);
+        QCOMPARE(bridge.updateStatus(), QStringLiteral("unchecked"));
+        QVERIFY(writeFile(later, QStringLiteral("state=switch\nversion=testing-cccc333\n")));
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("available"), busTimeoutMs);
+        QCOMPARE(bridge.updateState(), QStringLiteral("switch"));
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-watch"));
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-update"));
+    qputenv("MICRODAP_OS_RELEASE", (m_dir.path() + QStringLiteral("/none")).toUtf8());
+    QDBusConnection empty = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-noimage"));
+    {
+        PowerBridge bridge(nullptr, empty);
+        QCOMPARE(bridge.imageVersion(), QString());
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-noimage"));
 }
 
 QTEST_GUILESS_MAIN(PowerTest)

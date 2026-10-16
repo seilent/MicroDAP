@@ -18,6 +18,8 @@ TestCase {
         property bool switching: false
         property var verbs: []
         property var calls: []
+        property var sessions: [{ name: "microemu", label: "MicroEMU" }, { name: "steam", label: "Steam" }]
+        property var switches: []
 
         signal showSwitchPrompt()
         signal showPowerMenu()
@@ -41,6 +43,11 @@ TestCase {
 
         function closeAndSwitch() {
             fakePower.calls = fakePower.calls.concat(["close"])
+        }
+
+        function switchTo(session) {
+            fakePower.switches = fakePower.switches.concat([session])
+            return true
         }
     }
 
@@ -111,6 +118,7 @@ TestCase {
         fakePower.switching = false
         fakePower.verbs = []
         fakePower.calls = []
+        fakePower.switches = []
         fakePlayer.calls = []
         fakePlayer.status = 1
         fakeSettings.screenOffSeconds = 0
@@ -220,8 +228,8 @@ TestCase {
         fakePower.showPowerMenu()
         compare(menu.shown, true)
         compare(menu.title, "power")
-        compare(menu.items, ["screen off", "game mode", "suspend", "power off"])
-        compare(menu.words, ["screen-off", "game-mode", "suspend", "poweroff"])
+        compare(menu.items, ["screen off", "game mode", "MicroEMU", "suspend", "power off"])
+        compare(JSON.stringify(menu.entries.map((e) => e.word)), JSON.stringify(["screen-off", "game-mode", "microemu", "suspend", "poweroff"]))
         compare(menu.duration, Motion.dialog)
         compare(menu.hideDuration, Motion.dialogHide)
         fuzzyCompare(menu.scrimAlpha, 0.8, 1e-6)
@@ -252,20 +260,45 @@ TestCase {
         menu.complete()
 
         fakePower.showPowerMenu()
-        verify(main.router.dispatch("down", false))
-        verify(main.router.dispatch("down", false))
+        for (let i = 0; i < 3; i++)
+            verify(main.router.dispatch("down", false))
         verify(main.router.dispatch("a", false))
         compare(fakePower.verbs, ["screen-off", "suspend"])
         menu.complete()
 
         fakePower.showPowerMenu()
-        for (let i = 0; i < 4; i++)
+        for (let i = 0; i < 5; i++)
             main.router.dispatch("down", false)
-        compare(menu.focusIndex, 3)
+        compare(menu.focusIndex, 4)
         verify(main.router.dispatch("a", false))
         compare(fakePower.verbs, ["screen-off", "suspend", "poweroff"])
         menu.complete()
         compare(main.pageStack.depth, 1)
+    }
+
+    function test_power_menu_switches_session() {
+        fakePower.showPowerMenu()
+        verify(main.router.dispatch("down", false))
+        verify(main.router.dispatch("down", false))
+        compare(menu.focusIndex, 2)
+        verify(main.router.dispatch("a", false))
+        compare(menu.shown, false)
+        compare(main.switchPrompt.shown, false)
+        compare(fakePower.switches, ["microemu"])
+        compare(fakePower.verbs, [])
+        compare(fakePower.calls, [])
+        menu.complete()
+    }
+
+    function test_power_menu_sessions_edge() {
+        const old = fakePower.sessions
+        fakePower.sessions = []
+        compare(menu.items, ["screen off", "suspend", "power off"])
+        fakePower.sessions = [{ name: "steam", label: "Steam" }]
+        compare(menu.items, ["screen off", "game mode", "suspend", "power off"])
+        fakePower.sessions = [{ name: "a-session", label: "" }, { name: "b-session" }, { name: "steam", label: "Steam" }]
+        compare(menu.items, ["screen off", "game mode", "a-session", "b-session", "suspend", "power off"])
+        fakePower.sessions = old
     }
 
     function test_power_menu_game_mode_opens_prompt() {

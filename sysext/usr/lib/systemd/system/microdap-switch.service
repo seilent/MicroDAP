@@ -1,7 +1,0 @@
-[Unit]
-Description=Switch display session to MicroDAP
-
-[Service]
-Type=oneshot
-TimeoutStartSec=150
-ExecStart=/usr/libexec/armada/session-control switch-microdap

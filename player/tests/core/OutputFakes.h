@@ -181,11 +181,6 @@ public:
         QTimer::singleShot(0, &m_context, [done, out] { done(out); });
     }
 
-    void setDefaultSink(const QString &name) override
-    {
-        record(QStringLiteral("default %1").arg(name));
-    }
-
     void sinkVolumeDb(const QString &, std::function<void(bool ok, double db)> done) override
     {
         const double out = volumeDb;
@@ -220,6 +215,7 @@ public:
 
     void bluezInputs(std::function<void(const QList<quint32> &)> done) override
     {
+        record(QStringLiteral("inputs"));
         const QList<quint32> out = inputs;
         QTimer::singleShot(0, &m_context, [done, out] { done(out); });
     }

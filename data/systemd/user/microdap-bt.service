@@ -1,0 +1,12 @@
+[Unit]
+Description=MicroDAP Bluetooth receiver agent
+BindsTo=gamescope-session-plus@microdap.service
+After=gamescope-session-plus@microdap.service
+
+[Service]
+ExecStart=/usr/libexec/microdap/microdap-bt
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=gamescope-session-plus@microdap.service

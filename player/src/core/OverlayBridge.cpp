@@ -82,11 +82,6 @@ QString OverlayBridge::btBin()
     return qEnvironmentVariable("MICRODAP_BT_BIN", QStringLiteral("/usr/libexec/microdap/microdap-bt"));
 }
 
-QString OverlayBridge::codecBin()
-{
-    return qEnvironmentVariable("MICRODAP_CODEC_BIN", QStringLiteral("/usr/libexec/microdap/microdap-codec"));
-}
-
 bool OverlayBridge::notify(const QByteArray &state)
 {
     const QByteArray path = notifySocket();
@@ -294,9 +289,6 @@ void OverlayBridge::runCloseStep()
     if (m_closeStep == 0) {
         program = btBin();
         arguments = {QStringLiteral("--disconnect-sources")};
-    } else if (m_closeStep == 1) {
-        program = codecBin();
-        arguments = {QStringLiteral("clear")};
     } else {
         finishClose();
         return;
@@ -478,10 +470,8 @@ void OverlayBridge::onPrepareForSleep(bool start)
         return;
     }
     setSleeping(false);
-    if (m_pad) {
+    if (m_pad)
         m_pad->setShown(false);
-        m_pad->intercept()->reassert();
-    }
     m_sleep->take();
 }
 

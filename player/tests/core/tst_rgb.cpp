@@ -1,11 +1,10 @@
+#include "FakeService.h"
 #include "RgbControl.h"
 
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QSet>
+#include <microset/client.h>
+
+#include <QDBusArgument>
 #include <QSignalSpy>
-#include <QTemporaryDir>
 #include <QTest>
 
 using namespace microdap;
@@ -13,33 +12,6 @@ using namespace microdap;
 namespace {
 
 constexpr int waitMs = 5000;
-
-bool writeFile(const QString &path, const QString &text, bool executable = false)
-{
-    if (!QDir().mkpath(QFileInfo(path).absolutePath()))
-        return false;
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-    file.write(text.toUtf8());
-    file.close();
-    if (!executable)
-        return true;
-    return file.setPermissions(file.permissions() | QFileDevice::ExeOwner | QFileDevice::ExeUser);
-}
-
-QString readFile(const QString &path)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    return QString::fromUtf8(file.readAll());
-}
-
-QString unit(const QString &word)
-{
-    return QStringLiteral("microdap-priv@") + word + QStringLiteral(".service");
-}
 
 }
 
@@ -50,518 +22,220 @@ class RgbTest : public QObject
 private slots:
     void initTestCase();
     void init();
-    void words();
-    void artColorWords();
-    void artWordHeldWhileOff();
-    void restoreThenHueAtStart();
-    void offAndArmada();
+    void cleanup();
+    void colors();
+    void systemHoldsNothing();
+    void accentOverridesColor();
     void hueDebounced();
-    void unchangedHueSkipped();
-    void waitingHueReplaced();
-    void screenOffHolds();
-    void saverSleepsAndWakes();
-    void saverArmadaAndOff();
-    void saverScreenOff();
-    void unsupportedRunsNothing();
-    void missingBinaryUnsupported();
-    void failedWordReported();
+    void offOverridesEnabled();
+    void screenOffAndSaver();
+    void storedChangeUnderOverride();
+    void reoverrideOnNewOwner();
+    void overridesGoneWithClient();
+    void unsupportedSendsNothing();
 
 private:
-    void useSupported(bool supported);
-    void startAccent(RgbControl &control, QSignalSpy &applied, int hue);
-    QStringList starts() const;
+    QVariantMap overrides() const;
+    int countOf(const QString &call) const;
+    void started(RgbControl &control, const QString &mode, int hue = 200);
 
-    QTemporaryDir m_dir;
-    QString m_bin;
-    QString m_log;
-    QString m_rgbExit;
-    QString m_systemctlExit;
-    QString m_systemctlDelay;
+    FakeService m_set = FakeService::microSet(QStringLiteral(MICRODAP_FAKE_MICROSETD));
+    std::unique_ptr<MicroSet::Client> m_client;
 };
 
 void RgbTest::initTestCase()
 {
-    QVERIFY(m_dir.isValid());
-    m_bin = m_dir.path() + QStringLiteral("/bin");
-    m_log = m_dir.path() + QStringLiteral("/calls.log");
-    m_rgbExit = m_dir.path() + QStringLiteral("/rgb.exit");
-    m_systemctlExit = m_dir.path() + QStringLiteral("/systemctl.exit");
-    m_systemctlDelay = m_dir.path() + QStringLiteral("/systemctl.delay");
-    const QString logLine = QStringLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"") + m_log
-                            + QStringLiteral("\"\n");
-    QVERIFY(writeFile(m_bin + QStringLiteral("/armada-rgb"),
-                      QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("exit \"$(cat \"") + m_rgbExit
-                          + QStringLiteral("\")\"\n"),
-                      true));
-    QVERIFY(writeFile(m_bin + QStringLiteral("/systemctl"),
-                      QStringLiteral("#!/bin/sh\n") + logLine + QStringLiteral("[ -f \"") + m_systemctlDelay
-                          + QStringLiteral("\" ] && sleep \"$(cat \"") + m_systemctlDelay
-                          + QStringLiteral("\")\"\nexit \"$(cat \"") + m_systemctlExit + QStringLiteral("\")\"\n"),
-                      true));
-    qputenv("MICRODAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
-    qputenv("MICRODAP_SYSTEMCTL_BIN", (m_bin + QStringLiteral("/systemctl")).toUtf8());
-    QCOMPARE(RgbControl::rgbPath(), m_bin + QStringLiteral("/armada-rgb"));
-    QCOMPARE(RgbControl::systemctlPath(), m_bin + QStringLiteral("/systemctl"));
+    if (!QDBusConnection::sessionBus().isConnected())
+        QSKIP("no session bus, run under dbus-run-session");
 }
 
 void RgbTest::init()
 {
-    QFile::remove(m_log);
-    QFile::remove(m_systemctlDelay);
-    useSupported(true);
-    QVERIFY(writeFile(m_systemctlExit, QStringLiteral("0\n")));
-    qputenv("MICRODAP_RGB_BIN", (m_bin + QStringLiteral("/armada-rgb")).toUtf8());
+    QVERIFY(m_set.start());
+    m_client = std::make_unique<MicroSet::Client>(QDBusConnection::sessionBus());
 }
 
-void RgbTest::useSupported(bool supported)
+void RgbTest::cleanup()
 {
-    QVERIFY(writeFile(m_rgbExit, supported ? QStringLiteral("0\n") : QStringLiteral("1\n")));
+    m_client.reset();
+    m_set.stop();
 }
 
-void RgbTest::startAccent(RgbControl &control, QSignalSpy &applied, int hue)
+QVariantMap RgbTest::overrides() const
 {
-    control.start(QStringLiteral("accent"), hue);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QFile::remove(m_log);
+    return qdbus_cast<QVariantMap>(m_set.value(QStringLiteral("Overrides")));
 }
 
-QStringList RgbTest::starts() const
+int RgbTest::countOf(const QString &call) const
 {
-    QStringList out;
-    for (const QString &line : readFile(m_log).split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
-        if (line.startsWith(QLatin1StringView("systemctl start ")))
-            out.append(line.mid(16));
-    }
-    return out;
+    return int(m_set.calls().count(call));
 }
 
-void RgbTest::words()
+void RgbTest::started(RgbControl &control, const QString &mode, int hue)
 {
-    QCOMPARE(RgbControl::hueWord(0), QStringLiteral("rgb-hue-0"));
-    QCOMPARE(RgbControl::hueWord(350), QStringLiteral("rgb-hue-350"));
-    QCOMPARE(RgbControl::hueWord(198), QStringLiteral("rgb-hue-200"));
-    QCOMPARE(RgbControl::hueWord(360), QStringLiteral("rgb-hue-0"));
-    QCOMPARE(RgbControl::hueWord(-10), QStringLiteral("rgb-hue-350"));
-    QCOMPARE(RgbControl::unitFor(QStringLiteral("rgb-off")), QStringLiteral("microdap-priv@rgb-off.service"));
-    QCOMPARE(RgbControl::colorWord(0, 1), QStringLiteral("rgb-color-0-1"));
-    QCOMPARE(RgbControl::colorWord(200, 4), QStringLiteral("rgb-color-200-4"));
-    QCOMPARE(RgbControl::colorWord(355, 2), QStringLiteral("rgb-color-0-2"));
-    QCOMPARE(RgbControl::colorWord(344, 3), QStringLiteral("rgb-color-340-3"));
-    QCOMPARE(RgbControl::colorWord(200, 0), QStringLiteral("rgb-hue-200"));
-    QCOMPARE(RgbControl::colorWord(200, 5), QStringLiteral("rgb-hue-200"));
-    QSet<QString> all;
-    for (int hue = 0; hue < 360; hue += 10) {
-        for (int level = 1; level <= RgbControl::levels; ++level)
-            all.insert(RgbControl::colorWord(hue, level));
-    }
-    QCOMPARE(all.size(), 144);
-}
-
-void RgbTest::artColorWords()
-{
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    QSignalSpy levelSpy(&control, &RgbControl::levelChanged);
-    control.start(QStringLiteral("accent"), 200, 2);
-    QCOMPARE(control.level(), 2);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-color-200-2"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(control.sentWord(), QStringLiteral("rgb-color-200-2"));
-    QCOMPARE(control.sentHue(), 200);
-    QFile::remove(m_log);
-
-    control.setColor(200, 2);
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 2);
-
-    control.setColor(200, 1);
-    control.setColor(30, 3);
-    control.setColor(200, 4);
-    QTest::qWait(RgbControl::hueDelayMs / 2);
-    QCOMPARE(applied.count(), 2);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-color-200-4"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-
-    control.setHue(200);
-    QCOMPARE(control.level(), 0);
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 3);
-
-    control.setColor(200, 1);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-color-200-1"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    control.setHue(200);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
-    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("rgb-hue-200"));
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-color-200-4")), unit(QStringLiteral("rgb-color-200-1")),
-                                    unit(QStringLiteral("rgb-hue-200"))}));
-    QVERIFY(levelSpy.count() >= 5);
-}
-
-void RgbTest::artWordHeldWhileOff()
-{
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    startAccent(control, applied, 350);
-
-    control.setScreenOff(true);
-    control.setColor(120, 3);
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 2);
-    control.setScreenOff(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-color-120-3"));
-
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    control.setSaver(true);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    control.setColor(60, 1);
-    control.setSaver(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-sleep"));
-    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("rgb-wake"));
-    QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("rgb-color-60-1"));
-
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QVERIFY(writeFile(m_systemctlExit, QStringLiteral("1\n")));
-    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: \"rgb-color-60-2\" failed");
-    control.setColor(60, 2);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
-    QVERIFY(!applied.at(6).at(1).toBool());
-    QCOMPARE(control.sentWord(), QString());
-    QCOMPARE(control.sentHue(), -1);
-}
-
-void RgbTest::restoreThenHueAtStart()
-{
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    QSignalSpy supportedSpy(&control, &RgbControl::supportedChanged);
-    QVERIFY(!control.supported());
-    QVERIFY(!control.probed());
-    QCOMPARE(control.mode(), QStringLiteral("armada"));
-    control.start(QStringLiteral("accent"), 350);
-    QVERIFY(control.busy());
-    QCOMPARE(control.mode(), QStringLiteral("accent"));
-    QCOMPARE(control.hue(), 350);
-    QTRY_VERIFY_WITH_TIMEOUT(control.probed(), waitMs);
+    control.start(mode, hue);
+    QVERIFY(control.probed());
     QVERIFY(control.supported());
-    QCOMPARE(supportedSpy.count(), 1);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("rgb-restore"));
-    QVERIFY(applied.at(0).at(1).toBool());
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-hue-350"));
-    QVERIFY(applied.at(1).at(1).toBool());
     QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(control.sentHue(), 350);
-    const QString log = readFile(m_log);
-    QVERIFY2(log.startsWith(QStringLiteral("armada-rgb supported\n")), qPrintable(log));
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore")), unit(QStringLiteral("rgb-hue-350"))}));
 }
 
-void RgbTest::offAndArmada()
+void RgbTest::colors()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    control.start(QStringLiteral("off"), 200);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore")), unit(QStringLiteral("rgb-off"))}));
+    QCOMPARE(RgbControl::colorFor(0, 0), 0xFF0000u);
+    QCOMPARE(RgbControl::colorFor(120, 4), 0x00FF00u);
+    QCOMPARE(RgbControl::colorFor(240, 0), 0x0000FFu);
+    QCOMPARE(RgbControl::colorFor(60, 0), 0xFFFF00u);
+    QCOMPARE(RgbControl::colorFor(350, 0), 0xFF002Bu);
+    QCOMPARE(RgbControl::colorFor(0, 1), 0xFF9999u);
+    QCOMPARE(RgbControl::colorFor(200, 2), 0x66CCFFu);
+    QCOMPARE(RgbControl::colorFor(355, 0), RgbControl::colorFor(0, 0));
+    QCOMPARE(RgbControl::colorFor(200, 9), RgbControl::colorFor(200, 0));
+    QVERIFY(RgbControl::colorFor(200, 1) != RgbControl::colorFor(200, 4));
+}
 
-    QFile::remove(m_log);
-    control.setMode(QStringLiteral("armada"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-restore"));
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore"))}));
-
-    QFile::remove(m_log);
-    control.setHue(280);
-    control.setMode(QStringLiteral("armada"));
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 3);
-    QVERIFY(!QFile::exists(m_log));
-
-    control.setMode(QStringLiteral("accent"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-hue-280"));
-
-    QFile::remove(m_log);
-    control.setMode(QStringLiteral("off"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
-    QCOMPARE(control.sentHue(), -1);
-    control.setMode(QStringLiteral("accent"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-off")), unit(QStringLiteral("rgb-hue-280"))}));
-
-    QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: unknown mode \"disco\"");
-    control.setMode(QStringLiteral("disco"));
-    QCOMPARE(control.mode(), QStringLiteral("accent"));
+void RgbTest::systemHoldsNothing()
+{
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("system"));
     QTest::qWait(200);
-    QVERIFY(!QFile::exists(m_log));
+    QVERIFY(overrides().isEmpty());
+    QCOMPARE(countOf(QStringLiteral("Override rgb.enabled")), 0);
+    QVERIFY(!control.sent(RgbControl::enabledKey()));
+}
+
+void RgbTest::accentOverridesColor()
+{
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("accent"), 200);
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")).toBool(), true, waitMs);
+    QCOMPARE(overrides().value(QStringLiteral("rgb.color")).toUInt(), RgbControl::colorFor(200, 0));
+    QCOMPARE(m_client->get(QStringLiteral("rgb.color")).toUInt(), RgbControl::colorFor(200, 0));
+    QVERIFY(!overrides().contains(QStringLiteral("rgb.brightness")));
+    QCOMPARE(countOf(QStringLiteral("Override rgb.enabled")), 1);
+    QCOMPARE(countOf(QStringLiteral("Override rgb.color")), 1);
+
+    control.setMode(QStringLiteral("system"));
+    QTRY_VERIFY_WITH_TIMEOUT(overrides().isEmpty(), waitMs);
+    QCOMPARE(countOf(QStringLiteral("ClearOverride rgb.enabled")), 1);
+    QCOMPARE(countOf(QStringLiteral("ClearOverride rgb.color")), 1);
+    QCOMPARE(m_client->get(QStringLiteral("rgb.color")).toUInt(), 16777215u);
 }
 
 void RgbTest::hueDebounced()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    startAccent(control, applied, 350);
-
-    for (int hue = 0; hue <= 90; hue += 10)
-        control.setHue(hue);
-    QCOMPARE(control.hue(), 90);
-    QTest::qWait(RgbControl::hueDelayMs / 2);
-    QCOMPARE(applied.count(), 2);
-    QVERIFY(!QFile::exists(m_log));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-hue-90"));
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 3);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-hue-90"))}));
-}
-
-void RgbTest::unchangedHueSkipped()
-{
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    startAccent(control, applied, 200);
-
-    control.setHue(200);
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 2);
-
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("accent"), 200);
+    QTRY_COMPARE_WITH_TIMEOUT(countOf(QStringLiteral("Override rgb.color")), 1, waitMs);
     control.setHue(210);
-    control.setHue(200);
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 2);
-    QVERIFY(!QFile::exists(m_log));
+    control.setHue(220);
+    control.setColor(230, 3);
+    QTest::qWait(RgbControl::hueDelayMs / 2);
+    QCOMPARE(countOf(QStringLiteral("Override rgb.color")), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(countOf(QStringLiteral("Override rgb.color")), 2, waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.color")).toUInt(), RgbControl::colorFor(230, 3), waitMs);
+    control.setColor(230, 3);
+    QTest::qWait(RgbControl::hueDelayMs + 200);
+    QCOMPARE(countOf(QStringLiteral("Override rgb.color")), 2);
+    QCOMPARE(countOf(QStringLiteral("Override rgb.enabled")), 1);
 }
 
-void RgbTest::waitingHueReplaced()
+void RgbTest::offOverridesEnabled()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    startAccent(control, applied, 350);
-
-    QVERIFY(writeFile(m_systemctlDelay, QStringLiteral("2\n")));
-    control.setMode(QStringLiteral("off"));
-    QTRY_VERIFY_WITH_TIMEOUT(starts().size() == 1, waitMs);
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("off"));
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")), QVariant(false), waitMs);
+    QVERIFY(!overrides().contains(QStringLiteral("rgb.color")));
     control.setMode(QStringLiteral("accent"));
-    control.setHue(10);
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 2);
-    QVERIFY(control.busy());
-    QFile::remove(m_systemctlDelay);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-off"));
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-hue-10"));
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-off")), unit(QStringLiteral("rgb-hue-10"))}));
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")), QVariant(true), waitMs);
+    QVERIFY(overrides().contains(QStringLiteral("rgb.color")));
 }
 
-void RgbTest::screenOffHolds()
+void RgbTest::screenOffAndSaver()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    startAccent(control, applied, 350);
-
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("system"));
+    control.setSaver(true);
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")), QVariant(false), waitMs);
     control.setScreenOff(true);
-    QVERIFY(control.screenOff());
-    control.setHue(120);
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 2);
-    QVERIFY(!QFile::exists(m_log));
-
+    QTest::qWait(100);
+    QCOMPARE(countOf(QStringLiteral("Override rgb.enabled")), 1);
+    control.setSaver(false);
+    QTest::qWait(100);
+    QCOMPARE(overrides().value(QStringLiteral("rgb.enabled")), QVariant(false));
     control.setScreenOff(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-hue-120"));
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-hue-120"))}));
+    QTRY_VERIFY_WITH_TIMEOUT(overrides().isEmpty(), waitMs);
 
-    QFile::remove(m_log);
+    control.setMode(QStringLiteral("accent"));
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")), QVariant(true), waitMs);
     control.setScreenOff(true);
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")), QVariant(false), waitMs);
+    QVERIFY(overrides().contains(QStringLiteral("rgb.color")));
     control.setScreenOff(false);
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 3);
-    QVERIFY(!QFile::exists(m_log));
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().value(QStringLiteral("rgb.enabled")), QVariant(true), waitMs);
 }
 
-void RgbTest::saverSleepsAndWakes()
+void RgbTest::storedChangeUnderOverride()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    QSignalSpy saverSpy(&control, &RgbControl::saverChanged);
-    startAccent(control, applied, 350);
-
-    control.setSaver(true);
-    QVERIFY(control.saver());
-    QCOMPARE(saverSpy.count(), 1);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-sleep"));
-    QVERIFY(applied.at(2).at(1).toBool());
-    QCOMPARE(control.sentHue(), 350);
-
-    control.setHue(120);
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 3);
-
-    control.setSaver(false);
-    QVERIFY(!control.saver());
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-wake"));
-    QCOMPARE(applied.at(4).at(0).toString(), QStringLiteral("rgb-hue-120"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(control.sentHue(), 120);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-wake")),
-                                    unit(QStringLiteral("rgb-hue-120"))}));
-
-    QFile::remove(m_log);
-    control.setSaver(true);
-    control.setSaver(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 7);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-wake"))}));
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("accent"), 120);
+    QTRY_COMPARE_WITH_TIMEOUT(m_client->get(QStringLiteral("rgb.color")).toUInt(), RgbControl::colorFor(120, 0), waitMs);
+    MicroSet::Error error;
+    bool done = false;
+    m_client->set(QStringLiteral("rgb.color"), QVariant::fromValue(255u), [&](const MicroSet::Error &e) {
+        error = e;
+        done = true;
+    });
+    QTRY_VERIFY_WITH_TIMEOUT(done, waitMs);
+    QVERIFY(error.ok());
+    QCOMPARE(m_client->get(QStringLiteral("rgb.color")).toUInt(), RgbControl::colorFor(120, 0));
+    QCOMPARE(m_client->stored(QStringLiteral("rgb.")).value(QStringLiteral("rgb.color")).toUInt(), 255u);
+    control.setMode(QStringLiteral("system"));
+    QTRY_COMPARE_WITH_TIMEOUT(m_client->get(QStringLiteral("rgb.color")).toUInt(), 255u, waitMs);
 }
 
-void RgbTest::saverArmadaAndOff()
+void RgbTest::reoverrideOnNewOwner()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    control.start(QStringLiteral("armada"), 350);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QFile::remove(m_log);
-
-    control.setSaver(true);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QCOMPARE(applied.at(1).at(0).toString(), QStringLiteral("rgb-sleep"));
-    control.setHue(120);
-    control.setSaver(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QCOMPARE(applied.at(2).at(0).toString(), QStringLiteral("rgb-wake"));
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 3);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-wake"))}));
-
-    control.setMode(QStringLiteral("off"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-off"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QFile::remove(m_log);
-    control.setSaver(true);
-    QTest::qWait(300);
-    control.setSaver(false);
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 4);
-    QVERIFY(!QFile::exists(m_log));
+    RgbControl control(m_client.get());
+    started(control, QStringLiteral("accent"), 40);
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().size(), 2, waitMs);
+    m_set.stop();
+    QVERIFY(m_set.start());
+    QTRY_COMPARE_WITH_TIMEOUT(overrides().size(), 2, waitMs);
+    QCOMPARE(overrides().value(QStringLiteral("rgb.color")).toUInt(), RgbControl::colorFor(40, 0));
+    QCOMPARE(overrides().value(QStringLiteral("rgb.enabled")), QVariant(true));
 }
 
-void RgbTest::saverScreenOff()
+void RgbTest::overridesGoneWithClient()
 {
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    startAccent(control, applied, 350);
-
-    control.setSaver(true);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 3, waitMs);
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QFile::remove(m_log);
-
-    control.setScreenOff(true);
-    control.setHue(120);
-    control.setSaver(false);
-    QTest::qWait(RgbControl::hueDelayMs + 300);
-    QCOMPARE(applied.count(), 3);
-    QVERIFY(!QFile::exists(m_log));
-
-    control.setScreenOff(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 4, waitMs);
-    QCOMPARE(applied.at(3).at(0).toString(), QStringLiteral("rgb-hue-120"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-hue-120"))}));
-
-    QFile::remove(m_log);
-    control.setSaver(true);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 5, waitMs);
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    control.setScreenOff(true);
-    control.setScreenOff(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 6, waitMs);
-    QCOMPARE(applied.at(5).at(0).toString(), QStringLiteral("rgb-sleep"));
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    control.setSaver(false);
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 7, waitMs);
-    QCOMPARE(applied.at(6).at(0).toString(), QStringLiteral("rgb-wake"));
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 7);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-sleep")), unit(QStringLiteral("rgb-sleep")),
-                                    unit(QStringLiteral("rgb-wake"))}));
+    {
+        QDBusConnection own = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("rgb-own"));
+        MicroSet::Client client(own);
+        RgbControl control(&client);
+        started(control, QStringLiteral("accent"), 300);
+        QTRY_COMPARE_WITH_TIMEOUT(overrides().size(), 2, waitMs);
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("rgb-own"));
+    QTRY_VERIFY_WITH_TIMEOUT(overrides().isEmpty(), waitMs);
+    QCOMPARE(m_client->get(QStringLiteral("rgb.color")).toUInt(), 16777215u);
 }
 
-void RgbTest::unsupportedRunsNothing()
+void RgbTest::unsupportedSendsNothing()
 {
-    useSupported(false);
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    QSignalSpy supportedSpy(&control, &RgbControl::supportedChanged);
-    control.start(QStringLiteral("accent"), 350);
-    QTRY_VERIFY_WITH_TIMEOUT(control.probed(), waitMs);
+    RgbControl none(nullptr);
+    none.start(QStringLiteral("accent"), 10);
+    QVERIFY(none.probed());
+    QVERIFY(!none.supported());
+    none.setMode(QStringLiteral("off"));
+    QVERIFY(!none.busy());
+
+    m_set.stop();
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    RgbControl control(&client);
+    control.start(QStringLiteral("accent"), 10);
+    QVERIFY(control.probed());
     QVERIFY(!control.supported());
-    QCOMPARE(supportedSpy.count(), 0);
-    QVERIFY(!control.busy());
-    control.setMode(QStringLiteral("off"));
-    control.setMode(QStringLiteral("accent"));
-    control.setHue(200);
-    control.setScreenOff(true);
-    control.setScreenOff(false);
-    control.setSaver(true);
-    control.setSaver(false);
-    QTest::qWait(RgbControl::hueDelayMs + 200);
-    QCOMPARE(applied.count(), 0);
-    QCOMPARE(readFile(m_log), QStringLiteral("armada-rgb supported\n"));
-}
-
-void RgbTest::missingBinaryUnsupported()
-{
-    qputenv("MICRODAP_RGB_BIN", (m_dir.path() + QStringLiteral("/missing/armada-rgb")).toUtf8());
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    control.start(QStringLiteral("off"), 350);
-    QTRY_VERIFY_WITH_TIMEOUT(control.probed(), waitMs);
-    QVERIFY(!control.supported());
-    QVERIFY(!control.busy());
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 0);
-    QVERIFY(!QFile::exists(m_log));
-}
-
-void RgbTest::failedWordReported()
-{
-    QVERIFY(writeFile(m_systemctlExit, QStringLiteral("1\n")));
-    RgbControl control;
-    QSignalSpy applied(&control, &RgbControl::applied);
-    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: unknown mode \"disco\"");
-    control.start(QStringLiteral("disco"), 350);
-    QCOMPARE(control.mode(), QStringLiteral("armada"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
-    QCOMPARE(applied.at(0).at(0).toString(), QStringLiteral("rgb-restore"));
-    QVERIFY(!applied.at(0).at(1).toBool());
-    QTRY_VERIFY_WITH_TIMEOUT(!control.busy(), waitMs);
-    QTest::qWait(300);
-    QCOMPARE(applied.count(), 1);
-    QCOMPARE(starts(), QStringList({unit(QStringLiteral("rgb-restore"))}));
-
-    QFile::remove(m_log);
-    QTest::ignoreMessage(QtWarningMsg, "microdap rgb: \"rgb-hue-350\" failed");
-    control.setMode(QStringLiteral("accent"));
-    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 2, waitMs);
-    QVERIFY(!applied.at(1).at(1).toBool());
-    QCOMPARE(control.sentHue(), -1);
+    QVERIFY(!control.sent(RgbControl::enabledKey()));
 }
 
 QTEST_GUILESS_MAIN(RgbTest)
-
 #include "tst_rgb.moc"

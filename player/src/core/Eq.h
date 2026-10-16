@@ -105,6 +105,14 @@ struct EqStore
     static bool write(const QString &path, const EqProfile &profile);
 };
 
+struct EqFilters
+{
+    static QString key(const QString &slot, const QString &field);
+    static QString number(double value);
+    static QStringList encode(const EqProfile &profile);
+    static EqProfile decode(const QStringList &items);
+};
+
 class EqControl : public QObject
 {
     Q_OBJECT
@@ -117,9 +125,11 @@ class EqControl : public QObject
 
 public:
     static constexpr int syncDelayMs = 500;
+    static constexpr int writeDelayMs = 300;
     static constexpr int sinkTimeoutMs = 1000;
     static constexpr int sinkPollMs = 2000;
     static constexpr int startBoundMs = 3000;
+    static constexpr int nameMax = 256;
     static constexpr double gainFine = 0.1;
     static constexpr double gainCoarse = 1.0;
     static constexpr double qFine = 0.1;
@@ -147,12 +157,7 @@ public:
     void setActiveOutput(const QString &output);
     QString activeName() const;
     QVariantMap activeProfileMap() const;
-    EqProfile activeProfile() const;
     int revision() const;
-    bool bypassed() const;
-    void setBypassed(bool on);
-    bool dacHeld() const;
-    void setDacHeld(bool on);
 
     EqProfile profile(const QString &output) const;
     void setCustom(const QString &output, const EqProfile &profile);
@@ -180,19 +185,21 @@ signals:
     void revisionChanged();
     void profilesChanged();
     void profileChanged(const QString &output);
-    void profileApplied(const microdap::EqProfile &profile);
 
 private:
     std::optional<EqProfile> fileProfile(const QString &path) const;
     EqProfile &custom(const QString &output) const;
-    void setKey(const QString &output, const QString &value);
-    void keyChanged(const QString &output);
+    bool on(const QString &output) const;
+    QString storedName(const QString &output) const;
+    QStringList storedFilters(const QString &output) const;
+    void put(const QString &output, const QString &field, const QVariant &value);
+    void onValueChanged(const QString &key);
+    void select(const QString &output, bool enabled, const QString &name, const EqProfile &profile);
     EqProfile *beginEdit(const QString &output);
     EqBand *beginBandEdit(const QString &output, int band);
     void endEdit(const QString &output);
+    void writeFilters();
     void changed(const QString &output);
-    void applyActive(const QString &cause = QStringLiteral("profile"));
-    void emitApplied(const QString &cause);
     void pollSink();
     void querySink(bool seed);
     void seedFromSink();
@@ -207,18 +214,14 @@ private:
     QString m_activeOutput;
     QVariantList m_sources;
     QStringList m_sourcePaths;
-    QHash<QString, QString> m_keys;
+    QVariantMap m_local;
     mutable QHash<QString, EqProfile> m_custom;
+    mutable QHash<QString, EqProfile> m_live;
     mutable QHash<QString, std::optional<EqProfile>> m_files;
     QSet<QString> m_dirty;
+    QSet<QString> m_unwritten;
     QTimer m_syncTimer;
-    EqProfile m_applied = EqProfile::off();
-    EqProfile m_emitted = EqProfile::off();
-    bool m_appliedOnce = false;
-    bool m_emittedOnce = false;
-    bool m_bypassed = false;
-    bool m_dacHeld = false;
-    bool m_editing = false;
+    QTimer m_writeTimer;
     int m_revision = 0;
 };
 

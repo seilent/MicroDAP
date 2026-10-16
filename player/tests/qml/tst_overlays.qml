@@ -67,6 +67,14 @@ TestCase {
 
         width: 640
         height: 960
+        sessions: [{ name: "microemu", label: "MicroEMU" }, { name: "steam", label: "Steam" }]
+    }
+
+    SignalSpy {
+        id: switchSpy
+
+        target: powerMenu
+        signalName: "switchTo"
     }
 
     SwitchPrompt {
@@ -220,6 +228,7 @@ TestCase {
         pages.push(rowPage, {})
         routedSpy.clear()
         verbSpy.clear()
+        switchSpy.clear()
         keepSpy.clear()
         closeSpy.clear()
     }
@@ -457,6 +466,70 @@ TestCase {
         compare(dialog.bar.width, Ui.px(2))
     }
 
+    function rowAt(list, index) {
+        for (const c of list.children) {
+            if (c.touchIndex === index)
+                return c
+        }
+        return null
+    }
+
+    function barOnFocus(d, list) {
+        const row = tc.rowAt(list, d.focusIndex)
+        verify(row !== null)
+        fuzzyCompare(d.bar.y, list.y + row.y, 1e-6)
+        compare(d.bar.height, row.height)
+        fuzzyCompare(d.bar.x, d.edge - Ui.px(Ui.focusBarOffset), 1e-6)
+    }
+
+    function checkBarAcrossSurfaces(d, list) {
+        for (const from of [[640, 960], [960, 640]]) {
+            Ui.setSurface(from[0], from[1])
+            d.width = from[0]
+            d.height = from[1]
+            d.open()
+            d.complete()
+            verify(d.handleAction("down", false))
+            verify(d.handleAction("down", false))
+            verify(d.bar.y < list.y + tc.rowAt(list, 2).y)
+            tryVerify(() => Math.abs(d.bar.y - (list.y + tc.rowAt(list, 2).y)) < 1e-6, 2000)
+            tc.barOnFocus(d, list)
+            Ui.setSurface(from[1], from[0])
+            d.width = from[1]
+            d.height = from[0]
+            tc.barOnFocus(d, list)
+            d.close()
+            d.complete()
+        }
+    }
+
+    function test_dialog_bar_on_focused_item_both_orientations() {
+        tc.checkBarAcrossSurfaces(dialog, dialog.list)
+    }
+
+    function test_sheet_bar_on_focused_item_both_orientations() {
+        tc.checkBarAcrossSurfaces(sheet, sheet.list)
+    }
+
+    function test_prompt_lands_on_keep_in_both_orientations() {
+        for (const size of [[640, 960], [960, 640]]) {
+            Ui.setSurface(size[0], size[1])
+            prompt.width = size[0]
+            prompt.height = size[1]
+            prompt.show(true)
+            prompt.complete()
+            compare(prompt.focusIndex, prompt.keepIndex)
+            tc.barOnFocus(prompt, prompt.list)
+            compare(tc.rowAt(prompt.list, prompt.keepIndex).children[0].color, Ui.white(Ui.dialogItem.alpha))
+            compare(tc.rowAt(prompt.list, prompt.closeIndex).children[0].color, Ui.white(Ui.dialogItem.alphaDim))
+            prompt.close()
+            prompt.complete()
+        }
+        Ui.setSurface(640, 960)
+        prompt.width = 640
+        prompt.height = 960
+    }
+
     function test_dialog_focus() {
         dialog.open()
         dialog.complete()
@@ -464,7 +537,7 @@ TestCase {
         verify(dialog.handleAction("down", false))
         verify(dialog.handleAction("down", false))
         compare(dialog.focusIndex, 2)
-        compare(dialog.bar.rowY, Ui.px(Ui.contentTop) + 2 * dialog.pitch)
+        tryCompare(dialog.bar, "rowY", Ui.px(Ui.contentTop) + 2 * dialog.pitch, 2000)
         verify(dialog.handleAction("a", false))
         compare(acceptedSpy.count, 1)
         compare(acceptedSpy.signalArguments[0][0], 2)
@@ -781,9 +854,18 @@ TestCase {
 
     function test_touch_power_item_runs_verb() {
         tc.openDialog(powerMenu)
-        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 2))
+        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 3))
         compare(verbSpy.count, 1)
         compare(verbSpy.signalArguments[0][0], "suspend")
+        compare(powerMenu.shown, false)
+    }
+
+    function test_touch_power_session_item_switches() {
+        tc.openDialog(powerMenu)
+        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 2))
+        compare(switchSpy.count, 1)
+        compare(switchSpy.signalArguments[0][0], "microemu")
+        compare(verbSpy.count, 0)
         compare(powerMenu.shown, false)
     }
 

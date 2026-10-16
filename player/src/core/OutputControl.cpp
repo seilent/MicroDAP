@@ -1,7 +1,6 @@
 #include "OutputControl.h"
 
 #include "AudioInfo.h"
-#include "Settings.h"
 
 #include <QDebug>
 #include <QFile>
@@ -13,6 +12,7 @@ namespace {
 
 constexpr int pollMs = 2000;
 constexpr int processTimeoutMs = 5000;
+constexpr int settleMs = 400;
 
 QString binary(const char *env, const QString &fallback)
 {
@@ -28,19 +28,22 @@ OutputControl::OutputControl(QObject *parent)
 {
     m_pollTimer.setInterval(pollMs);
     connect(&m_pollTimer, &QTimer::timeout, this, &OutputControl::refresh);
+    m_settleTimer.setSingleShot(true);
+    m_settleTimer.setInterval(settleMs);
+    connect(&m_settleTimer, &QTimer::timeout, this, [this] { readAll([this] { finish(!m_defaultSink.isEmpty()); }); });
 }
 
 OutputControl::~OutputControl()
 {
-    drop(m_apply);
     drop(m_jack);
     drop(m_sinkList);
-    drop(m_word);
+    drop(m_default);
 }
 
 QStringList OutputControl::outputs()
 {
-    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb")};
+    return {QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), QStringLiteral("usb"),
+            QStringLiteral("bt")};
 }
 
 QString OutputControl::speakerSink()
@@ -58,9 +61,9 @@ QString OutputControl::usbPrefix()
     return QStringLiteral("alsa_output.usb-");
 }
 
-QString OutputControl::wpctlPath()
+QString OutputControl::btPrefix()
 {
-    return binary("MICRODAP_WPCTL_BIN", QStringLiteral("wpctl"));
+    return QStringLiteral("bluez_output.");
 }
 
 QString OutputControl::pactlPath()
@@ -71,11 +74,6 @@ QString OutputControl::pactlPath()
 QString OutputControl::amixerPath()
 {
     return binary("MICRODAP_AMIXER_BIN", QStringLiteral("amixer"));
-}
-
-QString OutputControl::systemctlPath()
-{
-    return binary("MICRODAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
 }
 
 QStringList OutputControl::parseSinks(const QString &text)
@@ -108,20 +106,17 @@ bool OutputControl::parseJack(const QString &text)
     return match.hasMatch() && match.captured(1) == QLatin1StringView("on");
 }
 
-QString OutputControl::resolve(const QString &output, bool jack, bool usb)
+QString OutputControl::outputOf(const QString &sink)
 {
-    if (output == QLatin1StringView("speaker"))
-        return QStringLiteral("speaker");
-    if (output == QLatin1StringView("headphones"))
-        return QStringLiteral("headphones");
-    if (usb)
+    if (sink.isEmpty())
+        return {};
+    if (sink.startsWith(usbPrefix()))
         return QStringLiteral("usb");
-    return jack ? QStringLiteral("headphones") : QStringLiteral("speaker");
-}
-
-QString OutputControl::unitFor(const QString &word)
-{
-    return QStringLiteral("microdap-priv@") + word + QStringLiteral(".service");
+    if (sink.startsWith(btPrefix()))
+        return QStringLiteral("bt");
+    if (sink == headphonesSink())
+        return QStringLiteral("headphones");
+    return QStringLiteral("speaker");
 }
 
 QString OutputControl::output() const
@@ -174,19 +169,9 @@ void OutputControl::setActive(bool active)
     emit activeChanged();
 }
 
-QString OutputControl::hpGain() const
+QString OutputControl::defaultSink() const
 {
-    return m_hpGain;
-}
-
-QString OutputControl::hpAmp() const
-{
-    return m_hpAmp;
-}
-
-int OutputControl::spkGain() const
-{
-    return m_spkGain;
+    return m_defaultSink;
 }
 
 OutputControl::HeldState OutputControl::held() const
@@ -205,12 +190,10 @@ void OutputControl::setHeld(HeldState state)
             << (released ? "none" : state == HeldState::Held ? "held" : "returning");
     if (usb != usbPresent())
         emit usbSinkChanged();
-    if (released && m_everApplied && m_activeOutput == QLatin1StringView("usb") && m_usbSink.isEmpty())
-        apply(m_output);
-    else if (released)
+    if (m_everApplied)
+        resolve();
+    if (released)
         refresh();
-    else if (state == HeldState::Held && m_everApplied && m_activeOutput != QLatin1StringView("usb"))
-        apply(m_output);
 }
 
 void OutputControl::watchCard(int index, const QString &id)
@@ -256,16 +239,16 @@ void OutputControl::apply(const QString &output)
         m_output = output;
         emit outputChanged();
     }
-    drop(m_apply);
     drop(m_jack);
     drop(m_sinkList);
+    drop(m_default);
     m_reading = false;
     m_reread = false;
     m_applying = true;
     m_everApplied = true;
     updateBusy();
-    qInfo() << "microdap output: apply" << output;
-    readBoth([this] { resolveAndSet(); });
+    qInfo() << "microdap output: wait for the default sink of" << output;
+    m_settleTimer.start();
 }
 
 void OutputControl::refresh()
@@ -276,15 +259,10 @@ void OutputControl::refresh()
         return;
     }
     m_reading = true;
-    const bool jack = m_jackPresent;
-    const QString usb = m_usbSink;
-    readBoth([this, jack, usb] {
+    readAll([this] {
         m_reading = false;
-        if (m_everApplied && (jack != m_jackPresent || usb != m_usbSink)) {
-            qInfo() << "microdap output: edge, jack" << m_jackPresent << "usb" << m_usbSink;
-            apply(m_output);
-            return;
-        }
+        if (m_everApplied)
+            resolve();
         if (!m_reread)
             return;
         m_reread = false;
@@ -292,10 +270,12 @@ void OutputControl::refresh()
     });
 }
 
-void OutputControl::readBoth(std::function<void()> done)
+void OutputControl::readAll(std::function<void()> done)
 {
     readJack([this, done](bool, const QByteArray &) {
-        readSinks([done](bool, const QByteArray &) { done(); });
+        readSinks([this, done](bool, const QByteArray &) {
+            readDefault([done](bool, const QByteArray &) { done(); });
+        });
     });
 }
 
@@ -325,96 +305,24 @@ void OutputControl::readSinks(Handler done)
     });
 }
 
-void OutputControl::resolveAndSet()
+void OutputControl::readDefault(Handler done)
 {
-    const QString active = resolve(m_output, m_jackPresent, usbPresent());
-    if (active == QLatin1StringView("usb") && m_held != HeldState::None) {
-        qInfo() << "microdap output: usb held, default sink kept";
-        setActiveOutput(active);
-        finish(true);
-        return;
-    }
-    const QString sink = active == QLatin1StringView("usb") ? m_usbSink
-        : active == QLatin1StringView("headphones") ? headphonesSink() : speakerSink();
-    if (!m_sinks.contains(sink)) {
-        qWarning() << "microdap output: sink not listed" << sink;
-        finish(false);
-        return;
-    }
-    run(m_apply, pactlPath(), {QStringLiteral("set-default-sink"), sink},
-        [this, active](bool ok, const QByteArray &) {
+    run(m_default, pactlPath(), {QStringLiteral("get-default-sink")}, [this, done](bool ok, const QByteArray &out) {
         if (ok)
-            setActiveOutput(active);
-        finish(ok);
+            m_defaultSink = QString::fromUtf8(out).trimmed();
+        done(ok, out);
     });
 }
 
-void OutputControl::setHeadphone(const QString &gain, const QString &amp)
+void OutputControl::resolve()
 {
-    const QString g = gain.toLower();
-    const QString a = amp.toLower();
-    if (!Settings::hpGains().contains(g) || !Settings::hpAmps().contains(a)) {
-        qWarning() << "microdap output: unknown headphone setting" << gain << amp;
+    if (m_held != HeldState::None) {
+        setActiveOutput(QStringLiteral("usb"));
         return;
     }
-    if (m_hpGain != g) {
-        m_hpGain = g;
-        emit hpGainChanged();
-    }
-    if (m_hpAmp != a) {
-        m_hpAmp = a;
-        emit hpAmpChanged();
-    }
-    if (!m_applying)
-        applyHeadphone();
-}
-
-void OutputControl::setSpkGain(int step)
-{
-    if (!Settings::spkGains().contains(step)) {
-        qWarning() << "microdap output: unknown speaker gain" << step;
-        return;
-    }
-    if (m_spkGain != step) {
-        m_spkGain = step;
-        emit spkGainChanged();
-    }
-    startWords({QStringLiteral("spk-gain-") + QString::number(step)});
-}
-
-void OutputControl::applyHeadphone()
-{
-    if (m_hpGain.isEmpty() || m_hpAmp.isEmpty())
-        return;
-    if (m_activeOutput != QLatin1StringView("headphones")) {
-        qInfo() << "microdap output: headphones not active, hp words skipped";
-        return;
-    }
-    startWords({QStringLiteral("hp-gain-") + m_hpGain, QStringLiteral("hp-amp-") + m_hpAmp});
-}
-
-void OutputControl::startWords(const QStringList &words)
-{
-    m_words.append(words);
-    if (!m_word)
-        nextWord();
-    updateBusy();
-}
-
-void OutputControl::nextWord()
-{
-    if (m_words.isEmpty()) {
-        updateBusy();
-        return;
-    }
-    const QString word = m_words.takeFirst();
-    qInfo() << "microdap output: start" << unitFor(word);
-    run(m_word, systemctlPath(), {QStringLiteral("start"), unitFor(word)},
-        [this, word](bool ok, const QByteArray &) {
-        qInfo() << "microdap output: applied" << word << ok;
-        emit applied(word, ok);
-        nextWord();
-    });
+    const QString active = outputOf(m_defaultSink);
+    if (!active.isEmpty())
+        setActiveOutput(active);
 }
 
 void OutputControl::run(QProcess *&slot, const QString &program, const QStringList &args, Handler handler)
@@ -467,15 +375,14 @@ void OutputControl::drop(QProcess *&slot)
 void OutputControl::finish(bool ok)
 {
     m_applying = false;
+    resolve();
     updateBusy();
-    qInfo() << "microdap output: applied" << m_output << "as" << m_activeOutput << ok;
+    qInfo() << "microdap output:" << m_output << "plays on" << m_defaultSink << "as" << m_activeOutput << ok;
     emit applied(m_output, ok);
     if (!m_resolvedOnce) {
         m_resolvedOnce = true;
         emit firstApplied(ok);
     }
-    if (ok)
-        applyHeadphone();
     if (!m_reread)
         return;
     m_reread = false;
@@ -484,10 +391,9 @@ void OutputControl::finish(bool ok)
 
 void OutputControl::updateBusy()
 {
-    const bool busy = m_applying || m_word != nullptr || !m_words.isEmpty();
-    if (m_busy == busy)
+    if (m_busy == m_applying)
         return;
-    m_busy = busy;
+    m_busy = m_applying;
     emit busyChanged();
 }
 

@@ -12,7 +12,7 @@ pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse libpulse-mainloop-glib)
 pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
-find_package(SDL3 REQUIRED CONFIG)
+find_package(MicroSet REQUIRED CONFIG)
 
 qt_standard_project_setup(REQUIRES 6.11)
 
@@ -41,8 +41,6 @@ add_library(microdapcore STATIC
     src/core/Biquad.h
     src/core/BluezModel.cpp
     src/core/BluezModel.h
-    src/core/CodecFragment.cpp
-    src/core/CodecFragment.h
     src/core/DacEq.cpp
     src/core/DacEq.h
     src/core/DbusPad.cpp
@@ -55,8 +53,8 @@ add_library(microdapcore STATIC
     src/core/FakeBluezModel.h
     src/core/FiioWorker.cpp
     src/core/FiioWorker.h
-    src/core/GuideChord.cpp
-    src/core/GuideChord.h
+    src/core/GuideKey.cpp
+    src/core/GuideKey.h
     src/core/HubModels.cpp
     src/core/HubModels.h
     src/core/Intercept.cpp
@@ -82,34 +80,25 @@ add_library(microdapcore STATIC
     src/core/OutputWatch.h
     src/core/OverlayBridge.cpp
     src/core/OverlayBridge.h
-    src/core/Pad.cpp
-    src/core/Pad.h
     src/core/PadSource.h
     src/core/Player.cpp
     src/core/Player.h
     src/core/PowerBridge.cpp
     src/core/PowerBridge.h
-    src/core/QrtrLink.cpp
-    src/core/QrtrLink.h
     src/core/Queue.cpp
     src/core/Queue.h
     src/core/RgbControl.cpp
     src/core/RgbControl.h
+    src/core/Rotation.cpp
+    src/core/Rotation.h
     src/core/Scanner.cpp
     src/core/Scanner.h
     src/core/SectionKey.cpp
     src/core/SectionKey.h
-    src/core/SensorRotation.cpp
-    src/core/SensorRotation.h
     src/core/Settings.cpp
     src/core/Settings.h
     src/core/SleepInhibitor.cpp
     src/core/SleepInhibitor.h
-    src/core/SscLink.h
-    src/core/SscRotation.cpp
-    src/core/SscRotation.h
-    src/core/SscWire.cpp
-    src/core/SscWire.h
     src/core/State.cpp
     src/core/State.h
     src/core/StatusModel.cpp
@@ -120,6 +109,8 @@ add_library(microdapcore STATIC
     src/core/Version.h
     src/core/VolumeKeys.cpp
     src/core/VolumeKeys.h
+    src/core/WirePlumberRestart.cpp
+    src/core/WirePlumberRestart.h
 )
 target_include_directories(microdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_definitions(microdapcore PRIVATE MICRODAP_VERSION="${PROJECT_VERSION}")
@@ -133,7 +124,7 @@ target_link_libraries(microdapcore PUBLIC
     PkgConfig::TAGLIB
     PkgConfig::PULSE
     PkgConfig::ALSA
-    SDL3::SDL3
+    MicroSet::MicroSet
 )
 
 install(FILES

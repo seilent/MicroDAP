@@ -7,17 +7,12 @@
 #include <QDBusVariant>
 #include <QDebug>
 #include <QTimer>
-#include <QtGlobal>
 
 #include <utility>
 
 namespace microdap {
 
 namespace {
-
-constexpr int exitWriteTimeoutMs = 1000;
-constexpr int releaseRetryMs = 1000;
-constexpr int releaseTries = 30;
 
 QString propertiesInterface()
 {
@@ -29,9 +24,9 @@ QString objectManagerInterface()
     return QStringLiteral("org.freedesktop.DBus.ObjectManager");
 }
 
-QString interceptModeProperty()
+QString holderProperty()
 {
-    return QStringLiteral("InterceptMode");
+    return QStringLiteral("Holder");
 }
 
 QVariant unwrap(const QVariant &value)
@@ -57,29 +52,37 @@ QStringList stringList(const QVariant &value)
     return inner.toStringList();
 }
 
-QDBusMessage setModeCall(const QString &path, uint mode)
-{
-    QDBusMessage call = QDBusMessage::createMethodCall(Intercept::service(), path,
-                                                       propertiesInterface(), QStringLiteral("Set"));
-    call << Intercept::compositeInterface() << interceptModeProperty()
-         << QVariant::fromValue(QDBusVariant(QVariant::fromValue(mode)));
-    return call;
 }
 
-}
-
-Intercept::Intercept(const QDBusConnection &bus, QObject *parent)
+Intercept::Intercept(const QDBusConnection &session, const QDBusConnection &inputPlumber, QObject *parent)
     : QObject(parent)
-    , m_bus(bus)
-    , m_watcher(service(), bus, QDBusServiceWatcher::WatchForOwnerChange)
-    , m_retryMs(qEnvironmentVariableIntValue("MICRODAP_INTERCEPT_RETRY_MS") > 0
-                    ? qEnvironmentVariableIntValue("MICRODAP_INTERCEPT_RETRY_MS")
-                    : releaseRetryMs)
+    , m_session(session)
+    , m_bus(inputPlumber)
+    , m_watcher(service(), inputPlumber, QDBusServiceWatcher::WatchForOwnerChange)
+    , m_arbiter(arbiterService(), session, QDBusServiceWatcher::WatchForOwnerChange)
 {
     registerMetaTypes();
     connect(&m_watcher, &QDBusServiceWatcher::serviceRegistered, this, &Intercept::refresh);
     connect(&m_watcher, &QDBusServiceWatcher::serviceUnregistered, this,
             &Intercept::onServiceUnregistered);
+    connect(&m_arbiter, &QDBusServiceWatcher::serviceOwnerChanged, this,
+            [this](const QString &, const QString &, const QString &owner) {
+        if (owner.isEmpty()) {
+            setHolder({});
+            return;
+        }
+        if (m_wanted)
+            acquire();
+        else
+            readHolder();
+    });
+
+    if (!m_session.isConnected())
+        qWarning() << "microdap intercept: session bus not connected";
+    else if (!m_session.connect(arbiterService(), arbiterPath(), propertiesInterface(),
+                                QStringLiteral("PropertiesChanged"), this,
+                                SLOT(onArbiterProperties(QString,QVariantMap,QStringList))))
+        qWarning() << "microdap intercept: cannot subscribe to the arbiter" << m_session.lastError().message();
 
     if (!m_bus.isConnected()) {
         qWarning() << "microdap intercept: bus not connected";
@@ -96,17 +99,6 @@ Intercept::Intercept(const QDBusConnection &bus, QObject *parent)
                    << m_bus.lastError().message();
     }
     refresh();
-}
-
-Intercept::~Intercept()
-{
-    if (!m_everShown || !m_bus.isConnected())
-        return;
-    for (const QString &path : std::as_const(m_devices)) {
-        const QDBusMessage reply = m_bus.call(setModeCall(path, ModeNone), QDBus::Block, exitWriteTimeoutMs);
-        if (reply.type() == QDBusMessage::ErrorMessage)
-            qWarning() << "microdap intercept: release failed" << path << reply.errorMessage();
-    }
 }
 
 QDBusConnection Intercept::bus()
@@ -148,28 +140,48 @@ QString Intercept::targetPrefix()
     return rootPath() + QStringLiteral("/devices/target/dbus");
 }
 
-bool Intercept::shown() const
+QString Intercept::arbiterService()
 {
-    return m_shown;
+    return QStringLiteral("net.seilent.MicroOs.Intercept");
 }
 
-void Intercept::setShown(bool shown)
+QString Intercept::arbiterPath()
 {
-    if (m_shown == shown)
-        return;
-    m_shown = shown;
-    if (shown)
-        m_everShown = true;
-    m_releaseTries.clear();
-    writeAll(shown ? ModeOverlay : ModeNone);
+    return QStringLiteral("/net/seilent/MicroOs/Intercept");
 }
 
-void Intercept::reassert()
+QString Intercept::arbiterInterface()
 {
-    if (m_shown)
+    return QStringLiteral("net.seilent.MicroOs.Intercept1");
+}
+
+bool Intercept::wanted() const
+{
+    return m_wanted;
+}
+
+void Intercept::setWanted(bool wanted)
+{
+    if (m_wanted == wanted)
         return;
-    m_releaseTries.clear();
-    writeAll(ModeNone);
+    const bool before = holding();
+    m_wanted = wanted;
+    if (wanted)
+        acquire();
+    else
+        release();
+    if (before != holding())
+        emit holdingChanged();
+}
+
+bool Intercept::holding() const
+{
+    return m_wanted && !m_holder.isEmpty() && m_holder == m_session.baseService();
+}
+
+QString Intercept::holder() const
+{
+    return m_holder;
 }
 
 QStringList Intercept::devices() const
@@ -189,6 +201,80 @@ QStringList Intercept::targets() const
 bool Intercept::hasTargets() const
 {
     return !m_targets.isEmpty();
+}
+
+void Intercept::acquire()
+{
+    if (!m_session.isConnected())
+        return;
+    const quint64 request = ++m_request;
+    const QDBusMessage call = QDBusMessage::createMethodCall(arbiterService(), arbiterPath(), arbiterInterface(),
+                                                             QStringLiteral("Acquire"));
+    auto *watcher = new QDBusPendingCallWatcher(m_session.asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, request](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        const QDBusMessage reply = finished->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            qInfo() << "microdap intercept: Acquire failed" << reply.errorMessage();
+            return;
+        }
+        if (request == m_request)
+            readHolder();
+    });
+}
+
+void Intercept::release()
+{
+    if (!m_session.isConnected())
+        return;
+    ++m_request;
+    const QDBusMessage call = QDBusMessage::createMethodCall(arbiterService(), arbiterPath(), arbiterInterface(),
+                                                             QStringLiteral("Release"));
+    auto *watcher = new QDBusPendingCallWatcher(m_session.asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        const QDBusMessage reply = finished->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage)
+            qInfo() << "microdap intercept: Release failed" << reply.errorMessage();
+    });
+}
+
+void Intercept::readHolder()
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(arbiterService(), arbiterPath(), propertiesInterface(),
+                                                       QStringLiteral("Get"));
+    call << arbiterInterface() << holderProperty();
+    const quint64 request = m_request;
+    auto *watcher = new QDBusPendingCallWatcher(m_session.asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, request](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        if (request != m_request)
+            return;
+        const QDBusMessage reply = finished->reply();
+        setHolder(reply.type() == QDBusMessage::ErrorMessage ? QString()
+                                                              : unwrap(reply.arguments().value(0)).toString());
+    });
+}
+
+void Intercept::setHolder(const QString &holder)
+{
+    if (m_holder == holder)
+        return;
+    const bool before = holding();
+    m_holder = holder;
+    if (before != holding())
+        emit holdingChanged();
+}
+
+void Intercept::onArbiterProperties(const QString &interface, const QVariantMap &changed,
+                                    const QStringList &invalidated)
+{
+    if (interface != arbiterInterface())
+        return;
+    if (changed.contains(holderProperty()))
+        setHolder(unwrap(changed.value(holderProperty())).toString());
+    else if (invalidated.contains(holderProperty()))
+        readHolder();
 }
 
 void Intercept::refresh()
@@ -217,12 +303,6 @@ void Intercept::refresh()
             bool targets = false;
             for (auto it = objects.cbegin(); it != objects.cend(); ++it)
                 track(it.key().path(), it.value(), devices, targets);
-        }
-        if (m_shown) {
-            for (const QString &path : std::as_const(m_devices)) {
-                if (!previousDevices.contains(path))
-                    write(path, ModeOverlay);
-            }
         }
         if (previousDevices != m_devices)
             emit devicesChanged();
@@ -256,8 +336,6 @@ void Intercept::onInterfacesAdded(const QDBusMessage &message)
     bool devices = false;
     bool targets = false;
     track(path, added, devices, targets);
-    if (devices && m_shown)
-        write(path, ModeOverlay);
     if (devices)
         emit devicesChanged();
     if (targets)
@@ -290,87 +368,32 @@ void Intercept::onServiceUnregistered()
         emit targetsChanged();
 }
 
-void Intercept::writeAll(uint mode)
+void Intercept::rumble(const QList<int> &pattern)
 {
-    for (const QString &path : std::as_const(m_devices))
-        write(path, mode);
+    int at = 0;
+    for (qsizetype i = 0; i < pattern.size(); ++i) {
+        const int ms = pattern.at(i);
+        if (ms <= 0)
+            return;
+        if (i % 2 == 0) {
+            QTimer::singleShot(at, this, [this] { sendRumble(RumbleLevel); });
+            QTimer::singleShot(at + ms, this, [this] { sendRumble(0.0); });
+        }
+        at += ms;
+    }
 }
 
-void Intercept::write(const QString &path, uint mode)
+void Intercept::sendRumble(double level)
 {
-    if (!m_bus.isConnected()) {
-        qWarning() << "microdap intercept: bus not connected, skipping" << path << mode;
+    if (!m_bus.isConnected())
         return;
+    for (const QString &path : devices()) {
+        QDBusMessage call = QDBusMessage::createMethodCall(
+            service(), path, QStringLiteral("org.shadowblip.Output.ForceFeedback"), QStringLiteral("Rumble"));
+        call << level;
+        call.setAutoStartService(false);
+        m_bus.asyncCall(call);
     }
-    if (m_inFlight.contains(path)) {
-        m_pending.insert(path, mode);
-        return;
-    }
-    m_inFlight.insert(path);
-    auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(setModeCall(path, mode)), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this,
-            [this, path, mode](QDBusPendingCallWatcher *finished) {
-        finished->deleteLater();
-        m_inFlight.remove(path);
-        const QDBusMessage reply = finished->reply();
-        const bool failed = reply.type() == QDBusMessage::ErrorMessage;
-        const bool queued = m_pending.contains(path);
-        const uint next = m_pending.take(path);
-        if (queued && m_devices.contains(path) && (failed || next != mode)) {
-            if (failed)
-                qWarning() << "microdap intercept: intercept failed" << path << mode << reply.errorMessage();
-            write(path, next);
-            return;
-        }
-        if (mode != ModeNone) {
-            if (failed)
-                qWarning() << "microdap intercept: intercept failed" << path << mode << reply.errorMessage();
-            return;
-        }
-        if (m_shown || !m_devices.contains(path)) {
-            m_releaseTries.remove(path);
-            return;
-        }
-        if (failed)
-            retryRelease(path);
-        else
-            verifyReleased(path);
-    });
-}
-
-void Intercept::verifyReleased(const QString &path)
-{
-    QDBusMessage call = QDBusMessage::createMethodCall(service(), path, propertiesInterface(), QStringLiteral("Get"));
-    call << compositeInterface() << interceptModeProperty();
-    auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(call), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, path](QDBusPendingCallWatcher *finished) {
-        finished->deleteLater();
-        if (m_shown || !m_devices.contains(path)) {
-            m_releaseTries.remove(path);
-            return;
-        }
-        const QDBusMessage reply = finished->reply();
-        if (reply.type() != QDBusMessage::ErrorMessage && unwrap(reply.arguments().value(0)).toUInt() == ModeNone) {
-            m_releaseTries.remove(path);
-            return;
-        }
-        retryRelease(path);
-    });
-}
-
-void Intercept::retryRelease(const QString &path)
-{
-    const int tries = ++m_releaseTries[path];
-    if (tries >= releaseTries) {
-        m_releaseTries.remove(path);
-        qWarning() << "microdap intercept: release gave up" << path << "after" << tries << "tries";
-        return;
-    }
-    QTimer::singleShot(m_retryMs, this, [this, path] {
-        if (m_shown || !m_devices.contains(path) || !m_releaseTries.contains(path))
-            return;
-        write(path, ModeNone);
-    });
 }
 
 }

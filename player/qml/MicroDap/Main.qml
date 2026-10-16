@@ -30,7 +30,6 @@ Window {
     property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
     property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
-    property var codecFragment: root.screenshot || typeof CodecFragment === "undefined" ? null : CodecFragment
     property var outputMode: root.screenshot || typeof OutputMode === "undefined" ? null : OutputMode
     property var dacEq: root.screenshot || typeof DacEq === "undefined" ? null : DacEq
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
@@ -966,6 +965,7 @@ Window {
             id: powerMenu
 
             anchors.fill: parent
+            sessions: root.power !== null && root.power.sessions !== undefined ? root.power.sessions : []
             screenOff: root.off
             onVerb: (word) => {
                 if (root.power !== null && typeof root.power.runVerb === "function")
@@ -974,6 +974,12 @@ Window {
                     console.info("microdap: power menu " + word)
             }
             onGameMode: root.showSwitchPrompt()
+            onSwitchTo: (session) => {
+                if (root.power !== null && typeof root.power.switchTo === "function")
+                    root.power.switchTo(session)
+                else
+                    console.info("microdap: power menu switch to " + session)
+            }
         }
 
         OverlayLayer {
@@ -1178,7 +1184,6 @@ Window {
             player: root.player
             audioInfo: root.audioInfo
             outputControl: root.outputControl
-            codecFragment: root.codecFragment
             outputMode: root.outputMode
             dacEq: root.dacEq
             library: root.library
@@ -1252,7 +1257,9 @@ Window {
 
     Component {
         id: powerShotComponent
-        PowerShot {}
+        PowerShot {
+            fixture: root.shotState
+        }
     }
 
     Component {

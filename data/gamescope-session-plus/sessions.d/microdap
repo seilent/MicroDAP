@@ -1,0 +1,8 @@
+short_session_recover() {
+  echo "microdap: short session, recovery is off" >&2
+}
+
+export ORIENTATION=normal
+export QT_QPA_PLATFORM=xcb
+export MICRODAP_GAMESCOPE_APPID=0x4d444150
+export CLIENTCMD=/usr/bin/microdap-player

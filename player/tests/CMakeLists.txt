@@ -72,14 +72,9 @@ set_tests_properties(mpris PROPERTIES FIXTURES_REQUIRED library-fixtures)
 microdap_test_env(mpris)
 set_property(TEST mpris APPEND PROPERTY ENVIRONMENT "MICRODAP_AUDIO_SINK=fakesink sync=true")
 
-qt_add_executable(tst_pad core/tst_pad.cpp)
-target_link_libraries(tst_pad PRIVATE microdapcore Qt6::Test)
-add_test(NAME pad COMMAND tst_pad)
-microdap_test_env(pad)
-set_property(TEST pad APPEND PROPERTY ENVIRONMENT "SDL_JOYSTICK_HIDAPI=0")
-
 qt_add_executable(tst_power core/tst_power.cpp)
-target_compile_definitions(tst_power PRIVATE MICRODAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py")
+target_compile_definitions(tst_power PRIVATE MICRODAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py"
+                                             MICRODAP_FAKE_POWERD="${CMAKE_CURRENT_SOURCE_DIR}/fake_powerd.py")
 target_link_libraries(tst_power PRIVATE microdapcore Qt6::DBus Qt6::Test)
 if(DBUS_RUN_SESSION)
     add_test(NAME power COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_power>)
@@ -95,10 +90,24 @@ add_test(NAME audioinfo COMMAND tst_audioinfo)
 microdap_test_env(audioinfo)
 
 qt_add_executable(tst_rgb core/tst_rgb.cpp)
-target_compile_definitions(tst_rgb PRIVATE MICRODAP_UI_QML="${CMAKE_SOURCE_DIR}/qml/MicroDap/Ui.qml")
-target_link_libraries(tst_rgb PRIVATE microdapcore Qt6::Test)
-add_test(NAME rgb COMMAND tst_rgb)
+target_compile_definitions(tst_rgb PRIVATE MICRODAP_FAKE_MICROSETD="${CMAKE_CURRENT_SOURCE_DIR}/fake_microsetd.py")
+target_link_libraries(tst_rgb PRIVATE microdapcore Qt6::DBus Qt6::Test)
+if(DBUS_RUN_SESSION)
+    add_test(NAME rgb COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_rgb>)
+else()
+    add_test(NAME rgb COMMAND tst_rgb)
+endif()
 microdap_test_env(rgb)
+
+qt_add_executable(tst_settings core/tst_settings.cpp)
+target_compile_definitions(tst_settings PRIVATE MICRODAP_FAKE_MICROSETD="${CMAKE_CURRENT_SOURCE_DIR}/fake_microsetd.py")
+target_link_libraries(tst_settings PRIVATE microdapcore Qt6::DBus Qt6::Test)
+if(DBUS_RUN_SESSION)
+    add_test(NAME settings COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_settings>)
+else()
+    add_test(NAME settings COMMAND tst_settings)
+endif()
+microdap_test_env(settings)
 
 qt_add_executable(tst_output core/tst_output.cpp)
 target_link_libraries(tst_output PRIVATE microdapcore Qt6::Test)
@@ -114,26 +123,6 @@ qt_add_executable(tst_outputs core/tst_outputs.cpp)
 target_link_libraries(tst_outputs PRIVATE microdapcore Qt6::Gui Qt6::Test)
 add_test(NAME outputs COMMAND tst_outputs)
 microdap_test_env(outputs)
-
-qt_add_executable(tst_sensor core/tst_sensor.cpp)
-target_compile_definitions(tst_sensor PRIVATE MICRODAP_FAKE_SENSORPROXY="${CMAKE_CURRENT_SOURCE_DIR}/fake_sensorproxy.py")
-target_link_libraries(tst_sensor PRIVATE microdapcore Qt6::DBus Qt6::Test)
-if(DBUS_RUN_SESSION)
-    add_test(NAME sensor COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_sensor>)
-else()
-    add_test(NAME sensor COMMAND tst_sensor)
-endif()
-microdap_test_env(sensor)
-
-qt_add_executable(tst_ssc core/tst_ssc.cpp)
-target_compile_definitions(tst_ssc PRIVATE MICRODAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py")
-target_link_libraries(tst_ssc PRIVATE microdapcore Qt6::DBus Qt6::Test)
-if(DBUS_RUN_SESSION)
-    add_test(NAME ssc COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_ssc>)
-else()
-    add_test(NAME ssc COMMAND tst_ssc)
-endif()
-microdap_test_env(ssc)
 
 qt_add_executable(tst_reservation core/tst_reservation.cpp)
 target_compile_definitions(tst_reservation PRIVATE MICRODAP_FAKE_RESERVE="${CMAKE_CURRENT_SOURCE_DIR}/fake_reserve.py")
@@ -235,11 +224,6 @@ add_test(NAME fiio-cli COMMAND sh -c "${fiio_cli_script}" sh $<TARGET_FILE:micro
          ${CMAKE_CURRENT_SOURCE_DIR}/stub_systemctl.sh)
 microdap_test_env(fiio-cli)
 
-qt_add_executable(tst_codec core/tst_codec.cpp)
-target_link_libraries(tst_codec PRIVATE microdapcore Qt6::Test)
-add_test(NAME codec COMMAND tst_codec)
-microdap_test_env(codec)
-
 qt_add_executable(tst_hubmodels core/tst_hubmodels.cpp)
 target_link_libraries(tst_hubmodels PRIVATE microdapcore Qt6::Test)
 add_test(NAME hubmodels COMMAND tst_hubmodels)
@@ -263,7 +247,10 @@ endif()
 microdap_test_env(systembluez)
 
 qt_add_executable(tst_dbuspad core/tst_dbuspad.cpp)
-target_compile_definitions(tst_dbuspad PRIVATE MICRODAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py")
+target_compile_definitions(tst_dbuspad PRIVATE
+    MICRODAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py"
+    MICRODAP_FAKE_ARBITER="${CMAKE_CURRENT_SOURCE_DIR}/fake_arbiter.py"
+)
 target_link_libraries(tst_dbuspad PRIVATE microdapcore Qt6::DBus Qt6::Test)
 if(DBUS_RUN_SESSION)
     add_test(NAME dbuspad COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_dbuspad>)
@@ -275,6 +262,7 @@ microdap_test_env(dbuspad)
 qt_add_executable(tst_overlay core/tst_overlay.cpp)
 target_compile_definitions(tst_overlay PRIVATE
     MICRODAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py"
+    MICRODAP_FAKE_ARBITER="${CMAKE_CURRENT_SOURCE_DIR}/fake_arbiter.py"
     MICRODAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py"
 )
 target_link_libraries(tst_overlay PRIVATE microdapcore microdapuiplugin Qt6::DBus Qt6::Gui Qt6::Quick Qt6::Test)
@@ -286,7 +274,7 @@ endif()
 microdap_test_env(overlay)
 set_property(TEST overlay APPEND PROPERTY ENVIRONMENT "MICRODAP_AUDIO_SINK=fakesink sync=false")
 
-set(MICRODAP_TEST_FONT_DIR ${CMAKE_SOURCE_DIR}/../dist/usr/share/fonts/microdap CACHE PATH "Selawik TTF directory for the qml tests and specimen shots")
+set(MICRODAP_TEST_FONT_DIR ${PROJECT_SOURCE_DIR}/../build/cache/fonts CACHE PATH "Selawik TTF directory for the qml tests and specimen shots")
 
 qt_add_executable(tst_qml qml/tst_qml.cpp)
 target_compile_definitions(tst_qml PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")
@@ -484,6 +472,20 @@ foreach(screen IN ITEMS artist album settings playlists history eq power saver s
     )
     microdap_test_env(screenshot-${screen}-landscape)
     set_property(TEST screenshot-${screen}-landscape APPEND PROPERTY ENVIRONMENT "MICRODAP_FONT_DIR=${MICRODAP_TEST_FONT_DIR}")
+endforeach()
+
+foreach(shot IN ITEMS settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
+        settings:about-missing power:power-none power:power-long)
+    string(REPLACE ":" ";" parts ${shot})
+    list(GET parts 0 screen)
+    list(GET parts 1 state)
+    foreach(size IN ITEMS 640x960 960x640)
+        add_test(NAME screenshot-${screen}-${state}-${size}
+            COMMAND microdap-player --screenshot ${screen} --state ${state} --size ${size} --out ${shots}/${screen}-${state}-${size}.png
+        )
+        microdap_test_env(screenshot-${screen}-${state}-${size})
+        set_property(TEST screenshot-${screen}-${state}-${size} APPEND PROPERTY ENVIRONMENT "MICRODAP_FONT_DIR=${MICRODAP_TEST_FONT_DIR}")
+    endforeach()
 endforeach()
 
 foreach(screen IN ITEMS home settings)

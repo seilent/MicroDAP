@@ -1,13 +1,12 @@
 #include "AccentControl.h"
 #include "AlsaVolume.h"
 #include "FakeBluezModel.h"
-#include "CodecFragment.h"
 #include "DacEq.h"
 #include "DbusPad.h"
 #include "DeviceReservation.h"
 #include "Eq.h"
 #include "Gamescope.h"
-#include "GuideChord.h"
+#include "GuideKey.h"
 #include "HubModels.h"
 #include "Intercept.h"
 #include "Keep.h"
@@ -19,27 +18,25 @@
 #include "OutputMode.h"
 #include "OutputWatch.h"
 #include "OverlayBridge.h"
-#include "Pad.h"
 #include "Player.h"
 #include "PowerBridge.h"
 #include "RgbControl.h"
+#include "Rotation.h"
 #include "Screenshot.h"
-#include "SensorRotation.h"
 #include "Settings.h"
-#include "SscRotation.h"
 #include "State.h"
 #include "StatusModel.h"
 #include "AudioInfo.h"
 #include "SystemBluezModel.h"
 #include "Version.h"
 #include "VolumeKeys.h"
+#include "WirePlumberRestart.h"
 
 #include <QCommandLineParser>
 #include <QDBusConnection>
 #include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
-#include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
 #include <QQuickGraphicsConfiguration>
@@ -197,15 +194,21 @@ int main(int argc, char *argv[])
                                                            QDBusConnection::sessionBus());
     player.setBluez(bluez.get());
     const bool overlayMode = parser.isSet(overlayOption);
+    if (!overlayMode) {
+        settings.importLegacy();
+        QObject::connect(&settings, &microdap::Settings::availableChanged, &settings, [&settings] {
+            if (settings.available())
+                settings.importLegacy();
+        });
+    }
     std::unique_ptr<microdap::EqControl> eqControl = std::make_unique<microdap::EqControl>(&settings);
-    QObject::connect(eqControl.get(), &microdap::EqControl::profileApplied, &player, &microdap::Player::applyEq);
     QObject::connect(&library, &microdap::Library::scanningChanged, eqControl.get(), [&library, eq = eqControl.get()] {
         if (!library.scanning())
             eq->relist();
     });
     QObject::connect(&settings, &microdap::Settings::rootsChanged, eqControl.get(), &microdap::EqControl::relist);
     std::unique_ptr<microdap::OutputControl> outputControl;
-    std::unique_ptr<microdap::CodecFragment> codecFragment;
+    std::unique_ptr<microdap::WirePlumberRestart> wireplumber;
     std::unique_ptr<microdap::AlsaVolume> alsaVolume;
     std::unique_ptr<microdap::DeviceReservation> reservation;
     std::unique_ptr<microdap::VolumeKeys> volumeKeys;
@@ -216,7 +219,8 @@ int main(int argc, char *argv[])
     if (!overlayMode) {
         const microdap::OutputMode::Bounds bounds{};
         outputControl = std::make_unique<microdap::OutputControl>();
-        codecFragment = std::make_unique<microdap::CodecFragment>();
+        wireplumber = std::make_unique<microdap::WirePlumberRestart>();
+        wireplumber->setBluez(bluez.get());
         alsaVolume = std::make_unique<microdap::AlsaVolume>(std::make_unique<microdap::SndMixer>(), bounds.pacingMs);
         reservation = std::make_unique<microdap::DeviceReservation>(bounds.reservation);
         pulseVolume = new microdap::PulseSinkVolume;
@@ -236,9 +240,8 @@ int main(int argc, char *argv[])
         ports.dac = pulseVolume;
         ports.volume = routedVolume;
         ports.mixer = alsaVolume.get();
-        ports.codec = codecFragment.get();
+        ports.wireplumber = wireplumber.get();
         ports.bluez = bluez.get();
-        ports.eq = eqControl.get();
         ports.dacEq = dacEq.get();
         outputMode = std::make_unique<microdap::OutputMode>(bounds, ports);
         outputMode->setLevel(settings.outputLevel());
@@ -293,7 +296,9 @@ int main(int argc, char *argv[])
     }
     if (!overlayMode) {
         microdap::Keep::clear();
+        power.setSettings(&settings);
         power.runScreenOn();
+        power.enableHolds();
         power.setState(&state);
         power.setOutputMode(outputMode.get(), &player);
         power.enableSleepWatch();
@@ -322,23 +327,10 @@ int main(int argc, char *argv[])
     QObject::connect(&library, &microdap::Library::albumsChanged, &accent, &microdap::AccentControl::clearCache);
     std::unique_ptr<microdap::RgbControl> rgbControl;
     if (!overlayMode) {
-        outputControl->setHeadphone(settings.hpGain(), settings.hpAmp());
-        outputControl->setSpkGain(settings.spkGain());
         outputControl->apply(settings.output());
         QObject::connect(&settings, &microdap::Settings::outputChanged, outputControl.get(),
                          [&settings, control = outputControl.get()] { control->apply(settings.output()); });
-        auto applyHeadphone = [&settings, control = outputControl.get()] {
-            control->setHeadphone(settings.hpGain(), settings.hpAmp());
-        };
-        QObject::connect(&settings, &microdap::Settings::hpGainChanged, outputControl.get(), applyHeadphone);
-        QObject::connect(&settings, &microdap::Settings::hpAmpChanged, outputControl.get(), applyHeadphone);
-        QObject::connect(&settings, &microdap::Settings::spkGainChanged, outputControl.get(),
-                         [&settings, control = outputControl.get()] { control->setSpkGain(settings.spkGain()); });
-        codecFragment->setBluez(bluez.get());
-        codecFragment->apply(settings.btCodec());
-        QObject::connect(&settings, &microdap::Settings::btCodecChanged, codecFragment.get(),
-                         [&settings, fragment = codecFragment.get()] { fragment->apply(settings.btCodec()); });
-        rgbControl = std::make_unique<microdap::RgbControl>();
+        rgbControl = std::make_unique<microdap::RgbControl>(settings.client());
         rgbControl->setScreenOff(power.screenOff());
         rgbControl->start(settings.rgb(), accent.hue(), accent.level());
         QObject::connect(&settings, &microdap::Settings::rgbChanged, rgbControl.get(),
@@ -349,16 +341,14 @@ int main(int argc, char *argv[])
                          [&power, rgb = rgbControl.get()] { rgb->setScreenOff(power.screenOff()); });
     }
 
-    std::unique_ptr<microdap::PadSource> pad;
+    auto pad = std::make_unique<microdap::DbusPad>(QDBusConnection::sessionBus(), microdap::Intercept::bus());
     std::unique_ptr<microdap::OverlayBridge> overlay;
     if (overlayMode) {
-        auto dbusPad = std::make_unique<microdap::DbusPad>(microdap::Intercept::bus());
-        overlay = std::make_unique<microdap::OverlayBridge>(dbusPad.get(), &player);
+        overlay = std::make_unique<microdap::OverlayBridge>(pad.get(), &player);
         overlay->setState(&state);
         power.setOverlay(overlay.get());
-        pad = std::move(dbusPad);
     } else {
-        pad = std::make_unique<microdap::Pad>();
+        pad->setShown(true);
     }
 
     auto applyActive = [&power, &status, &audioInfo, model = bluez.get(), bridge = overlay.get()] {
@@ -377,19 +367,23 @@ int main(int argc, char *argv[])
     }
     QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, pad.get(),
                      [&power, source = pad.get()] { source->setScreenOff(power.screenOff()); });
-    std::unique_ptr<microdap::GuideChord> guide;
+    std::unique_ptr<microdap::GuideKey> guide;
     std::unique_ptr<microdap::OutputWatch> outputs;
     std::unique_ptr<QObject> sensor;
     if (!overlayMode) {
-        guide = std::make_unique<microdap::GuideChord>();
+        guide = std::make_unique<microdap::GuideKey>();
+        guide->setScreenOff(power.screenOff());
+        QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, guide.get(),
+                         [&power, key = guide.get()] { key->setScreenOff(power.screenOff()); });
+        QObject::connect(guide.get(), &microdap::GuideKey::playPause, &player, &microdap::Player::playPause);
+        QObject::connect(guide.get(), &microdap::GuideKey::next, &player, &microdap::Player::next);
+        QObject::connect(guide.get(), &microdap::GuideKey::previous, &player, &microdap::Player::previous);
+        QObject::connect(guide.get(), &microdap::GuideKey::switchPrompt, &power,
+                         &microdap::PowerBridge::requestSwitchPrompt);
+        QObject::connect(guide.get(), &microdap::GuideKey::buzz, pad->intercept(), &microdap::Intercept::rumble);
         volumeKeys = std::make_unique<microdap::VolumeKeys>(new microdap::EvdevKeys, routedVolume, &settings);
         QObject::connect(volumeKeys.get(), &microdap::VolumeKeys::levelChanged, &power, &microdap::PowerBridge::setVolume);
-        const QString backend = qEnvironmentVariable("MICRODAP_SENSOR_BACKEND");
-        if (backend == QLatin1StringView("ssc")
-            || (backend != QLatin1StringView("proxy") && QFileInfo::exists(QStringLiteral("/dev/fastrpc-sdsp"))))
-            sensor = std::make_unique<microdap::SscRotation>();
-        else
-            sensor = std::make_unique<microdap::SensorRotation>();
+        sensor = std::make_unique<microdap::Rotation>(settings.client());
         outputs = std::make_unique<microdap::OutputWatch>();
         outputs->setScreenOff(power.screenOff());
         QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, outputs.get(),
@@ -427,8 +421,8 @@ int main(int argc, char *argv[])
         QObject::connect(bluez.get(), &microdap::BluezModel::readyChanged, mode, &microdap::OutputMode::onBluezReadyChanged);
         QObject::connect(bluez.get(), &microdap::BluezModel::transportStateChanged, mode,
                          &microdap::OutputMode::onTransportStateChanged);
-        QObject::connect(codecFragment.get(), &microdap::CodecFragment::restartFinished, mode,
-                         &microdap::OutputMode::onCodecRestartFinished);
+        QObject::connect(wireplumber.get(), &microdap::WirePlumberRestart::restartFinished, mode,
+                         &microdap::OutputMode::onRestartFinished);
         QObject::connect(reserve, &microdap::DeviceReservation::acquired, mode, &microdap::OutputMode::onAcquired);
         QObject::connect(reserve, &microdap::DeviceReservation::refused, mode, &microdap::OutputMode::onRefused);
         QObject::connect(reserve, &microdap::DeviceReservation::failed, mode, &microdap::OutputMode::onFailed);
@@ -459,8 +453,6 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);
     engine.rootContext()->setContextProperty(QStringLiteral("OutputControl"),
                                              static_cast<QObject *>(outputControl.get()));
-    engine.rootContext()->setContextProperty(QStringLiteral("CodecFragment"),
-                                             static_cast<QObject *>(codecFragment.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("RgbControl"),
                                              static_cast<QObject *>(rgbControl.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("Eq"),

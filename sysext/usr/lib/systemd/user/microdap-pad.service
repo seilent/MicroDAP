@@ -1,9 +1,0 @@
-[Unit]
-Description=MicroDAP pad target
-BindsTo=gamescope-session-plus@microdap.service
-After=gamescope-session-plus@microdap.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/libexec/microdap/microdap-pad xb360

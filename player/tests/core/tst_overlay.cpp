@@ -12,6 +12,7 @@
 #include <QDBusInterface>
 #include <QDBusMessage>
 #include <QDBusReply>
+#include <QDBusVariant>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
@@ -19,6 +20,7 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
@@ -67,11 +69,6 @@ QString login1ControlPath()
 QString login1ControlInterface()
 {
     return QStringLiteral("net.seilent.MicroDap.FakeLogin1");
-}
-
-QString devicePath(int index)
-{
-    return Intercept::rootPath() + QStringLiteral("/CompositeDevice%1").arg(index);
 }
 
 bool writeScript(const QString &path, const QByteArray &body)
@@ -123,11 +120,9 @@ private slots:
     void prepareForSleepHides();
     void resumeTakesNewInhibitor();
     void prepareForSleepWhileHidden();
-    void resumeRewritesZero();
-    void releaseRetriesUntilZero();
-    void releaseRetriesUntilReadZero();
-    void releaseGivesUpAfterThirty();
-    void showStopsReleaseRetry();
+    void wakeKeepsReleased();
+    void arbiterRestartWhileShown();
+    void otherHolderBlocksPad();
     void hideSavesStack();
     void closePlayer();
     void closePlayerTimeout();
@@ -136,8 +131,10 @@ private slots:
 private:
     QDBusMessage control(const QString &method, const QList<QVariant> &arguments = {});
     QDBusMessage login1(const QString &method, const QList<QVariant> &arguments = {});
-    int mode(const QString &path);
-    int attempts(const QString &path);
+    bool held();
+    QString holder();
+    bool startArbiter();
+    void stopArbiter();
     void sleepAndResume();
     int inhibitCount();
     int openFds();
@@ -151,6 +148,7 @@ private:
 
     QTemporaryDir m_dir;
     QProcess m_fake;
+    QProcess m_arbiter;
     QProcess m_login1;
     QString m_stateFile;
     QString m_keepFile;
@@ -191,20 +189,40 @@ QDBusMessage OverlayTest::login1(const QString &method, const QList<QVariant> &a
     return QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
 }
 
-int OverlayTest::mode(const QString &path)
+QString OverlayTest::holder()
 {
-    const QDBusMessage reply = control(QStringLiteral("GetMode"), {path});
+    QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                       QStringLiteral("org.freedesktop.DBus.Properties"),
+                                                       QStringLiteral("Get"));
+    call << Intercept::arbiterInterface() << QStringLiteral("Holder");
+    const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
     if (reply.type() == QDBusMessage::ErrorMessage)
-        return -1;
-    return reply.arguments().value(0).toInt();
+        return QStringLiteral("error");
+    return qvariant_cast<QDBusVariant>(reply.arguments().value(0)).variant().toString();
 }
 
-int OverlayTest::attempts(const QString &path)
+bool OverlayTest::held()
 {
-    const QDBusMessage reply = control(QStringLiteral("Attempts"), {path});
-    if (reply.type() == QDBusMessage::ErrorMessage)
-        return -1;
-    return reply.arguments().value(0).toInt();
+    return holder() == QDBusConnection::sessionBus().baseService();
+}
+
+bool OverlayTest::startArbiter()
+{
+    return startFake(m_arbiter, QStringLiteral(MICRODAP_FAKE_ARBITER), Intercept::arbiterService());
+}
+
+void OverlayTest::stopArbiter()
+{
+    if (m_arbiter.state() != QProcess::Running)
+        return;
+    const QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                             QStringLiteral("net.seilent.MicroDap.FakeArbiter"),
+                                                             QStringLiteral("Quit"));
+    QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+    if (!m_arbiter.waitForFinished(busTimeoutMs)) {
+        m_arbiter.terminate();
+        m_arbiter.waitForFinished(busTimeoutMs);
+    }
 }
 
 void OverlayTest::sleepAndResume()
@@ -310,7 +328,7 @@ void OverlayTest::settleHidden()
     if (m_overlay->shown())
         m_overlay->hide();
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), false, busTimeoutMs);
 }
 
 void OverlayTest::initTestCase()
@@ -322,6 +340,7 @@ void OverlayTest::initTestCase()
         QSKIP("fake InputPlumber did not start (python3 with dbus and gi needed)");
     if (!startFake(m_login1, QStringLiteral(MICRODAP_FAKE_LOGIN1), SleepInhibitor::service()))
         QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
+    QVERIFY(startArbiter());
     QVERIFY(m_dir.isValid());
     QVERIFY(openNotifySocket());
     m_stateFile = m_dir.path() + QStringLiteral("/config/microdap/state.json");
@@ -336,14 +355,11 @@ void OverlayTest::initTestCase()
     const QByteArray logLine = QByteArrayLiteral("printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> '")
                                + m_closeLog.toUtf8() + QByteArrayLiteral("'\n");
     QVERIFY(writeScript(m_dir.path() + QStringLiteral("/microdap-bt"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
-    QVERIFY(writeScript(m_dir.path() + QStringLiteral("/microdap-codec"), QByteArrayLiteral("#!/bin/sh\n") + logLine));
     QVERIFY(writeScript(m_dir.path() + QStringLiteral("/slow-bt"),
                         QByteArrayLiteral("#!/bin/sh\n") + logLine + QByteArrayLiteral("exec sleep 10\n")));
     qputenv("MICRODAP_BT_BIN", (m_dir.path() + QStringLiteral("/microdap-bt")).toUtf8());
-    qputenv("MICRODAP_CODEC_BIN", (m_dir.path() + QStringLiteral("/microdap-codec")).toUtf8());
 
     qputenv("MICRODAP_INPUTPLUMBER_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
-    qputenv("MICRODAP_INTERCEPT_RETRY_MS", QByteArrayLiteral("50"));
     qputenv("MICRODAP_LOGIN1_BUS", qgetenv("DBUS_SESSION_BUS_ADDRESS"));
     QDBusConnection bus = Intercept::bus();
     QVERIFY2(bus.isConnected(), qPrintable(bus.lastError().message()));
@@ -355,7 +371,7 @@ void OverlayTest::initTestCase()
     m_player = std::make_unique<Player>();
     QVERIFY(m_player->positionPollEnabled());
     m_state = std::make_unique<State>(m_player.get(), m_stateFile);
-    m_pad = std::make_unique<DbusPad>(bus);
+    m_pad = std::make_unique<DbusPad>(session, bus);
     m_overlay = std::make_unique<OverlayBridge>(m_pad.get(), m_player.get());
     m_overlay->setState(m_state.get());
     m_power = std::make_unique<PowerBridge>(m_player.get(), session);
@@ -400,6 +416,7 @@ void OverlayTest::cleanupTestCase()
     m_power.reset();
     m_overlay.reset();
     m_pad.reset();
+    stopArbiter();
     m_state.reset();
     m_player.reset();
     if (m_notifyFd >= 0)
@@ -430,8 +447,7 @@ void OverlayTest::hiddenAtStart()
     QVERIFY(!m_player->positionPollEnabled());
     QVERIFY(m_overlay->watchdogActive());
     QCOMPARE(m_remote->property("OverlayShown").toBool(), false);
-    QCOMPARE(mode(devicePath(0)), 0);
-    QCOMPARE(mode(devicePath(1)), 0);
+    QCOMPARE(held(), false);
     QVERIFY(m_window->handle());
     QVERIFY(!m_window->isVisible());
     QCOMPARE(depth(), 1);
@@ -448,11 +464,11 @@ void OverlayTest::readyBeforeWatchdog()
 void OverlayTest::toggleShows()
 {
     m_changes.clear();
-    int modeAtShown = -1;
+    bool heldAtShown = true;
     bool fadingAtShown = true;
     const QMetaObject::Connection probe = connect(m_overlay.get(), &OverlayBridge::shownChanged, this,
-                                                 [this, &modeAtShown, &fadingAtShown] {
-        modeAtShown = mode(devicePath(0));
+                                                 [this, &heldAtShown, &fadingAtShown] {
+        heldAtShown = held();
         fadingAtShown = m_overlay->fading();
     });
     QSignalSpy mappedSpy(m_overlay.get(), &OverlayBridge::mappedChanged);
@@ -461,7 +477,7 @@ void OverlayTest::toggleShows()
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QTRY_VERIFY_WITH_TIMEOUT(m_overlay->shown(), busTimeoutMs);
     disconnect(probe);
-    QCOMPARE(modeAtShown, 0);
+    QVERIFY(!heldAtShown);
     QVERIFY(!fadingAtShown);
     QVERIFY(m_overlay->mapped());
     QVERIFY(m_window->handle());
@@ -471,8 +487,7 @@ void OverlayTest::toggleShows()
     QVERIFY(m_overlay->fading());
     QVERIFY(m_player->positionPollEnabled());
     QTRY_VERIFY_WITH_TIMEOUT(sawChange(QStringLiteral("OverlayShown"), true), busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(1)), 3, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
     QCOMPARE(m_remote->property("OverlayShown").toBool(), true);
     QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->fading(), fadeTimeoutMs);
@@ -492,14 +507,14 @@ void OverlayTest::hideWritesZeroBeforeFade()
     QVERIFY(m_overlay->shown());
     m_changes.clear();
     bool fadingAtShown = true;
-    int modeAtFirstFade = -1;
+    int heldAtFirstFade = -1;
     bool padShownAtFirstFade = true;
     const QMetaObject::Connection shownProbe = connect(m_overlay.get(), &OverlayBridge::shownChanged, this,
                                                       [this, &fadingAtShown] { fadingAtShown = m_overlay->fading(); });
     const QMetaObject::Connection fadeProbe = connect(m_overlay.get(), &OverlayBridge::opacityChanged, this,
-                                                     [this, &modeAtFirstFade, &padShownAtFirstFade] {
-        if (modeAtFirstFade < 0) {
-            modeAtFirstFade = mode(devicePath(0));
+                                                     [this, &heldAtFirstFade, &padShownAtFirstFade] {
+        if (heldAtFirstFade < 0) {
+            heldAtFirstFade = held() ? 1 : 0;
             padShownAtFirstFade = m_pad->shown();
         }
     });
@@ -513,9 +528,9 @@ void OverlayTest::hideWritesZeroBeforeFade()
     QVERIFY(m_overlay->mapped());
     QVERIFY(m_overlay->fading());
     QVERIFY(m_window->handle());
-    QTRY_VERIFY_WITH_TIMEOUT(modeAtFirstFade >= 0, fadeTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(heldAtFirstFade >= 0, fadeTimeoutMs);
     QVERIFY(!padShownAtFirstFade);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), false, busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
     disconnect(shownProbe);
     disconnect(fadeProbe);
@@ -526,8 +541,7 @@ void OverlayTest::hideWritesZeroBeforeFade()
     QCOMPARE(m_engine->rootObjects().constFirst(), static_cast<QObject *>(m_window.data()));
     QCOMPARE(depth(), 1);
     QVERIFY(!m_player->positionPollEnabled());
-    QCOMPARE(mode(devicePath(0)), 0);
-    QCOMPARE(mode(devicePath(1)), 0);
+    QCOMPARE(held(), false);
     QTRY_VERIFY_WITH_TIMEOUT(sawChange(QStringLiteral("OverlayShown"), false), busTimeoutMs);
 }
 
@@ -572,7 +586,7 @@ void OverlayTest::toggleDuringShowFade()
     QVERIFY(!m_overlay->shown());
     QVERIFY(m_overlay->mapped());
     QVERIFY(m_overlay->fading());
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), false, busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
     QCOMPARE(m_overlay->opacity(), 0.0);
     QCOMPARE(m_overlay->mapCount(), maps + 1);
@@ -599,7 +613,7 @@ void OverlayTest::toggleDuringHideFade()
     QVERIFY(m_overlay->mapped());
     QVERIFY(m_window->handle());
     QVERIFY(m_window->isVisible());
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
     QVERIFY(m_overlay->mapped());
     QVERIFY(m_window->handle());
@@ -642,7 +656,7 @@ void OverlayTest::showDuringRelease()
     QVERIFY(m_window->handle());
     QCOMPARE(mappedSpy.count(), 0);
     QCOMPARE(m_overlay->mapCount(), maps);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
 }
 
 void OverlayTest::showDuringShowFadeNoOp()
@@ -736,7 +750,7 @@ void OverlayTest::prepareForSleepHides()
     settleHidden();
     m_overlay->show();
     QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
     m_changes.clear();
     bool heldAtHidden = false;
     const QMetaObject::Connection probe = connect(m_overlay.get(), &OverlayBridge::shownChanged, this,
@@ -749,7 +763,7 @@ void OverlayTest::prepareForSleepHides()
     QVERIFY(heldAtHidden);
     QVERIFY(m_overlay->sleeping());
     QCOMPARE(m_remote->property("OverlayShown").toBool(), false);
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), false, busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->sleep()->held(), busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(openFds(), 0, busTimeoutMs);
@@ -768,8 +782,7 @@ void OverlayTest::resumeTakesNewInhibitor()
     QCOMPARE(m_overlay->sleep()->takeCount(), 2);
     QTRY_COMPARE_WITH_TIMEOUT(inhibitCount(), 2, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(openFds(), 1, busTimeoutMs);
-    QCOMPARE(mode(devicePath(0)), 0);
-    QCOMPARE(mode(devicePath(1)), 0);
+    QCOMPARE(held(), false);
     QVERIFY(!m_overlay->shown());
     QVERIFY(!m_overlay->mapped());
 }
@@ -784,7 +797,7 @@ void OverlayTest::prepareForSleepWhileHidden()
     QTRY_VERIFY_WITH_TIMEOUT(m_overlay->sleeping(), busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->sleep()->held(), busTimeoutMs);
     QCOMPARE(shownSpy.count(), 0);
-    QCOMPARE(mode(devicePath(0)), 0);
+    QCOMPARE(held(), false);
     QVERIFY(QFile::exists(m_stateFile));
     login1(QStringLiteral("EmitPrepareForSleep"), {false});
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->sleeping(), busTimeoutMs);
@@ -792,72 +805,51 @@ void OverlayTest::prepareForSleepWhileHidden()
     QCOMPARE(m_overlay->sleep()->takeCount(), takes + 1);
 }
 
-void OverlayTest::resumeRewritesZero()
+void OverlayTest::wakeKeepsReleased()
 {
     settleHidden();
-    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(mode(devicePath(0)), 3);
     sleepAndResume();
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
+    QTest::qWait(200);
+    QCOMPARE(holder(), QString());
     QVERIFY(!m_overlay->shown());
 }
 
-void OverlayTest::releaseRetriesUntilZero()
+void OverlayTest::arbiterRestartWhileShown()
 {
     settleHidden();
-    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 2u}).type(), QDBusMessage::ReplyMessage);
-    sleepAndResume();
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
-    QCOMPARE(attempts(devicePath(0)), 3);
-    QTest::qWait(300);
-    QCOMPARE(attempts(devicePath(0)), 3);
-}
-
-void OverlayTest::releaseRetriesUntilReadZero()
-{
-    settleHidden();
-    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("Stick"), {devicePath(0), 2u}).type(), QDBusMessage::ReplyMessage);
-    sleepAndResume();
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
-    QCOMPARE(attempts(devicePath(0)), 3);
-    QTest::qWait(300);
-    QCOMPARE(attempts(devicePath(0)), 3);
-}
-
-void OverlayTest::releaseGivesUpAfterThirty()
-{
-    settleHidden();
-    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 100u}).type(), QDBusMessage::ReplyMessage);
-    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^microdap intercept: release gave up")));
-    QTest::failOnWarning(QRegularExpression(QStringLiteral("^microdap intercept")));
-    sleepAndResume();
-    QTRY_COMPARE_WITH_TIMEOUT(attempts(devicePath(0)), 30, busTimeoutMs);
-    QTest::qWait(500);
-    QCOMPARE(attempts(devicePath(0)), 30);
-    QCOMPARE(mode(devicePath(0)), 3);
-    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 0u}).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 0u}).type(), QDBusMessage::ReplyMessage);
-}
-
-void OverlayTest::showStopsReleaseRetry()
-{
-    settleHidden();
-    QCOMPARE(control(QStringLiteral("ClearWrites")).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("SetMode"), {devicePath(0), 3u}).type(), QDBusMessage::ReplyMessage);
-    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 100u}).type(), QDBusMessage::ReplyMessage);
-    sleepAndResume();
-    QTRY_VERIFY_WITH_TIMEOUT(attempts(devicePath(0)) >= 2, busTimeoutMs);
-    QCOMPARE(control(QStringLiteral("Refuse"), {devicePath(0), 0u}).type(), QDBusMessage::ReplyMessage);
     m_overlay->show();
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
-    QTest::qWait(300);
-    QCOMPARE(mode(devicePath(0)), 3);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    stopArbiter();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_pad->holding(), busTimeoutMs);
+    QVERIFY(m_overlay->shown());
+    QVERIFY(startArbiter());
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QCOMPARE(held(), true);
+    settleHidden();
+    QCOMPARE(holder(), QString());
+}
+
+void OverlayTest::otherHolderBlocksPad()
+{
+    settleHidden();
+    m_overlay->show();
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("other"));
+    auto disconnectOther = qScopeGuard([] { QDBusConnection::disconnectFromBus(QStringLiteral("other")); });
+    QVERIFY(other.isConnected());
+    const QDBusMessage acquire = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                                Intercept::arbiterInterface(),
+                                                                QStringLiteral("Acquire"));
+    QCOMPARE(other.call(acquire, QDBus::Block, busTimeoutMs).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_pad->holding(), busTimeoutMs);
+    QVERIFY(m_overlay->shown());
+    QCOMPARE(holder(), other.baseService());
+    const QDBusMessage release = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                                Intercept::arbiterInterface(),
+                                                                QStringLiteral("Release"));
+    QCOMPARE(other.call(release, QDBus::Block, busTimeoutMs).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
     settleHidden();
 }
 
@@ -890,7 +882,7 @@ void OverlayTest::closePlayer()
 {
     settleHidden();
     m_overlay->show();
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 3, busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
     QVERIFY(Keep::write());
     QVERIFY(QFile::exists(m_keepFile));
     QVERIFY(m_state->save(true));
@@ -902,18 +894,17 @@ void OverlayTest::closePlayer()
 
     m_overlay->closePlayer();
     QVERIFY(!m_overlay->shown());
-    QTRY_COMPARE_WITH_TIMEOUT(mode(devicePath(0)), 0, busTimeoutMs);
-    QCOMPARE(mode(devicePath(1)), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), false, busTimeoutMs);
     QVERIFY(!QFile::exists(m_keepFile));
     QJsonObject after;
     QVERIFY(State::read(m_stateFile, after));
     QCOMPARE(after.value(QStringLiteral("handoff")).toBool(true), false);
     QTRY_COMPARE_WITH_TIMEOUT(closed.count(), 1, OverlayBridge::CloseTimeoutMs + busTimeoutMs);
-    QCOMPARE(readText(m_closeLog), QStringLiteral("microdap-bt --disconnect-sources\nmicrodap-codec clear\n"));
+    QCOMPARE(readText(m_closeLog), QStringLiteral("microdap-bt --disconnect-sources\n"));
     m_overlay->closePlayer();
     QCoreApplication::processEvents();
     QCOMPARE(closed.count(), 1);
-    QCOMPARE(readText(m_closeLog), QStringLiteral("microdap-bt --disconnect-sources\nmicrodap-codec clear\n"));
+    QCOMPARE(readText(m_closeLog), QStringLiteral("microdap-bt --disconnect-sources\n"));
     m_overlay->hide();
     QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->mapped(), fadeTimeoutMs);
 }

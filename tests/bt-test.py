@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -89,7 +90,7 @@ class Adapter(dbus.service.Object):
         self.fake = fake
         self.props = {
             'Address': dbus.String('AA:BB:CC:DD:EE:FF'),
-            'Alias': dbus.String('armada'),
+            'Alias': dbus.String('adapter'),
             'Powered': dbus.Boolean(True),
             'Pairable': dbus.Boolean(False),
             'PairableTimeout': dbus.UInt32(30),
@@ -289,7 +290,7 @@ class Driver:
         self.check(int(self.adapter_get('PairableTimeout')) == seconds, f'{label}: PairableTimeout not {seconds}')
         self.check(bool(self.adapter_get('Discoverable')) is True, f'{label}: Discoverable not true')
         self.check(int(self.adapter_get('DiscoverableTimeout')) == seconds, f'{label}: DiscoverableTimeout not {seconds}')
-        self.check(str(self.adapter_get('Alias')) == 'Test Device', f'{label}: Alias is {self.adapter_get("Alias")}')
+        self.check(str(self.adapter_get('Alias')) == socket.gethostname(), f'{label}: Alias is {self.adapter_get("Alias")}')
         self.check(self.active() is True, f'{label}: PairingActive not true')
 
     def connect(self):

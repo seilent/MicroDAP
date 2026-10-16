@@ -56,7 +56,6 @@ public:
 
     virtual void cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done) = 0;
     virtual void sinkCard(const QString &name, std::function<void(const DacCard &)> done) = 0;
-    virtual void setDefaultSink(const QString &name) = 0;
     virtual void sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done) = 0;
     virtual void sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done) = 0;
     virtual void setSinkVolumeDb(const QString &name, double db, std::function<void(bool ok)> done = nullptr) = 0;

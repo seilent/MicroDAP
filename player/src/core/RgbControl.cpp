@@ -2,115 +2,67 @@
 
 #include "Settings.h"
 
+#include <microset/client.h>
+
 #include <QDebug>
 
-#include <utility>
+#include <array>
 
 namespace microdap {
 
 namespace {
 
-constexpr int processTimeoutMs = 5000;
-
-QString binary(const char *env, const QString &fallback)
-{
-    const QString value = qEnvironmentVariable(env);
-    return value.isEmpty() ? fallback : value;
-}
-
-QString huePrefix()
-{
-    return QStringLiteral("rgb-hue-");
-}
-
-QString colorPrefix()
-{
-    return QStringLiteral("rgb-color-");
-}
-
-bool isHueWord(const QString &word)
-{
-    return word.startsWith(huePrefix());
-}
-
-bool isColorWord(const QString &word)
-{
-    return isHueWord(word) || word.startsWith(colorPrefix());
-}
-
-QString canonical(const QString &word)
-{
-    if (isHueWord(word))
-        return colorPrefix() + word.mid(huePrefix().size()) + QStringLiteral("-4");
-    return word;
-}
-
-int wordHue(const QString &word)
-{
-    if (isHueWord(word))
-        return word.mid(huePrefix().size()).toInt();
-    if (word.startsWith(colorPrefix()))
-        return word.mid(colorPrefix().size()).section(QLatin1Char('-'), 0, 0).toInt();
-    return -1;
-}
-
-QString sleepWord()
-{
-    return QStringLiteral("rgb-sleep");
-}
-
-QString wakeWord()
-{
-    return QStringLiteral("rgb-wake");
-}
-
-bool keepsHue(const QString &word)
-{
-    return word == sleepWord() || word == wakeWord();
-}
+constexpr std::array<int, RgbControl::levels + 1> saturation{100, 40, 60, 80, 100};
 
 }
 
-RgbControl::RgbControl(QObject *parent)
+RgbControl::RgbControl(MicroSet::Client *client, QObject *parent)
     : QObject(parent)
-    , m_mode(QStringLiteral("armada"))
+    , m_client(client)
+    , m_mode(QStringLiteral("system"))
 {
     m_hueTimer.setSingleShot(true);
     m_hueTimer.setInterval(hueDelayMs);
-    connect(&m_hueTimer, &QTimer::timeout, this, &RgbControl::sendHue);
+    connect(&m_hueTimer, &QTimer::timeout, this, &RgbControl::apply);
 }
 
-RgbControl::~RgbControl()
+RgbControl::~RgbControl() = default;
+
+QString RgbControl::enabledKey()
 {
-    dropProcess(m_probe);
-    dropProcess(m_word);
+    return QStringLiteral("rgb.enabled");
 }
 
-QString RgbControl::rgbPath()
+QString RgbControl::colorKey()
 {
-    return binary("MICRODAP_RGB_BIN", QStringLiteral("/usr/libexec/armada/armada-rgb-env"));
+    return QStringLiteral("rgb.color");
 }
 
-QString RgbControl::systemctlPath()
+uint RgbControl::colorFor(int hue, int level)
 {
-    return binary("MICRODAP_SYSTEMCTL_BIN", QStringLiteral("systemctl"));
-}
-
-QString RgbControl::hueWord(int hue)
-{
-    return huePrefix() + QString::number(Settings::normalizeHue(hue));
-}
-
-QString RgbControl::colorWord(int hue, int level)
-{
-    if (level < 1 || level > levels)
-        return hueWord(hue);
-    return colorPrefix() + QStringLiteral("%1-%2").arg(Settings::normalizeHue(hue)).arg(level);
-}
-
-QString RgbControl::unitFor(const QString &word)
-{
-    return QStringLiteral("microdap-priv@") + word + QStringLiteral(".service");
+    const int h = Settings::normalizeHue(hue);
+    const int l = saturation[level >= 1 && level <= levels ? level : 0];
+    const int k = h / 60;
+    const int f = h % 60;
+    const int lo = (255 * (100 - l) + 50) / 100;
+    const int span = 255 - lo;
+    const int up = lo + (span * f + 30) / 60;
+    const int down = lo + (span * (60 - f) + 30) / 60;
+    const auto rgb = [](int r, int g, int b) { return uint(r) << 16 | uint(g) << 8 | uint(b); };
+    switch (k) {
+    case 0:
+        return rgb(255, up, lo);
+    case 1:
+        return rgb(down, 255, lo);
+    case 2:
+        return rgb(lo, 255, up);
+    case 3:
+        return rgb(lo, down, 255);
+    case 4:
+        return rgb(up, lo, 255);
+    default:
+        return rgb(255, lo, down);
+    }
 }
 
 bool RgbControl::supported() const
@@ -153,19 +105,12 @@ bool RgbControl::saver() const
     return m_saver;
 }
 
-int RgbControl::sentHue() const
+std::optional<QVariant> RgbControl::sent(const QString &key) const
 {
-    return wordHue(m_sentWord);
-}
-
-QString RgbControl::sentWord() const
-{
-    return m_sentWord;
-}
-
-bool RgbControl::ready() const
-{
-    return m_probed && m_supported;
+    const auto it = m_sent.constFind(key);
+    if (it == m_sent.constEnd())
+        return std::nullopt;
+    return *it;
 }
 
 void RgbControl::start(const QString &mode, int hue, int level)
@@ -187,7 +132,17 @@ void RgbControl::start(const QString &mode, int hue, int level)
         m_level = l;
         emit levelChanged();
     }
-    probe();
+    MicroSet::Error error;
+    const QString schema = m_client ? m_client->schema(enabledKey(), &error) : QString();
+    const bool supported = m_client && error.ok() && schema.contains(enabledKey());
+    qInfo() << "microdap rgb: supported" << supported;
+    if (m_supported != supported) {
+        m_supported = supported;
+        emit supportedChanged();
+    }
+    m_probed = true;
+    emit probedChanged();
+    apply();
 }
 
 void RgbControl::setMode(const QString &mode)
@@ -201,8 +156,8 @@ void RgbControl::setMode(const QString &mode)
         return;
     m_mode = m;
     emit modeChanged();
-    if (ready())
-        applyMode();
+    m_hueTimer.stop();
+    apply();
 }
 
 void RgbControl::setHue(int hue)
@@ -224,7 +179,7 @@ void RgbControl::setColor(int hue, int level)
         emit hueChanged();
     if (levelMoved)
         emit levelChanged();
-    if (ready() && m_mode == QLatin1StringView("accent"))
+    if (m_mode == QLatin1StringView("accent"))
         m_hueTimer.start();
 }
 
@@ -234,19 +189,7 @@ void RgbControl::setScreenOff(bool off)
         return;
     m_screenOff = off;
     emit screenOffChanged();
-    if (off) {
-        m_asleep = false;
-        m_hueTimer.stop();
-        m_words.removeIf(isColorWord);
-        updateBusy();
-        return;
-    }
-    if (m_saver) {
-        sleepLights();
-        updateBusy();
-        return;
-    }
-    queueHue();
+    apply();
 }
 
 void RgbControl::setSaver(bool on)
@@ -255,180 +198,73 @@ void RgbControl::setSaver(bool on)
         return;
     m_saver = on;
     emit saverChanged();
-    if (on) {
-        m_hueTimer.stop();
-        m_words.removeIf(isColorWord);
-        if (!m_screenOff)
-            sleepLights();
-        updateBusy();
-        return;
-    }
-    if (m_asleep) {
-        m_asleep = false;
-        startWords({wakeWord()});
-    }
-    queueHue();
+    apply();
 }
 
-void RgbControl::sleepLights()
+std::optional<QVariant> RgbControl::wanted(const QString &key) const
 {
-    if (!ready() || m_asleep || m_mode == QLatin1StringView("off"))
-        return;
-    m_asleep = true;
-    startWords({sleepWord()});
+    const bool accent = m_mode == QLatin1StringView("accent");
+    if (key == enabledKey()) {
+        if (m_mode == QLatin1StringView("off") || m_screenOff || m_saver)
+            return QVariant::fromValue(false);
+        if (accent)
+            return QVariant::fromValue(true);
+        return std::nullopt;
+    }
+    if (key == colorKey() && accent)
+        return QVariant::fromValue(colorFor(m_hue, m_level));
+    return std::nullopt;
 }
 
-void RgbControl::probe()
+void RgbControl::apply()
 {
-    dropProcess(m_probe);
-    auto *process = new QProcess(this);
-    m_probe = process;
-    auto done = [this, process](bool ok) {
-        if (m_probe == process)
-            m_probe = nullptr;
-        process->deleteLater();
-        const bool changed = m_supported != ok;
-        m_supported = ok;
-        m_probed = true;
-        qInfo() << "microdap rgb: supported" << ok;
-        if (changed)
-            emit supportedChanged();
-        emit probedChanged();
-        updateBusy();
-        if (!ok)
-            return;
-        startWords({QStringLiteral("rgb-restore")});
-        if (m_mode != QLatin1StringView("armada"))
-            applyMode();
-        else if (m_saver && !m_screenOff)
-            sleepLights();
-    };
-    connect(process, &QProcess::finished, this,
-            [done](int code, QProcess::ExitStatus status) { done(status == QProcess::NormalExit && code == 0); });
-    connect(process, &QProcess::errorOccurred, this, [done, process](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart)
-            return;
-        qWarning() << "microdap rgb: cannot start" << process->program();
-        done(false);
-    });
-    QTimer::singleShot(processTimeoutMs, process, [process] {
-        if (process->state() != QProcess::NotRunning)
-            process->kill();
-    });
-    process->start(rgbPath(), {QStringLiteral("supported")});
+    if (!m_probed || !m_supported)
+        return;
+    send(enabledKey());
+    if (!m_hueTimer.isActive())
+        send(colorKey());
+}
+
+void RgbControl::send(const QString &key)
+{
+    const std::optional<QVariant> value = wanted(key);
+    const std::optional<QVariant> current = sent(key);
+    if (value == current)
+        return;
+    ++m_inflight;
     updateBusy();
-}
-
-void RgbControl::applyMode()
-{
-    m_hueTimer.stop();
-    if (m_mode == QLatin1StringView("accent")) {
-        queueHue();
-    } else {
-        m_words.removeIf(isColorWord);
-        startWords({m_mode == QLatin1StringView("off") ? QStringLiteral("rgb-off") : QStringLiteral("rgb-restore")});
-    }
-    if (m_mode == QLatin1StringView("off")) {
-        m_asleep = false;
-    } else if (m_saver && !m_screenOff) {
-        m_asleep = false;
-        sleepLights();
-    }
-}
-
-void RgbControl::sendHue()
-{
-    if (m_mode == QLatin1StringView("accent"))
-        queueHue();
-}
-
-void RgbControl::queueHue()
-{
-    if (!ready() || m_screenOff || m_saver || m_mode != QLatin1StringView("accent"))
-        return;
-    m_words.removeIf(isColorWord);
-    QString tail = m_sentWord;
-    for (const QString &word : std::as_const(m_words)) {
-        if (!keepsHue(word))
-            tail.clear();
-    }
-    const QString word = colorWord(m_hue, m_level);
-    if (canonical(tail) == canonical(word)) {
-        updateBusy();
+    if (!value) {
+        m_sent.remove(key);
+        qInfo() << "microdap rgb: clear" << key;
+        m_client->clearOverride(key, [this, key](const MicroSet::Error &error) { finished(key, error.ok()); });
         return;
     }
-    startWords({word});
-}
-
-void RgbControl::startWords(const QStringList &words)
-{
-    m_words.append(words);
-    if (!m_word)
-        nextWord();
-    updateBusy();
-}
-
-void RgbControl::nextWord()
-{
-    if (m_words.isEmpty()) {
-        updateBusy();
-        return;
-    }
-    const QString word = m_words.takeFirst();
-    if (!keepsHue(word))
-        m_sentWord = isColorWord(word) ? word : QString();
-    qInfo() << "microdap rgb: start" << unitFor(word);
-    auto *process = new QProcess(this);
-    m_word = process;
-    auto done = [this, process, word](bool ok) {
-        if (m_word == process)
-            m_word = nullptr;
-        process->deleteLater();
-        if (!ok) {
-            qWarning() << "microdap rgb:" << word << "failed";
-            if (isColorWord(word) && m_sentWord == word)
-                m_sentWord.clear();
+    m_sent.insert(key, *value);
+    qInfo() << "microdap rgb: override" << key << *value;
+    m_client->override(key, *value, [this, key, sentValue = *value](const MicroSet::Error &error) {
+        if (!error.ok()) {
+            qWarning().noquote() << "microdap rgb: override" << key << "refused," << error.name << error.message;
+            if (m_sent.value(key) == sentValue)
+                m_sent.remove(key);
         }
-        qInfo() << "microdap rgb: applied" << word << ok;
-        emit applied(word, ok);
-        nextWord();
-    };
-    connect(process, &QProcess::finished, this,
-            [done](int code, QProcess::ExitStatus status) { done(status == QProcess::NormalExit && code == 0); });
-    connect(process, &QProcess::errorOccurred, this, [done, process](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart)
-            return;
-        qWarning() << "microdap rgb: cannot start" << process->program();
-        done(false);
+        finished(key, error.ok());
     });
-    QTimer::singleShot(processTimeoutMs, process, [process] {
-        if (process->state() != QProcess::NotRunning)
-            process->kill();
-    });
-    process->start(systemctlPath(), {QStringLiteral("start"), unitFor(word)});
+}
+
+void RgbControl::finished(const QString &key, bool ok)
+{
+    --m_inflight;
+    updateBusy();
+    emit applied(key, ok);
 }
 
 void RgbControl::updateBusy()
 {
-    const bool busy = m_probe != nullptr || m_word != nullptr || !m_words.isEmpty();
+    const bool busy = m_inflight > 0;
     if (m_busy == busy)
         return;
     m_busy = busy;
     emit busyChanged();
-}
-
-void RgbControl::dropProcess(QProcess *&slot)
-{
-    if (!slot)
-        return;
-    QProcess *process = slot;
-    slot = nullptr;
-    process->disconnect(this);
-    if (process->state() != QProcess::NotRunning) {
-        process->kill();
-        process->waitForFinished(1000);
-    }
-    process->deleteLater();
 }
 
 }

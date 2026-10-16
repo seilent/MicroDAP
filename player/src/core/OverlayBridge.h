@@ -46,7 +46,6 @@ public:
     static QByteArray notifySocket();
     static bool notify(const QByteArray &state);
     static QString btBin();
-    static QString codecBin();
 
     DbusPad *pad() const;
     Player *player() const;

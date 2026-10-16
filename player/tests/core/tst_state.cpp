@@ -138,7 +138,7 @@ void StateTest::levelSetRestoresParked()
     const qint64 position = savePlaying(path, true);
     QVERIFY(position >= 500);
 
-    Settings settings(m_dir.path() + QStringLiteral("/parked/settings.ini"));
+    Settings settings(nullptr);
     settings.setOutputLevel(QStringLiteral("exclusive"));
     FakeRestore restore(&settings);
     Player player;
@@ -167,7 +167,7 @@ void StateTest::levelSetPausedRestoreNoReplay()
     const qint64 position = savePlaying(path, false);
     QVERIFY(position >= 500);
 
-    Settings settings(m_dir.path() + QStringLiteral("/paused/settings.ini"));
+    Settings settings(nullptr);
     settings.setOutputLevel(QStringLiteral("bitperfect"));
     FakeRestore restore(&settings);
     Player player;
@@ -187,7 +187,7 @@ void StateTest::levelOffRestoresAsToday()
     const QString path = m_dir.path() + QStringLiteral("/off/state.json");
     QVERIFY(savePlaying(path, true) >= 500);
 
-    Settings settings(m_dir.path() + QStringLiteral("/off/settings.ini"));
+    Settings settings(nullptr);
     QCOMPARE(settings.outputLevel(), QStringLiteral("off"));
     FakeRestore restore(&settings);
     Player player;
@@ -251,7 +251,7 @@ void StateTest::restorePendingSkipsPauseSave()
     QJsonObject before;
     QVERIFY(State::read(path, before));
 
-    Settings settings(m_dir.path() + QStringLiteral("/pending/settings.ini"));
+    Settings settings(nullptr);
     settings.setOutputLevel(QStringLiteral("exclusive"));
     FakeRestore restore(&settings);
     Player player;

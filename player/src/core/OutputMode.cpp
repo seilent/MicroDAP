@@ -2,9 +2,8 @@
 
 #include "AudioInfo.h"
 #include "BluezModel.h"
-#include "CodecFragment.h"
-#include "Eq.h"
 #include "OutputControl.h"
+#include "WirePlumberRestart.h"
 
 #include <QDebug>
 #include <QDir>
@@ -62,16 +61,16 @@ OutputMode::OutputMode(const Bounds &bounds, const Ports &ports, QObject *parent
     m_pcmPoll.setSingleShot(true);
     m_pcmPoll.setInterval(bounds.pcmPollMs);
     connect(&m_pcmPoll, &QTimer::timeout, this, &OutputMode::pollPcm);
-    m_codecWait.setSingleShot(true);
-    m_codecWait.setInterval(bounds.codecWaitMs);
-    connect(&m_codecWait, &QTimer::timeout, this, [this] {
-        if (!m_codecWaiting)
+    m_restartWait.setSingleShot(true);
+    m_restartWait.setInterval(bounds.restartWaitMs);
+    connect(&m_restartWait, &QTimer::timeout, this, [this] {
+        if (!m_restartWaiting)
             return;
-        m_codecWaiting = false;
-        log(QStringLiteral("codec restart still running, bit perfect chain"));
+        m_restartWaiting = false;
+        log(QStringLiteral("wireplumber restart still running, bit perfect chain"));
         if (m_waiting) {
             m_waiting = false;
-            driveBuild(Player::OutputChain::Bp);
+            driveBuild(bitPerfectChain());
         }
         updateAll();
     });
@@ -307,16 +306,16 @@ Player::OutputChain OutputMode::chainFor(GstState target) const
     if (!effective())
         return Player::OutputChain::Pw;
     if (m_level == bitperfect)
-        return Player::OutputChain::Bp;
+        return bitPerfectChain();
     if (m_state == State::ExHeld || m_state == State::ExAcquiring)
         return Player::OutputChain::Ex;
-    return blocked() ? Player::OutputChain::Bp : Player::OutputChain::Ex;
+    return blocked() ? bitPerfectChain() : Player::OutputChain::Ex;
 }
 
 Admit OutputMode::admit(const Player::PendingBuild &build)
 {
     ++m_admitSeq;
-    if (m_r.running || m_acq != Acquire::None || m_codecWaiting) {
+    if (m_r.running || m_acq != Acquire::None || m_restartWaiting) {
         m_waiting = true;
         m_waitTarget = build.target;
         if (build.target == GST_STATE_PLAYING)
@@ -328,7 +327,7 @@ Admit OutputMode::admit(const Player::PendingBuild &build)
         return {true, Player::OutputChain::Pw};
     }
     if (m_level == bitperfect)
-        return {true, Player::OutputChain::Bp};
+        return {true, bitPerfectChain()};
     if (m_state == State::ExHeld) {
         if (build.target == GST_STATE_PLAYING)
             m_park.stop();
@@ -340,7 +339,7 @@ Admit OutputMode::admit(const Player::PendingBuild &build)
         const Reason why = blockReason();
         if (why != Reason::None)
             m_reason = why;
-        return {true, Player::OutputChain::Bp};
+        return {true, bitPerfectChain()};
     }
     if (build.target != GST_STATE_PLAYING) {
         schedulePark();
@@ -348,10 +347,10 @@ Admit OutputMode::admit(const Player::PendingBuild &build)
     }
     m_waiting = true;
     m_waitTarget = GST_STATE_PLAYING;
-    if (m_ports.codec && m_ports.codec->restarting()) {
-        log(QStringLiteral("acquire waits for the codec restart"));
-        m_codecWaiting = true;
-        m_codecWait.start();
+    if (m_ports.wireplumber && m_ports.wireplumber->restarting()) {
+        log(QStringLiteral("acquire waits for the wireplumber restart"));
+        m_restartWaiting = true;
+        m_restartWait.start();
         return {false, Player::OutputChain::Ex};
     }
     startAcquire();
@@ -376,6 +375,24 @@ QString OutputMode::exclusiveSink() const
 QString OutputMode::exclusiveCard() const
 {
     return m_card.id;
+}
+
+QString OutputMode::bitPerfectSink() const
+{
+    return m_card.sink.isEmpty() ? m_usbSink : m_card.sink;
+}
+
+Player::OutputChain OutputMode::bitPerfectChain() const
+{
+    if (!bitPerfectSink().isEmpty()) {
+        m_noBitPerfectSink = false;
+        return Player::OutputChain::Bp;
+    }
+    if (!m_noBitPerfectSink) {
+        m_noBitPerfectSink = true;
+        log(QStringLiteral("no usb sink for bit perfect, normal chain"));
+    }
+    return Player::OutputChain::Pw;
 }
 
 int OutputMode::fixedRate() const
@@ -550,8 +567,7 @@ void OutputMode::onActiveOutputChanged(const QString &active, const QString &usb
 void OutputMode::onApplied(const QString &output, bool ok)
 {
     Q_UNUSED(ok);
-    if (m_resolved || !QStringList{QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"), usb}
-                           .contains(output))
+    if (m_resolved || !OutputControl::outputs().contains(output))
         return;
     m_resolved = true;
     m_resolveTimer.stop();
@@ -603,9 +619,9 @@ void OutputMode::onStatusChanged()
         abortAcquire(Reason::None, Build::Park);
     } else if (m_r.running) {
         m_waiting = false;
-    } else if (m_codecWaiting) {
-        m_codecWaiting = false;
-        m_codecWait.stop();
+    } else if (m_restartWaiting) {
+        m_restartWaiting = false;
+        m_restartWait.stop();
         m_waiting = false;
     } else if (m_state == State::ExHeld && m_nameOwned && !m_asleep) {
         if (play == PlayerPort::PlayState::Stopped)
@@ -750,12 +766,12 @@ void OutputMode::onTransportStateChanged()
     updateAll();
 }
 
-void OutputMode::onCodecRestartFinished(bool ok)
+void OutputMode::onRestartFinished(bool ok)
 {
-    if (m_codecWaiting) {
-        m_codecWaiting = false;
-        m_codecWait.stop();
-        log(QStringLiteral("codec restart finished"));
+    if (m_restartWaiting) {
+        m_restartWaiting = false;
+        m_restartWait.stop();
+        log(QStringLiteral("wireplumber restart finished"));
         if (m_waiting)
             decideWaiting();
     }
@@ -939,10 +955,10 @@ void OutputMode::releaseForSwitch()
         m_switchDac = true;
     }
     m_park.stop();
-    if (m_codecWaiting) {
-        log(QStringLiteral("switch drops the build waiting for the codec restart"));
-        m_codecWaiting = false;
-        m_codecWait.stop();
+    if (m_restartWaiting) {
+        log(QStringLiteral("switch drops the build waiting for the wireplumber restart"));
+        m_restartWaiting = false;
+        m_restartWait.stop();
         m_waiting = false;
         drivePark(m_ports.player->positionMs());
         updateAll();
@@ -1004,9 +1020,9 @@ void OutputMode::prepareForSleep(bool sleeping)
         m_park.stop();
         m_asleep = true;
         m_sleepGeneration = generation();
-        if (m_codecWaiting) {
-            m_codecWaiting = false;
-            m_codecWait.stop();
+        if (m_restartWaiting) {
+            m_restartWaiting = false;
+            m_restartWait.stop();
         }
         if (m_acq != Acquire::None && !m_nameOwned)
             dropAcquire();
@@ -1086,7 +1102,7 @@ void OutputMode::aboutToQuit()
     m_park.stop();
     m_acquireTimer.stop();
     m_pcmPoll.stop();
-    m_codecWait.stop();
+    m_restartWait.stop();
     m_netTimer.stop();
     m_resolveTimer.stop();
     m_readyTimer.stop();
@@ -1302,7 +1318,7 @@ void OutputMode::reconcile()
             if (built != chainFor(GST_STATE_PLAYING))
                 driveRebuild(position, GST_STATE_PLAYING);
         } else if (blocked()) {
-            if (parked || built != Player::OutputChain::Bp)
+            if (parked || built != bitPerfectChain())
                 driveRebuild(position, GST_STATE_PAUSED);
         } else if (!parked) {
             drivePark(position);
@@ -1348,10 +1364,6 @@ void OutputMode::updateAll()
         m_routeSink = sink;
         m_ports.volume->setRoute(alsa ? DacVolumePort::Route::Alsa : DacVolumePort::Route::Pulse, card, sink);
     }
-    if (m_ports.eq && on != m_bypassed) {
-        m_bypassed = on;
-        m_ports.eq->setBypassed(on);
-    }
     const bool store = on && m_ports.player->playState() != PlayerPort::PlayState::Playing && !m_nameOwned
                        && m_state != State::ExHeld;
     if (int(store) != m_storeAllowed) {
@@ -1395,7 +1407,7 @@ QString OutputMode::computeStatus() const
         return word;
     const bool ex = m_level == exclusiveLevel;
     const bool held = m_state == State::ExHeld;
-    Player::OutputChain wanted = Player::OutputChain::Bp;
+    Player::OutputChain wanted = bitPerfectChain();
     if (ex && (held || m_state == State::ExAcquiring))
         wanted = Player::OutputChain::Ex;
     if (m_ports.player->builtChain() != wanted || m_r.running)
@@ -1480,7 +1492,7 @@ void OutputMode::acquireCard(const DacCard &card)
         m_reason = Reason::Unavailable;
         if (m_waiting) {
             m_waiting = false;
-            driveBuild(Player::OutputChain::Bp);
+            driveBuild(bitPerfectChain());
         }
         updateAll();
         return;
@@ -1579,7 +1591,7 @@ void OutputMode::failBeforeReserve(Reason reason)
     m_reason = reason;
     if (m_waiting) {
         m_waiting = false;
-        driveBuild(Player::OutputChain::Bp);
+        driveBuild(bitPerfectChain());
     }
     updateAll();
 }
@@ -1711,7 +1723,6 @@ void OutputMode::sinkFound(const QString &name)
         m_netTimer.start(m_bounds.netFirstMs);
     m_usbSink = name;
     log(QStringLiteral("dac sink back ") + name);
-    m_ports.dac->setDefaultSink(name);
     QPointer<OutputMode> self(this);
     const QString id = m_card.id;
     m_ports.dac->sinkCard(name, [self, id](const DacCard &card) {
@@ -1807,14 +1818,14 @@ void OutputMode::onNetTimer()
             failReturn(false);
             return;
         }
-        if (!m_ports.codec || !m_ports.codec->restartForNet(QStringLiteral("dac sink missing"))) {
+        if (!m_ports.wireplumber || !m_ports.wireplumber->restartForNet(QStringLiteral("dac sink missing"))) {
             log(QStringLiteral("dac sink missing, restart deferred for the phone"));
             failReturn(true);
             return;
         }
         log(QStringLiteral("dac sink missing after release, restarting wireplumber"));
         m_r.phase = Phase::Restart;
-        m_netTimer.start(m_bounds.codecWaitMs);
+        m_netTimer.start(m_bounds.restartWaitMs);
         return;
     case Phase::Restart:
         m_r.phase = Phase::Second;
@@ -1832,7 +1843,7 @@ void OutputMode::retryNet()
 {
     if (!m_deferredNet || m_r.running || m_acq != Acquire::None || m_nameOwned || !cardPresent())
         return;
-    if (!m_ports.codec || !m_ports.codec->restartForNet(QStringLiteral("dac sink missing"))) {
+    if (!m_ports.wireplumber || !m_ports.wireplumber->restartForNet(QStringLiteral("dac sink missing"))) {
         log(QStringLiteral("dac sink missing, restart deferred for the phone"));
         return;
     }
@@ -1844,7 +1855,7 @@ void OutputMode::retryNet()
     m_reason = Reason::None;
     m_r.phase = Phase::Restart;
     m_ports.output->setHeld(HeldOutputPort::HeldState::Returning);
-    m_netTimer.start(m_bounds.codecWaitMs);
+    m_netTimer.start(m_bounds.restartWaitMs);
 }
 
 void OutputMode::finishRelease()
@@ -1888,14 +1899,14 @@ void OutputMode::decideWaiting()
         return;
     }
     if (m_level == bitperfect) {
-        driveBuild(Player::OutputChain::Bp);
+        driveBuild(bitPerfectChain());
         return;
     }
     if (blocked()) {
         const Reason why = blockReason();
         if (why != Reason::None)
             m_reason = why;
-        driveBuild(Player::OutputChain::Bp);
+        driveBuild(bitPerfectChain());
         return;
     }
     if (m_waitTarget != GST_STATE_PLAYING) {
@@ -1903,10 +1914,10 @@ void OutputMode::decideWaiting()
         return;
     }
     m_waiting = true;
-    if (m_ports.codec && m_ports.codec->restarting()) {
-        log(QStringLiteral("acquire waits for the codec restart"));
-        m_codecWaiting = true;
-        m_codecWait.start();
+    if (m_ports.wireplumber && m_ports.wireplumber->restarting()) {
+        log(QStringLiteral("acquire waits for the wireplumber restart"));
+        m_restartWaiting = true;
+        m_restartWait.start();
         return;
     }
     startAcquire();

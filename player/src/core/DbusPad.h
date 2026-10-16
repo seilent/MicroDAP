@@ -20,7 +20,7 @@ class DbusPad : public PadSource
 public:
     static constexpr double PressThreshold = 0.5;
 
-    explicit DbusPad(const QDBusConnection &bus, QObject *parent = nullptr);
+    DbusPad(const QDBusConnection &session, const QDBusConnection &inputPlumber, QObject *parent = nullptr);
     ~DbusPad() override;
 
     static int actionFor(const QString &name);
@@ -28,6 +28,7 @@ public:
     Intercept *intercept() const;
     bool shown() const;
     void setShown(bool shown);
+    bool holding() const;
     QStringList dropped() const;
 
     bool screenOff() const override;

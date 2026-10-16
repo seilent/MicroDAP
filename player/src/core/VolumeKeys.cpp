@@ -552,14 +552,6 @@ void PulseSinkVolume::lookupCard(quint32 sinkIndex, const QByteArray &name, std:
     });
 }
 
-void PulseSinkVolume::setDefaultSink(const QString &name)
-{
-    const QByteArray sink = name.toUtf8();
-    dacCall("default sink", [this, sink] {
-        return pa_context_set_default_sink(m_context, sink.constData(), &PulseSinkVolume::onDacSet, this);
-    });
-}
-
 void PulseSinkVolume::sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done)
 {
     querySink(PA_INVALID_INDEX, name.toUtf8(), [done](const pa_sink_info *info) {

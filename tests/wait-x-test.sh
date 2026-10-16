@@ -3,7 +3,7 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-waitx="${repo}/sysext/usr/libexec/microdap/microdap-wait-x"
+waitx="${repo}/data/libexec/microdap-wait-x"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT

@@ -1422,7 +1422,7 @@ void LibraryTest::mediaUnmounted()
 {
     const QSqlDatabase db = m_library->database();
     const QString base = m_dir.path() + QStringLiteral("/media");
-    const QString label = base + QStringLiteral("/armada/CARD");
+    const QString label = base + QStringLiteral("/micro/CARD");
     const QString path = label + QStringLiteral("/Single/01 Single.mp3");
     QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
                      label + QStringLiteral("/Single")));
@@ -1514,7 +1514,7 @@ void LibraryTest::candidateRoots()
 {
     const QString base = m_dir.path() + QStringLiteral("/candidates");
     const QString card = base + QStringLiteral("/mmcblk0p1");
-    const QString user = base + QStringLiteral("/armada");
+    const QString user = base + QStringLiteral("/micro");
     const QString label = user + QStringLiteral("/CARD");
     const QString empty = base + QStringLiteral("/nobody");
     QVERIFY(QDir().mkpath(card + QStringLiteral("/Music")));
@@ -1794,7 +1794,7 @@ void LibraryTest::migrateFrom4()
 
 void LibraryTest::rootsChange()
 {
-    m_settings = std::make_unique<Settings>(m_dir.path() + QStringLiteral("/settings.ini"));
+    m_settings = std::make_unique<Settings>(nullptr);
     m_settings->setRoots({m_music});
     m_library->setSettings(m_settings.get());
     const QString other = m_dir.path() + QStringLiteral("/roots");

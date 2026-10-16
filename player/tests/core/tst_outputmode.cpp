@@ -1,10 +1,8 @@
 #include "AlsaVolume.h"
-#include "CodecFragment.h"
-#include "Eq.h"
 #include "FakeBluezModel.h"
 #include "OutputFakes.h"
 #include "OutputMode.h"
-#include "Settings.h"
+#include "WirePlumberRestart.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -109,7 +107,7 @@ OutputMode::Bounds shortBounds()
     b.pcmFreeMs = 150;
     b.pcmPollMs = 5;
     b.acquireMs = 400;
-    b.codecWaitMs = 300;
+    b.restartWaitMs = 300;
     b.parkMs = 120;
     b.netFirstMs = 120;
     b.netSecondMs = 150;
@@ -144,7 +142,7 @@ public:
         dac.volumeDb = -20.0;
         dac.sinkCards.insert(fiioSink, dac.card);
         dac.sinkCards.insert(replugSink, dac.card);
-        codec.setBluez(&bluez);
+        restart.setBluez(&bluez);
         OutputMode::Ports ports;
         ports.player = &player;
         ports.reservation = &reservation;
@@ -152,7 +150,7 @@ public:
         ports.dac = &dac;
         ports.volume = &volume;
         ports.mixer = &alsa;
-        ports.codec = &codec;
+        ports.wireplumber = &restart;
         ports.bluez = &bluez;
         if (withDacEq)
             ports.dacEq = &dacEq;
@@ -168,7 +166,7 @@ public:
                 QTimer::singleShot(0, &context, [this] { mode->onReleased(); });
         };
         output.onRefresh = [this](quint64 read) { mode->onSinksRead(sinkListed ? sink : QString(), read); };
-        QObject::connect(&codec, &CodecFragment::restartFinished, mode.get(), &OutputMode::onCodecRestartFinished);
+        QObject::connect(&restart, &WirePlumberRestart::restartFinished, mode.get(), &OutputMode::onRestartFinished);
         QObject::connect(&alsa, &AlsaVolume::disconnected, mode.get(), &OutputMode::onMixerDisconnected);
         QObject::connect(&bluez, &BluezModel::connectedChanged, mode.get(), &OutputMode::onBluezConnectedChanged);
         QObject::connect(&bluez, &BluezModel::readyChanged, mode.get(), &OutputMode::onBluezReadyChanged);
@@ -205,7 +203,7 @@ public:
     FakeDacVolume volume{&log};
     FakeDacEqPort dacEq{&log};
     FakeBluezModel bluez;
-    CodecFragment codec;
+    WirePlumberRestart restart;
     std::unique_ptr<OutputMode> mode;
     QObject context;
     QString sink = fiioSink;
@@ -290,9 +288,9 @@ private slots:
     void netAdoptsRunningRestart();
     void netSecondFiringSticky();
     void stickyUnavailableClearsOnDisconnect();
-    void codecRestartingWaits();
-    void codecRestartingBoundBuildsBp();
-    void switchDuringCodecWaitParks();
+    void restartingWaits();
+    void restartingBoundBuildsBp();
+    void switchDuringRestartWaitParks();
     void readyFalseNoAcquire();
     void dapStartAdoptsWritesNothing();
     void entryUnmutesOnce();
@@ -314,7 +312,7 @@ private slots:
     void statusSuffixOrder();
     void ratesAndFixedRate();
     void exclusiveSinkFormat();
-    void eqBypassFollowsLevel();
+    void bitPerfectSinkFollowsUsb();
     void cardChangedAtAssignments();
     void generationAfterGoneDecision();
     void cardGoneOnlyOnChange();
@@ -674,7 +672,8 @@ void OutputModeTest::releaseSleepCancelsNet()
     QVERIFY(rig.output.refreshes > refreshes);
     QVERIFY(rig.settled());
     QCOMPARE(rig.output.held, HeldOutputPort::HeldState::None);
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), fiioSink);
 }
 
 void OutputModeTest::releaseUnplugEndsReturn()
@@ -705,7 +704,7 @@ void OutputModeTest::releaseOutputAwayEndsReturn()
     rig.mode->onActiveOutputChanged(QStringLiteral("headphones"), QString());
     QVERIFY(!rig.mode->releasing());
     QCOMPARE(rig.output.held, HeldOutputPort::HeldState::None);
-    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("default ")), 0);
+    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("inputs")), 0);
     QCOMPARE(rig.mode->state(), State::Pw);
 }
 
@@ -735,7 +734,8 @@ void OutputModeTest::releaseReturningEndsAtFreshRead()
     rig.player.stop();
     QTRY_COMPARE_WITH_TIMEOUT(rig.output.held, HeldOutputPort::HeldState::Returning, waitMs);
     rig.mode->onSinkAppeared(41, replugSink, 1);
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + replugSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), replugSink);
     QTest::qWait(30);
     QCOMPARE(rig.output.held, HeldOutputPort::HeldState::Returning);
     QVERIFY(rig.mode->releasing());
@@ -757,7 +757,8 @@ void OutputModeTest::releaseRenamedSinkUsedByNextAcquire()
     rig.dac.sinkCards.remove(fiioSink);
     rig.player.stop();
     QVERIFY(rig.settled());
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + replugSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), replugSink);
     QVERIFY(rig.hold(2));
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("acquire Audio1 B")), 2);
 }
@@ -1057,7 +1058,7 @@ void OutputModeTest::heldParkTimerReleasesIdle()
     const int park = indexOf(rig.log, QStringLiteral("player park 5000"));
     const int release = indexOf(rig.log, QStringLiteral("reserve release"));
     const int returning = indexOf(rig.log, QStringLiteral("output held returning"));
-    const int def = indexOf(rig.log, QStringLiteral("default ") + fiioSink);
+    const int def = indexOf(rig.log, QStringLiteral("inputs"));
     const int none = indexOf(rig.log, QStringLiteral("output held none"), returning);
     QVERIFY(park >= 0);
     QVERIFY(park < release);
@@ -1106,7 +1107,7 @@ void OutputModeTest::heldConnectedReleasesContinuesBp()
     QCOMPARE(rig.player.status, Play::Playing);
     QVERIFY(rig.settled());
     const int release = indexOf(rig.log, QStringLiteral("reserve release"));
-    const int def = indexOf(rig.log, QStringLiteral("default ") + fiioSink);
+    const int def = indexOf(rig.log, QStringLiteral("inputs"));
     const int move = indexOf(rig.log, QStringLiteral("move 12 ") + fiioSink);
     const int built = indexOf(rig.log, QStringLiteral("player built bp playing 1 2000"));
     QVERIFY(indexOf(rig.log, QStringLiteral("player hold 1 playing 2000")) < release);
@@ -1128,7 +1129,8 @@ void OutputModeTest::heldSwitchReleasesThenReady()
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, waitMs);
     QVERIFY(rig.player.isParked);
     QVERIFY(indexOf(rig.log, QStringLiteral("player park")) < indexOf(rig.log, QStringLiteral("reserve release")));
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), fiioSink);
     QCOMPARE(rig.mode->reason(), Reason::Switch);
     QCOMPARE(countOf(rig.log, QStringLiteral("player built")), 1);
 }
@@ -1159,7 +1161,8 @@ void OutputModeTest::heldWakeSameGenerationReleases()
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("mark gone")), 0);
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 1);
     QVERIFY(rig.settled());
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), fiioSink);
     QCOMPARE(rig.mode->reason(), Reason::Idle);
     QVERIFY(rig.player.isParked);
     QVERIFY(rig.alsa.isOpen());
@@ -1182,8 +1185,9 @@ void OutputModeTest::heldWakeNewerGenerationReturnedCard()
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 1);
     QVERIFY(indexOf(rig.log, QStringLiteral("reserve mark gone")) < indexOf(rig.log, QStringLiteral("reserve release")));
     QVERIFY(rig.settled());
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + replugSink));
-    QVERIFY(!rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), replugSink);
+    QVERIFY(rig.mode->bitPerfectSink() != fiioSink);
     QVERIFY(rig.mixer->writes.contains(74));
     QVERIFY(rig.player.isParked);
 }
@@ -1198,7 +1202,7 @@ void OutputModeTest::heldWakeCardGoneNoReturn()
     rig.mode->prepareForSleep(false);
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 1);
     QVERIFY(rig.settled());
-    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("default ")), 0);
+    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("inputs")), 0);
     QCOMPARE(rig.output.held, HeldOutputPort::HeldState::None);
     QCOMPARE(rig.mode->state(), State::Pw);
     QTest::qWait(300);
@@ -1217,7 +1221,7 @@ void OutputModeTest::heldReleaseRequestedGrants()
     QVERIFY(!rig.mode->releasing());
     QCOMPARE(rig.mode->reason(), Reason::Released);
     QCOMPARE(rig.output.held, HeldOutputPort::HeldState::None);
-    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("default ")), 0);
+    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("inputs")), 0);
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 0);
 }
 
@@ -1237,7 +1241,7 @@ void OutputModeTest::grantSleepNameLostNoNewRelease()
     QCOMPARE(rig.mode->reason(), Reason::Released);
     QTest::qWait(400);
     QCOMPARE(rig.output.refreshes, refreshes);
-    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("default ")), 0);
+    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("inputs")), 0);
     QCOMPARE(restarts(), 0);
 }
 
@@ -1251,7 +1255,8 @@ void OutputModeTest::heldNameLostUnrequested()
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 0);
     QVERIFY(rig.settled());
     QVERIFY(indexOf(rig.log, QStringLiteral("player park")) < indexOf(rig.log, QStringLiteral("output held returning")));
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), fiioSink);
     QCOMPARE(rig.mode->reason(), Reason::Lost);
 }
 
@@ -1302,7 +1307,8 @@ void OutputModeTest::heldReplugInsidePollGap()
     QVERIFY(r2 < release);
     QVERIFY(rig.settled());
     QVERIFY(rig.player.isParked);
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), fiioSink);
     QVERIFY(rig.alsa.isOpen());
     QTest::qWait(300);
     QCOMPARE(restarts(), 0);
@@ -1320,7 +1326,7 @@ void OutputModeTest::heldLevelChangeRebuilds()
     QVERIFY(rig.settled());
     QCOMPARE(rig.mode->state(), State::Bp);
     QVERIFY(rig.player.calls.contains(QStringLiteral("built bp playing 1 4400")));
-    QVERIFY(indexOf(rig.log, QStringLiteral("default ")) < indexOf(rig.log, QStringLiteral("player built bp")));
+    QVERIFY(indexOf(rig.log, QStringLiteral("inputs")) < indexOf(rig.log, QStringLiteral("player built bp")));
 }
 
 void OutputModeTest::heldReadyFalseReleases()
@@ -1333,7 +1339,7 @@ void OutputModeTest::heldReadyFalseReleases()
     QVERIFY(rig.settled());
     QCOMPARE(rig.player.chain, Chain::Bp);
     QCOMPARE(rig.player.status, Play::Playing);
-    QVERIFY(indexOf(rig.log, QStringLiteral("default ")) < indexOf(rig.log, QStringLiteral("player built bp")));
+    QVERIFY(indexOf(rig.log, QStringLiteral("inputs")) < indexOf(rig.log, QStringLiteral("player built bp")));
 }
 
 void OutputModeTest::heldQuitReleasesThroughJoin()
@@ -1350,7 +1356,7 @@ void OutputModeTest::heldQuitReleasesThroughJoin()
     QCOMPARE(countOf(rig.reservation.calls, QStringLiteral("release")), 0);
     QTest::qWait(50);
     QCOMPARE(rig.output.refreshes, refreshes);
-    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("default ")), 0);
+    QCOMPARE(countOf(rig.dac.calls, QStringLiteral("inputs")), 0);
 }
 
 void OutputModeTest::netSinkListedNoWait()
@@ -1441,7 +1447,7 @@ void OutputModeTest::netAdoptsRunningRestart()
     QVERIFY(rig.hold());
     rig.player.stop();
     QTRY_COMPARE_WITH_TIMEOUT(rig.output.held, HeldOutputPort::HeldState::Returning, waitMs);
-    QVERIFY(rig.codec.restartForNet(QStringLiteral("test")));
+    QVERIFY(rig.restart.restartForNet(QStringLiteral("test")));
     QTRY_VERIFY_WITH_TIMEOUT(!rig.mode->releasing(), waitMs);
     QCOMPARE(restarts(), 1);
 }
@@ -1489,13 +1495,13 @@ void OutputModeTest::stickyUnavailableClearsOnDisconnect()
     QTRY_COMPARE_WITH_TIMEOUT(rig.mode->state(), State::ExHeld, waitMs);
 }
 
-void OutputModeTest::codecRestartingWaits()
+void OutputModeTest::restartingWaits()
 {
     Rig rig;
     setRestartDelay(QStringLiteral("0.15"));
     QVERIFY(rig.enter(QStringLiteral("exclusive")));
-    QVERIFY(rig.codec.restartForNet(QStringLiteral("test")));
-    QVERIFY(rig.codec.restarting());
+    QVERIFY(rig.restart.restartForNet(QStringLiteral("test")));
+    QVERIFY(rig.restart.restarting());
     rig.player.play(1);
     QCOMPARE(rig.player.status, Play::Playing);
     QTest::qWait(30);
@@ -1503,27 +1509,27 @@ void OutputModeTest::codecRestartingWaits()
     QTRY_COMPARE_WITH_TIMEOUT(rig.mode->state(), State::ExHeld, waitMs);
 }
 
-void OutputModeTest::codecRestartingBoundBuildsBp()
+void OutputModeTest::restartingBoundBuildsBp()
 {
     Rig rig;
     setRestartDelay(QStringLiteral("1"));
     QVERIFY(rig.enter(QStringLiteral("exclusive")));
-    QVERIFY(rig.codec.restartForNet(QStringLiteral("test")));
+    QVERIFY(rig.restart.restartForNet(QStringLiteral("test")));
     QElapsedTimer clock;
     clock.start();
     rig.player.play(1);
     QTRY_COMPARE_WITH_TIMEOUT(rig.player.chain, Chain::Bp, waitMs);
     QVERIFY(clock.elapsed() >= 270);
     QVERIFY(rig.reservation.calls.isEmpty());
-    QTRY_VERIFY_WITH_TIMEOUT(!rig.codec.restarting(), waitMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!rig.restart.restarting(), waitMs);
 }
 
-void OutputModeTest::switchDuringCodecWaitParks()
+void OutputModeTest::switchDuringRestartWaitParks()
 {
     Rig rig;
     setRestartDelay(QStringLiteral("0.3"));
     QVERIFY(rig.enter(QStringLiteral("exclusive")));
-    QVERIFY(rig.codec.restartForNet(QStringLiteral("test")));
+    QVERIFY(rig.restart.restartForNet(QStringLiteral("test")));
     rig.player.play(1);
     rig.player.seek(800);
     QSignalSpy ready(rig.mode.get(), &OutputMode::switchReady);
@@ -1531,7 +1537,7 @@ void OutputModeTest::switchDuringCodecWaitParks()
     QCOMPARE(ready.count(), 1);
     QVERIFY(rig.player.isParked);
     QCOMPARE(rig.player.position, qint64(800));
-    QSignalSpy finished(&rig.codec, &CodecFragment::restartFinished);
+    QSignalSpy finished(&rig.restart, &WirePlumberRestart::restartFinished);
     QVERIFY(finished.wait(waitMs));
     QTest::qWait(50);
     QVERIFY(rig.reservation.calls.isEmpty());
@@ -1694,7 +1700,7 @@ void OutputModeTest::outputErrorWriteReleasesAndReacquires()
     QTRY_COMPARE_WITH_TIMEOUT(countOf(rig.reservation.calls, QStringLiteral("release")), 1, waitMs);
     QTRY_COMPARE_WITH_TIMEOUT(countOf(rig.reservation.calls, QStringLiteral("acquire")), 2, waitMs);
     QTRY_COMPARE_WITH_TIMEOUT(rig.mode->state(), State::ExHeld, waitMs);
-    QVERIFY(indexOf(rig.log, QStringLiteral("default ")) < indexOf(rig.log, QStringLiteral("reserve acquire"),
+    QVERIFY(indexOf(rig.log, QStringLiteral("inputs")) < indexOf(rig.log, QStringLiteral("reserve acquire"),
                                                                     indexOf(rig.log, QStringLiteral("reserve release"))));
 }
 
@@ -1815,7 +1821,8 @@ void OutputModeTest::sleepDuringReleaseWaits()
     rig.mode->onReleased();
     rig.mode->prepareForSleep(false);
     QVERIFY(rig.settled());
-    QVERIFY(rig.dac.calls.contains(QStringLiteral("default ") + fiioSink));
+    QVERIFY(rig.dac.calls.contains(QStringLiteral("inputs")));
+    QCOMPARE(rig.mode->bitPerfectSink(), fiioSink);
 }
 
 void OutputModeTest::sleepDuringReleaseBound()
@@ -1913,35 +1920,36 @@ void OutputModeTest::exclusiveSinkFormat()
     QCOMPARE(dongle.mode->rates(), QVariantList{48000});
 }
 
-void OutputModeTest::eqBypassFollowsLevel()
+void OutputModeTest::bitPerfectSinkFollowsUsb()
 {
-    Settings settings(m_dir.path() + QStringLiteral("/settings.ini"));
-    EqControl eq(&settings);
-    Rig base;
-    OutputMode::Ports ports;
-    ports.player = &base.player;
-    ports.reservation = &base.reservation;
-    ports.output = &base.output;
-    ports.dac = &base.dac;
-    ports.volume = &base.volume;
-    ports.mixer = &base.alsa;
-    ports.eq = &eq;
-    OutputMode mode(shortBounds(), ports);
-    base.player.policy = &mode;
-    mode.onActiveOutputChanged(QStringLiteral("usb"), fiioSink);
-    QVERIFY(!eq.bypassed());
-    mode.setLevel(QStringLiteral("bitperfect"));
-    QVERIFY(eq.bypassed());
-    mode.onActiveOutputChanged(QStringLiteral("speaker"), QString());
-    QVERIFY(!eq.bypassed());
-    base.player.policy = base.mode.get();
+    Rig rig;
+    QCOMPARE(rig.mode->bitPerfectSink(), QString());
+    QCOMPARE(rig.mode->bitPerfectChain(), Chain::Pw);
+    rig.mode->setLevel(QStringLiteral("bitperfect"));
+    rig.mode->onActiveOutputChanged(QStringLiteral("usb"), QString());
+    QTest::qWait(100);
+    QCOMPARE(rig.mode->bitPerfectSink(), QString());
+    QVERIFY(rig.mode->chainFor(GST_STATE_PLAYING) != Chain::Bp);
+    rig.player.play(1);
+    QVERIFY(rig.player.chain != Chain::Bp);
+    QCOMPARE(countOf(rig.player.calls, QStringLiteral("built bp")), 0);
+    rig.player.stop();
+
+    Rig known;
+    known.mode->onActiveOutputChanged(QStringLiteral("usb"), fiioSink);
+    QCOMPARE(known.mode->bitPerfectSink(), fiioSink);
+    QCOMPARE(known.mode->bitPerfectChain(), Chain::Bp);
+    QVERIFY(known.enter(QStringLiteral("bitperfect")));
+    QCOMPARE(known.mode->chainFor(GST_STATE_PLAYING), Chain::Bp);
+    known.player.play(1);
+    QCOMPARE(known.player.chain, Chain::Bp);
 }
 
 bool OutputModeTest::enterSwitchPath(Rig &rig, int path)
 {
     if (path == 0) {
         setRestartDelay(QStringLiteral("0.3"));
-        if (!rig.enter(QStringLiteral("exclusive")) || !rig.codec.restartForNet(QStringLiteral("test")))
+        if (!rig.enter(QStringLiteral("exclusive")) || !rig.restart.restartForNet(QStringLiteral("test")))
             return false;
         rig.player.play(1);
         return rig.player.pending.has_value();
@@ -1958,7 +1966,7 @@ bool OutputModeTest::enterSwitchPath(Rig &rig, int path)
 void OutputModeTest::finishSwitchPath(Rig &rig, int path)
 {
     if (path == 0)
-        QTRY_VERIFY_WITH_TIMEOUT(!rig.codec.restarting(), waitMs);
+        QTRY_VERIFY_WITH_TIMEOUT(!rig.restart.restarting(), waitMs);
     setRestartDelay(QStringLiteral("0"));
 }
 

@@ -3,10 +3,10 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-helper="${repo}/sysext/usr/libexec/microdap/microdap-usb-audio"
-rules="${repo}/sysext/usr/lib/udev/rules.d/70-microdap-usb-audio.rules"
-unit="${repo}/sysext/usr/lib/systemd/system/microdap-usb-audio.service"
-wants="${repo}/sysext/usr/lib/systemd/system/multi-user.target.d/50-microdap.conf"
+helper="${repo}/data/libexec/microdap-usb-audio"
+rules="${repo}/data/udev/70-microdap-usb-audio.rules"
+unit="${repo}/data/systemd/system/microdap-usb-audio.service"
+preset="${repo}/data/systemd/system-preset/70-microdap.preset"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT
@@ -246,7 +246,7 @@ expect_rc 2
 expect_log
 
 case_name=files
-for f in "${helper}" "${rules}" "${unit}" "${wants}"; do
+for f in "${helper}" "${rules}" "${unit}" "${preset}"; do
     if LC_ALL=C grep -q -P '\xe2\x80[\x93\x94]' "${f}"; then
         fail "${f} has a dash"
     fi
@@ -260,9 +260,8 @@ grep -qxF 'ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{
 grep -qxF 'ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2972", ATTR{idProduct}=="0149", ENV{SYSTEMD_USER_WANTS}+="microdap-fiio-reset.service"' "${rules}" || fail "rules lack the fiio plug in line"
 grep -qxF 'ExecStart=/usr/libexec/microdap/microdap-usb-audio --scan' "${unit}" || fail "unit lacks the scan"
 grep -qxF 'RemainAfterExit=yes' "${unit}" || fail "unit lacks RemainAfterExit=yes"
-grep -qxF 'Upholds=microdap-guard.service microdap-usb-audio.service' "${wants}" || fail "multi-user drop in lacks the Upholds line"
-grep -qxF 'EXTENSION_RELOAD_MANAGER=1' "${repo}/sysext/usr/lib/extension-release.d/extension-release.microdap" \
-    || fail "extension-release does not ask for a manager reload"
+grep -qxF 'WantedBy=multi-user.target' "${unit}" || fail "unit lacks WantedBy=multi-user.target"
+grep -qxF 'enable microdap-usb-audio.service' "${preset}" || fail "preset does not enable the unit"
 
 if (( failures )); then
     echo "usb-audio-test: ${failures} failure(s)" >&2

@@ -3,7 +3,7 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "${here}")
-keep="${repo}/sysext/usr/libexec/microdap/microdap-keep"
+keep="${repo}/data/libexec/microdap-keep"
 
 T=$(mktemp -d)
 trap 'rm -rf "${T}"' EXIT

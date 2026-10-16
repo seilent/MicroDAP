@@ -1,9 +1,0 @@
-[Unit]
-Description=MicroDAP boot guard
-After=systemd-sysext.service
-ConditionPathExists=/usr/share/microdap/build-manifest
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/libexec/microdap/microdap-guard

@@ -43,9 +43,9 @@ TestCase {
         property string hpAmp: "lohifi"
         property int spkGain: 102
         property int volumeStep: 5
-        property string rgb: "armada"
+        property string rgb: "system"
         property string btCodec: "auto"
-        property var roots: ["/home/armada/Music"]
+        property var roots: ["/home/micro/Music"]
         property int accentHue: 350
         property bool accentFromArt: false
         property real scale: 1.0
@@ -59,6 +59,13 @@ TestCase {
         property bool touch: true
         property string outputLevel: "off"
         property string sampleRate: "auto"
+        property string bootSession: "steam"
+        property var sessionChoices: ["microdap", "microemu", "steam"]
+        property bool available: true
+
+        function bootSessions() {
+            return fakeSettings.sessionChoices
+        }
     }
 
     QtObject {
@@ -94,17 +101,18 @@ TestCase {
     }
 
     QtObject {
-        id: fakeCodec
-
-        property bool pending: false
-    }
-
-    QtObject {
         id: fakePower
 
         property var verbs: []
         property int switches: 0
-        property var driftPaths: []
+        property string imageVersion: "testing-38784f1"
+        property string updateStatus: "none"
+        property string updateVersion: ""
+        property int updateReloads: 0
+
+        function reloadUpdate() {
+            fakePower.updateReloads++
+        }
 
         function runVerb(verb) {
             fakePower.verbs = fakePower.verbs.concat([verb])
@@ -185,7 +193,7 @@ TestCase {
         id: fakeEq
 
         property string activeOutput: "headphones"
-        property var keys: ({ headphones: "/home/armada/.config/microdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
+        property var keys: ({ headphones: "/home/micro/.config/microdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
         property bool missing: false
 
         signal profilesChanged()
@@ -207,7 +215,7 @@ TestCase {
             outputControl: fakeOutput
             outputMode: fakeMode
             rgbControl: fakeRgb
-            folders: ["/home/armada/Music", "/run/media/armada/SD"]
+            folders: ["/home/micro/Music", "/run/media/micro/SD"]
             onPairPhone: counters.pair++
             onOpenEq: counters.eq++
             onClosePlayerRequested: counters.closePlayer++
@@ -242,14 +250,14 @@ TestCase {
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
         "label-display", "accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts",
-        "label-power", "screenOff", "suspend", "wifi",
+        "label-power", "screenOff", "suspend", "wifi", "boot",
         "about"
     ]
     readonly property var overlayKeys: [
         "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair",
         "label-library", "folders", "rescan",
         "label-display", "accent", "accentArt", "scale", "saver", "toasts",
-        "label-power", "screenOff", "suspend", "wifi", "closePlayer",
+        "label-power", "screenOff", "suspend", "wifi", "boot", "closePlayer",
         "about"
     ]
 
@@ -275,9 +283,9 @@ TestCase {
         fakeSettings.hpAmp = "lohifi"
         fakeSettings.spkGain = 102
         fakeSettings.volumeStep = 5
-        fakeSettings.rgb = "armada"
+        fakeSettings.rgb = "system"
         fakeSettings.btCodec = "auto"
-        fakeSettings.roots = ["/home/armada/Music"]
+        fakeSettings.roots = ["/home/micro/Music"]
         fakeSettings.accentHue = 350
         fakeSettings.accentFromArt = false
         fakeSettings.scale = 1.0
@@ -300,7 +308,9 @@ TestCase {
         fakeLibrary.scanning = false
         fakeLibrary.songCount = 9
         fakeLibrary.rescans = 0
-        fakeCodec.pending = false
+        fakeSettings.bootSession = "steam"
+        fakeSettings.sessionChoices = ["microdap", "microemu", "steam"]
+        fakeSettings.available = true
         fakeAudio.pcmFormat = "44100 S24_LE"
         fakeAudio.hwRate = 44100
         fakeAudio.refreshes = 0
@@ -314,13 +324,16 @@ TestCase {
         fakeRgb.supported = true
         fakePower.verbs = []
         fakePower.switches = 0
-        fakePower.driftPaths = []
+        fakePower.imageVersion = "testing-38784f1"
+        fakePower.updateStatus = "none"
+        fakePower.updateVersion = ""
+        fakePower.updateReloads = 0
         fakeBridge.closes = 0
         counters.pair = 0
         counters.closePlayer = 0
         counters.eq = 0
         fakeEq.activeOutput = "headphones"
-        fakeEq.keys = ({ headphones: "/home/armada/.config/microdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
+        fakeEq.keys = ({ headphones: "/home/micro/.config/microdap/eq/HD 600.txt", usb: "custom", speaker: "off" })
         fakeEq.missing = false
         fakeDacEq.status = "none"
     }
@@ -398,7 +411,7 @@ TestCase {
         compare(page.indexOfKey("keepPhone"), -1)
         compare(page.indexOfKey("gameMode"), -1)
         compare(page.indexOfKey("closePlayer"), -1)
-        compare(tc.keyIndex(page, "about"), tc.keyIndex(page, "wifi") + 1)
+        compare(tc.keyIndex(page, "about"), tc.keyIndex(page, "boot") + 1)
         for (const r of page.rows) {
             verify(r.title !== "keep phone in game mode")
             verify(r.title !== "game mode")
@@ -407,7 +420,7 @@ TestCase {
         const overlayPage = open({ overlay: true, bridge: fakeBridge })
         compare(overlayPage.indexOfKey("keepPhone"), -1)
         compare(overlayPage.indexOfKey("gameMode"), -1)
-        compare(tc.keyIndex(overlayPage, "closePlayer"), tc.keyIndex(overlayPage, "wifi") + 1)
+        compare(tc.keyIndex(overlayPage, "closePlayer"), tc.keyIndex(overlayPage, "boot") + 1)
     }
 
     function test_row_geometry() {
@@ -764,7 +777,7 @@ TestCase {
         compare(tc.rowOf(page, "volumeStep").title, "volume step")
         compare(tc.rowOf(page, "volumeStep").value, "5%")
         compare(tc.rowOf(page, "rgb").title, "rgb")
-        compare(tc.rowOf(page, "rgb").value, "armada")
+        compare(tc.rowOf(page, "rgb").value, "system")
         verify(tc.keyIndex(page, "rgb") > tc.keyIndex(page, "saver"))
         verify(tc.keyIndex(page, "rgb") < tc.keyIndex(page, "toasts"))
         const item = tc.itemOf(page, "spkGain")
@@ -858,7 +871,7 @@ TestCase {
         compare(tc.rowOf(page, "rgb").readOnly, false)
         tc.edit(page, "rgb")
         verify(router.dispatch("right", false))
-        compare(fakeSettings.rgb, "armada")
+        compare(fakeSettings.rgb, "system")
         verify(router.dispatch("left", false))
         compare(fakeSettings.rgb, "off")
         verify(router.dispatch("left", false))
@@ -866,7 +879,7 @@ TestCase {
         verify(router.dispatch("left", false))
         compare(fakeSettings.rgb, "accent")
         verify(router.dispatch("b", false))
-        compare(fakeSettings.rgb, "armada")
+        compare(fakeSettings.rgb, "system")
         tc.edit(page, "rgb")
         router.dispatch("left", false)
         tc.confirm(page)
@@ -885,9 +898,9 @@ TestCase {
         compare(router.dispatch("left", false), false)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
-        compare(fakeSettings.rgb, "armada")
+        compare(fakeSettings.rgb, "system")
         fakeRgb.supported = true
-        compare(tc.rowOf(page, "rgb").value, "armada")
+        compare(tc.rowOf(page, "rgb").value, "system")
         tc.edit(page, "rgb")
         verify(router.dispatch("left", false))
         compare(fakeSettings.rgb, "off")
@@ -1283,7 +1296,7 @@ TestCase {
 
     function test_eq_row_dac() {
         tc.useUsb()
-        const file = "/home/armada/.config/microdap/eq/HD 600.txt"
+        const file = "/home/micro/.config/microdap/eq/HD 600.txt"
         fakeEq.activeOutput = "usb"
         fakeEq.keys = ({ headphones: file, usb: file, speaker: "off" })
         const page = open({ eq: fakeEq, dacEq: fakeDacEq })
@@ -1480,9 +1493,9 @@ TestCase {
         compare(page.foldersOpen, true)
         compare(page.editing, false)
         compare(page.rows[folders + 1].kind, "sub")
-        compare(page.rows[folders + 1].title, "/home/armada/Music")
+        compare(page.rows[folders + 1].title, "/home/micro/Music")
         compare(page.rows[folders + 1].value, "on")
-        compare(page.rows[folders + 2].title, "/run/media/armada/SD")
+        compare(page.rows[folders + 2].title, "/run/media/micro/SD")
         compare(page.rows[folders + 2].value, "off")
         compare(page.rows[folders + 3].key, "rescan")
         compare(page.rows[folders + 4].kind, "label")
@@ -1497,17 +1510,17 @@ TestCase {
         compare(page.focusIndex, folders + 2)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
-        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/armada/Music", "/run/media/armada/SD"]))
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/micro/Music", "/run/media/micro/SD"]))
         compare(page.rows[folders + 2].value, "on")
         compare(page.rows[folders].value, "2 on")
         router.dispatch("up", false)
         router.dispatch("a", false)
-        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/run/media/armada/SD"]))
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/run/media/micro/SD"]))
         compare(page.rows[folders + 1].value, "off")
-        compare(page.rows[folders + 1].title, "/home/armada/Music")
+        compare(page.rows[folders + 1].title, "/home/micro/Music")
         router.dispatch("down", false)
         router.dispatch("a", false)
-        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/run/media/armada/SD"]))
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/run/media/micro/SD"]))
         compare(page.rows[folders + 2].value, "on")
         router.dispatch("up", false)
         router.dispatch("up", false)
@@ -1985,7 +1998,6 @@ TestCase {
     }
 
     function test_about_rows() {
-        fakePower.driftPaths = ["/usr/libexec/armada/session-control"]
         const page = open()
         tc.focusKey(page, "about")
         const about = tc.keyIndex(page, "about")
@@ -1994,20 +2006,30 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(page.aboutOpen, true)
         compare(page.editing, false)
+        compare(fakePower.updateReloads, 1)
         const list = tc.keys(page)
-        verify(list.indexOf("drift") > about)
-        verify(list.indexOf("track") > about)
-        verify(list.indexOf("pcm") > about)
-        compare(tc.rowOf(page, "drift").value, "1 file")
+        compare(JSON.stringify(list.slice(about + 1)), JSON.stringify(["image", "update", "track", "pcm"]))
+        compare(tc.rowOf(page, "image").title, "image")
+        compare(tc.rowOf(page, "image").value, "testing-38784f1")
+        compare(tc.rowOf(page, "update").title, "system update")
+        compare(tc.rowOf(page, "update").kind, "info")
+        compare(tc.rowOf(page, "update").value, "up to date")
         compare(tc.rowOf(page, "track").value, "44100 hz 16 bit")
         compare(tc.rowOf(page, "pcm").title, "output")
         compare(tc.rowOf(page, "pcm").value, "44100 S24_LE")
+        compare(page.indexOfKey("drift"), -1)
+        compare(page.indexOfKey("armada"), -1)
         const track = tc.itemOf(page, "track")
         compare(track.titleItem.font.pixelSize, Ui.fontPx(11))
         compare(track.titleItem.font.styleName, "Light")
         compare(track.titleItem.font.capitalization, Font.AllUppercase)
         compare(track.valueItem.font.capitalization, Font.AllUppercase)
+        const update = tc.itemOf(page, "update")
+        compare(update.titleItem.font.pixelSize, Ui.fontPx(11))
+        compare(update.titleItem.font.styleName, "Light")
+        compare(update.valueItem.font.capitalization, Font.AllUppercase)
         router.dispatch("down", false)
+        compare(page.focusIndex, about + 1)
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
@@ -2015,11 +2037,159 @@ TestCase {
         compare(tc.rowOf(page, "track").value, "44100 hz")
         fakeAudio.pcmFormat = ""
         compare(page.indexOfKey("pcm"), -1)
-        fakePower.driftPaths = []
-        compare(page.indexOfKey("drift"), -1)
         tc.focusKey(page, "about")
         router.dispatch("a", false)
         compare(page.rows.length, tc.expectedKeys.length)
+        compare(fakePower.updateReloads, 1)
+    }
+
+    function test_system_update_values() {
+        const page = open()
+        tc.focusKey(page, "about")
+        router.dispatch("a", false)
+        compare(tc.rowOf(page, "update").value, "up to date")
+        fakePower.updateStatus = "available"
+        fakePower.updateVersion = "testing-0628a41"
+        compare(tc.rowOf(page, "update").value, "testing-0628a41 available")
+        fakePower.updateVersion = ""
+        compare(tc.rowOf(page, "update").value, "available")
+        fakePower.updateStatus = "offline"
+        compare(tc.rowOf(page, "update").value, "offline")
+        fakePower.updateStatus = "unchecked"
+        compare(tc.rowOf(page, "update").value, "not checked")
+        fakePower.updateStatus = ""
+        compare(tc.rowOf(page, "update").value, "not checked")
+    }
+
+    function test_about_without_image_version() {
+        fakePower.imageVersion = ""
+        const page = open()
+        tc.focusKey(page, "about")
+        router.dispatch("a", false)
+        const about = tc.keyIndex(page, "about")
+        compare(page.indexOfKey("image"), -1)
+        compare(page.rows[about + 1].key, "update")
+        const bare = open({ power: null })
+        tc.focusKey(bare, "about")
+        router.dispatch("a", false)
+        compare(bare.indexOfKey("image"), -1)
+        compare(bare.indexOfKey("update"), -1)
+        compare(bare.rows[tc.keyIndex(bare, "about") + 1].key, "track")
+    }
+
+    function test_boot_into_row() {
+        const page = open()
+        compare(tc.rowOf(page, "boot").title, "boot into")
+        compare(tc.rowOf(page, "boot").kind, "row")
+        compare(tc.rowOf(page, "boot").value, "steam")
+        compare(tc.rowOf(page, "boot").readOnly, false)
+        const item = tc.itemOf(page, "boot")
+        compare(item.titleItem.font.pixelSize, Ui.fontPx(17))
+        compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
+        compare(item.valueItem.text, "steam")
+    }
+
+    function test_boot_into_draft_edit() {
+        const page = open()
+        tc.edit(page, "boot")
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "boot").value, "microemu")
+        compare(fakeSettings.bootSession, "steam")
+        compare(tc.itemOf(page, "boot").valueItem.color, Ui.accent)
+        verify(router.dispatch("left", false))
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "boot").value, "microdap")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.bootSession, "steam")
+        tc.confirm(page)
+        compare(fakeSettings.bootSession, "microemu")
+        compare(tc.rowOf(page, "boot").value, "microemu")
+        tc.edit(page, "boot")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "boot").value, "steam")
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.bootSession, "microemu")
+        compare(tc.rowOf(page, "boot").value, "microemu")
+        compare(pages.depth, 2)
+    }
+
+    function test_boot_into_choices_read_at_edit() {
+        const page = open()
+        fakeSettings.sessionChoices = ["microdap", "steam"]
+        tc.edit(page, "boot")
+        verify(router.dispatch("left", false))
+        compare(tc.rowOf(page, "boot").value, "microdap")
+        tc.confirm(page)
+        compare(fakeSettings.bootSession, "microdap")
+    }
+
+    function test_boot_into_missing_session() {
+        fakeSettings.bootSession = "handheld-desktop-session"
+        const page = open()
+        compare(tc.rowOf(page, "boot").value, "handheld-desktop-session (not available)")
+        tc.edit(page, "boot")
+        verify(router.dispatch("right", false))
+        compare(tc.rowOf(page, "boot").value, "microemu")
+        tc.confirm(page)
+        compare(fakeSettings.bootSession, "microemu")
+    }
+
+    function test_boot_into_without_choices() {
+        fakeSettings.sessionChoices = []
+        const page = open()
+        compare(tc.rowOf(page, "boot").value, "steam")
+        compare(tc.rowOf(page, "boot").readOnly, true)
+        tc.focusKey(page, "boot")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(router.dispatch("right", false), false)
+        fakeSettings.sessionChoices = ["microdap", "steam"]
+        fakeSettings.available = false
+        fakeSettings.available = true
+        compare(tc.rowOf(page, "boot").readOnly, false)
+        verify(router.dispatch("a", false))
+        compare(page.editing, true)
+        compare(page.editKey, "boot")
+    }
+
+    function test_boot_into_hidden_without_settings_key() {
+        const page = open({ settings: null })
+        compare(page.indexOfKey("boot"), -1)
+        compare(page.indexOfKey("about"), page.indexOfKey("wifi") + 1)
+    }
+
+    function test_boot_into_overlay() {
+        const page = open({ overlay: true, bridge: fakeBridge })
+        tc.edit(page, "boot")
+        verify(router.dispatch("left", false))
+        tc.confirm(page)
+        compare(fakeSettings.bootSession, "microemu")
+    }
+
+    function test_boot_into_edit_dropped_on_screen_off() {
+        const page = open()
+        tc.edit(page, "boot")
+        router.dispatch("left", false)
+        page.screenOff = true
+        compare(page.editing, false)
+        compare(fakeSettings.bootSession, "steam")
+        compare(tc.rowOf(page, "boot").value, "steam")
+    }
+
+    function test_touch_boot_into_halves() {
+        const page = open()
+        tc.tapRow(page, "boot")
+        compare(page.editKey, "boot")
+        tc.tapRow(page, "boot", 0.25)
+        compare(tc.rowOf(page, "boot").value, "microemu")
+        tc.tapRow(page, "boot", 0.75)
+        compare(tc.rowOf(page, "boot").value, "steam")
+        tc.tapRow(page, "boot", 0.25)
+        const item = tc.itemOf(page, "wifi")
+        tc.tapAt(item, item.width / 2, item.height / 2)
+        compare(page.editing, false)
+        compare(fakeSettings.bootSession, "microemu")
     }
 
     function test_value_change_f7() {
@@ -2162,16 +2332,6 @@ TestCase {
         compare(tc.rowOf(page, "rescan").value, "0 songs")
         tc.focusKey(page, "rescan")
         verify(router.dispatch("a", false))
-    }
-
-    function test_codec_pending() {
-        fakeSettings.btCodec = "aptx"
-        const page = open({ settings: fakeSettings, codecFragment: fakeCodec })
-        compare(tc.rowOf(page, "codec").value, "aptx")
-        fakeCodec.pending = true
-        compare(tc.rowOf(page, "codec").value, "aptx (pending)")
-        fakeCodec.pending = false
-        compare(tc.rowOf(page, "codec").value, "aptx")
     }
 
     function tapAt(item, x, y) {
@@ -2324,7 +2484,7 @@ TestCase {
         page.ensureVisible(0)
         const item = tc.rowItem(page, sub)
         tc.tapAt(item, item.width / 2, item.height / 2)
-        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/armada/Music", "/run/media/armada/SD"]))
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/micro/Music", "/run/media/micro/SD"]))
         compare(page.editing, false)
     }
 

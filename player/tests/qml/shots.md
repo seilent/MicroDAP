@@ -54,6 +54,17 @@
 | eq | `eq-dac-range` | `--size 640x960` and `960x640` | USB pivot, BAND 1 sub rows, focus on GAIN `-15.0 DB (DAC -12.0)`, Q `10.00 (DAC 8.00)`, PREAMP `-6.5 DB (DAC 0.0)` (portrait), band row text unchanged, values clear of the titles | 2026-10-12 (Selawik) |
 | eq | `eq-dac-preamp` | `--size 640x960` and `960x640` | focus on PREAMP `-6.5 DB (DAC 0.0)`, BAND 2 sub rows, GAIN `-24.0 DB (DAC -12.0)` (the longest value) and Q `0.10 (DAC 0.25)` on screen in portrait, landscape down to FREQUENCY | 2026-10-12 (Selawik) |
 | eq | `eq-dac-long` | `--size 640x960` and `960x640` | BAND 2 sub rows, focus on GAIN `-24.0 DB (DAC -12.0)`, the longest value, with Q `0.10 (DAC 0.25)` on screen in both orientations | 2026-10-12 (Selawik) |
+| settings | `boot` | `--size 640x960` and `960x640` | BOOT INTO STEAM after WI-FI WHEN OFF, focus on BOOT INTO | 2026-10-16 |
+| settings | `boot-edit` | `--size 640x960` and `960x640` | BOOT INTO draft in accent | 2026-10-16 |
+| settings | `boot-missing` | `--size 640x960` | `HANDHELD-DESKTOP-SESSION (NOT AVAILABLE)` clips the title to BOOT I, the title clip rule | 2026-10-16 |
+| settings | `about` | `--size 640x960` and `960x640` | About open: IMAGE, SYSTEM UPDATE UP TO DATE, focus on SYSTEM UPDATE | 2026-10-16 |
+| settings | `about-available` | `--size 640x960` and `960x640` | SYSTEM UPDATE `TESTING-0628A41 AVAILABLE` clear of the title | 2026-10-16 |
+| settings | `about-missing` | `--size 640x960` and `960x640` | no IMAGE row, SYSTEM UPDATE NOT CHECKED under ABOUT | 2026-10-16 |
+| power | browse | `--size 640x960` and `960x640` | SCREEN OFF, GAME MODE, MICROEMU, SUSPEND, POWER OFF, focus bar on SCREEN OFF in both | 2026-10-16 |
+| prompt | browse | `--size 640x960` and `960x640` | focus bar and the full white on KEEP IN BACKGROUND, CLOSE PLAYER dim | 2026-10-16 |
+| overlays | browse | `--size 640x960` and `960x640` | dialog and sheet focus bars on their first item | 2026-10-16 |
+| power | `power-none` | `--size 640x960` and `960x640` | SCREEN OFF, SUSPEND, POWER OFF | 2026-10-16 |
+| power | `power-long` | `--size 640x960` and `960x640` | a long label runs past the right edge at 640x960 (dialog items do not clip) | 2026-10-16 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

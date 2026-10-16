@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Biquad.h"
-#include "Eq.h"
 #include "OutputPorts.h"
 #include "Queue.h"
 
@@ -14,9 +12,6 @@
 
 #include <gst/gst.h>
 
-#include <array>
-#include <atomic>
-#include <mutex>
 #include <optional>
 
 class QSocketNotifier;
@@ -60,6 +55,7 @@ public:
     static QString sinkDescription(OutputChain chain, const QString &audioSinkEnv,
                                    const QString &exclusiveEnv, const QString &policyExclusive,
                                    const QString &cardId = {});
+    static QString bitPerfectProperties(const QString &target, int rate);
 
     explicit Player(Library *library = nullptr, QObject *parent = nullptr);
     ~Player() override;
@@ -83,9 +79,6 @@ public:
     void setPositionPollEnabled(bool on);
     GstElement *audioFilter() const;
     GstElement *audioSink() const;
-    void applyEq(const microdap::EqProfile &profile);
-    int eqProbeSets() const;
-    int eqBandSets(int band) const;
     void setPolicy(OutputPolicy *policy);
     OutputChain builtChain() const override;
     bool parked() const override;
@@ -144,24 +137,19 @@ private:
         bool stale = false;
     };
 
-    struct EqSnapshot
+    struct BitPerfectBinding
     {
-        EqProfile profile = EqProfile::off();
-        double preampApplied = 1.0;
-        std::array<BiquadCoeffs, EqProfile::bandCount> applied;
-        std::array<bool, EqProfile::bandCount> marks{};
-        std::array<bool, EqProfile::bandCount> guardLogged{};
+        GstElement *element;
+        QString target;
     };
 
     static void aboutToFinish(GstElement *element, gpointer data);
-    static GstPadProbeReturn eqProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
-    static void eqRateChanged(GstElement *element, gint rate, gpointer data);
+    static GstPadProbeReturn bitPerfectProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    static void setStreamProperties(GstElement *element, const QString &text);
 
-    void buildEq();
-    void markEq(int rate);
-    void setEq();
     bool configure(OutputChain chain);
     GstElement *pwFilter(int rate);
+    void bindBitPerfect(GstElement *sink);
     void build(int index, const PendingBuild &pending, OutputChain chain, bool guard);
     void request(int index, GstState target, qint64 positionMs, bool guard, bool sameListen);
     void hold(int index, const PendingBuild &pending);
@@ -205,7 +193,6 @@ private:
     bool m_resumeOnReady = false;
     QTimer m_holdTimer;
     GstElement *m_playbin = nullptr;
-    GstElement *m_eqFilter = nullptr;
     GstElement *m_filter = nullptr;
     GstElement *m_sink = nullptr;
     QString m_audioSinkEnv;
@@ -225,16 +212,6 @@ private:
     std::optional<PendingBuild> m_pending;
     QVariantMap m_sourceFormat;
     QVariantMap m_sinkFormat;
-    GstElement *m_preamp = nullptr;
-    QList<GstElement *> m_eqBands;
-    std::mutex m_eqMutex;
-    EqSnapshot m_eqSnapshot;
-    std::atomic<int> m_eqPending = 0;
-    std::atomic<int> m_eqRate = 0;
-    std::atomic<int> m_eqProbeSets = 0;
-    std::array<std::atomic<int>, EqProfile::bandCount> m_eqBandSets{};
-    gulong m_eqProbeId = 0;
-    gulong m_eqRateId = 0;
     GstBus *m_bus = nullptr;
     gulong m_aboutToFinishId = 0;
     QSocketNotifier *m_busNotifier = nullptr;
@@ -269,6 +246,7 @@ public:
     virtual Admit admit(const Player::PendingBuild &build) = 0;
     virtual QString exclusiveSink() const = 0;
     virtual QString exclusiveCard() const = 0;
+    virtual QString bitPerfectSink() const = 0;
     virtual int fixedRate() const = 0;
     virtual void outputError(int code) = 0;
 };

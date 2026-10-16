@@ -26,9 +26,9 @@ Item {
         id: sampleEq
 
         readonly property string activeOutput: root.dacShot ? "usb" : "headphones"
-        readonly property var sources: [{ name: "SENNHEISER HD 600 PARAMETRICEQ", path: "/home/armada/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt" }]
+        readonly property var sources: [{ name: "SENNHEISER HD 600 PARAMETRICEQ", path: "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt" }]
         readonly property var headphones: ({
-            key: "/home/armada/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt",
+            key: "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt",
             name: "Sennheiser HD 600 ParametricEQ",
             missing: false,
             preamp: -6.5,
@@ -60,7 +60,7 @@ Item {
         ]
 
         readonly property var dacLow: ({
-            key: "/home/armada/.config/microdap/eq/DQ LOW.txt",
+            key: "/home/micro/.config/microdap/eq/DQ LOW.txt",
             name: "DQ LOW",
             missing: false,
             preamp: -6.5,
@@ -78,7 +78,7 @@ Item {
             if (output === "usb" && root.dacShot)
                 return sampleEq.dacLow
             if (output === "usb")
-                return { key: "/run/media/armada/SD/Music/EQ/Apple Dongle.txt", name: "Apple Dongle", missing: true, preamp: 0, bands: [] }
+                return { key: "/run/media/micro/SD/Music/EQ/Apple Dongle.txt", name: "Apple Dongle", missing: true, preamp: 0, bands: [] }
             return { key: "off", name: "", missing: false, preamp: 0, bands: [] }
         }
     }

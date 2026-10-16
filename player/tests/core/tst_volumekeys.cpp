@@ -341,7 +341,7 @@ void VolumeKeysTest::closeStopsRepeat()
 
 void VolumeKeysTest::stepTimesVolumeStep()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     auto *keys = new FakeKeys;
     auto *sink = new FakeSink;
     VolumeKeys volume(keys, sink, &settings);
@@ -357,12 +357,9 @@ void VolumeKeysTest::stepTimesVolumeStep()
 
 void VolumeKeysTest::invalidVolumeStep()
 {
-    const QString path = m_dir->filePath(QStringLiteral("settings.ini"));
-    QFile file(path);
-    QVERIFY(file.open(QIODevice::WriteOnly));
-    file.write("[General]\nvolumeStep=7\n");
-    file.close();
-    Settings settings(path);
+    Settings settings(nullptr);
+    settings.setValue(QStringLiteral("audio.volume_step"), 7u);
+    QCOMPARE(settings.value(QStringLiteral("audio.volume_step")).toUInt(), 7u);
     auto *keys = new FakeKeys;
     auto *sink = new FakeSink;
     VolumeKeys volume(keys, sink, &settings);
@@ -372,7 +369,7 @@ void VolumeKeysTest::invalidVolumeStep()
 
 void VolumeKeysTest::levelForwarded()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     auto *sink = new FakeSink;
     VolumeKeys volume(new FakeKeys, sink, &settings);
     QSignalSpy spy(&volume, &VolumeKeys::levelChanged);
@@ -852,7 +849,6 @@ void VolumeKeysTest::dacHelpersFailWithoutServer()
         ++inputs;
         found = out;
     });
-    sink.setDefaultSink(QStringLiteral("alsa_output.usb-FIIO"));
     sink.setSinkVolumeDb(QStringLiteral("alsa_output.usb-FIIO"), -40.0);
     sink.unmuteSink(QStringLiteral("alsa_output.usb-FIIO"));
     sink.moveSinkInput(7, QStringLiteral("alsa_output.usb-FIIO"));
@@ -884,7 +880,7 @@ void VolumeKeysTest::dacFailuresDroppedWithObject()
 
 void VolumeKeysTest::routedPulseForwards()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     QStringList log;
     FakeDacSink dac(&log);
     AlsaVolume alsa(std::make_unique<FakeMixer>(&log), 10);
@@ -911,7 +907,7 @@ void VolumeKeysTest::routedPulseForwards()
 
 void VolumeKeysTest::routedAlsaWritesPcm()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     auto owned = std::make_unique<FakeMixer>();
     FakeMixer *mixer = owned.get();
@@ -943,7 +939,7 @@ void VolumeKeysTest::routedAlsaWritesPcm()
 
 void VolumeKeysTest::routedDropsPulseLevels()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     AlsaVolume alsa(std::make_unique<FakeMixer>(), 10);
     auto *keys = new FakeKeys;
@@ -971,7 +967,7 @@ void VolumeKeysTest::routedDropsPulseLevels()
 
 void VolumeKeysTest::routedDownNeverUnmutes()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     dac.muted = true;
     auto owned = std::make_unique<FakeMixer>();
@@ -994,7 +990,7 @@ void VolumeKeysTest::routedDownNeverUnmutes()
 
 void VolumeKeysTest::routedStoreSyncOrder()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     QStringList log;
     FakeDacSink dac(&log);
     AlsaVolume alsa(std::make_unique<FakeMixer>(&log), 10);
@@ -1019,7 +1015,7 @@ void VolumeKeysTest::routedStoreSyncOrder()
 
 void VolumeKeysTest::routedStoreSyncAfterLastPress()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     AlsaVolume alsa(std::make_unique<FakeMixer>(), 10);
     auto *keys = new FakeKeys;
@@ -1044,7 +1040,7 @@ void VolumeKeysTest::routedStoreSyncAfterLastPress()
 
 void VolumeKeysTest::routedStoreSyncGated()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     auto owned = std::make_unique<FakeMixer>();
     FakeMixer *mixer = owned.get();
@@ -1083,7 +1079,7 @@ void VolumeKeysTest::routedStoreSyncGated()
 
 void VolumeKeysTest::routedOwnedStepPerCard()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     auto owned = std::make_unique<FakeMixer>();
     FakeMixer *mixer = owned.get();
@@ -1124,7 +1120,7 @@ void VolumeKeysTest::routedOwnedStepPerCard()
 
 void VolumeKeysTest::routedStoreSyncNudge()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     auto owned = std::make_unique<FakeMixer>();
     FakeMixer *mixer = owned.get();
@@ -1159,7 +1155,7 @@ void VolumeKeysTest::routedStoreSyncNudge()
 
 void VolumeKeysTest::routedSkipsWithoutMixer()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     auto owned = std::make_unique<FakeMixer>();
     FakeMixer *mixer = owned.get();
@@ -1198,7 +1194,7 @@ void VolumeKeysTest::routedSkipsWithoutMixer()
 
 void VolumeKeysTest::routedDropsPulsePending()
 {
-    Settings settings(m_dir->filePath(QStringLiteral("settings.ini")));
+    Settings settings(nullptr);
     FakeDacSink dac;
     AlsaVolume alsa(std::make_unique<FakeMixer>(), 10);
     auto *keys = new FakeKeys;

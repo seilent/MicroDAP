@@ -2,7 +2,6 @@ name: build
 
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -24,20 +23,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Free disk
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          docker system prune -af
-          df -h
-
       - name: Keys
         id: keys
-        env:
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          key=$(cat build/Containerfile build/toolchain.sh build/base.env | sha256sum | cut -c1-16)
-          echo "builder=${key}" >> "$GITHUB_OUTPUT"
-          echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "builder=$(cat build/Containerfile build/deps.sh | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "microset=$(sed -n 's/^MICROSET_REF=//p' build/microset.env)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: seilent/MicroSET
+          ref: ${{ steps.keys.outputs.microset }}
+          path: microset
 
       - name: Builder image
         env:
@@ -50,61 +46,19 @@ jobs:
           if podman pull "${image}"; then
             podman tag "${image}" localhost/microdap-builder
           else
-            . build/base.env
-            podman build --build-arg BASE_IMAGE="$BASE_IMAGE" -t localhost/microdap-builder -f build/Containerfile .
-            podman image prune -f
+            podman build -t localhost/microdap-builder -f build/Containerfile .
             if [[ "${PUBLISH}" == true ]]; then
               podman tag localhost/microdap-builder "${image}"
               podman push "${image}"
             fi
           fi
-          df -h
 
       - uses: actions/cache@v4
         with:
           path: build/cache
-          key: cache-${{ steps.keys.outputs.builder }}-${{ hashFiles('player/**/CMakeLists.txt') }}-${{ github.run_id }}
+          key: cache-${{ steps.keys.outputs.builder }}-${{ github.run_id }}
           restore-keys: |
-            cache-${{ steps.keys.outputs.builder }}-${{ hashFiles('player/**/CMakeLists.txt') }}-
             cache-${{ steps.keys.outputs.builder }}-
 
-      - name: Build
-        run: podman run --rm -v "$PWD":/work:Z -e MICRODAP_VERSION=${{ steps.keys.outputs.short }} localhost/microdap-builder build/build.sh
-
-      - name: ctest
-        run: podman run --rm -v "$PWD":/work:Z -w /work/build/player localhost/microdap-builder ctest --timeout 300 --output-on-failure -j 2
-
-      - name: Test deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-dbus python3-gi dbus-daemon patch
-
-      - name: Script tests
-        run: |
-          root=$(mktemp -d)
-          mkdir -p "${root}/usr/libexec/armada"
-          cid=$(podman create localhost/microdap-builder true)
-          podman cp "${cid}:/usr/libexec/armada/session-control" "${root}/usr/libexec/armada/session-control"
-          podman rm "${cid}"
-          MICRODAP_BASE_ROOT="${root}" bash tests/session-control-test.sh
-          bash tests/priv-test.sh
-          bash tests/hotkeyd-test.sh
-          bash tests/pad-test.sh
-          bash tests/intercept-test.sh
-          bash tests/keep-test.sh
-          bash tests/codec-test.sh
-          bash tests/power-test.sh
-          bash tests/powerd-test.sh
-          bash tests/wait-x-test.sh
-          bash tests/overlay-unit-test.sh
-          bash tests/bt-test.sh
-
-      - name: Pack dist
-        run: tar -cf dist.tar dist
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: microdap-dist-${{ steps.keys.outputs.short }}
-          path: dist.tar
-          retention-days: 7
-          if-no-files-found: error
+      - name: Build and test
+        run: podman run --rm -v "$PWD":/work:Z -e MICROSET_SRC=/work/microset localhost/microdap-builder build/ci.sh

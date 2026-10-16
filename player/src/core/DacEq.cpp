@@ -725,8 +725,6 @@ void DacEq::refresh()
         m_gateRetry.stop();
     if (held != m_dacHeld) {
         m_dacHeld = held;
-        if (m_eq)
-            m_eq->setDacHeld(held);
         emit dacHeldChanged();
     }
     const QString status = computeStatus();

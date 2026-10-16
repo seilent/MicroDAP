@@ -119,7 +119,6 @@ public:
 
     void cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done) override;
     void sinkCard(const QString &name, std::function<void(const DacCard &)> done) override;
-    void setDefaultSink(const QString &name) override;
     void sinkVolumeDb(const QString &name, std::function<void(bool ok, double db)> done) override;
     void sinkMuted(const QString &name, std::function<void(bool ok, bool muted)> done) override;
     void setSinkVolumeDb(const QString &name, double db, std::function<void(bool ok)> done = nullptr) override;

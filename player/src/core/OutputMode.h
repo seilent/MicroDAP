@@ -18,8 +18,7 @@
 namespace microdap {
 
 class BluezModel;
-class CodecFragment;
-class EqControl;
+class WirePlumberRestart;
 
 class OutputMode : public QObject, public OutputPolicy, public RestorePort
 {
@@ -35,7 +34,7 @@ public:
         int pcmFreeMs = 1000;
         int pcmPollMs = 20;
         int acquireMs = 2000;
-        int codecWaitMs = 3000;
+        int restartWaitMs = 3000;
         int parkMs = 5000;
         int netFirstMs = 1500;
         int netSecondMs = 3000;
@@ -63,9 +62,8 @@ public:
         DacSinkPort *dac = nullptr;
         DacVolumePort *volume = nullptr;
         AlsaVolume *mixer = nullptr;
-        CodecFragment *codec = nullptr;
+        WirePlumberRestart *wireplumber = nullptr;
         BluezModel *bluez = nullptr;
-        EqControl *eq = nullptr;
         DacEqPort *dacEq = nullptr;
     };
 
@@ -100,6 +98,8 @@ public:
     Admit admit(const Player::PendingBuild &build) override;
     QString exclusiveSink() const override;
     QString exclusiveCard() const override;
+    QString bitPerfectSink() const override;
+    Player::OutputChain bitPerfectChain() const;
     int fixedRate() const override;
     void outputError(int code) override;
 
@@ -125,7 +125,7 @@ public slots:
     void onBluezConnectedChanged();
     void onBluezReadyChanged();
     void onTransportStateChanged();
-    void onCodecRestartFinished(bool ok);
+    void onRestartFinished(bool ok);
     void onAcquired(quint64 seq);
     void onRefused(quint64 seq);
     void onFailed(quint64 seq, const QString &reason);
@@ -259,7 +259,8 @@ private:
     qint64 m_retryAt = -1;
     bool m_waiting = false;
     GstState m_waitTarget = GST_STATE_PAUSED;
-    bool m_codecWaiting = false;
+    bool m_restartWaiting = false;
+    mutable bool m_noBitPerfectSink = false;
     bool m_asleep = false;
     bool m_sleepHeld = false;
     bool m_sleepReturn = false;
@@ -272,7 +273,6 @@ private:
     bool m_routeAlsa = false;
     QString m_routeCard;
     QString m_routeSink;
-    bool m_bypassed = false;
     int m_storeAllowed = -1;
     int m_driving = 0;
     int m_hwRate = 0;
@@ -294,7 +294,7 @@ private:
     QTimer m_park;
     QTimer m_acquireTimer;
     QTimer m_pcmPoll;
-    QTimer m_codecWait;
+    QTimer m_restartWait;
     QTimer m_netTimer;
     QTimer m_resolveTimer;
     QTimer m_readyTimer;

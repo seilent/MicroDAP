@@ -1,11 +1,17 @@
 #pragma once
 
+#include <QDBusConnection>
+#include <QMap>
 #include <QObject>
-#include <QSettings>
 #include <QString>
 #include <QStringList>
-#include <QTimer>
 #include <QVariantMap>
+
+#include <memory>
+
+namespace MicroSet {
+class Client;
+}
 
 namespace microdap {
 
@@ -31,26 +37,25 @@ class Settings : public QObject
     Q_PROPERTY(QString orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
     Q_PROPERTY(bool autoRotate READ autoRotate WRITE setAutoRotate NOTIFY autoRotateChanged)
     Q_PROPERTY(bool touch READ touch WRITE setTouch NOTIFY touchChanged)
-    Q_PROPERTY(QString eqHeadphones READ eqHeadphones WRITE setEqHeadphones NOTIFY eqHeadphonesChanged)
-    Q_PROPERTY(QString eqUsb READ eqUsb WRITE setEqUsb NOTIFY eqUsbChanged)
-    Q_PROPERTY(QString eqSpeaker READ eqSpeaker WRITE setEqSpeaker NOTIFY eqSpeakerChanged)
     Q_PROPERTY(QString outputLevel READ outputLevel WRITE setOutputLevel NOTIFY outputLevelChanged)
     Q_PROPERTY(QString sampleRate READ sampleRate WRITE setSampleRate NOTIFY sampleRateChanged)
-    Q_PROPERTY(QString path READ path CONSTANT)
+    Q_PROPERTY(QString bootSession READ bootSession WRITE setBootSession NOTIFY bootSessionChanged)
+    Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
 public:
     static constexpr double minScale = 0.8;
     static constexpr double maxScale = 1.4;
     static constexpr int minSaverSeconds = 10;
     static constexpr int maxSaverSeconds = 300;
-    static constexpr int syncDelayMs = 500;
     static constexpr int defaultAccentHue = 350;
 
-    explicit Settings(QObject *parent = nullptr);
-    explicit Settings(const QString &path, QObject *parent = nullptr);
+    Settings();
+    explicit Settings(MicroSet::Client *client, QObject *parent = nullptr);
     ~Settings() override;
 
-    static QString defaultPath();
+    static QDBusConnection bus();
+    static QString legacyPath();
+    static QVariantMap legacyValues(const QString &path);
     static QStringList outputs();
     static QStringList codecs();
     static int normalizeHue(int hue);
@@ -64,9 +69,17 @@ public:
     static QStringList outputLevels();
     static QStringList sampleRates();
     static QStringList defaultRoots();
+    static QList<int> saverSteps();
+    static QList<int> screenOffSteps();
+    static QList<int> suspendSteps();
+    static int snap(int value, const QList<int> &steps);
     Q_INVOKABLE static QStringList candidateRoots();
 
-    QString path() const;
+    MicroSet::Client *client() const;
+    bool available() const;
+    QVariant value(const QString &key) const;
+    void setValue(const QString &key, const QVariant &value);
+    void importLegacy(const QString &path = legacyPath());
 
     QString output() const;
     void setOutput(const QString &output);
@@ -106,22 +119,13 @@ public:
     void setAutoRotate(bool on);
     bool touch() const;
     void setTouch(bool on);
-    QString eqHeadphones() const;
-    void setEqHeadphones(const QString &key);
-    QString eqUsb() const;
-    void setEqUsb(const QString &key);
-    QString eqSpeaker() const;
-    void setEqSpeaker(const QString &key);
     QString outputLevel() const;
     void setOutputLevel(const QString &level);
     QString sampleRate() const;
     void setSampleRate(const QString &rate);
-
-    static QString normalizeEq(const QString &key);
-    Q_INVOKABLE QString eq(const QString &output) const;
-    Q_INVOKABLE void setEq(const QString &output, const QString &key);
-
-    Q_INVOKABLE void sync();
+    QString bootSession() const;
+    void setBootSession(const QString &name);
+    Q_INVOKABLE QStringList bootSessions() const;
 
 signals:
     void outputChanged();
@@ -143,44 +147,25 @@ signals:
     void orientationChanged();
     void autoRotateChanged();
     void touchChanged();
-    void eqHeadphonesChanged();
-    void eqUsbChanged();
-    void eqSpeakerChanged();
     void outputLevelChanged();
     void sampleRateChanged();
+    void bootSessionChanged();
+    void availableChanged();
+    void valueChanged(const QString &key);
+    void imported(bool ok);
 
 private:
     void load();
+    void take(const QString &key, const QVariant &value);
     void store(const QString &key, const QVariant &value);
+    void refresh(const QString &key);
+    void notify(const QString &key);
 
-    QSettings m_settings;
-    QTimer m_syncTimer;
-    QVariantMap m_dirty;
-    QString m_output;
-    QStringList m_roots;
-    int m_accentHue = defaultAccentHue;
-    bool m_accentFromArt = false;
-    bool m_dropAccent = false;
-    double m_scale = 1.0;
-    int m_saverSeconds = 30;
-    int m_screenOffSeconds = 300;
-    int m_suspendMinutes = 10;
-    bool m_wifiOffScreenOff = false;
-    QString m_btCodec;
-    bool m_overlayToasts = false;
-    QString m_hpGain;
-    QString m_hpAmp;
-    int m_spkGain = 102;
-    int m_volumeStep = 5;
-    QString m_rgb;
-    QString m_orientation;
-    bool m_autoRotate = false;
-    bool m_touch = true;
-    QString m_eqHeadphones;
-    QString m_eqUsb;
-    QString m_eqSpeaker;
-    QString m_outputLevel;
-    QString m_sampleRate;
+    std::unique_ptr<MicroSet::Client> m_owned;
+    MicroSet::Client *m_client = nullptr;
+    QVariantMap m_values;
+    bool m_available = false;
+    bool m_importing = false;
 };
 
 }
