@@ -395,6 +395,11 @@ int Library::playlistCount() const
     return m_db.isOpen() ? count(QStringLiteral("playlists")) : 0;
 }
 
+Settings *Library::settings() const
+{
+    return m_settings;
+}
+
 void Library::setSettings(Settings *settings)
 {
     if (m_settings == settings)

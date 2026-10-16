@@ -32,7 +32,7 @@ KEYS = {
     'audio.volume_step': ('u', 5, {'enum': [2, 5, 10]}),
     'audio.bt_codec': ('s', 'auto', {'enum': ['auto', 'aptx', 'aac', 'ldac', 'sbc']}),
     'display.orientation': ('s', 'portrait', {}),
-    'display.auto_rotate': ('b', False, {}),
+    'display.auto_rotate': ('b', True, {}),
     'display.rotation': ('s', 'portrait', {'live': True, 'writable': False}),
     'session.default': ('s', 'steam', {'enum': ['steam', 'microdap', 'microemu']}),
     'rgb.enabled': ('b', False, {'override': True}),

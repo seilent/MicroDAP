@@ -44,6 +44,7 @@ public:
     int songCount() const;
     int playlistCount() const;
 
+    Settings *settings() const;
     void setSettings(Settings *settings);
     QStringList scannedRoots() const;
     QStringList scannedDirectories() const;

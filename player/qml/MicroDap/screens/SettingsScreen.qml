@@ -709,7 +709,9 @@ Page {
         } else {
             next.push(path)
         }
-        page.set("roots", next)
+        const defaults = page.settings !== null && typeof page.settings.defaultRoots === "function" ? page.settings.defaultRoots() : []
+        const same = defaults.length === next.length && defaults.slice().sort().join("\n") === next.slice().sort().join("\n")
+        page.set("roots", same ? [] : next)
     }
 
     function closePlayer(): void {

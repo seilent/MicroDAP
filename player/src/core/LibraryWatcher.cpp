@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSet>
+#include <QSocketNotifier>
 
 #include <utility>
 
@@ -23,14 +24,64 @@ LibraryWatcher::LibraryWatcher(Library *library, QObject *parent)
 {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(defaultDebounceMs);
-    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this](const QString &path) {
+        if (m_media.contains(path))
+            m_mediaEvent = true;
+        m_debounce.start();
+    });
     connect(&m_debounce, &QTimer::timeout, this, [this] {
         emit triggered();
-        m_library->rescanRoots();
+        Settings *settings = m_library->settings();
+        if (std::exchange(m_mediaEvent, false) && settings && settings->rootsDefault())
+            settings->refreshRoots();
+        else
+            m_library->rescanRoots();
     });
     connect(m_library, &Library::scanned, this, &LibraryWatcher::rebuild);
     m_poll.setInterval(defaultPollMs);
     connect(&m_poll, &QTimer::timeout, this, &LibraryWatcher::poll);
+    m_mountinfo.setFileName(QStringLiteral("/proc/self/mountinfo"));
+    if (m_mountinfo.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) {
+        m_mediaMounts = mediaMounts(m_mountinfo.readAll());
+        m_notifier = std::make_unique<QSocketNotifier>(m_mountinfo.handle(), QSocketNotifier::Exception);
+        connect(m_notifier.get(), &QSocketNotifier::activated, this, [this] {
+            m_mountinfo.seek(0);
+            QStringList mounts = mediaMounts(m_mountinfo.readAll());
+            if (mounts == m_mediaMounts)
+                return;
+            m_mediaMounts = std::move(mounts);
+            mountsChanged();
+        });
+    }
+}
+
+LibraryWatcher::~LibraryWatcher() = default;
+
+QStringList LibraryWatcher::mediaMounts(const QByteArray &mountinfo)
+{
+    const QString base = QDir::cleanPath(QDir(Scanner::mediaBase()).absolutePath());
+    const QString prefix = base + QLatin1Char('/');
+    QStringList out;
+    for (const QByteArray &line : mountinfo.split('\n')) {
+        const QList<QByteArray> fields = line.split(' ');
+        if (fields.size() < 5)
+            continue;
+        QByteArray target = fields.at(4);
+        target.replace("\\040", " ").replace("\\011", "\t").replace("\\012", "\n").replace("\\134", "\\");
+        const QString path = QString::fromLocal8Bit(target);
+        if (path == base || path.startsWith(prefix))
+            out.append(QString::fromLocal8Bit(line));
+    }
+    return out;
+}
+
+void LibraryWatcher::mountsChanged()
+{
+    const Settings *settings = m_library->settings();
+    if (!settings || !settings->rootsDefault())
+        return;
+    m_mediaEvent = true;
+    m_debounce.start();
 }
 
 int LibraryWatcher::pollMs() const
@@ -114,6 +165,37 @@ void LibraryWatcher::rebuild()
         listed.insert(path);
         wanted.append(path);
     };
+
+    m_media.clear();
+    const Settings *settings = m_library->settings();
+    const QString base = QDir::cleanPath(QDir(Scanner::mediaBase()).absolutePath());
+    if (settings && settings->rootsDefault() && QFileInfo(base).isDir()) {
+        const auto dirs = [](const QString &path) {
+            return QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
+        };
+        const auto card = [this, &dirs](const QString &path) {
+            m_media.append(path);
+            for (const QFileInfo &entry : dirs(path)) {
+                if (entry.fileName().compare(QLatin1StringView("roms"), Qt::CaseInsensitive) == 0)
+                    m_media.append(entry.absoluteFilePath());
+            }
+        };
+        m_media.append(base);
+        for (const QFileInfo &child : dirs(base)) {
+            const QString path = child.absoluteFilePath();
+            if (Scanner::isMountPoint(path)) {
+                card(path);
+                continue;
+            }
+            m_media.append(path);
+            for (const QFileInfo &sub : dirs(path)) {
+                if (Scanner::isMountPoint(sub.absoluteFilePath()))
+                    card(sub.absoluteFilePath());
+            }
+        }
+        for (const QString &path : std::as_const(m_media))
+            add(path);
+    }
 
     m_missing.clear();
     const QStringList roots = m_library->scannedRoots();

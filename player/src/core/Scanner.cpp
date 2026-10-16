@@ -111,6 +111,7 @@ int bitDepthOf(const TagLib::AudioProperties *audio)
 }
 
 std::atomic<Scanner::MountCheck> mountCheck{nullptr};
+std::atomic<Scanner::DeviceCheck> deviceCheck{nullptr};
 
 bool cancelled(const std::atomic_bool *cancel)
 {
@@ -192,6 +193,18 @@ void Scanner::setMountCheck(MountCheck check)
     mountCheck.store(check);
 }
 
+QString Scanner::deviceOf(const QString &mount)
+{
+    if (const DeviceCheck check = deviceCheck.load())
+        return check(mount);
+    return QString::fromLocal8Bit(QStorageInfo(mount).device());
+}
+
+void Scanner::setDeviceCheck(DeviceCheck check)
+{
+    deviceCheck.store(check);
+}
+
 QString Scanner::decodePlaylist(const QByteArray &bytes, bool utf8Only)
 {
     QByteArray data = bytes;
@@ -268,15 +281,30 @@ bool Scanner::onAbsentMedia(const QString &path)
     return true;
 }
 
+QString Scanner::mountOf(const QString &root)
+{
+    const QString base = rootPrefix(mediaBase());
+    QString dir = QDir::cleanPath(QDir(root).absolutePath());
+    while (dir.startsWith(base)) {
+        if (isMountPoint(dir))
+            return dir;
+        const QString parent = QFileInfo(dir).path();
+        if (parent == dir)
+            break;
+        dir = parent;
+    }
+    return {};
+}
+
 bool Scanner::removable(const QString &path, const QStringList &present, const QStringList &absent)
 {
     const auto under = [&path](const QStringList &prefixes) {
         return std::any_of(prefixes.cbegin(), prefixes.cend(),
                            [&path](const QString &prefix) { return path.startsWith(prefix); });
     };
-    if (under(present))
-        return !onAbsentMedia(path);
-    return !under(absent);
+    if (onAbsentMedia(path))
+        return false;
+    return under(present) || !under(absent);
 }
 
 ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStamp> &snapshot,
@@ -287,7 +315,15 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
     m_folderArt.clear();
     m_mounts.clear();
 
+    struct Walked
+    {
+        QString root;
+        QString mount;
+        QString device;
+    };
+
     ScanResult result;
+    QList<Walked> walkedRoots;
     QSet<QString> seen;
     QSet<QString> seenPlaylists;
     QSet<QString> walked;
@@ -302,6 +338,9 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
             continue;
         }
         present.append(rootPrefix(root));
+        const QString mount = mountOf(root);
+        walkedRoots.append({root, mount,
+                            mount.isEmpty() ? QString::fromLocal8Bit(QStorageInfo(root).device()) : deviceOf(mount)});
 
         QStringList queue{QDir(root).absolutePath()};
         for (qsizetype next = 0; next < queue.size(); ++next) {
@@ -355,6 +394,16 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
         }
     }
 
+    for (const Walked &walkedRoot : std::as_const(walkedRoots)) {
+        const bool same = walkedRoot.mount.isEmpty()
+                              ? QString::fromLocal8Bit(QStorageInfo(walkedRoot.root).device()) == walkedRoot.device
+                              : isMountPoint(walkedRoot.mount) && QFileInfo::exists(walkedRoot.device)
+                                    && deviceOf(walkedRoot.mount) == walkedRoot.device;
+        if (same && QFileInfo(walkedRoot.root).isDir())
+            continue;
+        present.removeAll(rootPrefix(walkedRoot.root));
+        absent.append(rootPrefix(walkedRoot.root));
+    }
     for (auto it = snapshot.cbegin(); it != snapshot.cend(); ++it) {
         if (!seen.contains(it.key()) && removable(it.key(), present, absent))
             result.removed.append(it.key());

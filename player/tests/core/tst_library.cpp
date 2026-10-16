@@ -1,3 +1,4 @@
+#include "Eq.h"
 #include "Library.h"
 #include "LibraryWatcher.h"
 #include "Models.h"
@@ -18,17 +19,23 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QtTest>
 
 #include <memory>
+#include <utility>
 
 using namespace microdap;
 
 namespace {
 
 constexpr int scanTimeoutMs = 60000;
+
+const char *autoEq =
+    "Preamp: -6.2 dB\n"
+    "Filter 1: ON PK Fc 1000 Hz Gain -3.2 dB Q 1.41\n";
 
 bool copyTree(const QString &from, const QString &to)
 {
@@ -169,6 +176,30 @@ bool fakeMountCheck(const QString &dir)
     return !fakeMount.isEmpty() && QDir::cleanPath(dir) == fakeMount;
 }
 
+QString fakeDevice;
+void (*deviceFlip)() = nullptr;
+
+QString fakeDeviceCheck(const QString &)
+{
+    const QString device = fakeDevice;
+    if (deviceFlip)
+        std::exchange(deviceFlip, nullptr)();
+    return device;
+}
+
+QString pulledCard;
+QString pulledRoot;
+int pulledChecks = 0;
+
+bool pullingMountCheck(const QString &dir)
+{
+    if (QDir::cleanPath(dir) != pulledCard)
+        return false;
+    if (++pulledChecks == 1)
+        QDir(pulledRoot).removeRecursively();
+    return true;
+}
+
 QList<qint64> idsOf(const QList<QueueEntry> &entries)
 {
     QList<qint64> ids;
@@ -248,6 +279,14 @@ private slots:
     void watcherMissingRoot();
     void watcherClimbStops();
     void watcherPoll();
+    void mediaDefaultRoots();
+    void mediaKeepsUserData();
+    void watcherMedia();
+    void watcherMediaLimit();
+    void watcherMountOverDir();
+    void scanCardPulled();
+    void scanCardRecheck();
+    void mediaMountsFilter();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -306,6 +345,9 @@ QString LibraryTest::artPathOf(const QString &album) const
 void LibraryTest::initTestCase()
 {
     QVERIFY(m_dir.isValid());
+    fakeDevice = m_dir.path() + QStringLiteral("/dev-card");
+    QVERIFY(writeBytes(fakeDevice, QByteArray()));
+    Scanner::setDeviceCheck(fakeDeviceCheck);
     m_music = m_dir.path() + QStringLiteral("/music");
     QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC), m_music));
 
@@ -1527,15 +1569,11 @@ void LibraryTest::candidateRoots()
         return path.endsWith(QLatin1StringView("/mmcblk0p1")) || path.endsWith(QLatin1StringView("/CARD"));
     });
 
+    QVERIFY(QDir().mkpath(label + QStringLiteral("/MUSIC")));
     const QStringList roots = Settings::candidateRoots();
-    QVERIFY(roots.contains(card));
-    QVERIFY(roots.contains(card + QStringLiteral("/Music")));
-    QVERIFY(roots.contains(label));
-    QVERIFY(!roots.contains(label + QStringLiteral("/Music")));
-    QVERIFY(!roots.contains(user));
-    QVERIFY(!roots.contains(user + QStringLiteral("/stale")));
-    QVERIFY(roots.contains(empty));
-    QVERIFY(!roots.contains(empty + QStringLiteral("/old")));
+    QCOMPARE(roots, (QStringList{QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+                                 label + QStringLiteral("/MUSIC"), card + QStringLiteral("/Music")}));
+    QCOMPARE(roots, Settings::defaultRoots());
 
     Scanner::setMountCheck(nullptr);
     qunsetenv("MICRODAP_MEDIA_ROOT");
@@ -1935,6 +1973,8 @@ void LibraryTest::watcherPoll()
     const QString base = m_dir.path() + QStringLiteral("/pollmedia");
     const QString root = base + QStringLiteral("/mmcblk0p1/Music");
     qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    fakeMount = base + QStringLiteral("/mmcblk0p1");
     LibraryWatcher watcher(m_library.get());
     watcher.setDebounceMs(600000);
     watcher.setPollMs(200);
@@ -1958,8 +1998,377 @@ void LibraryTest::watcherPoll()
 
     m_settings->setRoots({m_music});
     QTRY_VERIFY_WITH_TIMEOUT(!m_library->scanning() && m_library->songCount() == before, scanTimeoutMs);
+    fakeMount.clear();
+    Scanner::setMountCheck(nullptr);
     qunsetenv("MICRODAP_MEDIA_ROOT");
     QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::mediaDefaultRoots()
+{
+    const QString base = m_dir.path() + QStringLiteral("/defaults");
+    const QString card = base + QStringLiteral("/mmcblk0p1");
+    const QString user = base + QStringLiteral("/micro");
+    const QString fat = user + QStringLiteral("/CARD");
+    const QString old = user + QStringLiteral("/old");
+    const QString linked = user + QStringLiteral("/linked");
+    const QString target = m_dir.path() + QStringLiteral("/defaults-target");
+    for (const QString &dir : {card + QStringLiteral("/Music"), card + QStringLiteral("/roms/music"),
+                               card + QStringLiteral("/roms/gba"), card + QStringLiteral("/steamapps"),
+                               fat + QStringLiteral("/MUSIC"), fat + QStringLiteral("/ROMS/MUSIC"),
+                               old + QStringLiteral("/Music"), linked, target + QStringLiteral("/music"),
+                               base + QStringLiteral("/loose/Music")})
+        QVERIFY(QDir().mkpath(dir));
+    QVERIFY(QFile::link(target + QStringLiteral("/music"), linked + QStringLiteral("/Music")));
+    QVERIFY(QFile::link(target, linked + QStringLiteral("/roms")));
+    QVERIFY(QFile::link(card, user + QStringLiteral("/alias")));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck([](const QString &dir) {
+        const QString path = QDir::cleanPath(dir);
+        return path.endsWith(QLatin1StringView("/mmcblk0p1")) || path.endsWith(QLatin1StringView("/CARD"));
+    });
+
+    const QString home = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+    QStringList roots = Settings::defaultRoots();
+    QCOMPARE(roots.first(), home);
+    roots.sort();
+    QStringList expected{home,
+                         card + QStringLiteral("/Music"),
+                         card + QStringLiteral("/roms/music"),
+                         fat + QStringLiteral("/MUSIC"),
+                         fat + QStringLiteral("/ROMS/MUSIC"),
+                         old + QStringLiteral("/Music")};
+    expected.sort();
+    QCOMPARE(roots, expected);
+
+    Settings settings(nullptr);
+    QCOMPARE(settings.roots(), Settings::defaultRoots());
+    settings.setRoots({m_music});
+    QCOMPARE(settings.roots(), QStringList{m_music});
+    settings.setRoots({});
+    QVERIFY(settings.rootsDefault());
+    QCOMPARE(settings.value(QStringLiteral("microdap.roots")).toStringList(), QStringList());
+
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+    QVERIFY(QDir(target).removeRecursively());
+}
+
+void LibraryTest::mediaKeepsUserData()
+{
+    QSqlDatabase db = m_library->database();
+    const QString base = m_dir.path() + QStringLiteral("/keepmedia");
+    const QString card = base + QStringLiteral("/micro/CARD");
+    const QString music = card + QStringLiteral("/Music");
+    const QString path = music + QStringLiteral("/Single/01 Single.mp3");
+    const QString stray = card + QStringLiteral("/steamapps/01 Single.mp3");
+    const QString list = music + QStringLiteral("/Card.m3u");
+    const QString single = QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single");
+    QVERIFY(copyTree(single, music + QStringLiteral("/Single")));
+    QVERIFY(QDir().mkpath(QFileInfo(stray).absolutePath()));
+    QVERIFY(QFile::copy(single + QStringLiteral("/01 Single.mp3"), stray));
+    QVERIFY(writeBytes(list, QByteArrayLiteral("Single/01 Single.mp3\n")));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    fakeMount = card;
+    const int before = m_library->songCount();
+
+    int added = 0;
+    int updated = 0;
+    int removed = 0;
+    QVERIFY(scan({m_music, card}, added, updated, removed));
+    QCOMPARE(added, 2);
+    QVERIFY(trackId(db, stray) > 0);
+
+    QVERIFY(scan({m_music, music}, added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(trackId(db, stray), 0);
+    const qint64 track = trackId(db, path);
+    QVERIFY(track > 0);
+    const qint64 playlist = playlistId(db, QStringLiteral("Card"));
+    QVERIFY(playlist > 0);
+    m_library->setRating(track, 1);
+    m_library->addHistory(track);
+    QVERIFY(m_library->pin(QStringLiteral("playlist"), playlist));
+    QVERIFY(m_library->pin(QStringLiteral("song"), track));
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ? AND track_id = ?"),
+                    {playlist, track})
+                 .toInt(),
+             1);
+
+    fakeMount.clear();
+    QVERIFY(QDir(card).removeRecursively());
+    Scanner scanner(m_dir.path() + QStringLiteral("/art"));
+    const ScanResult result = scanner.scan({m_music}, m_library->snapshot(), nullptr, m_library->playlistStamps());
+    QVERIFY(result.complete);
+    QVERIFY(!result.removed.contains(path));
+    QVERIFY(!result.removedPlaylists.contains(list));
+
+    QVERIFY(scan({m_music}, added, updated, removed));
+    QCOMPARE(removed, 0);
+    QCOMPARE(trackId(db, path), track);
+    QCOMPARE(m_library->rating(track), 1);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = ?"), {track}).toInt(), 1);
+    QCOMPARE(playlistId(db, QStringLiteral("Card")), playlist);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ? AND track_id = ?"),
+                    {playlist, track})
+                 .toInt(),
+             1);
+    QVERIFY(m_library->isPinned(QStringLiteral("playlist"), playlist));
+    QVERIFY(m_library->isPinned(QStringLiteral("song"), track));
+    QCOMPARE(m_library->songCount(), before + 1);
+
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(scan({m_music}, added, updated, removed));
+    QCOMPARE(removed, 1);
+    QCOMPARE(m_library->songCount(), before);
+    QCOMPARE(playlistId(db, QStringLiteral("Card")), 0);
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::watcherMedia()
+{
+    const QString base = m_dir.path() + QStringLiteral("/watchmedia");
+    const QString user = base + QStringLiteral("/micro");
+    const QString card = user + QStringLiteral("/CARD");
+    const QString stage = m_dir.path() + QStringLiteral("/watchstage");
+    const QString profile = card + QStringLiteral("/Music/EQ/HD600 ParametricEQ.txt");
+    QVERIFY(QDir().mkpath(user));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    Settings settings(nullptr);
+    Library library(m_dir.path() + QStringLiteral("/watchmedia.db"), m_dir.path() + QStringLiteral("/watchart"));
+    QVERIFY(library.isOpen());
+    library.setSettings(&settings);
+    EqControl eq(&settings);
+    LibraryWatcher watcher(&library);
+    watcher.setDebounceMs(200);
+    QSignalSpy scanned(&library, &Library::scanned);
+    library.rescanRoots();
+    QVERIFY(scanned.wait(scanTimeoutMs));
+    QVERIFY(watcher.watched().contains(base));
+    QVERIFY(watcher.watched().contains(user));
+    QCOMPARE(library.songCount(), 0);
+    const auto listed = [&eq, &profile] {
+        for (const QVariant &source : eq.sources()) {
+            if (source.toMap().value(QStringLiteral("path")).toString() == profile)
+                return true;
+        }
+        return false;
+    };
+    QVERIFY(!listed());
+
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     stage + QStringLiteral("/Music/Single")));
+    QVERIFY(QDir().mkpath(stage + QStringLiteral("/Roms")));
+    QVERIFY(QDir().mkpath(stage + QStringLiteral("/Music/EQ")));
+    QVERIFY(writeBytes(stage + QStringLiteral("/Music/EQ/HD600 ParametricEQ.txt"), QByteArray(autoEq)));
+    fakeMount = card;
+    QVERIFY(QDir().rename(stage, card));
+    QTRY_COMPARE_WITH_TIMEOUT(library.songCount(), 1, scanTimeoutMs);
+    QVERIFY(listed());
+    QVERIFY(library.scannedRoots().contains(card + QStringLiteral("/Music")));
+    QTRY_VERIFY_WITH_TIMEOUT(watcher.watched().contains(card + QStringLiteral("/Music/Single")), scanTimeoutMs);
+    QVERIFY(watcher.watched().contains(card));
+    QVERIFY(watcher.watched().contains(card + QStringLiteral("/Roms")));
+
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     stage + QStringLiteral("/Single")));
+    QVERIFY(QDir().rename(stage, card + QStringLiteral("/Roms/MUSIC")));
+    QTRY_COMPARE_WITH_TIMEOUT(library.songCount(), 2, scanTimeoutMs);
+    QVERIFY(library.scannedRoots().contains(card + QStringLiteral("/Roms/MUSIC")));
+
+    fakeMount.clear();
+    QVERIFY(QDir(card).removeRecursively());
+    QTRY_VERIFY_WITH_TIMEOUT(!listed(), scanTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!library.scanning() && !library.scannedRoots().contains(card + QStringLiteral("/Music")),
+                             scanTimeoutMs);
+    QCOMPARE(library.songCount(), 2);
+
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::watcherMediaLimit()
+{
+    const QString base = m_dir.path() + QStringLiteral("/limitmedia");
+    const QString card = base + QStringLiteral("/mmcblk0p1");
+    const QString stage = m_dir.path() + QStringLiteral("/limitstage");
+    QVERIFY(QDir().mkpath(base + QStringLiteral("/micro")));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    Settings settings(nullptr);
+    Library library(m_dir.path() + QStringLiteral("/limitmedia.db"), m_dir.path() + QStringLiteral("/limitart"));
+    QVERIFY(library.isOpen());
+    library.setSettings(&settings);
+    LibraryWatcher watcher(&library);
+    watcher.setDebounceMs(200);
+    watcher.setLimit(1);
+    QSignalSpy scanned(&library, &Library::scanned);
+    library.rescanRoots();
+    QVERIFY(scanned.wait(scanTimeoutMs));
+    QCOMPARE(watcher.watched(), QStringList{base});
+
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     stage + QStringLiteral("/music/Single")));
+    fakeMount = card;
+    QVERIFY(QDir().rename(stage, card));
+    QTRY_COMPARE_WITH_TIMEOUT(library.songCount(), 1, scanTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!library.scanning(), scanTimeoutMs);
+    QCOMPARE(watcher.watched(), QStringList{base});
+
+    fakeMount.clear();
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::watcherMountOverDir()
+{
+    const QString base = m_dir.path() + QStringLiteral("/overmedia");
+    const QString card = base + QStringLiteral("/micro/CARD");
+    QVERIFY(QDir().mkpath(card));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    Settings settings(nullptr);
+    Library library(m_dir.path() + QStringLiteral("/overmedia.db"), m_dir.path() + QStringLiteral("/overart"));
+    QVERIFY(library.isOpen());
+    library.setSettings(&settings);
+    LibraryWatcher watcher(&library);
+    watcher.setDebounceMs(200);
+    QSignalSpy scanned(&library, &Library::scanned);
+    library.rescanRoots();
+    QVERIFY(scanned.wait(scanTimeoutMs));
+    QVERIFY(!watcher.watched().contains(card));
+
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     card + QStringLiteral("/Music/Single")));
+    fakeMount = card;
+    QTest::qWait(600);
+    QCOMPARE(library.songCount(), 0);
+    watcher.mountsChanged();
+    QTRY_COMPARE_WITH_TIMEOUT(library.songCount(), 1, scanTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!library.scanning() && watcher.watched().contains(card), scanTimeoutMs);
+
+    settings.setRoots({m_music});
+    QTRY_VERIFY_WITH_TIMEOUT(!library.scanning() && !watcher.watched().contains(base), scanTimeoutMs);
+    QSignalSpy triggered(&watcher, &LibraryWatcher::triggered);
+    watcher.mountsChanged();
+    QTest::qWait(600);
+    QCOMPARE(triggered.count(), 0);
+
+    fakeMount.clear();
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::scanCardPulled()
+{
+    const QString base = m_dir.path() + QStringLiteral("/pullmedia");
+    const QString card = base + QStringLiteral("/micro/CARD");
+    const QString music = card + QStringLiteral("/Music");
+    const QString path = music + QStringLiteral("/Single/01 Single.mp3");
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     music + QStringLiteral("/Single")));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    fakeMount = card;
+    Library library(m_dir.path() + QStringLiteral("/pullmedia.db"), m_dir.path() + QStringLiteral("/pullart"));
+    QVERIFY(library.isOpen());
+    QSignalSpy scanned(&library, &Library::scanned);
+    library.rescan({music});
+    QVERIFY(scanned.wait(scanTimeoutMs));
+    QCOMPARE(library.songCount(), 1);
+
+    pulledCard = card;
+    pulledRoot = music;
+    pulledChecks = 0;
+    Scanner::setMountCheck(pullingMountCheck);
+    Scanner scanner(m_dir.path() + QStringLiteral("/pullart"));
+    const ScanResult result = scanner.scan({music}, library.snapshot());
+    QVERIFY(result.complete);
+    QVERIFY(pulledChecks >= 2);
+    QVERIFY(!QFileInfo::exists(music));
+    QVERIFY(result.removed.isEmpty());
+
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     music + QStringLiteral("/Single")));
+    Scanner::setMountCheck(fakeMountCheck);
+    QVERIFY(QFile::remove(path));
+    const ScanResult gone = scanner.scan({music}, library.snapshot());
+    QCOMPARE(gone.removed, QStringList{path});
+
+    fakeMount.clear();
+    pulledCard.clear();
+    pulledRoot.clear();
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::scanCardRecheck()
+{
+    const QString base = m_dir.path() + QStringLiteral("/recheckmedia");
+    const QString card = base + QStringLiteral("/micro/CARD");
+    const QString music = card + QStringLiteral("/Music");
+    const QString path = music + QStringLiteral("/Single/01 Single.mp3");
+    const QString card0 = fakeDevice;
+    const QString other = m_dir.path() + QStringLiteral("/dev-other");
+    QVERIFY(writeBytes(other, QByteArray()));
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC) + QStringLiteral("/Single"),
+                     music + QStringLiteral("/Single")));
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    fakeMount = card;
+    Library library(m_dir.path() + QStringLiteral("/recheckmedia.db"), m_dir.path() + QStringLiteral("/recheckart"));
+    QVERIFY(library.isOpen());
+    QSignalSpy scanned(&library, &Library::scanned);
+    library.rescan({music});
+    QVERIFY(scanned.wait(scanTimeoutMs));
+    QCOMPARE(library.songCount(), 1);
+    const QHash<QString, FileStamp> snapshot = library.snapshot();
+    QVERIFY(QFile::remove(path));
+    Scanner scanner(m_dir.path() + QStringLiteral("/recheckart"));
+
+    deviceFlip = [] { QFile::remove(fakeDevice); };
+    QVERIFY(scanner.scan({music}, snapshot).removed.isEmpty());
+    QVERIFY(!deviceFlip);
+    QVERIFY(writeBytes(fakeDevice, QByteArray()));
+
+    deviceFlip = [] { fakeMount.clear(); };
+    QVERIFY(scanner.scan({music}, snapshot).removed.isEmpty());
+    fakeMount = card;
+
+    deviceFlip = [] { fakeDevice = QDir::cleanPath(fakeDevice + QStringLiteral("/../dev-other")); };
+    QVERIFY(scanner.scan({music}, snapshot).removed.isEmpty());
+    QCOMPARE(fakeDevice, other);
+    fakeDevice = card0;
+
+    QCOMPARE(scanner.scan({music}, snapshot).removed, QStringList{path});
+
+    fakeMount.clear();
+    Scanner::setMountCheck(nullptr);
+    qunsetenv("MICRODAP_MEDIA_ROOT");
+    QVERIFY(QFile::remove(other));
+    QVERIFY(QDir(base).removeRecursively());
+}
+
+void LibraryTest::mediaMountsFilter()
+{
+    const QByteArray root = "36 25 0:32 / / rw - ext4 /dev/sda22 rw\n";
+    const QByteArray card = "120 36 179:1 / /run/media/micro/e8ea rw,nosuid - ext4 /dev/mmcblk0p1 rw\n";
+    const QByteArray spaced = "121 36 179:2 / /run/media/micro/My\\040Card rw - vfat /dev/mmcblk0p2 rw\n";
+    const QByteArray user = "122 36 0:50 / /run/user/1000 rw - tmpfs tmpfs rw\n";
+    const QByteArray near = "123 36 0:51 / /run/mediax rw - tmpfs tmpfs rw\n";
+    const QStringList mounts = LibraryWatcher::mediaMounts(root + card + spaced + user + near);
+    QCOMPARE(mounts, (QStringList{QString::fromLatin1(card).trimmed(), QString::fromLatin1(spaced).trimmed()}));
+    QCOMPARE(LibraryWatcher::mediaMounts(root + card + spaced), mounts);
+    QCOMPARE(LibraryWatcher::mediaMounts(root + user), QStringList());
+    QVERIFY(LibraryWatcher::mediaMounts(root + card) != mounts);
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)

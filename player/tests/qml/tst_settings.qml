@@ -46,6 +46,7 @@ TestCase {
         property string rgb: "system"
         property string btCodec: "auto"
         property var roots: ["/home/micro/Music"]
+        property var defaultList: []
         property int accentHue: 350
         property bool accentFromArt: false
         property real scale: 1.0
@@ -65,6 +66,10 @@ TestCase {
 
         function bootSessions() {
             return fakeSettings.sessionChoices
+        }
+
+        function defaultRoots() {
+            return fakeSettings.defaultList
         }
     }
 
@@ -286,6 +291,7 @@ TestCase {
         fakeSettings.rgb = "system"
         fakeSettings.btCodec = "auto"
         fakeSettings.roots = ["/home/micro/Music"]
+        fakeSettings.defaultList = []
         fakeSettings.accentHue = 350
         fakeSettings.accentFromArt = false
         fakeSettings.scale = 1.0
@@ -1482,6 +1488,22 @@ TestCase {
         compare(counters.closePlayer, 1)
         compare(tc.rowOf(page, "toasts").title, "toasts in game")
         compare(tc.rowOf(page, "saver").title, "saver")
+    }
+
+    function test_library_folders_default() {
+        fakeSettings.roots = ["/home/micro/Music", "/run/media/micro/SD"]
+        fakeSettings.defaultList = ["/run/media/micro/SD", "/home/micro/Music"]
+        const page = open()
+        tc.focusKey(page, "folders")
+        const folders = tc.keyIndex(page, "folders")
+        verify(router.dispatch("a", false))
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        compare(page.focusIndex, folders + 2)
+        verify(router.dispatch("a", false))
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify(["/home/micro/Music"]))
+        verify(router.dispatch("a", false))
+        compare(JSON.stringify(fakeSettings.roots), JSON.stringify([]))
     }
 
     function test_library_folders() {

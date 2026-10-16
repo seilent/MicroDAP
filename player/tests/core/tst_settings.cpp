@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -54,6 +55,8 @@ private slots:
     void defaultsWithoutDaemon();
     void loadsFromDaemon();
     void writesTypedKeys();
+    void rootsStoreEmpty();
+    void rootsOldDefaults();
     void followsChanged();
     void refusedSetReverts();
     void daemonLater();
@@ -119,6 +122,7 @@ void SettingsTest::defaultsWithoutDaemon()
     QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
     QCOMPARE(settings.rgb(), QStringLiteral("system"));
     QCOMPARE(settings.orientation(), QStringLiteral("portrait"));
+    QVERIFY(settings.autoRotate());
     QCOMPARE(settings.roots(), Settings::defaultRoots());
     QCOMPARE(settings.accentHue(), 350);
     QCOMPARE(settings.scale(), 1.0);
@@ -170,7 +174,7 @@ void SettingsTest::loadsFromDaemon()
     m_set.call(QStringLiteral("SetStored"), {QStringLiteral("microdap.roots"),
                                              FakeService::variant(QStringList{QStringLiteral("/music")})});
     m_set.call(QStringLiteral("SetStored"), {QStringLiteral("microdap.scale"), FakeService::variant(1.2)});
-    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("display.auto_rotate"), FakeService::variant(true)});
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("display.auto_rotate"), FakeService::variant(false)});
     MicroSet::Client client(QDBusConnection::sessionBus());
     Settings settings(&client);
     QVERIFY(settings.available());
@@ -178,7 +182,7 @@ void SettingsTest::loadsFromDaemon()
     QCOMPARE(settings.volumeStep(), 10);
     QCOMPARE(settings.roots(), QStringList{QStringLiteral("/music")});
     QCOMPARE(settings.scale(), 1.2);
-    QVERIFY(settings.autoRotate());
+    QVERIFY(!settings.autoRotate());
     QCOMPARE(settings.hpGain(), QStringLiteral("high"));
     QCOMPARE(settings.rgb(), QStringLiteral("system"));
     QCOMPARE(m_set.calls().filter(QStringLiteral("Set ")).size(), 0);
@@ -217,6 +221,42 @@ void SettingsTest::writesTypedKeys()
     settings.setBootSession(QStringLiteral("nowhere"));
     QTest::qWait(200);
     QCOMPARE(m_set.calls().filter(QStringLiteral("Set ")).size(), 11);
+}
+
+void SettingsTest::rootsStoreEmpty()
+{
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    Settings settings(&client);
+    QVERIFY(settings.rootsDefault());
+    settings.setRoots({QStringLiteral("/a")});
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("microdap.roots")).toStringList(), QStringList{QStringLiteral("/a")},
+                              waitMs);
+    QVERIFY(!settings.rootsDefault());
+    QSignalSpy roots(&settings, &Settings::rootsChanged);
+    settings.refreshRoots();
+    QCOMPARE(roots.count(), 0);
+    settings.setRoots({});
+    QCOMPARE(roots.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(m_set.calls().filter(QStringLiteral("Set ")).size(), 2, waitMs);
+    QCOMPARE(client.get(QStringLiteral("microdap.roots")).toStringList(), QStringList());
+    QVERIFY(settings.rootsDefault());
+    QCOMPARE(settings.roots(), Settings::defaultRoots());
+    settings.refreshRoots();
+    QCOMPARE(roots.count(), 2);
+}
+
+void SettingsTest::rootsOldDefaults()
+{
+    const QStringList old{QStandardPaths::writableLocation(QStandardPaths::MusicLocation), QStringLiteral("/run/media")};
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("microdap.roots"), FakeService::variant(old)});
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    Settings settings(&client);
+    QVERIFY(settings.rootsDefault());
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("microdap.roots")).toStringList(), QStringList(), waitMs);
+    QCOMPARE(m_set.calls().filter(QStringLiteral("Set ")).size(), 1);
+    QVERIFY(Settings::legacyValues(ini(QStringLiteral("[General]\nroots=") + old.join(QLatin1Char(','))
+                                       + QStringLiteral("\n")))
+                .isEmpty());
 }
 
 void SettingsTest::followsChanged()

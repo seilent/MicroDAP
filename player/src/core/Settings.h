@@ -68,7 +68,7 @@ public:
     static QStringList orientations();
     static QStringList outputLevels();
     static QStringList sampleRates();
-    static QStringList defaultRoots();
+    Q_INVOKABLE static QStringList defaultRoots();
     static QList<int> saverSteps();
     static QList<int> screenOffSteps();
     static QList<int> suspendSteps();
@@ -84,7 +84,9 @@ public:
     QString output() const;
     void setOutput(const QString &output);
     QStringList roots() const;
+    bool rootsDefault() const;
     void setRoots(const QStringList &roots);
+    void refreshRoots();
     int accentHue() const;
     void setAccentHue(int hue);
     bool accentFromArt() const;

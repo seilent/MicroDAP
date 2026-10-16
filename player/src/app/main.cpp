@@ -206,7 +206,6 @@ int main(int argc, char *argv[])
         if (!library.scanning())
             eq->relist();
     });
-    QObject::connect(&settings, &microdap::Settings::rootsChanged, eqControl.get(), &microdap::EqControl::relist);
     std::unique_ptr<microdap::OutputControl> outputControl;
     std::unique_ptr<microdap::WirePlumberRestart> wireplumber;
     std::unique_ptr<microdap::AlsaVolume> alsaVolume;

@@ -495,6 +495,7 @@ EqControl::EqControl(Settings *settings, QObject *parent)
         connect(app, &QCoreApplication::aboutToQuit, this, &EqControl::sync);
     if (m_settings) {
         connect(m_settings, &Settings::valueChanged, this, &EqControl::onValueChanged);
+        connect(m_settings, &Settings::rootsChanged, this, &EqControl::relist);
         connect(m_settings, &QObject::destroyed, this, [this] { m_settings = nullptr; });
         relist();
     }

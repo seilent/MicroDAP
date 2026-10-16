@@ -69,6 +69,7 @@ class Scanner
 {
 public:
     using MountCheck = bool (*)(const QString &path);
+    using DeviceCheck = QString (*)(const QString &mount);
 
     explicit Scanner(const QString &artDir);
 
@@ -85,11 +86,14 @@ public:
     static QString decodePlaylist(const QByteArray &bytes, bool utf8Only);
     static bool isMountPoint(const QString &dir);
     static void setMountCheck(MountCheck check);
+    static QString deviceOf(const QString &mount);
+    static void setDeviceCheck(DeviceCheck check);
 
 private:
     bool removable(const QString &path, const QStringList &present, const QStringList &absent);
     bool onAbsentMedia(const QString &path);
     bool mounted(const QString &dir);
+    static QString mountOf(const QString &root);
 
     TrackInfo read(const QFileInfo &info, const FileStamp &stamp);
     QString resolveArt(TagLib::File *file, const QString &key, const QDir &dir);

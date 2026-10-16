@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -139,7 +140,7 @@ QVariantMap defaults()
         {keyVolumeStep, 5u},
         {keyBtCodec, QStringLiteral("auto")},
         {keyOrientation, QStringLiteral("portrait")},
-        {keyAutoRotate, false},
+        {keyAutoRotate, true},
         {keyBootSession, QStringLiteral("steam")},
         {keyRoots, QStringList()},
         {keyAccentHue, uint(Settings::defaultAccentHue)},
@@ -161,6 +162,11 @@ QVariantMap defaults()
         out.insert(EqFilters::key(slot, QStringLiteral("filters")), QStringList{QStringLiteral("preamp 0")});
     }
     return out;
+}
+
+QStringList oldDefaultRoots()
+{
+    return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation), QStringLiteral("/run/media")};
 }
 
 double normalizeScale(double scale)
@@ -313,8 +319,37 @@ QStringList Settings::sampleRates()
 
 QStringList Settings::defaultRoots()
 {
-    return {QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-            QStringLiteral("/run/media")};
+    QStringList out{QStandardPaths::writableLocation(QStandardPaths::MusicLocation)};
+    const auto dirs = [](const QString &path) {
+        return QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name);
+    };
+    const auto named = [](const QFileInfo &info, QLatin1StringView name) {
+        return info.fileName().compare(name, Qt::CaseInsensitive) == 0;
+    };
+    const auto offer = [&](const QString &card) {
+        for (const QFileInfo &entry : dirs(card)) {
+            if (named(entry, QLatin1StringView("music"))) {
+                out.append(entry.absoluteFilePath());
+                continue;
+            }
+            if (!named(entry, QLatin1StringView("roms")))
+                continue;
+            for (const QFileInfo &music : dirs(entry.absoluteFilePath())) {
+                if (named(music, QLatin1StringView("music")))
+                    out.append(music.absoluteFilePath());
+            }
+        }
+    };
+    for (const QFileInfo &child : dirs(Scanner::mediaBase())) {
+        const QString path = child.absoluteFilePath();
+        if (Scanner::isMountPoint(path)) {
+            offer(path);
+            continue;
+        }
+        for (const QFileInfo &sub : dirs(path))
+            offer(sub.absoluteFilePath());
+    }
+    return out;
 }
 
 QList<int> Settings::saverSteps()
@@ -344,32 +379,16 @@ int Settings::snap(int value, const QList<int> &steps)
 
 QStringList Settings::candidateRoots()
 {
-    QStringList out = defaultRoots();
-    const auto offer = [&out](const QString &mount) {
-        out.append(mount);
-        const QString music = mount + QStringLiteral("/Music");
-        if (QFileInfo(music).isDir())
-            out.append(music);
-    };
-    const QFileInfoList children = QDir(Scanner::mediaBase()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QFileInfo &child : children) {
-        const QString path = child.absoluteFilePath();
-        if (Scanner::isMountPoint(path)) {
-            offer(path);
+    QStringList out;
+    QSet<QString> seen;
+    for (const QString &root : defaultRoots()) {
+        const QString canonical = QFileInfo(root).canonicalFilePath();
+        const QString key = canonical.isEmpty() ? QDir::cleanPath(root) : canonical;
+        if (seen.contains(key))
             continue;
-        }
-        QStringList mounts;
-        const QFileInfoList subs = QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QFileInfo &sub : subs) {
-            if (Scanner::isMountPoint(sub.absoluteFilePath()))
-                mounts.append(sub.absoluteFilePath());
-        }
-        if (mounts.isEmpty())
-            offer(path);
-        for (const QString &mount : std::as_const(mounts))
-            offer(mount);
+        seen.insert(key);
+        out.append(root);
     }
-    out.removeDuplicates();
     return out;
 }
 
@@ -418,7 +437,7 @@ QVariantMap Settings::legacyValues(const QString &path)
     if (has("touch"))
         put(keyTouch, ini.value(QStringLiteral("touch")).toBool());
     const QStringList roots = ini.value(QStringLiteral("roots")).toStringList();
-    if (!roots.isEmpty())
+    if (!roots.isEmpty() && roots != oldDefaultRoots())
         put(keyRoots, roots);
     if (has("accentFromArt"))
         put(keyAccentFromArt, ini.value(QStringLiteral("accentFromArt")).toBool());
@@ -498,6 +517,8 @@ void Settings::load()
         if (m_values.contains(it.key()))
             m_values.insert(it.key(), it.value());
     }
+    if (m_values.value(keyRoots).toStringList() == oldDefaultRoots())
+        store(keyRoots, QStringList());
 }
 
 void Settings::take(const QString &key, const QVariant &value)
@@ -577,9 +598,20 @@ QStringList Settings::roots() const
     return roots.isEmpty() ? defaultRoots() : roots;
 }
 
+bool Settings::rootsDefault() const
+{
+    return m_values.value(keyRoots).toStringList().isEmpty();
+}
+
 void Settings::setRoots(const QStringList &roots)
 {
-    store(keyRoots, roots.isEmpty() ? defaultRoots() : roots);
+    store(keyRoots, roots);
+}
+
+void Settings::refreshRoots()
+{
+    if (rootsDefault())
+        emit rootsChanged();
 }
 
 int Settings::accentHue() const
