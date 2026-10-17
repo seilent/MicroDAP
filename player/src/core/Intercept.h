@@ -10,6 +10,7 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantMap>
 
 namespace microdap {
@@ -23,6 +24,7 @@ class Intercept : public QObject
 
 public:
     static constexpr double RumbleLevel = 1.0;
+    static constexpr int ReleaseRetryMs = 1000;
 
     Intercept(const QDBusConnection &session, const QDBusConnection &inputPlumber, QObject *parent = nullptr);
 
@@ -41,6 +43,8 @@ public:
     void setWanted(bool wanted);
     bool holding() const;
     QString holder() const;
+    QString name() const;
+    void acquire();
     QStringList devices() const;
     QStringList targets() const;
     bool hasTargets() const;
@@ -49,6 +53,9 @@ public:
 
 signals:
     void holdingChanged();
+    void holderChanged();
+    void acquired(bool ok);
+    void arbiterLost();
     void devicesChanged();
     void targetsChanged();
 
@@ -59,9 +66,8 @@ private slots:
     void onServiceUnregistered();
 
 private:
-    void acquire();
     void release();
-    void readHolder();
+    void readHolder(bool afterAcquire = false);
     void setHolder(const QString &holder);
     void track(const QString &path, const InterfaceList &interfaces, bool &devices, bool &targets);
     void sendRumble(double level);
@@ -70,6 +76,7 @@ private:
     QDBusConnection m_bus;
     QDBusServiceWatcher m_watcher;
     QDBusServiceWatcher m_arbiter;
+    QTimer m_retry;
     bool m_wanted = false;
     QString m_holder;
     QSet<QString> m_devices;

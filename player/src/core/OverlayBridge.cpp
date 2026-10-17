@@ -1,6 +1,7 @@
 #include "OverlayBridge.h"
 
 #include "DbusPad.h"
+#include "Intercept.h"
 #include "Keep.h"
 #include "Player.h"
 #include "SleepInhibitor.h"
@@ -24,6 +25,7 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     : QObject(parent)
     , m_pad(pad)
     , m_player(player)
+    , m_lower([](QWindow *window) { window->lower(); })
     , m_sleep(new SleepInhibitor(QStringLiteral("hide overlay"), this))
 {
     m_fade.setStartValue(0.0);
@@ -34,6 +36,12 @@ OverlayBridge::OverlayBridge(DbusPad *pad, Player *player, QObject *parent)
     connect(&m_fade, &QVariantAnimation::stateChanged, this, &OverlayBridge::onFadeState);
     connect(m_sleep, &SleepInhibitor::prepareForSleep, this, &OverlayBridge::onPrepareForSleep);
     m_sleep->take();
+    if (m_pad) {
+        Intercept *intercept = m_pad->intercept();
+        connect(intercept, &Intercept::holderChanged, this, &OverlayBridge::onHolder);
+        connect(intercept, &Intercept::acquired, this, &OverlayBridge::onAcquired);
+        connect(intercept, &Intercept::arbiterLost, this, &OverlayBridge::onArbiterLost);
+    }
 
     if (m_player)
         m_player->setPositionPollEnabled(false);
@@ -142,8 +150,20 @@ QWindow *OverlayBridge::toastWindow() const
 
 void OverlayBridge::setToastWindow(QWindow *window, WindowPrepare prepare)
 {
+    if (m_toast)
+        disconnect(m_toast.data(), &QWindow::visibleChanged, this, nullptr);
     m_toast = window;
     m_prepareToast = prepare ? std::move(prepare) : WindowPrepare([](QWindow *target) { target->create(); });
+    if (m_toast)
+        connect(m_toast.data(), &QWindow::visibleChanged, this, [this](bool visible) {
+            if (visible && m_toast)
+                m_lower(m_toast);
+        });
+}
+
+void OverlayBridge::setLower(WindowPrepare lower)
+{
+    m_lower = std::move(lower);
 }
 
 State *OverlayBridge::state() const
@@ -175,6 +195,14 @@ bool OverlayBridge::ready() const
 bool OverlayBridge::shown() const
 {
     return m_shown;
+}
+
+bool OverlayBridge::buried() const
+{
+    if (!m_pad || !m_shown || !m_inStack || m_acquiring)
+        return false;
+    const QString holder = m_pad->intercept()->holder();
+    return !holder.isEmpty() && holder != m_pad->intercept()->name();
 }
 
 bool OverlayBridge::mapped() const
@@ -219,8 +247,11 @@ bool OverlayBridge::watchdogActive() const
 
 void OverlayBridge::show()
 {
-    if (m_shown)
+    if (m_shown) {
+        if (buried())
+            raise();
         return;
+    }
     m_clock.start();
     m_release.stop();
     m_releaseArmed = false;
@@ -228,7 +259,10 @@ void OverlayBridge::show()
     m_shown = true;
     qInfo() << "microdap overlay: show requested";
     emit shownChanged();
-    if (m_pad)
+    m_acquiring = true;
+    if (m_pad && m_pad->shown())
+        m_pad->intercept()->acquire();
+    else if (m_pad)
         m_pad->setShown(true);
     mapWindow();
     setMapped(true);
@@ -244,19 +278,85 @@ void OverlayBridge::hide()
     m_clock.start();
     m_phase = Phase::Hiding;
     m_shown = false;
+    m_acquiring = false;
+    m_inStack = false;
     qInfo() << "microdap overlay: hide requested";
     emit shownChanged();
     if (m_pad)
         m_pad->setShown(false);
+    if (!m_window || !m_window->handle()) {
+        m_fade.stop();
+        setOpacity(0.0);
+        finishRelease();
+        return;
+    }
     fadeTo(0.0, HideMs, QEasingCurve::OutExpo);
 }
 
 void OverlayBridge::toggle()
 {
-    if (m_shown)
-        hide();
-    else
+    if (!m_shown)
         show();
+    else if (buried())
+        raise();
+    else
+        hide();
+}
+
+void OverlayBridge::raise()
+{
+    qInfo() << "microdap overlay: back to the top";
+    m_clock.start();
+    m_acquiring = true;
+    m_pad->intercept()->acquire();
+}
+
+void OverlayBridge::onHolder()
+{
+    if (!m_shown || !m_pad)
+        return;
+    if (m_pad->intercept()->holder() == m_pad->intercept()->name()) {
+        if (m_window && m_window->handle() && m_window->isVisible())
+            return;
+        m_fade.stop();
+        setOpacity(1.0);
+        m_phase = Phase::Shown;
+        mapWindow();
+        setMapped(true);
+        step("holder again");
+        return;
+    }
+    if (!buried())
+        return;
+    m_fade.stop();
+    m_release.stop();
+    setOpacity(1.0);
+    m_phase = Phase::Shown;
+    destroyWindow();
+    setMapped(false);
+    step("buried");
+}
+
+void OverlayBridge::onAcquired(bool ok)
+{
+    if (!m_shown || !m_pad->shown())
+        return;
+    m_acquiring = false;
+    if (!ok) {
+        qWarning() << "microdap overlay: intercept failed";
+        return;
+    }
+    m_inStack = true;
+    onHolder();
+}
+
+void OverlayBridge::onArbiterLost()
+{
+    m_inStack = false;
+    if (!m_shown || (m_window && m_window->handle()))
+        return;
+    qInfo() << "microdap overlay: arbiter gone while buried, hidden";
+    hide();
 }
 
 void OverlayBridge::closePlayer()
@@ -349,7 +449,7 @@ void OverlayBridge::finishClose()
 
 bool OverlayBridge::prepareToast()
 {
-    if (!m_toast)
+    if (!m_toast || m_shown)
         return false;
     if (!m_toast->handle())
         m_prepareToast(m_toast);
@@ -513,6 +613,7 @@ void OverlayBridge::mapWindow()
         return;
     m_firstFrame = m_frames;
     m_window->setVisible(true);
+    m_lower(m_window);
     step("mapped");
 }
 

@@ -32,6 +32,8 @@ class Arbiter(dbus.service.Object):
         self.loop = loop
         self.stack = []
         self.calls = []
+        self.changes = 0
+        self.refuse_release = False
         self.watches = {}
 
     def holder(self):
@@ -40,6 +42,7 @@ class Arbiter(dbus.service.Object):
     def changed(self, before):
         now = self.holder()
         if now != before:
+            self.changes += 1
             self.PropertiesChanged(INTERFACE, dbus.Dictionary({'Holder': dbus.String(now)}, signature='sv'),
                                    dbus.Array([], signature='s'))
 
@@ -58,7 +61,10 @@ class Arbiter(dbus.service.Object):
     def Acquire(self, sender=None):
         self.calls.append(f'Acquire {sender}')
         before = self.holder()
-        if sender not in self.stack:
+        if sender in self.stack:
+            self.stack.remove(sender)
+            self.stack.append(sender)
+        else:
             self.stack.append(sender)
             self.watches[sender] = self.bus.watch_name_owner(sender, lambda o, n=sender: self.vanished(n, o))
         self.changed(before)
@@ -66,6 +72,8 @@ class Arbiter(dbus.service.Object):
     @dbus.service.method(INTERFACE, in_signature='', out_signature='', sender_keyword='sender')
     def Release(self, sender=None):
         self.calls.append(f'Release {sender}')
+        if self.refuse_release:
+            raise dbus.DBusException('refused', name='org.freedesktop.DBus.Error.Failed')
         before = self.holder()
         if sender in self.stack:
             self.drop(sender)
@@ -94,6 +102,18 @@ class Arbiter(dbus.service.Object):
     @dbus.service.method(CONTROL, in_signature='', out_signature='')
     def ClearCalls(self):
         self.calls = []
+
+    @dbus.service.method(CONTROL, in_signature='', out_signature='u')
+    def Changes(self):
+        return dbus.UInt32(self.changes)
+
+    @dbus.service.method(CONTROL, in_signature='', out_signature='as')
+    def Stack(self):
+        return dbus.Array([dbus.String(n) for n in self.stack], signature='s')
+
+    @dbus.service.method(CONTROL, in_signature='b', out_signature='')
+    def RefuseRelease(self, refuse):
+        self.refuse_release = bool(refuse)
 
     @dbus.service.method(CONTROL, in_signature='', out_signature='')
     def Quit(self):

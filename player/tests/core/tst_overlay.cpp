@@ -123,6 +123,14 @@ private slots:
     void wakeKeepsReleased();
     void arbiterRestartWhileShown();
     void otherHolderBlocksPad();
+    void lowerAtMap();
+    void buriedDestroysWindow();
+    void toggleOnBuriedRaises();
+    void holderBackRecreates();
+    void hideOnBuriedReleases();
+    void showOnBuriedRaises();
+    void arbiterRestartWhileBuried();
+    void releaseFailureRetries();
     void hideSavesStack();
     void closePlayer();
     void closePlayerTimeout();
@@ -133,6 +141,13 @@ private:
     QDBusMessage login1(const QString &method, const QList<QVariant> &arguments = {});
     bool held();
     QString holder();
+    QDBusMessage arbiter(const QString &method, const QList<QVariant> &arguments = {});
+    QDBusMessage otherCall(const QString &method);
+    QString other();
+    QStringList stack();
+    uint changes();
+    void showSettled();
+    bool windowUp() const;
     bool startArbiter();
     void stopArbiter();
     void sleepAndResume();
@@ -163,6 +178,7 @@ private:
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QPointer<QQuickWindow> m_window;
     QList<QVariantMap> m_changes;
+    QStringList m_lowered;
 };
 
 void OverlayTest::onPropertiesChanged(const QString &interface, const QVariantMap &changed,
@@ -199,6 +215,52 @@ QString OverlayTest::holder()
     if (reply.type() == QDBusMessage::ErrorMessage)
         return QStringLiteral("error");
     return qvariant_cast<QDBusVariant>(reply.arguments().value(0)).variant().toString();
+}
+
+QDBusMessage OverlayTest::arbiter(const QString &method, const QList<QVariant> &arguments)
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                       QStringLiteral("net.seilent.MicroDap.FakeArbiter"), method);
+    call.setArguments(arguments);
+    return QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+}
+
+QDBusMessage OverlayTest::otherCall(const QString &method)
+{
+    const QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                             Intercept::arbiterInterface(), method);
+    return QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("other"))
+        .call(call, QDBus::Block, busTimeoutMs);
+}
+
+QString OverlayTest::other()
+{
+    return QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("other")).baseService();
+}
+
+QStringList OverlayTest::stack()
+{
+    return arbiter(QStringLiteral("Stack")).arguments().value(0).toStringList();
+}
+
+uint OverlayTest::changes()
+{
+    return arbiter(QStringLiteral("Changes")).arguments().value(0).toUInt();
+}
+
+void OverlayTest::showSettled()
+{
+    settleHidden();
+    m_overlay->show();
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
+    QVERIFY(windowUp());
+}
+
+bool OverlayTest::windowUp() const
+{
+    return m_window && m_window->handle() && m_window->isVisible();
 }
 
 bool OverlayTest::held()
@@ -408,6 +470,10 @@ void OverlayTest::initTestCase()
     });
     QVERIFY(m_overlay->ready());
     QCOMPARE(m_overlay->window(), static_cast<QWindow *>(m_window.data()));
+    m_overlay->setLower([this](QWindow *target) {
+        const QString name = target == m_window.data() ? QStringLiteral("page") : QStringLiteral("toast");
+        m_lowered << (target->isVisible() ? name : name + QStringLiteral(" unmapped"));
+    });
 }
 
 void OverlayTest::cleanupTestCase()
@@ -845,12 +911,160 @@ void OverlayTest::otherHolderBlocksPad()
     QTRY_VERIFY_WITH_TIMEOUT(!m_pad->holding(), busTimeoutMs);
     QVERIFY(m_overlay->shown());
     QCOMPARE(holder(), other.baseService());
+    QTRY_VERIFY_WITH_TIMEOUT(!m_window->handle(), busTimeoutMs);
     const QDBusMessage release = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
                                                                 Intercept::arbiterInterface(),
                                                                 QStringLiteral("Release"));
     QCOMPARE(other.call(release, QDBus::Block, busTimeoutMs).type(), QDBusMessage::ReplyMessage);
     QTRY_VERIFY_WITH_TIMEOUT(m_pad->holding(), busTimeoutMs);
+    QVERIFY(windowUp());
     settleHidden();
+}
+
+void OverlayTest::lowerAtMap()
+{
+    settleHidden();
+    m_lowered.clear();
+    m_overlay->show();
+    QCOMPARE(m_lowered, QStringList{QStringLiteral("page")});
+    QTRY_COMPARE_WITH_TIMEOUT(m_overlay->opacity(), 1.0, fadeTimeoutMs);
+    QVERIFY(!m_overlay->prepareToast());
+    settleHidden();
+    QWindow toast;
+    toast.resize(320, 40);
+    m_overlay->setToastWindow(&toast);
+    m_lowered.clear();
+    QVERIFY(m_overlay->prepareToast());
+    QVERIFY(m_lowered.isEmpty());
+    toast.setVisible(true);
+    QCOMPARE(m_lowered, QStringList{QStringLiteral("toast")});
+    m_overlay->releaseToast();
+    QVERIFY(!toast.handle());
+    m_overlay->setToastWindow(nullptr);
+}
+
+void OverlayTest::buriedDestroysWindow()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_window->handle(), busTimeoutMs);
+    QVERIFY(m_overlay->shown());
+    QVERIFY(m_overlay->buried());
+    QVERIFY(!m_overlay->mapped());
+    QCOMPARE(m_overlay->opacity(), 1.0);
+    QVERIFY(!m_pad->holding());
+    QCOMPARE(m_remote->property("OverlayShown").toBool(), true);
+    QVERIFY(!m_overlay->prepareToast());
+    QCOMPARE(stack(), (QStringList{QDBusConnection::sessionBus().baseService(), other()}));
+    QCOMPARE(otherCall(QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+    settleHidden();
+}
+
+void OverlayTest::toggleOnBuriedRaises()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_overlay->buried(), busTimeoutMs);
+    const uint before = changes();
+    const int maps = m_overlay->mapCount();
+    QSignalSpy holders(m_pad->intercept(), &Intercept::holderChanged);
+    m_lowered.clear();
+    QDBusReply<void> reply = m_remote->call(QStringLiteral("ToggleOverlay"));
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_VERIFY_WITH_TIMEOUT(windowUp(), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
+    QTest::qWait(100);
+    QCOMPARE(changes(), before + 1);
+    QCOMPARE(holders.count(), 1);
+    QCOMPARE(stack(), (QStringList{other(), QDBusConnection::sessionBus().baseService()}));
+    QCOMPARE(m_lowered, QStringList{QStringLiteral("page")});
+    QCOMPARE(m_overlay->mapCount(), maps + 1);
+    QVERIFY(m_overlay->shown());
+    QVERIFY(!m_overlay->buried());
+    QVERIFY(m_overlay->mapped());
+    QVERIFY(m_pad->holding());
+    settleHidden();
+    QCOMPARE(stack(), QStringList{other()});
+    QCOMPARE(otherCall(QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+    QTRY_COMPARE_WITH_TIMEOUT(holder(), QString(), busTimeoutMs);
+}
+
+void OverlayTest::holderBackRecreates()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_window->handle(), busTimeoutMs);
+    m_lowered.clear();
+    QCOMPARE(otherCall(QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(windowUp(), busTimeoutMs);
+    QVERIFY(m_overlay->mapped());
+    QVERIFY(m_pad->holding());
+    QCOMPARE(m_lowered, QStringList{QStringLiteral("page")});
+    settleHidden();
+}
+
+void OverlayTest::hideOnBuriedReleases()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_overlay->buried(), busTimeoutMs);
+    QFile::remove(m_stateFile);
+    m_overlay->hide();
+    QVERIFY(!m_overlay->shown());
+    QVERIFY(!m_overlay->mapped());
+    QCOMPARE(m_overlay->opacity(), 0.0);
+    QVERIFY(!m_player->positionPollEnabled());
+    QTRY_COMPARE_WITH_TIMEOUT(stack(), QStringList{other()}, busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(m_stateFile), busTimeoutMs);
+    QCOMPARE(otherCall(QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+    QTest::qWait(100);
+    QVERIFY(!m_window->handle());
+    QVERIFY(!m_overlay->shown());
+}
+
+void OverlayTest::showOnBuriedRaises()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_overlay->buried(), busTimeoutMs);
+    QDBusReply<void> reply = m_remote->call(QStringLiteral("ShowOverlay"));
+    QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(windowUp(), busTimeoutMs);
+    settleHidden();
+    QCOMPARE(otherCall(QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+}
+
+void OverlayTest::arbiterRestartWhileBuried()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_overlay->buried(), busTimeoutMs);
+    stopArbiter();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_overlay->shown(), busTimeoutMs);
+    QVERIFY(!m_window->handle());
+    QVERIFY(startArbiter());
+    QTest::qWait(200);
+    QCOMPARE(stack(), QStringList());
+    QVERIFY(!m_overlay->shown());
+    QVERIFY(!m_window->handle());
+    m_overlay->toggle();
+    QTRY_COMPARE_WITH_TIMEOUT(held(), true, busTimeoutMs);
+    QVERIFY(windowUp());
+    settleHidden();
+}
+
+void OverlayTest::releaseFailureRetries()
+{
+    showSettled();
+    QCOMPARE(arbiter(QStringLiteral("RefuseRelease"), {true}).type(), QDBusMessage::ReplyMessage);
+    m_overlay->hide();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_window->handle(), fadeTimeoutMs);
+    QTest::qWait(300);
+    QCOMPARE(held(), true);
+    QCOMPARE(arbiter(QStringLiteral("RefuseRelease"), {false}).type(), QDBusMessage::ReplyMessage);
+    QTRY_COMPARE_WITH_TIMEOUT(holder(), QString(), Intercept::ReleaseRetryMs + busTimeoutMs);
+    QVERIFY(!m_overlay->shown());
 }
 
 void OverlayTest::hideSavesStack()

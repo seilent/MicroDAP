@@ -53,11 +53,13 @@ public:
     void setWindow(QWindow *window, WindowPrepare prepare = {});
     QWindow *toastWindow() const;
     void setToastWindow(QWindow *window, WindowPrepare prepare = {});
+    void setLower(WindowPrepare lower);
     State *state() const;
     void setState(State *state);
     SleepInhibitor *sleep() const;
     bool ready() const;
     bool shown() const;
+    bool buried() const;
     bool mapped() const;
     qreal opacity() const;
     bool fading() const;
@@ -88,6 +90,10 @@ private slots:
 private:
     enum class Phase { Hidden, Showing, Shown, Hiding, Releasing };
 
+    void raise();
+    void onHolder();
+    void onAcquired(bool ok);
+    void onArbiterLost();
     void fadeTo(qreal to, int ms, QEasingCurve::Type curve);
     void onFadeFinished();
     void onFadeState();
@@ -113,6 +119,7 @@ private:
     QPointer<QWindow> m_toast;
     WindowPrepare m_prepare;
     WindowPrepare m_prepareToast;
+    WindowPrepare m_lower;
     State *m_state = nullptr;
     SleepInhibitor *m_sleep;
     QVariantAnimation m_fade;
@@ -131,6 +138,8 @@ private:
     bool m_firstFrame = false;
     bool m_ready = false;
     bool m_shown = false;
+    bool m_acquiring = false;
+    bool m_inStack = false;
     bool m_mapped = false;
     bool m_fading = false;
     bool m_sleeping = false;

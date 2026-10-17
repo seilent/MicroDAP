@@ -62,13 +62,21 @@ Intercept::Intercept(const QDBusConnection &session, const QDBusConnection &inpu
     , m_arbiter(arbiterService(), session, QDBusServiceWatcher::WatchForOwnerChange)
 {
     registerMetaTypes();
+    m_retry.setSingleShot(true);
+    m_retry.setInterval(ReleaseRetryMs);
+    connect(&m_retry, &QTimer::timeout, this, [this] {
+        if (!m_wanted)
+            release();
+    });
     connect(&m_watcher, &QDBusServiceWatcher::serviceRegistered, this, &Intercept::refresh);
     connect(&m_watcher, &QDBusServiceWatcher::serviceUnregistered, this,
             &Intercept::onServiceUnregistered);
     connect(&m_arbiter, &QDBusServiceWatcher::serviceOwnerChanged, this,
             [this](const QString &, const QString &, const QString &owner) {
         if (owner.isEmpty()) {
+            m_retry.stop();
             setHolder({});
+            emit arbiterLost();
             return;
         }
         if (m_wanted)
@@ -166,6 +174,7 @@ void Intercept::setWanted(bool wanted)
         return;
     const bool before = holding();
     m_wanted = wanted;
+    m_retry.stop();
     if (wanted)
         acquire();
     else
@@ -182,6 +191,11 @@ bool Intercept::holding() const
 QString Intercept::holder() const
 {
     return m_holder;
+}
+
+QString Intercept::name() const
+{
+    return m_session.baseService();
 }
 
 QStringList Intercept::devices() const
@@ -216,10 +230,12 @@ void Intercept::acquire()
         const QDBusMessage reply = finished->reply();
         if (reply.type() == QDBusMessage::ErrorMessage) {
             qInfo() << "microdap intercept: Acquire failed" << reply.errorMessage();
+            if (request == m_request)
+                emit acquired(false);
             return;
         }
         if (request == m_request)
-            readHolder();
+            readHolder(true);
     });
 }
 
@@ -231,28 +247,34 @@ void Intercept::release()
     const QDBusMessage call = QDBusMessage::createMethodCall(arbiterService(), arbiterPath(), arbiterInterface(),
                                                              QStringLiteral("Release"));
     auto *watcher = new QDBusPendingCallWatcher(m_session.asyncCall(call), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [](QDBusPendingCallWatcher *finished) {
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *finished) {
         finished->deleteLater();
         const QDBusMessage reply = finished->reply();
-        if (reply.type() == QDBusMessage::ErrorMessage)
-            qInfo() << "microdap intercept: Release failed" << reply.errorMessage();
+        if (reply.type() != QDBusMessage::ErrorMessage)
+            return;
+        qInfo() << "microdap intercept: Release failed" << reply.errorMessage();
+        if (!m_wanted && m_holder == name())
+            m_retry.start();
     });
 }
 
-void Intercept::readHolder()
+void Intercept::readHolder(bool afterAcquire)
 {
     QDBusMessage call = QDBusMessage::createMethodCall(arbiterService(), arbiterPath(), propertiesInterface(),
                                                        QStringLiteral("Get"));
     call << arbiterInterface() << holderProperty();
     const quint64 request = m_request;
     auto *watcher = new QDBusPendingCallWatcher(m_session.asyncCall(call), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, request](QDBusPendingCallWatcher *finished) {
+    connect(watcher, &QDBusPendingCallWatcher::finished, this,
+            [this, request, afterAcquire](QDBusPendingCallWatcher *finished) {
         finished->deleteLater();
         if (request != m_request)
             return;
         const QDBusMessage reply = finished->reply();
         setHolder(reply.type() == QDBusMessage::ErrorMessage ? QString()
                                                               : unwrap(reply.arguments().value(0)).toString());
+        if (afterAcquire)
+            emit acquired(true);
     });
 }
 
@@ -262,8 +284,13 @@ void Intercept::setHolder(const QString &holder)
         return;
     const bool before = holding();
     m_holder = holder;
+    if (m_wanted || m_holder != name())
+        m_retry.stop();
+    else if (!m_retry.isActive())
+        m_retry.start();
     if (before != holding())
         emit holdingChanged();
+    emit holderChanged();
 }
 
 void Intercept::onArbiterProperties(const QString &interface, const QVariantMap &changed,
