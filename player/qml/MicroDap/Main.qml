@@ -1052,7 +1052,7 @@ Window {
             width: toastWindow.width
             screenOff: false
             onPhaseChanged: {
-                if (hiddenToast.phase === "hidden" && root.toastShown)
+                if (hiddenToast.phase === "hidden" && hiddenToast.progress <= 0 && root.toastShown)
                     root.endHiddenToast()
             }
         }

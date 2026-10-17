@@ -474,6 +474,25 @@ TestCase {
         overlayMain.hiddenToast.hold.interval = Motion.toastHold
     }
 
+    function test_toast_window_stays_through_the_hold() {
+        fakeSettings.overlayToasts = true
+        compare(overlayMain.hidden, true)
+        fakePlayer.current = { id: 5, title: "Song 5", artist: "Addison Road", album: "Stories", artPath: "" }
+        compare(overlayMain.toastShown, true)
+        const toast = overlayMain.hiddenToast
+        const whole = toast.inDuration + toast.holdDuration - 200
+        const start = Date.now()
+        while (Date.now() - start < whole) {
+            wait(20)
+            verify(overlayMain.toastShown && overlayMain.toastWindow.visible,
+                   "toast window gone after " + (Date.now() - start) + " ms")
+        }
+        compare(toast.phase, "hold")
+        tryCompare(toast, "phase", "hidden", 3000)
+        compare(overlayMain.toastShown, false)
+        compare(overlayMain.toastWindow.visible, false)
+    }
+
     function test_toast_shown_uses_layer() {
         fakeSettings.overlayToasts = true
         overlayMain.overlayMapped = true
