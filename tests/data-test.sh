@@ -152,10 +152,14 @@ microset schema microdap. > "${T}/schema.json" || fail "microset schema"
 python3 - "${T}/schema.json" "${data}/microset/schema.d/50-microdap.json" <<'PY' || fail "microsetd did not load every key"
 import json, sys
 loaded = json.load(open(sys.argv[1]))
-mine = json.load(open(sys.argv[2]))["keys"]
+file = json.load(open(sys.argv[2]))
+mine = file["keys"]
 assert set(loaded) == set(mine), sorted(set(mine) ^ set(loaded))
 for k, e in mine.items():
     assert loaded[k]["owner"] == "microdap" and loaded[k]["default"] == e["default"], k
+    assert loaded[k]["ui"] == e["ui"], k
+    assert loaded[k]["group_ui"] == file["groups"][e["group"]], k
+assert loaded["microdap.roots"]["ui"]["widget"] == "none"
 PY
 microset set microdap.rgb accent || fail "set microdap.rgb accent refused"
 [[ "$(microset get microdap.rgb)" == accent ]] || fail "microdap.rgb reads $(microset get microdap.rgb)"

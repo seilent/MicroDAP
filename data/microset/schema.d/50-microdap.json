@@ -7,7 +7,8 @@
       "enum": ["off", "bitperfect", "exclusive"],
       "applier": null,
       "group": "microdap_audio",
-      "label": "Bit perfect"
+      "label": "Bit perfect",
+      "ui": {"order": 0, "values": {"bitperfect": "on"}}
     },
     "microdap.sample_rate": {
       "type": "s",
@@ -15,7 +16,8 @@
       "enum": ["auto", "44100", "48000", "88200", "96000", "176400", "192000", "352800", "384000"],
       "applier": null,
       "group": "microdap_audio",
-      "label": "Sample rate"
+      "label": "Sample rate",
+      "ui": {"order": 1}
     },
     "microdap.roots": {
       "type": "as",
@@ -24,7 +26,8 @@
       "max_len": 4096,
       "applier": null,
       "group": "microdap_library",
-      "label": "Library folders"
+      "label": "Library folders",
+      "ui": {"widget": "none"}
     },
     "microdap.accent_hue": {
       "type": "u",
@@ -33,14 +36,16 @@
       "max": 350,
       "applier": null,
       "group": "microdap_display",
-      "label": "Accent hue"
+      "label": "Accent hue",
+      "ui": {"order": 0, "widget": "hue"}
     },
     "microdap.accent_from_art": {
       "type": "b",
       "default": false,
       "applier": null,
       "group": "microdap_display",
-      "label": "Accent from art"
+      "label": "Accent from art",
+      "ui": {"order": 1}
     },
     "microdap.scale": {
       "type": "d",
@@ -49,7 +54,8 @@
       "max": 1.4,
       "applier": null,
       "group": "microdap_display",
-      "label": "Scale"
+      "label": "Scale",
+      "ui": {"order": 3, "step": 0.1}
     },
     "microdap.saver_seconds": {
       "type": "u",
@@ -57,14 +63,16 @@
       "enum": [10, 15, 30, 60, 120, 300],
       "applier": null,
       "group": "microdap_display",
-      "label": "Screen saver after (s)"
+      "label": "Screen saver after",
+      "ui": {"order": 4, "values": {"10": "10 s", "15": "15 s", "30": "30 s", "60": "1 min", "120": "2 min", "300": "5 min"}}
     },
     "microdap.touch": {
       "type": "b",
       "default": true,
       "applier": null,
       "group": "microdap_display",
-      "label": "Touch"
+      "label": "Touch",
+      "ui": {"order": 2}
     },
     "microdap.rgb": {
       "type": "s",
@@ -72,14 +80,16 @@
       "enum": ["system", "accent", "off"],
       "applier": null,
       "group": "microdap_display",
-      "label": "RGB"
+      "label": "RGB",
+      "ui": {"order": 5}
     },
     "microdap.overlay_toasts": {
       "type": "b",
       "default": false,
       "applier": null,
       "group": "microdap_display",
-      "label": "Toasts in game"
+      "label": "Toasts in game",
+      "ui": {"order": 6}
     },
     "microdap.screen_off_seconds": {
       "type": "u",
@@ -87,7 +97,8 @@
       "enum": [0, 60, 120, 300, 600, 1800],
       "applier": null,
       "group": "microdap_power",
-      "label": "Screen off after (s)"
+      "label": "Screen off after",
+      "ui": {"order": 0, "values": {"0": "off", "60": "1 min", "120": "2 min", "300": "5 min", "600": "10 min", "1800": "30 min"}}
     },
     "microdap.suspend_minutes": {
       "type": "u",
@@ -95,14 +106,22 @@
       "enum": [0, 5, 10, 30, 60],
       "applier": null,
       "group": "microdap_power",
-      "label": "Suspend after (min)"
+      "label": "Suspend after",
+      "ui": {"order": 1, "unit": "min", "values": {"0": "off"}}
     },
     "microdap.wifi_off_screen_off": {
       "type": "b",
       "default": false,
       "applier": null,
       "group": "microdap_power",
-      "label": "Wi-Fi off with the screen"
+      "label": "Wi-Fi off with the screen",
+      "ui": {"order": 2}
     }
+  },
+  "groups": {
+    "microdap_audio": {"label": "audio", "order": 0},
+    "microdap_library": {"label": "library", "order": 1},
+    "microdap_display": {"label": "display", "order": 2},
+    "microdap_power": {"label": "power", "order": 3}
   }
 }
