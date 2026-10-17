@@ -65,7 +65,6 @@ bool applyOverlayAtoms(QWindow *window, bool fullscreen)
     xcb_connection_t *connection = x11->connection();
     const auto id = static_cast<xcb_window_t>(window->winId());
     setCardinal(connection, id, atom(connection, "STEAM_OVERLAY"), 1);
-    setCardinal(connection, id, atom(connection, "GAMESCOPE_NO_FOCUS"), 1);
     xcb_flush(connection);
     return true;
 }

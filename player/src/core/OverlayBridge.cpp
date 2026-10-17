@@ -323,6 +323,8 @@ void OverlayBridge::onHolder()
         m_phase = Phase::Shown;
         mapWindow();
         setMapped(true);
+        if (m_player)
+            m_player->setPositionPollEnabled(true);
         step("holder again");
         return;
     }
@@ -334,6 +336,8 @@ void OverlayBridge::onHolder()
     m_phase = Phase::Shown;
     destroyWindow();
     setMapped(false);
+    if (m_player)
+        m_player->setPositionPollEnabled(false);
     step("buried");
 }
 

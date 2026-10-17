@@ -75,6 +75,7 @@ Intercept::Intercept(const QDBusConnection &session, const QDBusConnection &inpu
             [this](const QString &, const QString &, const QString &owner) {
         if (owner.isEmpty()) {
             m_retry.stop();
+            m_releaseFailed = false;
             setHolder({});
             emit arbiterLost();
             return;
@@ -175,6 +176,7 @@ void Intercept::setWanted(bool wanted)
     const bool before = holding();
     m_wanted = wanted;
     m_retry.stop();
+    m_releaseFailed = false;
     if (wanted)
         acquire();
     else
@@ -252,7 +254,9 @@ void Intercept::release()
         const QDBusMessage reply = finished->reply();
         if (reply.type() != QDBusMessage::ErrorMessage)
             return;
-        qInfo() << "microdap intercept: Release failed" << reply.errorMessage();
+        if (!m_releaseFailed)
+            qInfo() << "microdap intercept: Release failed" << reply.errorMessage();
+        m_releaseFailed = true;
         if (!m_wanted && m_holder == name())
             m_retry.start();
     });
@@ -284,8 +288,10 @@ void Intercept::setHolder(const QString &holder)
         return;
     const bool before = holding();
     m_holder = holder;
-    if (m_wanted || m_holder != name())
+    if (m_wanted || m_holder != name()) {
         m_retry.stop();
+        m_releaseFailed = false;
+    }
     else if (!m_retry.isActive())
         m_retry.start();
     if (before != holding())

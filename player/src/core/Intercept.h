@@ -78,6 +78,7 @@ private:
     QDBusServiceWatcher m_arbiter;
     QTimer m_retry;
     bool m_wanted = false;
+    bool m_releaseFailed = false;
     QString m_holder;
     QSet<QString> m_devices;
     QSet<QString> m_targets;

@@ -131,6 +131,7 @@ private slots:
     void showOnBuriedRaises();
     void arbiterRestartWhileBuried();
     void releaseFailureRetries();
+    void releaseRetryWhenHolderReturns();
     void hideSavesStack();
     void closePlayer();
     void closePlayerTimeout();
@@ -965,10 +966,12 @@ void OverlayTest::toggleOnBuriedRaises()
     showSettled();
     QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
     QTRY_VERIFY_WITH_TIMEOUT(m_overlay->buried(), busTimeoutMs);
+    QVERIFY(!m_player->positionPollEnabled());
     const uint before = changes();
     const int maps = m_overlay->mapCount();
     QSignalSpy holders(m_pad->intercept(), &Intercept::holderChanged);
     m_lowered.clear();
+    QCOMPARE(arbiter(QStringLiteral("ClearCalls")).type(), QDBusMessage::ReplyMessage);
     QDBusReply<void> reply = m_remote->call(QStringLiteral("ToggleOverlay"));
     QVERIFY2(reply.isValid(), qPrintable(reply.error().message()));
     QTRY_VERIFY_WITH_TIMEOUT(windowUp(), busTimeoutMs);
@@ -976,6 +979,9 @@ void OverlayTest::toggleOnBuriedRaises()
     QTest::qWait(100);
     QCOMPARE(changes(), before + 1);
     QCOMPARE(holders.count(), 1);
+    QCOMPARE(arbiter(QStringLiteral("Calls")).arguments().value(0).toStringList(),
+             QStringList{QStringLiteral("Acquire ") + QDBusConnection::sessionBus().baseService()});
+    QVERIFY(m_player->positionPollEnabled());
     QCOMPARE(stack(), (QStringList{other(), QDBusConnection::sessionBus().baseService()}));
     QCOMPARE(m_lowered, QStringList{QStringLiteral("page")});
     QCOMPARE(m_overlay->mapCount(), maps + 1);
@@ -1064,6 +1070,26 @@ void OverlayTest::releaseFailureRetries()
     QCOMPARE(held(), true);
     QCOMPARE(arbiter(QStringLiteral("RefuseRelease"), {false}).type(), QDBusMessage::ReplyMessage);
     QTRY_COMPARE_WITH_TIMEOUT(holder(), QString(), Intercept::ReleaseRetryMs + busTimeoutMs);
+    QVERIFY(!m_overlay->shown());
+}
+
+void OverlayTest::releaseRetryWhenHolderReturns()
+{
+    showSettled();
+    QCOMPARE(otherCall(QStringLiteral("Acquire")).type(), QDBusMessage::ReplyMessage);
+    QTRY_VERIFY_WITH_TIMEOUT(m_overlay->buried(), busTimeoutMs);
+    QCOMPARE(arbiter(QStringLiteral("RefuseRelease"), {true}).type(), QDBusMessage::ReplyMessage);
+    m_overlay->hide();
+    QVERIFY(!m_overlay->shown());
+    QTest::qWait(300);
+    QCOMPARE(stack(), (QStringList{QDBusConnection::sessionBus().baseService(), other()}));
+    QCOMPARE(arbiter(QStringLiteral("RefuseRelease"), {false}).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(arbiter(QStringLiteral("ClearCalls")).type(), QDBusMessage::ReplyMessage);
+    QCOMPARE(otherCall(QStringLiteral("Release")).type(), QDBusMessage::ReplyMessage);
+    QTRY_COMPARE_WITH_TIMEOUT(holder(), QString(), Intercept::ReleaseRetryMs + 500);
+    QVERIFY(arbiter(QStringLiteral("Calls")).arguments().value(0).toStringList().contains(
+        QStringLiteral("Release ") + QDBusConnection::sessionBus().baseService()));
+    QVERIFY(!m_window->handle());
     QVERIFY(!m_overlay->shown());
 }
 
