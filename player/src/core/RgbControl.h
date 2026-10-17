@@ -34,8 +34,9 @@ public:
     ~RgbControl() override;
 
     static QString enabledKey();
-    static QString colorKey();
-    static uint colorFor(int hue, int level);
+    static QString hueKey();
+    static QString saturationKey();
+    static int saturationFor(int level);
 
     bool supported() const;
     bool probed() const;

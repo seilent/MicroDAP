@@ -33,36 +33,19 @@ QString RgbControl::enabledKey()
     return QStringLiteral("rgb.enabled");
 }
 
-QString RgbControl::colorKey()
+QString RgbControl::hueKey()
 {
-    return QStringLiteral("rgb.color");
+    return QStringLiteral("rgb.hue");
 }
 
-uint RgbControl::colorFor(int hue, int level)
+QString RgbControl::saturationKey()
 {
-    const int h = Settings::normalizeHue(hue);
-    const int l = saturation[level >= 1 && level <= levels ? level : 0];
-    const int k = h / 60;
-    const int f = h % 60;
-    const int lo = (255 * (100 - l) + 50) / 100;
-    const int span = 255 - lo;
-    const int up = lo + (span * f + 30) / 60;
-    const int down = lo + (span * (60 - f) + 30) / 60;
-    const auto rgb = [](int r, int g, int b) { return uint(r) << 16 | uint(g) << 8 | uint(b); };
-    switch (k) {
-    case 0:
-        return rgb(255, up, lo);
-    case 1:
-        return rgb(down, 255, lo);
-    case 2:
-        return rgb(lo, 255, up);
-    case 3:
-        return rgb(lo, down, 255);
-    case 4:
-        return rgb(up, lo, 255);
-    default:
-        return rgb(255, lo, down);
-    }
+    return QStringLiteral("rgb.saturation");
+}
+
+int RgbControl::saturationFor(int level)
+{
+    return saturation[level >= 1 && level <= levels ? level : 0];
 }
 
 bool RgbControl::supported() const
@@ -133,8 +116,8 @@ void RgbControl::start(const QString &mode, int hue, int level)
         emit levelChanged();
     }
     MicroSet::Error error;
-    const QString schema = m_client ? m_client->schema(enabledKey(), &error) : QString();
-    const bool supported = m_client && error.ok() && schema.contains(enabledKey());
+    const QString schema = m_client ? m_client->schema(QStringLiteral("rgb."), &error) : QString();
+    const bool supported = m_client && error.ok() && schema.contains(hueKey());
     qInfo() << "microdap rgb: supported" << supported;
     if (m_supported != supported) {
         m_supported = supported;
@@ -211,8 +194,10 @@ std::optional<QVariant> RgbControl::wanted(const QString &key) const
             return QVariant::fromValue(true);
         return std::nullopt;
     }
-    if (key == colorKey() && accent)
-        return QVariant::fromValue(colorFor(m_hue, m_level));
+    if (key == hueKey() && accent)
+        return QVariant::fromValue(uint(m_hue));
+    if (key == saturationKey() && accent)
+        return QVariant::fromValue(uint(saturationFor(m_level)));
     return std::nullopt;
 }
 
@@ -221,8 +206,10 @@ void RgbControl::apply()
     if (!m_probed || !m_supported)
         return;
     send(enabledKey());
-    if (!m_hueTimer.isActive())
-        send(colorKey());
+    if (m_hueTimer.isActive())
+        return;
+    send(hueKey());
+    send(saturationKey());
 }
 
 void RgbControl::send(const QString &key)

@@ -276,7 +276,7 @@ void SettingsTest::followsChanged()
     QTRY_VERIFY_WITH_TIMEOUT(settings.value(QStringLiteral("audio.eq.usb.on")).toBool(), waitMs);
     QVERIFY(values.count() >= 3);
     QCOMPARE(values.last().at(0).toString(), QStringLiteral("audio.eq.usb.on"));
-    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("rgb.color"), FakeService::variant(5u)});
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("rgb.hue"), FakeService::variant(5u)});
     QTest::qWait(200);
     QCOMPARE(values.last().at(0).toString(), QStringLiteral("audio.eq.usb.on"));
 }

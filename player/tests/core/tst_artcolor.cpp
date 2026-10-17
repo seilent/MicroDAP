@@ -4,6 +4,8 @@
 #include "RgbControl.h"
 #include "Settings.h"
 
+#include <microset/color.h>
+
 #include <QColor>
 #include <QFile>
 #include <QImage>
@@ -277,7 +279,7 @@ void ArtColorTest::utilization()
         QVERIFY2(AccentControl::luminance(AccentControl::artAccentFor(pick.hue, pick.color))
                      >= AccentControl::minLuminance - 1e-9,
                  qPrintable(cover.name));
-        words.insert(RgbControl::colorFor(pick.hue, pick.level));
+        words.insert(MicroSet::hueColor(Settings::normalizeHue(pick.hue), RgbControl::saturationFor(pick.level)));
         levelsUsed.insert(pick.level);
     }
     QVERIFY2(words.size() >= 16, qPrintable(QStringLiteral("%1 words").arg(words.size())));
@@ -287,7 +289,7 @@ void ArtColorTest::utilization()
     const ArtPick pastel = ArtColor::pick(hsvSolid(240, 0.28, 0.95));
     QCOMPARE(neon.hue, pastel.hue);
     QVERIFY(neon.level != pastel.level);
-    QVERIFY(RgbControl::colorFor(neon.hue, neon.level) != RgbControl::colorFor(pastel.hue, pastel.level));
+    QVERIFY(RgbControl::saturationFor(neon.level) != RgbControl::saturationFor(pastel.level));
 }
 
 void ArtColorTest::fileUrl()
