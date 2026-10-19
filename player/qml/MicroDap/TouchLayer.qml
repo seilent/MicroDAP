@@ -36,6 +36,7 @@ Item {
     property TouchScroll flung: null
     property alias handler: handler
     property alias returnTimer: returnTimer
+    property alias holdTimer: holdTimer
 
     signal touched()
 
@@ -157,6 +158,7 @@ Item {
     }
 
     function clear() {
+        holdTimer.stop()
         layer.down = false
         layer.tapping = false
         layer.dragging = false
@@ -175,6 +177,7 @@ Item {
     }
 
     function abort() {
+        holdTimer.stop()
         layer.stopFling()
         if (layer.dragging && layer.scroll !== null)
             layer.scroll.stop()
@@ -308,7 +311,27 @@ Item {
             layer.last = layer.start
             layer.tapping = true
             layer.sample(layer.start.y)
+            if (layer.owner !== null && typeof layer.owner.touchContext === "function")
+                holdTimer.restart()
         }
+        layer.touched()
+    }
+
+    function hold() {
+        if (!layer.down || layer.dead || !layer.tapping || layer.pending !== null || !layer.intact())
+            return
+        let handled = false
+        layer.dispatching = true
+        try {
+            handled = layer.router.context(layer.owner, layer.kind, layer.hitIndex, layer.hit)
+        } finally {
+            layer.dispatching = false
+        }
+        if (!handled)
+            return
+        layer.releasePressed()
+        layer.tapping = false
+        layer.dead = true
         layer.touched()
     }
 
@@ -330,6 +353,7 @@ Item {
         if (dx * dx + dy * dy <= slop * slop)
             return
         layer.tapping = false
+        holdTimer.stop()
         layer.releasePressed()
         if (layer.scroll === null || Math.abs(dy) < Math.abs(dx)) {
             layer.dead = true
@@ -444,6 +468,14 @@ Item {
                 layer.cancel()
         }
         onCanceled: layer.cancel()
+    }
+
+    Timer {
+        id: holdTimer
+
+        interval: Ui.seekHoldMs
+        repeat: false
+        onTriggered: layer.hold()
     }
 
     Timer {

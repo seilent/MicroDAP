@@ -1127,6 +1127,33 @@ TestCase {
         compare(counters.played[0].id, 1)
     }
 
+    function test_touch_long_press_row_opens_sheet() {
+        const page = open({ pivotIndex: 2 })
+        const row = tc.rowAt(page.songsPane, 1)
+        mousePress(row, row.width / 2, row.height / 2)
+        tryCompare(page.sheet, "shown", true, Ui.seekHoldMs + 1000)
+        compare(page.songsPane.focusIndex, 1)
+        compare(page.sheet.title, page.focusedRow.title)
+        mouseRelease(row, row.width / 2, row.height / 2)
+        wait(0)
+        wait(0)
+        compare(page.sheet.shown, true)
+        compare(counters.played, [])
+        compare(counters.sheetActions, [])
+    }
+
+    function test_touch_long_press_pivot_label_is_a_tap() {
+        const page = open({ pivotIndex: 2 })
+        const label = page.strip.labelItem(3)
+        mousePress(label, label.width / 2, label.height / 2)
+        wait(Ui.seekHoldMs + 150)
+        compare(page.sheet.shown, false)
+        mouseRelease(label, label.width / 2, label.height / 2)
+        wait(0)
+        wait(0)
+        compare(page.pivotIndex, 3)
+    }
+
     function test_touch_divider_opens_jump_grid() {
         const page = open({ pivotIndex: 2 })
         tc.tapAt(tc.rowAt(page.songsPane, 0))

@@ -116,6 +116,10 @@ Page {
         return pinned ? "unpin from quickplay" : "pin to quickplay"
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        return kind === "row" && page.openSheet()
+    }
+
     function openSheet(): bool {
         const r = page.focusedRow
         if (r === null || (r.kind !== "playlist" && r.kind !== "favorites"))

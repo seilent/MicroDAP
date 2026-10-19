@@ -880,6 +880,23 @@ TestCase {
         compare(counters.queueOpens, 1)
     }
 
+    function test_touch_long_press_title_does_not_pause() {
+        const page = open()
+        const title = page.titleItem
+        const routed = []
+        const seen = (name) => routed.push(name)
+        router.routed.connect(seen)
+        mousePress(title, title.width / 2, title.height / 2)
+        compare(layer.holdTimer.running, false)
+        wait(Ui.seekHoldMs + 150)
+        mouseRelease(title, title.width / 2, title.height / 2)
+        wait(0)
+        wait(0)
+        router.routed.disconnect(seen)
+        compare(fakePlayer.calls, [])
+        compare(routed.indexOf("x"), -1)
+    }
+
     function test_touch_last_next_track_opens_queue() {
         const page = open()
         compare(page.nextRepeater.count, 3)

@@ -110,7 +110,14 @@ TestCase {
             property alias focusList: focusList
             property alias band: band
             property var activations: []
+            property var contexts: []
+            property bool takeContext: false
             property bool pushOnA: false
+
+            function touchContext(kind: string, index: int, hit: Item): bool {
+                lp.contexts = lp.contexts.concat([kind + ":" + index])
+                return lp.takeContext
+            }
 
             list: focusList
             onActivated: (index) => {
@@ -469,6 +476,69 @@ TestCase {
         wait(1500)
         tc.up("mouse", tc.page, tc.rowX(), tc.rowY(3))
         compare(tc.page.activations, [3])
+    }
+
+    function test_long_press_runs_context() {
+        tc.page.takeContext = true
+        tc.down("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        compare(tc.page.pressed, true)
+        tryCompare(tc.page, "contexts", ["row:3"], Ui.seekHoldMs + 1000)
+        compare(tc.page.pressed, false)
+        compare(tc.list().focusIndex, 3)
+        tc.up("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        compare(tc.page.activations, [])
+        compare(tc.count(routedSpy, "a"), 0)
+    }
+
+    function test_long_press_touch_runs_context() {
+        tc.page.takeContext = true
+        tc.down("touch", tc.page, tc.rowX(), tc.rowY(5))
+        tryCompare(tc.page, "contexts", ["row:5"], Ui.seekHoldMs + 1000)
+        tc.up("touch", tc.page, tc.rowX(), tc.rowY(5))
+        compare(tc.page.activations, [])
+    }
+
+    function test_short_hold_is_a_tap() {
+        tc.page.takeContext = true
+        tc.down("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        wait(Ui.seekHoldMs - 150)
+        tc.up("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        compare(tc.page.contexts, [])
+        compare(tc.page.activations, [3])
+        wait(300)
+        compare(tc.page.contexts, [])
+    }
+
+    function test_long_press_past_slop_cancels() {
+        tc.page.takeContext = true
+        const x = tc.rowX()
+        const y = tc.rowY(3)
+        tc.down("mouse", tc.page, x, y)
+        tc.slide("mouse", tc.page, x, y, Ui.px(30), 0, 10, 0)
+        wait(Ui.seekHoldMs + 150)
+        tc.up("mouse", tc.page, x + Ui.px(30), y)
+        compare(tc.page.contexts, [])
+        compare(tc.page.activations, [])
+    }
+
+    function test_long_press_declined_stays_a_tap() {
+        tc.page.takeContext = false
+        tc.down("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        tryCompare(tc.page, "contexts", ["row:3"], Ui.seekHoldMs + 1000)
+        compare(tc.page.pressed, true)
+        tc.up("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        compare(tc.page.activations, [3])
+    }
+
+    function test_long_press_screen_off_runs_nothing() {
+        tc.page.takeContext = true
+        tc.down("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        router.screenOff = true
+        wait(Ui.seekHoldMs + 150)
+        router.screenOff = false
+        tc.up("mouse", tc.page, tc.rowX(), tc.rowY(3))
+        compare(tc.page.contexts, [])
+        compare(tc.page.activations, [])
     }
 
     function test_out_and_back_does_nothing() {

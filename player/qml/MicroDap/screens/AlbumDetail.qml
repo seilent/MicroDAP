@@ -150,6 +150,10 @@ Page {
         return ["play", "play next", "add to queue", page.pinLabel(kind, id)]
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        return kind === "row" && page.openSheet()
+    }
+
     function openSheet(): bool {
         if (page.focusedRow === null)
             return false

@@ -201,6 +201,10 @@ Page {
         console.info("microdap: queue play " + screen.rowIndex)
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        return kind === "row" && screen.openSheet()
+    }
+
     function openSheet(): bool {
         if (screen.focusedRow === null)
             return false

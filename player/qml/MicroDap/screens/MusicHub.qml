@@ -666,6 +666,10 @@ Page {
         }
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        return (kind === "row" || kind === "cell") && hub.openSheet()
+    }
+
     function touchTap(kind: string, index: int, hit: Item) {
         switch (kind) {
         case "pivot":

@@ -193,6 +193,10 @@ Page {
             page.sheetAction("add to queue", t.kind, t.id)
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        return (kind === "ring" || kind === "row") && page.openSheet()
+    }
+
     function openSheet(): bool {
         const t = page.sheetTarget()
         if (t === null)

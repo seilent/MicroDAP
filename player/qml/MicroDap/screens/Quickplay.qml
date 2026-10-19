@@ -192,6 +192,16 @@ Item {
         qp.touchFocusing = false
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        if (kind !== "tile" || (!qp.active && !Ui.landscape))
+            return false
+        const entry = qp.entryAt(qp.focusIndex)
+        if (entry === null || entry.phone)
+            return false
+        qp.pin(entry)
+        return true
+    }
+
     function touchPress(kind: string, index: int, x: real, hit: Item): string {
         if (kind !== "tile")
             return ""

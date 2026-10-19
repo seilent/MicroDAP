@@ -115,6 +115,12 @@ Item {
         return handled
     }
 
+    function context(owner: Item, kind: string, index: int, hit: Item): bool {
+        if (router.screenOff || router.locked || router.saverUp || owner === null || typeof owner.touchContext !== "function")
+            return false
+        return owner.touchContext(kind, index, hit) === true
+    }
+
     function press(name: string) {
         if (name === "" || router.screenOff || router.locked || router.modalUp || router.saverUp)
             return
