@@ -51,6 +51,7 @@ struct PlaylistFile
     QString source;
     QString name;
     QStringList entries;
+    QStringList tails;
     qint64 mtime = -1;
     qint64 size = -1;
     bool readable = true;
@@ -89,6 +90,7 @@ public:
     static PlaylistFile readPlaylist(const QString &path);
     static QString decodePlaylist(const QByteArray &bytes, bool utf8Only);
     static bool isMountPoint(const QString &dir);
+    static QString mountOf(const QString &root);
     static void setMountCheck(MountCheck check);
     static QString deviceOf(const QString &mount);
     static void setDeviceCheck(DeviceCheck check);
@@ -97,7 +99,6 @@ private:
     bool removable(const QString &path, const QStringList &present, const QStringList &absent);
     bool onAbsentMedia(const QString &path);
     bool mounted(const QString &dir);
-    static QString mountOf(const QString &root);
 
     TrackInfo read(const QFileInfo &info, const FileStamp &stamp);
     QString resolveArt(const QString &trackArt, const QString &key, const QDir &dir);

@@ -18,6 +18,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QStandardPaths>
@@ -25,6 +26,7 @@
 #include <QUrl>
 #include <QtTest>
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -443,6 +445,7 @@ private slots:
     void trackArtFirst();
     void newFormats();
     void migrateFrom6();
+    void playlistFallback();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -2929,6 +2932,81 @@ void LibraryTest::trackArtFirst()
     QCOMPARE(pins.rowCount(), 2);
     QCOMPARE(pins.data(pins.index(0), LibraryModel::ArtPathRole).toString(), artB);
     QCOMPARE(pins.data(pins.index(1), LibraryModel::ArtPathRole).toString(), artA);
+}
+
+void LibraryTest::playlistFallback()
+{
+    const QString base = m_dir.path() + QStringLiteral("/fallback");
+    const QString card = base + QStringLiteral("/mmcblk0p1");
+    const QString plain = m_dir.path() + QStringLiteral("/fallback-plain");
+    const QString source = QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/01 One.flac");
+    const QStringList files{
+        card + QStringLiteral("/Music/_/a.flac"),     card + QStringLiteral("/Music/Album/01.flac"),
+        card + QStringLiteral("/Music/Other/01.flac"), card + QStringLiteral("/A/x.flac"),
+        card + QStringLiteral("/A/B/x.flac"),          card + QStringLiteral("/r.flac"),
+        card + QStringLiteral("/A/y.flac"),            card + QStringLiteral("/A/B/Y.flac"),
+        card + QStringLiteral("/A/B/Zz.flac"),         card + QStringLiteral("/A/B/zZ.flac"),
+        plain + QStringLiteral("/Music/Sub/s.flac"),
+    };
+    for (const QString &file : files) {
+        QVERIFY(QDir().mkpath(QFileInfo(file).absolutePath()));
+        QVERIFY(QFile::copy(source, file));
+    }
+    QVERIFY(QDir().mkpath(card + QStringLiteral("/Playlist")));
+    QVERIFY(writeBytes(card + QStringLiteral("/Playlist/Beat.m3u8"),
+                       (QStringLiteral("#EXTM3U\n_/a.flac\n01.flac\nAlbum/01.flac\nalbum/01.flac\n_\\a.flac\n"
+                                       "../nothere/a.flac\n")
+                        + card + QStringLiteral("/Playlist/_/a.flac\n"))
+                           .toUtf8()));
+    QVERIFY(QDir().mkpath(card + QStringLiteral("/A/B/Playlists")));
+    QVERIFY(writeBytes(card + QStringLiteral("/A/B/Playlists/Near.m3u8"),
+                       QByteArrayLiteral("x.flac\nr.flac\ny.flac\nzz.flac\n")));
+    QVERIFY(QDir().mkpath(plain + QStringLiteral("/Lists")));
+    QVERIFY(writeBytes(plain + QStringLiteral("/Lists/Plain.m3u8"), QByteArrayLiteral("Sub/s.flac\n")));
+
+    qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+    Scanner::setMountCheck(fakeMountCheck);
+    fakeMount = card;
+    const auto restore = qScopeGuard([] {
+        fakeMount.clear();
+        Scanner::setMountCheck(nullptr);
+        qunsetenv("MICRODAP_MEDIA_ROOT");
+    });
+
+    Library library(m_dir.path() + QStringLiteral("/fallback.db"), m_dir.path() + QStringLiteral("/fallback-art"));
+    QVERIFY(library.isOpen());
+    const QSqlDatabase db = library.database();
+    QSignalSpy spy(&library, &Library::scanned);
+    library.rescan({card, plain});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QVERIFY(spy.takeFirst().at(3).toBool());
+
+    const auto id = [&db](const QString &path) { return trackId(db, path); };
+    const qint64 a = id(card + QStringLiteral("/Music/_/a.flac"));
+    const qint64 album = id(card + QStringLiteral("/Music/Album/01.flac"));
+    QVERIFY(a > 0);
+    QVERIFY(album > 0);
+    const qint64 beat = playlistId(db, QStringLiteral("Beat"));
+    QCOMPARE(library.playlistTracks(beat), (QVariantList{a, album, album, a}));
+    QCOMPARE(library.playlistInfo(beat).value(QStringLiteral("skipped")).toInt(), 3);
+
+    const qint64 zz = std::min(id(card + QStringLiteral("/A/B/Zz.flac")), id(card + QStringLiteral("/A/B/zZ.flac")));
+    QCOMPARE(library.playlistTracks(playlistId(db, QStringLiteral("Near"))),
+             (QVariantList{id(card + QStringLiteral("/A/B/x.flac")), id(card + QStringLiteral("/r.flac")),
+                           id(card + QStringLiteral("/A/B/Y.flac")), zz}));
+    QCOMPARE(library.playlistTracks(playlistId(db, QStringLiteral("Plain"))),
+             (QVariantList{id(plain + QStringLiteral("/Music/Sub/s.flac"))}));
+
+    const QString local = card + QStringLiteral("/Playlist/_/a.flac");
+    QVERIFY(QDir().mkpath(QFileInfo(local).absolutePath()));
+    QVERIFY(QFile::copy(source, local));
+    library.rescan({card, plain});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QVERIFY(spy.takeFirst().at(3).toBool());
+    const qint64 near = id(local);
+    QVERIFY(near > 0);
+    QCOMPARE(library.playlistTracks(beat), (QVariantList{near, album, album, near, near}));
+    QCOMPARE(library.playlistInfo(beat).value(QStringLiteral("skipped")).toInt(), 2);
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)

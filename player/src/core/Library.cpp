@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -296,6 +297,57 @@ constexpr const char *pinKinds[] = {"album", "artist", "song", "playlist"};
 QString songSortKey(const QString &title)
 {
     return sectionKey(title).sortKey;
+}
+
+struct TailTrack
+{
+    qint64 id = -1;
+    QString path;
+};
+
+qint64 tailMatch(const QString &dir, const QString &root, const QString &tail, const QList<TailTrack> &tracks)
+{
+    const QString prefix = root.endsWith(QLatin1Char('/')) ? root : root + QLatin1Char('/');
+    if (dir != root && !dir.startsWith(prefix))
+        return -1;
+    const QString relDir = dir == root ? QString() : dir.mid(prefix.size());
+    QStringList ups;
+    for (QString up = relDir; !up.isEmpty();) {
+        const qsizetype slash = up.lastIndexOf(QLatin1Char('/'));
+        up = slash < 0 ? QString() : up.left(slash);
+        ups.append(up);
+    }
+    const qsizetype n = tail.size();
+    qint64 best = -1;
+    qsizetype bestRank = -1;
+    bool tied = false;
+    for (const TailTrack &track : tracks) {
+        if (!track.path.startsWith(prefix))
+            continue;
+        const QStringView rel = QStringView(track.path).mid(prefix.size());
+        const qsizetype m = rel.size();
+        if (m < n || (m > n && rel[m - n - 1] != QLatin1Char('/'))
+            || rel.right(n).compare(tail, Qt::CaseInsensitive) != 0)
+            continue;
+        const QStringView folder = rel.left(m > n ? m - n - 1 : 0);
+        if (folder.compare(relDir, Qt::CaseInsensitive) == 0)
+            continue;
+        qsizetype step = 0;
+        while (step < ups.size() && folder.compare(ups.at(step), Qt::CaseInsensitive) != 0)
+            ++step;
+        if (step == ups.size() && folder.contains(QLatin1Char('/')))
+            ++step;
+        const bool exact = rel.right(n) == tail && (step >= ups.size() || folder == ups.at(step));
+        const qsizetype rank = step * 2 + (exact ? 0 : 1);
+        if (bestRank < 0 || rank < bestRank) {
+            bestRank = rank;
+            best = track.id;
+            tied = false;
+        } else if (rank == bestRank && track.id != best && step >= ups.size()) {
+            tied = true;
+        }
+    }
+    return tied ? -1 : best;
 }
 
 }
@@ -841,6 +893,8 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
     }
     QHash<QString, QList<qint64>> folded;
     bool foldedBuilt = false;
+    QHash<QString, QList<TailTrack>> byName;
+    bool byNameBuilt = false;
 
     QSqlQuery find(m_db);
     find.prepare(QStringLiteral("SELECT id, name, skipped FROM playlists WHERE source = ?"));
@@ -851,7 +905,10 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
         QList<qint64> ids;
         ids.reserve(playlist.entries.size());
         int skipped = 0;
-        for (const QString &entry : playlist.entries) {
+        const QString dir = QFileInfo(playlist.source).absolutePath();
+        std::optional<QString> root;
+        for (qsizetype i = 0; i < playlist.entries.size(); ++i) {
+            const QString &entry = playlist.entries.at(i);
             if (const auto hit = exact.constFind(entry); hit != exact.cend()) {
                 ids.append(*hit);
                 continue;
@@ -862,10 +919,31 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
                     folded[it.key().toCaseFolded()].append(it.value());
             }
             const auto candidates = folded.constFind(entry.toCaseFolded());
-            if (candidates != folded.cend() && candidates->size() == 1)
+            if (candidates != folded.cend() && candidates->size() == 1) {
                 ids.append(candidates->constFirst());
-            else
-                ++skipped;
+                continue;
+            }
+            const QString tail = playlist.tails.value(i);
+            if (!tail.isEmpty()) {
+                if (!root)
+                    root = playlistRoot(dir);
+                if (!byNameBuilt) {
+                    byNameBuilt = true;
+                    QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks ORDER BY id"), m_db);
+                    while (query.next()) {
+                        const QString path = query.value(1).toString();
+                        byName[QFileInfo(path).fileName().toCaseFolded()].append({query.value(0).toLongLong(), path});
+                    }
+                }
+                const qint64 id = root->isEmpty() ? -1
+                                                  : tailMatch(dir, *root, tail,
+                                                              byName.value(QFileInfo(tail).fileName().toCaseFolded()));
+                if (id >= 0) {
+                    ids.append(id);
+                    continue;
+                }
+            }
+            ++skipped;
         }
 
         find.bindValue(0, playlist.source);
@@ -941,6 +1019,20 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
                                      .arg(skipped);
     }
     return true;
+}
+
+QString Library::playlistRoot(const QString &dir) const
+{
+    const QString mount = Scanner::mountOf(dir);
+    if (!mount.isEmpty())
+        return mount;
+    QString best;
+    for (const QString &root : m_scannedRoots) {
+        const QString clean = QDir::cleanPath(root);
+        if (clean.size() > best.size() && (dir == clean || dir.startsWith(clean + QLatin1Char('/'))))
+            best = clean;
+    }
+    return best;
 }
 
 QString Library::metaValue(const QString &key) const

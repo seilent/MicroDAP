@@ -115,6 +115,7 @@ private:
     void setScanning(bool scanning);
     int count(const QString &table) const;
     bool applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed);
+    QString playlistRoot(const QString &dir) const;
     int removePlaylists(const QStringList &sources);
     QVariantList songOrder(const QString &where, const QVariantList &binds) const;
     QList<QueueEntry> entryRows(const QString &sql, const QVariantList &binds) const;
