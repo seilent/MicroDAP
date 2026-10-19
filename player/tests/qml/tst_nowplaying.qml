@@ -694,6 +694,21 @@ TestCase {
         compare(page.backdrop.source.toString(), "")
     }
 
+    function test_track_art_in_one_album() {
+        fakeQueue.rows[0].artPath = "/tmp/a.png"
+        fakeQueue.rows[1].artPath = "/tmp/b.png"
+        fakePlayer.select(0)
+        const page = open({ animated: true })
+        compare(page.shown.album, "Album 1")
+        compare(page.shown.artPath, "/tmp/a.png")
+        compare(page.artUrl(page.shown.artPath), "file:///tmp/a.png")
+        fakePlayer.select(1)
+        tryCompare(page, "trackAnimating", false, 3000)
+        compare(page.shown.album, "Album 1")
+        compare(page.shown.artPath, "/tmp/b.png")
+        compare(page.artUrl(page.shown.artPath), "file:///tmp/b.png")
+    }
+
     function test_ring_states_white() {
         const page = open()
         for (let i = 0; i < 3; i++) {

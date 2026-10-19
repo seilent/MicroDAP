@@ -290,7 +290,7 @@ void HistoryModel::setLimit(int limit)
 bool HistoryModel::readTrack(qint64 trackId, Entry &entry) const
 {
     QSqlQuery query(library()->database());
-    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, a.art_path FROM tracks t "
+    query.prepare(QStringLiteral("SELECT t.id, t.title, t.artist, COALESCE(t.art_path, a.art_path) FROM tracks t "
                                  "JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
     query.addBindValue(trackId);
     if (!query.exec() || !query.next())
@@ -334,7 +334,7 @@ QList<LibraryModel::Entry> HistoryModel::load() const
 {
     QList<Entry> entries;
     QString sql = m_mode == Recent
-        ? QStringLiteral("SELECT t.id, t.title, t.artist, a.art_path, MAX(h.played_at) AS last "
+        ? QStringLiteral("SELECT t.id, t.title, t.artist, COALESCE(t.art_path, a.art_path), MAX(h.played_at) AS last "
                          "FROM history h JOIN tracks t ON t.id = h.track_id "
                          "JOIN albums a ON a.id = t.album_id GROUP BY t.id ORDER BY last DESC, MAX(h.id) DESC")
         : QStringLiteral("SELECT id, title, artist, art_path FROM albums "
@@ -419,7 +419,7 @@ bool PinsModel::loadArtist(Entry &entry) const
 bool PinsModel::loadSong(Entry &entry) const
 {
     QSqlQuery query(library()->database());
-    query.prepare(QStringLiteral("SELECT t.title, t.artist, a.art_path FROM tracks t "
+    query.prepare(QStringLiteral("SELECT t.title, t.artist, COALESCE(t.art_path, a.art_path) FROM tracks t "
                                  "JOIN albums a ON a.id = t.album_id WHERE t.id = ?"));
     query.addBindValue(entry.id);
     if (!query.exec() || !query.next())

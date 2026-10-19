@@ -129,6 +129,16 @@ TestCase {
         compare(Motion.saverDriftTo, -27)
     }
 
+    function test_track_art_in_one_album() {
+        const first = fakePlayer.current
+        fakePlayer.current = { id: 1, title: "One", artist: "Addison Road", album: "Addison Road", artPath: "/tmp/one.png" }
+        compare(saver.artUrl, "file:///tmp/one.png")
+        fakePlayer.current = { id: 2, title: "Two", artist: "Addison Road", album: "Addison Road", artPath: "/tmp/two.png" }
+        compare(saver.artUrl, "file:///tmp/two.png")
+        fakePlayer.current = first
+        compare(saver.artUrl, "")
+    }
+
     function test_timer_shows_after_saver_seconds() {
         compare(main.saverArmed, true)
         compare(main.saverTimer.running, true)

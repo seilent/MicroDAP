@@ -172,7 +172,7 @@ const char *const pruneGenres[] = {
 };
 
 constexpr const char *entryColumns =
-    "SELECT t.id, t.path, t.title, t.artist, a.title, a.art_path, t.duration_ms";
+    "SELECT t.id, t.path, t.title, t.artist, a.title, COALESCE(t.art_path, a.art_path), t.duration_ms";
 
 constexpr const char *rowColumns =
     "SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms, t.sample_rate, t.bit_depth";

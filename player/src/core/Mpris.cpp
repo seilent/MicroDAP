@@ -432,7 +432,7 @@ QueueEntry Mpris::entryForPath(const QString &path) const
         return entry;
     QSqlQuery query(library->database());
     query.prepare(QStringLiteral(
-        "SELECT t.id, t.title, t.artist, a.title, a.art_path, t.duration_ms "
+        "SELECT t.id, t.title, t.artist, a.title, COALESCE(t.art_path, a.art_path), t.duration_ms "
         "FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE t.path = ?"));
     query.addBindValue(path);
     if (!query.exec() || !query.next())

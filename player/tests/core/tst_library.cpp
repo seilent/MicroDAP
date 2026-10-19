@@ -440,6 +440,7 @@ private slots:
     void migrateFailureRollsBack();
     void newerReader();
     void trackTags();
+    void trackArtFirst();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -2803,6 +2804,49 @@ void LibraryTest::trackTags()
     QVERIFY(QFileInfo::exists(artA));
     QVERIFY(QFileInfo::exists(artB));
     QVERIFY(!scalar(db, QStringLiteral("SELECT art_path FROM albums WHERE title = 'Tagged'")).isNull());
+}
+
+void LibraryTest::trackArtFirst()
+{
+    const QString music = m_dir.path() + QStringLiteral("/tagged");
+    Library library(m_dir.path() + QStringLiteral("/tagged.db"), m_dir.path() + QStringLiteral("/tagged-art"));
+    QVERIFY(library.isOpen());
+    const QSqlDatabase db = library.database();
+    const auto trackArt = [&db](const QString &name) {
+        return scalar(db, QStringLiteral("SELECT art_path FROM tracks WHERE path = ?"), {name}).toString();
+    };
+    const QString a = music + QStringLiteral("/a.flac");
+    const QString b = music + QStringLiteral("/b.flac");
+    const QString c = music + QStringLiteral("/c.flac");
+    const QString artA = trackArt(a);
+    const QString artB = trackArt(b);
+    QVERIFY(!artA.isEmpty());
+    QVERIFY(!artB.isEmpty());
+    QVERIFY(artA != artB);
+    QVERIFY(trackArt(c).isEmpty());
+
+    const qint64 album = scalar(db, QStringLiteral("SELECT id FROM albums WHERE title = 'Tagged'")).toLongLong();
+    QCOMPARE(library.albumInfo(album).value(QStringLiteral("artPath")).toString(), artA);
+    QHash<QString, QString> art;
+    for (const QueueEntry &entry : library.entriesFor(QStringLiteral("album"), album))
+        art.insert(entry.path, entry.artPath);
+    QCOMPARE(art.value(a), artA);
+    QCOMPARE(art.value(b), artB);
+    QCOMPARE(art.value(c), artA);
+    const qint64 idB = trackId(db, b);
+    QCOMPARE(library.queueEntries({idB}).value(0).artPath, artB);
+
+    library.addHistory(idB);
+    QVERIFY(library.pin(QStringLiteral("song"), idB));
+    QVERIFY(library.pin(QStringLiteral("album"), album));
+    HistoryModel recent(&library, HistoryModel::Recent, 8);
+    recent.ensureLoaded();
+    QCOMPARE(recent.rowCount(), 1);
+    QCOMPARE(recent.data(recent.index(0), LibraryModel::ArtPathRole).toString(), artB);
+    PinsModel pins(&library);
+    QCOMPARE(pins.rowCount(), 2);
+    QCOMPARE(pins.data(pins.index(0), LibraryModel::ArtPathRole).toString(), artB);
+    QCOMPARE(pins.data(pins.index(1), LibraryModel::ArtPathRole).toString(), artA);
 }
 
 QTEST_GUILESS_MAIN(LibraryTest)

@@ -105,8 +105,9 @@ QHash<QString, QueueEntry> entriesByPath(const QSqlDatabase &db, const QStringLi
         for (qsizetype i = 0; i < chunk.size(); ++i)
             marks.append(QStringLiteral("?"));
         QSqlQuery query(db);
-        query.prepare(QStringLiteral("SELECT t.id, t.path, t.title, t.artist, a.title, a.art_path, "
-                                     "t.duration_ms FROM tracks t JOIN albums a ON a.id = t.album_id "
+        query.prepare(QStringLiteral("SELECT t.id, t.path, t.title, t.artist, a.title, "
+                                     "COALESCE(t.art_path, a.art_path), t.duration_ms "
+                                     "FROM tracks t JOIN albums a ON a.id = t.album_id "
                                      "WHERE t.path IN (%1)")
                           .arg(marks.join(QLatin1Char(','))));
         for (const QString &path : chunk)
