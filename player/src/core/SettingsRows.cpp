@@ -152,6 +152,7 @@ QList<Row> build()
     out.push_back(readOnly(draft(replaygain, "off plays louder than track or album"), "bitPerfect"));
 
     Row crossfade = steps("output", "crossfade", "crossfade", "crossfadeMs", numbers({0, 1000, 2000, 3000, 5000}));
+    link(crossfade, "crossfade");
     out.push_back(readOnly(draft(crossfade, "a browse would change the planned overlap"), "bitPerfect"));
 
     out.push_back(action("output", "eq", "eq", "eq"));

@@ -7,6 +7,7 @@
 #include "Player.h"
 #include "Queue.h"
 #include "Settings.h"
+#include "SettingsRows.h"
 #include "VolumeKeys.h"
 
 #include "LinkProto.h"
@@ -484,6 +485,9 @@ private slots:
     void pruneBumpsSnapRev();
     void playAndQueue();
     void libraryScale();
+    void schemaAfterHello();
+    void setKeptAndRefused();
+    void draftRefused();
     void profileRegisters();
     void profileBackoffOnNotPermitted();
     void profileAlreadyExistsIsOurs();
@@ -510,8 +514,8 @@ void LinkTest::helloReply()
     QCOMPARE(b.u("screenH"), 960u);
     QCOMPARE(b.u("backdropW"), 960u);
     QCOMPARE(b.u("backdropH"), 960u);
-    QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::library | uint64_t(1) << proto::feature::queue
-                                  | uint64_t(1) << proto::feature::stateClock);
+    QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::settings | uint64_t(1) << proto::feature::library
+                                  | uint64_t(1) << proto::feature::queue | uint64_t(1) << proto::feature::stateClock);
     QCOMPARE(b.u("minor"), uint64_t(proto::minor));
     QVERIFY(find(frames, proto::msg::STATE));
     QVERIFY(rig.server.connected());
@@ -1119,6 +1123,181 @@ void LinkTest::playAndQueue()
     fd::LinkWriter unknownFavorite;
     unknownFavorite.u8(proto::tag::ACTION::cmd, proto::val::ACTION_CMD::favorite).u64(proto::tag::ACTION::track, 999999);
     QCOMPARE(errorCode(rig.ask(proto::msg::ACTION, unknownFavorite), proto::msg::ACTION), uint64_t(proto::err::staleRev));
+}
+
+const fd::LinkField *schemaRow(const std::vector<fd::LinkFrame> &frames, const std::string &key)
+{
+    static fd::LinkBody kept;
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type != proto::msg::SCHEMA)
+            continue;
+        kept = body(f);
+        for (const fd::LinkField *r : kept.all("row")) {
+            for (const fd::LinkField &x : r->rec) {
+                if (x.def && std::string_view(x.def->field) == "key" && x.s == key)
+                    return r;
+            }
+        }
+    }
+    return nullptr;
+}
+
+QStringList recordList(const fd::LinkField *row, const char *field)
+{
+    QStringList out;
+    for (const fd::LinkField &x : row->rec) {
+        if (x.def && std::string_view(x.def->field) == field)
+            out.push_back(x.def->kind == proto::Kind::Str ? QString::fromStdString(x.s)
+                          : x.def->kind == proto::Kind::I32 ? QString::number(x.i)
+                                                             : QString::number(x.u));
+    }
+    return out;
+}
+
+QString settingsText(const std::vector<fd::LinkFrame> &frames)
+{
+    const fd::LinkFrame *f = find(frames, proto::msg::SETTINGS);
+    return f ? QString::fromStdString(body(*f).str("text")) : QString();
+}
+
+void LinkTest::schemaAfterHello()
+{
+    Rig rig;
+    rig.settings.setOutputSlot(QStringLiteral("headphones"));
+    Phone phone;
+    const std::vector<fd::LinkFrame> frames = rig.connect(phone);
+    const fd::LinkFrame *reply = find(frames, proto::msg::HELLO, true);
+    QVERIFY(reply);
+    const uint64_t settingsRev = body(*reply).u("settingsRev");
+    QStringList pivots;
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type != proto::msg::SCHEMA)
+            continue;
+        const fd::LinkBody b = body(f);
+        QCOMPARE(b.u("pivotCount"), 5u);
+        QVERIFY(f.body.size() <= size_t(proto::maxPayload) * proto::pageFillPct / 100);
+        const QString pivot = QString::fromStdString(b.str("pivot"));
+        if (!pivots.contains(pivot))
+            pivots.push_back(pivot);
+    }
+    QCOMPARE(pivots, SettingsRows::pivots());
+    const fd::LinkFrame *settings = find(frames, proto::msg::SETTINGS);
+    QVERIFY(settings);
+    QCOMPARE(body(*settings).u("rev"), settingsRev);
+    const QString text = settingsText(frames);
+    QVERIFY(text.contains(QStringLiteral("maxVolume=100\n")));
+    QVERIFY(text.contains(QStringLiteral("balance=0\n")));
+    QVERIFY(text.contains(QStringLiteral("crossfade=0\n")));
+    QVERIFY(text.contains(QStringLiteral("companion=on\n")));
+    QVERIFY(!text.contains(QStringLiteral("crossfadeMs")));
+    const fd::LinkField *max = schemaRow(frames, "maxVolume");
+    QVERIFY(max);
+    QCOMPARE(recordList(max, "value"), QStringList({QStringLiteral("50"), QStringLiteral("55"), QStringLiteral("60"),
+                                                    QStringLiteral("65"), QStringLiteral("70"), QStringLiteral("75"),
+                                                    QStringLiteral("80"), QStringLiteral("85"), QStringLiteral("90"),
+                                                    QStringLiteral("95"), QStringLiteral("100")}));
+    QCOMPARE(recordList(max, "kind"), QStringList({QString::number(proto::val::ROW_KIND::steps)}));
+    const fd::LinkField *balance = schemaRow(frames, "balance");
+    QVERIFY(balance);
+    QCOMPARE(recordList(balance, "min"), QStringList({QStringLiteral("-20")}));
+    QCOMPARE(recordList(balance, "max"), QStringList({QStringLiteral("20")}));
+    QCOMPARE(recordList(balance, "step"), QStringList({QStringLiteral("1")}));
+    const fd::LinkField *crossfade = schemaRow(frames, "crossfade");
+    QVERIFY(crossfade);
+    QCOMPARE(recordList(crossfade, "value"), QStringList({QStringLiteral("0"), QStringLiteral("1"), QStringLiteral("2"),
+                                                          QStringLiteral("3"), QStringLiteral("5")}));
+    QCOMPARE(recordList(crossfade, "word").constFirst(), QStringLiteral("OFF"));
+    const fd::LinkField *crossfeed = schemaRow(frames, "crossfeed");
+    QVERIFY(crossfeed && recordList(crossfeed, "value").contains(QStringLiteral("chuMoy"))
+            && recordList(crossfeed, "value").contains(QStringLiteral("janMeier")));
+    const fd::LinkField *companion = schemaRow(frames, "companion");
+    QVERIFY(companion);
+    QCOMPARE(recordList(companion, "flag"), QStringList({QString::number(proto::val::ROW_FLAG::readOnly),
+                                                         QString::number(proto::val::ROW_FLAG::boardOnly)}));
+    const fd::LinkField *codec = schemaRow(frames, "btCodec");
+    QVERIFY(codec && recordList(codec, "flag").contains(QString::number(proto::val::ROW_FLAG::restart)));
+    QVERIFY(schemaRow(frames, "companionPair"));
+    QVERIFY(!schemaRow(frames, "closePlayer"));
+    rig.server.poll();
+    QCOMPARE(count(phone.frames(), proto::msg::SCHEMA), 0);
+}
+
+void LinkTest::setKeptAndRefused()
+{
+    Rig rig;
+    rig.settings.setOutputSlot(QStringLiteral("headphones"));
+    Phone phone;
+    rig.connect(phone);
+    fd::LinkWriter set;
+    set.str(proto::tag::SET::text, "maxVolume=72\nvolumeStep=10\ncrossfade=2\nbalance=30\n");
+    phone.send(proto::msg::SET, set);
+    rig.server.poll();
+    std::vector<fd::LinkFrame> frames = phone.frames();
+    QCOMPARE(rig.settings.maxVolume(), 70);
+    QCOMPARE(rig.settings.volumeStep(), 10);
+    QCOMPARE(rig.settings.crossfadeMs(), 2000);
+    QCOMPARE(rig.settings.balance(), 20);
+    size_t settingsAt = frames.size();
+    size_t replyAt = frames.size();
+    for (size_t i = 0; i < frames.size(); ++i) {
+        if (frames[i].type == proto::msg::SETTINGS && settingsAt == frames.size())
+            settingsAt = i;
+        if (frames[i].type == proto::msg::SET && frames[i].flags == proto::flagReply)
+            replyAt = i;
+    }
+    QVERIFY(settingsAt < replyAt && replyAt < frames.size());
+    const fd::LinkBody reply = body(frames[replyAt]);
+    QCOMPARE(reply.all("kept").size(), size_t(4));
+    QCOMPARE(reply.u("rev"), body(frames[settingsAt]).u("rev"));
+    QVERIFY(settingsText(frames).contains(QStringLiteral("maxVolume=70\n")));
+
+    fd::LinkWriter partly;
+    partly.str(proto::tag::SET::text, "maxVolume=60\nnope=1\n");
+    phone.send(proto::msg::SET, partly);
+    rig.server.poll();
+    frames = phone.frames();
+    const fd::LinkFrame *ok = nullptr;
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type == proto::msg::SET && f.flags == proto::flagReply)
+            ok = &f;
+    }
+    QVERIFY(ok);
+    QCOMPARE(body(*ok).all("refused").size(), size_t(1));
+    QCOMPARE(body(*ok).all("refused").front()->s, std::string("nope"));
+    QCOMPARE(rig.settings.maxVolume(), 60);
+
+    for (const char *text : {"companion=off\n", "maxVolume=abc\n", "volumeStep=4.5\n", "output=loud\n",
+                             "balance=1=2\n", "companionPair=on\n"}) {
+        fd::LinkWriter bad;
+        bad.str(proto::tag::SET::text, text);
+        phone.send(proto::msg::SET, bad);
+        rig.server.poll();
+        frames = phone.frames();
+        QCOMPARE(errorCode(frames, proto::msg::SET), uint64_t(proto::err::refused));
+    }
+    QVERIFY(rig.settings.companion());
+    QCOMPARE(rig.settings.maxVolume(), 60);
+    QCOMPARE(rig.settings.volumeStep(), 10);
+    rig.settings.setOutputSlot(QStringLiteral("usb"));
+    fd::LinkWriter gain;
+    gain.str(proto::tag::SET::text, "hpGain=high\n");
+    phone.send(proto::msg::SET, gain);
+    rig.server.poll();
+    frames = phone.frames();
+    QCOMPARE(errorCode(frames, proto::msg::SET), uint64_t(proto::err::refused));
+    QVERIFY(recordList(schemaRow(frames, "hpGain"), "flag").contains(QString::number(proto::val::ROW_FLAG::readOnly)));
+}
+
+void LinkTest::draftRefused()
+{
+    Rig rig;
+    Phone phone;
+    rig.connect(phone);
+    fd::LinkWriter draft;
+    draft.u8(proto::tag::DRAFT::kind, proto::val::DRAFT_KIND::sleep).u32(proto::tag::DRAFT::minutes, 30);
+    phone.send(proto::msg::DRAFT, draft);
+    rig.server.poll();
+    QCOMPARE(errorCode(phone.frames(), proto::msg::DRAFT), uint64_t(proto::err::refused));
 }
 
 void LinkTest::profileRegisters()

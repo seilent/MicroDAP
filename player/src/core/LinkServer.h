@@ -3,6 +3,7 @@
 #include "BluezModel.h"
 #include "LinkLibrary.h"
 #include "LinkProto.h"
+#include "LinkSettings.h"
 
 #include <QDeadlineTimer>
 #include <QObject>
@@ -115,6 +116,16 @@ private:
         bool refused = false;
         bool candidate = false;
         bool hello = false;
+        bool schemaSent = false;
+        bool settingsSent = false;
+        quint32 schema = 0;
+        quint32 settings = 0;
+    };
+
+    struct Pivot
+    {
+        QString name;
+        std::vector<fd::LinkWriter> rows;
     };
 
     LinkSig sig(qint64 mono) const;
@@ -139,6 +150,11 @@ private:
                quint32 total, const std::function<void(quint32, fd::LinkWriter &)> &rec, qint64 now);
     bool knownTracks(const QVariantList &ids) const;
     void bumpLib(bool snap);
+    void refresh();
+    void pushSchema(Peer &p, qint64 now);
+    void pushSettings(Peer &p, qint64 now);
+    void settings(Peer &p, qint64 now);
+    void settingsCommand(Peer &p, fd::LinkCommand &c, qint64 now);
     bool phone() const;
     int cap() const;
     void setPairWindow(bool on);
@@ -165,6 +181,12 @@ private:
     LinkSig m_sent;
     qint64 m_sentAt = -1;
     quint32 m_sentRev = 0;
+    std::vector<Pivot> m_schema;
+    QByteArray m_schemaSig;
+    QString m_settingsText;
+    quint32 m_schemaRev;
+    quint32 m_settingsRev;
+    bool m_settingsFresh = false;
     qint64 m_seen = 0;
     qint64 m_nextAt = -1;
     quint32 m_gen = 0;

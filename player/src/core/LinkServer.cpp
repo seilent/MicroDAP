@@ -66,7 +66,8 @@ LinkTime LinkServer::now()
 
 quint64 LinkServer::features()
 {
-    return 1ull << proto::feature::library | 1ull << proto::feature::queue | 1ull << proto::feature::stateClock;
+    return 1ull << proto::feature::settings | 1ull << proto::feature::library | 1ull << proto::feature::queue
+           | 1ull << proto::feature::stateClock;
 }
 
 quint32 LinkServer::randomRev()
@@ -89,6 +90,8 @@ LinkServer::LinkServer(Player *player, Settings *settings, QObject *parent)
     , m_clock(&LinkServer::now)
     , m_libRev(randomRev())
     , m_snapRev(randomRev())
+    , m_schemaRev(randomRev())
+    , m_settingsRev(randomRev())
 {
     m_timer.setSingleShot(true);
     m_timer.setTimerType(Qt::PreciseTimer);
@@ -114,6 +117,14 @@ LinkServer::LinkServer(Player *player, Settings *settings, QObject *parent)
     connect(m_settings, &Settings::volumeStepChanged, this, soon);
     m_companion = m_settings->companion();
     connect(m_settings, &Settings::companionChanged, this, &LinkServer::companionChanged);
+    auto stale = [this] {
+        m_settingsFresh = false;
+        if (!m_peers.empty())
+            m_soon.start();
+    };
+    connect(m_settings, &Settings::valueChanged, this, stale);
+    connect(m_settings, &Settings::outputSlotChanged, this, stale);
+    connect(m_settings, &Settings::availableChanged, this, stale);
 }
 
 LinkServer::~LinkServer()
@@ -231,6 +242,7 @@ fd::LinkHello LinkServer::hello() const
     h.backdrop_h = backdropSide;
     h.features = features();
     h.lib_rev = m_libRev;
+    h.settings_rev = m_settingsRev;
     h.snap_rev = m_snapRev;
     return h;
 }
@@ -351,6 +363,7 @@ void LinkServer::open(int fd, const QString &device)
     const bool gone = m_bluez && m_bluez->companionRemoving().contains(device);
     const bool candidate = other && known && !gone && m_windowEnd.remainingTime() != 0;
     const bool refused = (other && !candidate) || (window && !known) || gone;
+    refresh();
     auto p = std::make_unique<Peer>();
     p->device = device;
     p->refused = refused;
@@ -446,13 +459,17 @@ void LinkServer::poll()
     m_polling = true;
     const qint64 now = m_clock().boot;
     m_nextAt = -1;
+    if (m_connected)
+        refresh();
     for (size_t i = 0; i < m_peers.size(); ++i) {
         Peer &p = *m_peers[i];
         if (p.s->closed())
             continue;
         tick(p, now);
-        if (p.hello && !p.refused && p.s->open())
+        if (p.hello && !p.refused && p.s->open()) {
             state(p, now);
+            settings(p, now);
+        }
     }
     for (auto it = m_peers.begin(); it != m_peers.end();) {
         if ((*it)->s->closed()) {
@@ -655,6 +672,10 @@ void LinkServer::command(fd::LinkCommand &c, int64_t now)
             m_soon.start();
         }
         emit phoneHello();
+        return;
+    }
+    if (c.type == m::SET || c.type == m::DRAFT) {
+        settingsCommand(*p, c, now);
         return;
     }
     if (library(*p, c, now))
@@ -1032,6 +1053,140 @@ uint8_t LinkServer::action(const fd::LinkCommand &c)
     default:
         return proto::err::badValue;
     }
+}
+
+void LinkServer::refresh()
+{
+    if (m_settingsFresh)
+        return;
+    m_settingsFresh = true;
+    const LinkSettings link(m_settings, version());
+    const QList<LinkSettingRow> rows = link.rows();
+    std::vector<Pivot> pivots;
+    QByteArray sig;
+    for (const LinkSettingRow &r : rows) {
+        if (pivots.empty() || pivots.back().name != r.pivot)
+            pivots.push_back({r.pivot, {}});
+        namespace t = proto::tag::Row;
+        fd::LinkWriter w;
+        w.str(t::key, utf8(r.key)).str(t::label, utf8(r.label)).str(t::pivot, utf8(r.pivot)).u8(t::kind, r.kind);
+        for (const QString &v : r.values)
+            w.str(t::value, utf8(v));
+        if (r.max > r.min)
+            w.i32(t::min, r.min).i32(t::max, r.max).i32(t::step, r.step);
+        for (const QString &word : r.words)
+            w.str(t::word, utf8(word));
+        if (r.readOnly)
+            w.u8(t::flag, proto::val::ROW_FLAG::readOnly);
+        if (r.restart)
+            w.u8(t::flag, proto::val::ROW_FLAG::restart);
+        if (r.boardOnly)
+            w.u8(t::flag, proto::val::ROW_FLAG::boardOnly);
+        sig.append(r.pivot.toUtf8()).append('\n').append(reinterpret_cast<const char *>(w.data().data()), qsizetype(w.size()));
+        pivots.back().rows.push_back(std::move(w));
+    }
+    if (sig != m_schemaSig) {
+        m_schemaSig = sig;
+        m_schema = std::move(pivots);
+        ++m_schemaRev;
+    }
+    const QString text = link.text();
+    if (text != m_settingsText) {
+        m_settingsText = text;
+        ++m_settingsRev;
+    }
+}
+
+void LinkServer::pushSchema(Peer &p, qint64 now)
+{
+    namespace t = proto::tag::SCHEMA;
+    const size_t cap = size_t(proto::maxPayload) * proto::pageFillPct / 100;
+    for (size_t pi = 0; pi < m_schema.size(); ++pi) {
+        const std::vector<fd::LinkWriter> &rows = m_schema[pi].rows;
+        const std::string name = utf8(m_schema[pi].name);
+        auto page = [&](size_t at, size_t n) {
+            fd::LinkWriter w;
+            w.str(t::pivot, name).u32(t::offset, uint32_t(at)).u32(t::total, uint32_t(rows.size()));
+            w.flag(t::more, at + n < rows.size());
+            for (size_t i = at; i < at + n; ++i)
+                w.rec(t::row, rows[i]);
+            w.u32(t::rev, m_schemaRev).u8(t::pivotIndex, uint8_t(pi)).u8(t::pivotCount, uint8_t(m_schema.size()));
+            p.s->push(proto::msg::SCHEMA, w, now);
+        };
+        const size_t fixed = name.size() + 48;
+        size_t at = 0;
+        size_t used = 0;
+        size_t n = 0;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (n > 0 && fixed + used + 3 + rows[i].size() > cap) {
+                page(at, n);
+                at = i;
+                used = 0;
+                n = 0;
+            }
+            used += 3 + rows[i].size();
+            ++n;
+        }
+        page(at, n);
+    }
+}
+
+void LinkServer::pushSettings(Peer &p, qint64 now)
+{
+    fd::LinkWriter w;
+    w.u32(proto::tag::SETTINGS::rev, m_settingsRev).str(proto::tag::SETTINGS::text, utf8(m_settingsText));
+    p.s->push(proto::msg::SETTINGS, w, now);
+    p.settings = m_settingsRev;
+    p.settingsSent = true;
+}
+
+void LinkServer::settings(Peer &p, qint64 now)
+{
+    bool sent = false;
+    if (!p.schemaSent || p.schema != m_schemaRev) {
+        pushSchema(p, now);
+        p.schema = m_schemaRev;
+        p.schemaSent = true;
+        sent = true;
+    }
+    if (!p.settingsSent || p.settings != m_settingsRev) {
+        pushSettings(p, now);
+        sent = true;
+    }
+    if (sent && !m_ticking && p.s->open())
+        tick(p, now);
+}
+
+void LinkServer::settingsCommand(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    namespace m = proto::msg;
+    QStringList kept;
+    QStringList refused;
+    uint8_t code = proto::err::refused;
+    if (!p.refused && c.type == m::SET) {
+        code = c.body.has("text") ? LinkSettings(m_settings, version()).set(QString::fromStdString(c.body.str("text")), kept,
+                                                                             refused)
+                                  : uint8_t(proto::err::badValue);
+    }
+    m_settingsFresh = false;
+    refresh();
+    if (!code)
+        pushSettings(p, now);
+    std::vector<std::string> names;
+    for (const QString &k : std::as_const(refused))
+        names.push_back(utf8(k));
+    if (code) {
+        p.s->fail(c, code, fd::link_err_text(code), now, names);
+        return;
+    }
+    namespace t = proto::tag::SET_reply;
+    fd::LinkWriter w;
+    w.u32(t::rev, m_settingsRev);
+    for (const QString &k : std::as_const(kept))
+        w.str(t::kept, utf8(k));
+    for (const std::string &k : names)
+        w.str(t::refused, k);
+    p.s->reply(c, w, now);
 }
 
 }
