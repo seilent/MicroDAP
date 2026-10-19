@@ -14,6 +14,9 @@ PressScale {
     property bool countLine: false
     property bool ring: false
     property string ringGlyph: "play"
+    property real ringArc: 0
+    property bool ringToggle: false
+    property bool ringOn: false
 
     readonly property bool indented: root.number !== "" || root.ring
     readonly property real textX: Ui.px(Ui.hubEdge) + (root.indented ? Ui.songTextX(root.number.length) : 0)
@@ -43,6 +46,9 @@ PressScale {
             size: Ui.rowRing
             glyph: root.ringGlyph
             focused: root.focused
+            arcSweep: root.ringArc
+            toggle: root.ringToggle
+            on: root.ringOn
             animated: root.animated
         }
     }

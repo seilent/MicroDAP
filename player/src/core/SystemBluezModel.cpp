@@ -12,6 +12,9 @@
 #include <QSaveFile>
 #include <QUrl>
 
+#include <algorithm>
+#include <utility>
+
 namespace microdap {
 
 namespace {
@@ -108,6 +111,35 @@ bool inRole(const QVariantMap &device, const QString &role)
     return role == QLatin1StringView("receiver") ? hasA2dpSource(uuids) : isHeadset(uuids);
 }
 
+bool isAudioSink(const QVariantMap &device)
+{
+    const uint major = (device.value(QStringLiteral("Class")).toUInt() >> 8) & 0x1f;
+    return major == 0x04 || hasUuid(device.value(QStringLiteral("UUIDs")), QLatin1StringView("0000110b"));
+}
+
+QString aliasOf(const QVariantMap &device)
+{
+    return device.value(QStringLiteral("Alias"), device.value(QStringLiteral("Name"))).toString();
+}
+
+QVariantList sortedByName(QVariantList list)
+{
+    std::stable_sort(list.begin(), list.end(), [](const QVariant &a, const QVariant &b) {
+        return QString::compare(a.toMap().value(QStringLiteral("name")).toString(),
+                                b.toMap().value(QStringLiteral("name")).toString(), Qt::CaseInsensitive) < 0;
+    });
+    return list;
+}
+
+void writeLine(const QString &path, const QString &text)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(text.toUtf8() + '\n') < 0
+        || !file.commit())
+        qWarning() << "microdap bluez: cannot write" << path;
+}
+
 int roleCheckMs()
 {
     bool ok = false;
@@ -130,14 +162,11 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     QFile last(lastPhonePath());
     if (last.open(QIODevice::ReadOnly))
         updateLastPhone(QString::fromUtf8(last.read(1024)).trimmed());
-    connect(this, &BluezModel::lastPhoneChanged, this, [this] {
-        const QString path = lastPhonePath();
-        QDir().mkpath(QFileInfo(path).absolutePath());
-        QSaveFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(lastPhone().toUtf8() + '\n') < 0
-            || !file.commit())
-            qWarning() << "microdap bluez: cannot write" << path;
-    });
+    connect(this, &BluezModel::lastPhoneChanged, this, [this] { writeLine(lastPhonePath(), lastPhone()); });
+    QFile lastHeadsetFile(lastHeadsetPath());
+    if (lastHeadsetFile.open(QIODevice::ReadOnly))
+        updateLastHeadset(QString::fromUtf8(lastHeadsetFile.read(1024)).trimmed());
+    connect(this, &BluezModel::lastHeadsetChanged, this, [this] { writeLine(lastHeadsetPath(), lastHeadset()); });
 
     m_gateTimer.setSingleShot(true);
     connect(&m_gateTimer, &QTimer::timeout, this, &SystemBluezModel::apply);
@@ -332,8 +361,13 @@ void SystemBluezModel::onAgentPropertiesChanged(const QString &interface, const 
         updatePairing(changed.value(QStringLiteral("PairingActive")).toBool());
     if (changed.contains(QStringLiteral("SearchRemaining")))
         updateSearchRemaining(changed.value(QStringLiteral("SearchRemaining")).toInt());
+    const bool wasSearching = searching();
     if (changed.contains(QStringLiteral("SearchActive")))
         updateSearching(changed.value(QStringLiteral("SearchActive")).toBool());
+    if (wasSearching && !searching())
+        m_pairAfterSearch.clear();
+    if (searching() && !m_pairAfterSearch.isEmpty())
+        startPair(std::exchange(m_pairAfterSearch, QString()));
     if (invalidated.contains(QStringLiteral("PairingRemaining"))
         || invalidated.contains(QStringLiteral("PairingActive"))
         || invalidated.contains(QStringLiteral("SearchRemaining"))
@@ -399,16 +433,88 @@ void SystemBluezModel::onBluezPropertiesChanged(const QString &interface, const 
         properties.insert(change.key(), change.value());
     for (const QString &name : invalidated)
         properties.remove(name);
+    const QString path = message.path();
+    if (interface == device1Interface() && changed.contains(QStringLiteral("Connected"))) {
+        if (changed.value(QStringLiteral("Connected")).toBool())
+            checkHeadset(path);
+        else if (path == m_connectTarget)
+            m_connectTarget.clear();
+    }
     apply();
     if (interface != device1Interface())
         return;
-    const QString path = message.path();
     if (changed.value(QStringLiteral("ServicesResolved")).toBool() || changed.contains(QStringLiteral("UUIDs")))
         checkRole(path);
     if (changed.contains(QStringLiteral("Connected")) && !changed.value(QStringLiteral("Connected")).toBool())
         m_wrongRole.remove(path);
     if (changed.value(QStringLiteral("Connected")).toBool())
         QTimer::singleShot(roleCheckMs(), this, [this, path] { checkRole(path); });
+}
+
+void SystemBluezModel::applyHeadsets()
+{
+    QString connectedName;
+    QString connectedPath;
+    QVariantList paired;
+    QVariantList found;
+    for (auto it = m_objects.cbegin(); it != m_objects.cend(); ++it) {
+        const QVariantMap device = it->value(device1Interface());
+        if (device.isEmpty())
+            continue;
+        const QString path = it.key();
+        const bool connected = device.value(QStringLiteral("Connected")).toBool();
+        if (device.value(QStringLiteral("Paired")).toBool()) {
+            if (!isHeadset(device.value(QStringLiteral("UUIDs"))))
+                continue;
+            const QString transport = childWithInterface(path, mediaTransport1Interface());
+            const bool active = connected && !transport.isEmpty()
+                && m_objects.value(transport).value(mediaTransport1Interface()).value(QStringLiteral("State")).toString()
+                       == QLatin1StringView("active");
+            QVariantMap row;
+            row.insert(QStringLiteral("path"), path);
+            row.insert(QStringLiteral("name"), aliasOf(device));
+            row.insert(QStringLiteral("connected"), connected);
+            row.insert(QStringLiteral("state"), active ? QStringLiteral("audio active")
+                                                       : connected ? QStringLiteral("connected")
+                                                                   : QStringLiteral("disconnected"));
+            paired.append(row);
+            if (connected && connectedPath.isEmpty()) {
+                connectedPath = path;
+                connectedName = aliasOf(device);
+            }
+            continue;
+        }
+        if (!isAudioSink(device) || hasA2dpSource(device.value(QStringLiteral("UUIDs"))))
+            continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("path"), path);
+        row.insert(QStringLiteral("name"), aliasOf(device));
+        row.insert(QStringLiteral("connected"), false);
+        row.insert(QStringLiteral("state"), m_pairState.value(path, QStringLiteral("not paired")));
+        found.append(row);
+    }
+    updateHeadsets(sortedByName(paired));
+    updateDiscovered(sortedByName(found));
+    updateHeadsetName(connectedName);
+    if (!connectedPath.isEmpty() && activeRole() == QLatin1StringView("headphones"))
+        updateLastHeadset(connectedPath);
+}
+
+void SystemBluezModel::checkHeadset(const QString &path)
+{
+    const QVariantMap device = m_objects.value(path).value(device1Interface());
+    if (activeRole() != QLatin1StringView("headphones") || path == m_connectTarget
+        || !device.value(QStringLiteral("Connected")).toBool() || !isHeadset(device.value(QStringLiteral("UUIDs"))))
+        return;
+    for (auto it = m_objects.cbegin(); it != m_objects.cend(); ++it) {
+        const QVariantMap other = it->value(device1Interface());
+        if (it.key() != path && other.value(QStringLiteral("Connected")).toBool()
+            && isHeadset(other.value(QStringLiteral("UUIDs")))) {
+            qInfo() << "microdap bluez:" << path << "connected beside" << it.key();
+            disconnectDevice(path);
+            return;
+        }
+    }
 }
 
 void SystemBluezModel::checkRole(const QString &path)
@@ -419,7 +525,8 @@ void SystemBluezModel::checkRole(const QString &path)
         return;
     const QVariant uuids = device.value(QStringLiteral("UUIDs"));
     const QString name = device.value(QStringLiteral("Alias"), device.value(QStringLiteral("Name"))).toString();
-    if (!wrongRoleCheck(name, hasA2dpSource(uuids), hasUuid(uuids, QLatin1StringView("0000110b"))))
+    if (!wrongRoleCheck(name, hasA2dpSource(uuids), hasUuid(uuids, QLatin1StringView("0000110b")),
+                        path == lastHeadset()))
         return;
     m_wrongRole.insert(path);
     disconnectDevice(path);
@@ -456,6 +563,8 @@ void SystemBluezModel::dropRole(const QString &role)
 
 void SystemBluezModel::applyRole(const QString &role)
 {
+    if (role != QLatin1StringView("headphones"))
+        m_pairAfterSearch.clear();
     callAgent(QStringLiteral("SetRole"), {role});
 }
 
@@ -546,13 +655,7 @@ void SystemBluezModel::apply()
     m_transportPath = transportPath;
     m_playerPath = playerPath;
 
-    QString headset;
-    for (auto it = m_objects.cbegin(); it != m_objects.cend() && headset.isEmpty(); ++it) {
-        const QVariantMap props = it->value(device1Interface());
-        if (props.value(QStringLiteral("Connected")).toBool() && isHeadset(props.value(QStringLiteral("UUIDs"))))
-            headset = props.value(QStringLiteral("Alias"), props.value(QStringLiteral("Name"))).toString();
-    }
-    updateHeadsetName(headset);
+    applyHeadsets();
     roleDevicesChanged();
 
     if (devicePath.isEmpty()) {
@@ -809,6 +912,13 @@ void SystemBluezModel::startSearch(int timeoutSeconds)
 {
     if (holdWindow(true, timeoutSeconds))
         return;
+    for (auto it = m_pairState.begin(); it != m_pairState.end();) {
+        if (it.value() == QLatin1StringView("pair failed"))
+            it = m_pairState.erase(it);
+        else
+            ++it;
+    }
+    applyHeadsets();
     const uint seconds = static_cast<uint>(qMax(1, timeoutSeconds));
     callAgent(QStringLiteral("StartSearch"), {QVariant::fromValue(seconds)});
 }
@@ -816,6 +926,7 @@ void SystemBluezModel::startSearch(int timeoutSeconds)
 void SystemBluezModel::stopSearch()
 {
     dropHeld(true);
+    m_pairAfterSearch.clear();
     callAgent(QStringLiteral("StopSearch"));
 }
 
@@ -827,6 +938,96 @@ void SystemBluezModel::setShuffle(const QString &shuffle)
 void SystemBluezModel::setRepeat(const QString &repeat)
 {
     setPlayerProperty(QStringLiteral("Repeat"), repeat);
+}
+
+void SystemBluezModel::connectHeadset(const QString &path)
+{
+    if (holdDevice(false, path) || !m_bluez.isConnected())
+        return;
+    m_connectTarget = path;
+    for (auto it = m_objects.cbegin(); it != m_objects.cend(); ++it) {
+        const QVariantMap device = it->value(device1Interface());
+        if (it.key() != path && device.value(QStringLiteral("Connected")).toBool()
+            && isHeadset(device.value(QStringLiteral("UUIDs"))))
+            disconnectDevice(it.key());
+    }
+    qInfo() << "microdap bluez: connecting" << path;
+    auto *watcher = new QDBusPendingCallWatcher(
+        m_bluez.asyncCall(QDBusMessage::createMethodCall(bluezService(), path, device1Interface(),
+                                                         QStringLiteral("Connect"))),
+        this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, path](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        if (m_connectTarget == path)
+            m_connectTarget.clear();
+        const QDBusMessage reply = finished->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage)
+            qInfo() << "microdap bluez: connect" << path << "failed" << reply.errorName();
+    });
+}
+
+void SystemBluezModel::disconnectHeadset(const QString &path)
+{
+    if (path == m_connectTarget)
+        m_connectTarget.clear();
+    disconnectDevice(path);
+}
+
+void SystemBluezModel::forgetHeadset(const QString &path)
+{
+    if (!m_bluez.isConnected() || path.isEmpty())
+        return;
+    if (path == lastHeadset())
+        updateLastHeadset({});
+    if (path == m_connectTarget)
+        m_connectTarget.clear();
+    QDBusMessage call = QDBusMessage::createMethodCall(bluezService(), path.section(QLatin1Char('/'), 0, -2),
+                                                       QStringLiteral("org.bluez.Adapter1"),
+                                                       QStringLiteral("RemoveDevice"));
+    call << QVariant::fromValue(QDBusObjectPath(path));
+    qInfo() << "microdap bluez: forgetting" << path;
+    m_bluez.asyncCall(call);
+}
+
+void SystemBluezModel::pairDevice(const QString &path)
+{
+    if (holdDevice(true, path) || m_pairState.value(path) == QLatin1StringView("pairing") || m_pairAfterSearch == path)
+        return;
+    if (!searching()) {
+        m_pairAfterSearch = path;
+        startSearch(defaultPairingTimeout);
+        return;
+    }
+    startPair(path);
+}
+
+void SystemBluezModel::startPair(const QString &path)
+{
+    if (!m_bluez.isConnected() || !m_objects.contains(path) || activeRole() != QLatin1StringView("headphones"))
+        return;
+    m_pairState.insert(path, QStringLiteral("pairing"));
+    applyHeadsets();
+    qInfo() << "microdap bluez: pairing" << path;
+    QDBusMessage call = QDBusMessage::createMethodCall(bluezService(), path, device1Interface(), QStringLiteral("Pair"));
+    auto *watcher = new QDBusPendingCallWatcher(m_bluez.asyncCall(call, pairTimeoutMs), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, path](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        const QDBusMessage reply = finished->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage) {
+            qInfo() << "microdap bluez: pair" << path << "failed" << reply.errorName();
+            m_pairState.insert(path, QStringLiteral("pair failed"));
+            applyHeadsets();
+            return;
+        }
+        m_pairState.remove(path);
+        QDBusMessage trust = QDBusMessage::createMethodCall(bluezService(), path, propertiesInterface(),
+                                                            QStringLiteral("Set"));
+        trust << device1Interface() << QStringLiteral("Trusted") << QVariant::fromValue(QDBusVariant(true));
+        m_bluez.asyncCall(trust);
+        applyHeadsets();
+        if (!switching() && activeRole() == QLatin1StringView("headphones"))
+            connectHeadset(path);
+    });
 }
 
 }

@@ -30,6 +30,8 @@ QStringList FakeBluezModel::presets()
         QStringLiteral("art"),
         QStringLiteral("pairing"),
         QStringLiteral("last"),
+        QStringLiteral("headphones"),
+        QStringLiteral("search"),
     };
 }
 
@@ -46,6 +48,22 @@ void FakeBluezModel::clearAll()
     setConnected(false);
     setDeviceName({});
     forgetVolume();
+    updateSearching(false);
+    updateSearchRemaining(0);
+    setHeadsets({});
+    setDiscovered({});
+    setHeadsetName({});
+    setRole(QStringLiteral("receiver"));
+}
+
+namespace {
+
+QVariantMap headsetRow(const QString &path, const QString &name, bool connected, const QString &state)
+{
+    return {{QStringLiteral("path"), path}, {QStringLiteral("name"), name},
+            {QStringLiteral("connected"), connected}, {QStringLiteral("state"), state}};
+}
+
 }
 
 bool FakeBluezModel::applyPreset(const QString &name)
@@ -74,6 +92,24 @@ bool FakeBluezModel::applyPreset(const QString &name)
         setTransportState(QStringLiteral("active"));
         if (name == QLatin1StringView("art"))
             setArtUrl(sampleArt());
+        return true;
+    }
+    if (name == QLatin1StringView("headphones") || name == QLatin1StringView("search")) {
+        clearAll();
+        setRole(QStringLiteral("headphones"));
+        setHeadsets({headsetRow(QStringLiteral("/org/bluez/hci0/dev_10_00_00_00_00_01"), QStringLiteral("Buds Pro"),
+                                false, QStringLiteral("disconnected")),
+                     headsetRow(QStringLiteral("/org/bluez/hci0/dev_10_00_00_00_00_02"), QStringLiteral("WH-1000XM5"),
+                                true, QStringLiteral("audio active"))});
+        setHeadsetName(QStringLiteral("WH-1000XM5"));
+        if (name == QLatin1StringView("search")) {
+            setDiscovered({headsetRow(QStringLiteral("/org/bluez/hci0/dev_20_00_00_00_00_01"),
+                                      QStringLiteral("JBL Tune 760NC"), false, QStringLiteral("pair failed")),
+                           headsetRow(QStringLiteral("/org/bluez/hci0/dev_20_00_00_00_00_02"),
+                                      QStringLiteral("Soundcore Life Q30"), false, QStringLiteral("not paired"))});
+            updateSearching(true);
+            updateSearchRemaining(presetPairingRemaining);
+        }
         return true;
     }
     if (name == QLatin1StringView("last")) {
@@ -320,9 +356,43 @@ void FakeBluezModel::setRoleDevices(const QString &role, int count)
     roleDevicesChanged();
 }
 
-bool FakeBluezModel::reportDevice(const QString &device, bool source, bool sink)
+bool FakeBluezModel::reportDevice(const QString &device, bool source, bool sink, bool target)
 {
-    return wrongRoleCheck(device, source, sink);
+    return wrongRoleCheck(device, source, sink, target);
+}
+
+void FakeBluezModel::setHeadsets(const QVariantList &headsets)
+{
+    updateHeadsets(headsets);
+}
+
+void FakeBluezModel::setDiscovered(const QVariantList &discovered)
+{
+    updateDiscovered(discovered);
+}
+
+void FakeBluezModel::connectHeadset(const QString &path)
+{
+    if (holdDevice(false, path))
+        return;
+    m_commands.append(QStringLiteral("connectHeadset ") + path);
+}
+
+void FakeBluezModel::disconnectHeadset(const QString &path)
+{
+    m_commands.append(QStringLiteral("disconnectHeadset ") + path);
+}
+
+void FakeBluezModel::forgetHeadset(const QString &path)
+{
+    m_commands.append(QStringLiteral("forgetHeadset ") + path);
+}
+
+void FakeBluezModel::pairDevice(const QString &path)
+{
+    if (holdDevice(true, path))
+        return;
+    m_commands.append(QStringLiteral("pairDevice ") + path);
 }
 
 int FakeBluezModel::roleDevices(const QString &role) const

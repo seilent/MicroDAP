@@ -27,6 +27,7 @@ private slots:
     void roleSwitchTimeout();
     void windowsWaitForTheRole();
     void wrongRole();
+    void devicesWaitForTheRole();
 
 private:
     QueueEntry entry() const;
@@ -176,7 +177,7 @@ void BluezTest::commands()
 void BluezTest::presets()
 {
     FakeBluezModel fake;
-    QCOMPARE(FakeBluezModel::presets().size(), 6);
+    QCOMPARE(FakeBluezModel::presets().size(), 8);
     QVERIFY(!fake.applyPreset(QStringLiteral("bogus")));
     QVERIFY(fake.lastPhone().isEmpty());
     QVERIFY(fake.applyPreset(QStringLiteral("last")));
@@ -422,6 +423,47 @@ void BluezTest::wrongRole()
     QCOMPARE(spy.count(), 2);
     QCOMPARE(spy.at(1).at(0).toString(), QStringLiteral("Pixel 8"));
     QCOMPARE(spy.at(1).at(1).toString(), QStringLiteral("phone"));
+    QVERIFY(fake.reportDevice(QStringLiteral("Pixel 9"), true, false, false));
+    QCOMPARE(spy.count(), 3);
+    fake.setRole(QStringLiteral("receiver"));
+    QVERIFY(fake.reportDevice(QStringLiteral("Other Buds"), false, true, false));
+    QCOMPARE(spy.count(), 3);
+}
+
+void BluezTest::devicesWaitForTheRole()
+{
+    FakeBluezModel fake;
+    fake.setRoleDevices(QStringLiteral("receiver"), 1);
+    fake.connectHeadset(QStringLiteral("/h1"));
+    QVERIFY(fake.switching());
+    QVERIFY(!fake.commands().contains(QStringLiteral("connectHeadset /h1")));
+    fake.setRoleDevices(QStringLiteral("receiver"), 0);
+    QCOMPARE(fake.role(), QStringLiteral("headphones"));
+    QVERIFY(fake.commands().contains(QStringLiteral("connectHeadset /h1")));
+    fake.connectHeadset(QStringLiteral("/h2"));
+    QCOMPARE(fake.commands().last(), QStringLiteral("connectHeadset /h2"));
+
+    fake.setRoleDevices(QStringLiteral("headphones"), 1);
+    fake.setRole(QStringLiteral("receiver"));
+    fake.clearCommands();
+    fake.pairDevice(QStringLiteral("/n1"));
+    QCOMPARE(fake.activeRole(), QStringLiteral("headphones"));
+    QVERIFY(!fake.switching());
+    QCOMPARE(fake.commands(), QStringList({QStringLiteral("applyRole headphones"), QStringLiteral("pairDevice /n1")}));
+
+    fake.setRoleDevices(QStringLiteral("headphones"), 1);
+    fake.setRoleDevices(QStringLiteral("receiver"), 0);
+    fake.setRole(QStringLiteral("receiver"));
+    QVERIFY(fake.switching());
+    fake.setRoleDevices(QStringLiteral("receiver"), 1);
+    fake.setRoleDevices(QStringLiteral("headphones"), 0);
+    QCOMPARE(fake.role(), QStringLiteral("receiver"));
+    fake.clearCommands();
+    fake.pairDevice(QStringLiteral("/n2"));
+    QVERIFY(fake.switching());
+    fake.setRole(QStringLiteral("receiver"));
+    fake.setRoleDevices(QStringLiteral("receiver"), 0);
+    QVERIFY(!fake.commands().contains(QStringLiteral("pairDevice /n2")));
 }
 
 QTEST_GUILESS_MAIN(BluezTest)

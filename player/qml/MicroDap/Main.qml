@@ -983,6 +983,15 @@ Window {
     }
 
     Connections {
+        target: root.bluez
+        ignoreUnknownSignals: true
+
+        function onWrongRole(device: string, pivot: string) {
+            overlays.toast.show(device, "use the " + pivot + " pivot")
+        }
+    }
+
+    Connections {
         target: router
 
         function onRouted() {

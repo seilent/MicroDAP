@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantList>
 
 namespace microdap {
 
@@ -36,6 +37,9 @@ class BluezModel : public QObject
     Q_PROPERTY(QString activeRole READ activeRole NOTIFY switchingChanged)
     Q_PROPERTY(bool switching READ switching NOTIFY switchingChanged)
     Q_PROPERTY(QString headsetName READ headsetName NOTIFY headsetNameChanged)
+    Q_PROPERTY(QVariantList headsets READ headsets NOTIFY headsetsChanged)
+    Q_PROPERTY(QVariantList discovered READ discovered NOTIFY discoveredChanged)
+    Q_PROPERTY(QString lastHeadset READ lastHeadset NOTIFY lastHeadsetChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
 
@@ -77,6 +81,10 @@ public:
     QString activeRole() const;
     bool switching() const;
     QString headsetName() const;
+    QVariantList headsets() const;
+    QVariantList discovered() const;
+    QString lastHeadset() const;
+    static QString lastHeadsetPath();
     bool active() const;
     void setActive(bool active);
     bool ready() const;
@@ -92,6 +100,10 @@ public:
     Q_INVOKABLE virtual void startSearch(int timeoutSeconds = defaultPairingTimeout) = 0;
     Q_INVOKABLE virtual void stopSearch() = 0;
     Q_INVOKABLE void setRole(const QString &role);
+    Q_INVOKABLE virtual void connectHeadset(const QString &path) = 0;
+    Q_INVOKABLE virtual void disconnectHeadset(const QString &path) = 0;
+    Q_INVOKABLE virtual void forgetHeadset(const QString &path) = 0;
+    Q_INVOKABLE virtual void pairDevice(const QString &path) = 0;
     virtual void setShuffle(const QString &shuffle) = 0;
     virtual void setRepeat(const QString &repeat) = 0;
 
@@ -122,6 +134,9 @@ signals:
     void roleChanged();
     void switchingChanged();
     void headsetNameChanged();
+    void headsetsChanged();
+    void discoveredChanged();
+    void lastHeadsetChanged();
     void wrongRole(const QString &device, const QString &pivot);
     void activeChanged();
     void readyChanged();
@@ -152,9 +167,13 @@ protected:
     void updateSearching(bool searching);
     void updateSearchRemaining(int seconds);
     void updateHeadsetName(const QString &name);
+    void updateHeadsets(const QVariantList &headsets);
+    void updateDiscovered(const QVariantList &discovered);
+    void updateLastHeadset(const QString &path);
     bool holdWindow(bool search, int timeoutSeconds);
+    bool holdDevice(bool pair, const QString &path);
     void dropHeld(bool search);
-    bool wrongRoleCheck(const QString &device, bool source, bool sink);
+    bool wrongRoleCheck(const QString &device, bool source, bool sink, bool target);
     void roleDevicesChanged();
     void runHeld();
     virtual int roleDevices(const QString &role) const = 0;
@@ -189,9 +208,13 @@ private:
     QString m_targetRole;
     bool m_switching = false;
     QString m_headsetName;
-    enum class Held { None, Pairing, Search };
+    enum class Held { None, Pairing, Search, Connect, Pair };
     Held m_held = Held::None;
     int m_heldSeconds = 0;
+    QString m_heldPath;
+    QVariantList m_headsets;
+    QVariantList m_discovered;
+    QString m_lastHeadset;
     QTimer m_switchTimer;
     bool m_active = true;
     bool m_ready = true;

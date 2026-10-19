@@ -48,7 +48,9 @@ public:
     void setSearchRemaining(int seconds);
     void setHeadsetName(const QString &name);
     void setRoleDevices(const QString &role, int count);
-    bool reportDevice(const QString &device, bool source, bool sink);
+    bool reportDevice(const QString &device, bool source, bool sink, bool target = true);
+    void setHeadsets(const QVariantList &headsets);
+    void setDiscovered(const QVariantList &discovered);
 
     void play() override;
     void pause() override;
@@ -60,6 +62,10 @@ public:
     void stopPairing() override;
     void startSearch(int timeoutSeconds = defaultPairingTimeout) override;
     void stopSearch() override;
+    void connectHeadset(const QString &path) override;
+    void disconnectHeadset(const QString &path) override;
+    void forgetHeadset(const QString &path) override;
+    void pairDevice(const QString &path) override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
 

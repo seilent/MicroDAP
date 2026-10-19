@@ -51,6 +51,13 @@ TestCase {
         property int battery: -1
         property bool pairing: false
         property int pairingRemaining: 0
+        property string activeRole: "receiver"
+        property bool switching: false
+        property bool searching: false
+        property int searchRemaining: 0
+        property var headsets: []
+        property var discovered: []
+        property string headsetName: ""
         property var calls: []
 
         function reset() {
@@ -65,7 +72,43 @@ TestCase {
             fake.battery = -1
             fake.pairing = false
             fake.pairingRemaining = 0
+            fake.activeRole = "receiver"
+            fake.switching = false
+            fake.searching = false
+            fake.searchRemaining = 0
+            fake.headsets = []
+            fake.discovered = []
+            fake.headsetName = ""
             fake.calls = []
+        }
+
+        function startSearch(timeout) {
+            fake.calls = fake.calls.concat(["startSearch " + timeout])
+        }
+
+        function stopSearch() {
+            fake.calls = fake.calls.concat(["stopSearch"])
+            fake.searching = false
+        }
+
+        function connectHeadset(path) {
+            fake.calls = fake.calls.concat(["connectHeadset " + path])
+        }
+
+        function disconnectHeadset(path) {
+            fake.calls = fake.calls.concat(["disconnectHeadset " + path])
+        }
+
+        function forgetHeadset(path) {
+            fake.calls = fake.calls.concat(["forgetHeadset " + path])
+        }
+
+        function pairDevice(path) {
+            fake.calls = fake.calls.concat(["pairDevice " + path])
+        }
+
+        function setRole(role) {
+            fake.calls = fake.calls.concat(["setRole " + role])
         }
 
         function connect() {
@@ -182,7 +225,7 @@ TestCase {
         const page = open()
         compare(pages.depth, 2)
         compare(page.header.text, "bluetooth")
-        compare(page.strip.labels, ["phone", "pairing", "eq"])
+        compare(page.strip.labels, ["phone", "pairing", "headphones", "eq"])
         compare(page.strip.activeIndex, 0)
         compare(page.pivotIndex, 0)
         compare(page.shownPivot, 0)
@@ -289,9 +332,15 @@ TestCase {
         compare(page.pairingPage.visible, true)
         verify(router.dispatch("rb", false))
         compare(page.pivotIndex, 2)
-        compare(page.eqPage.visible, true)
+        compare(page.headphonesPage.visible, true)
         compare(page.pairingPage.visible, false)
         verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 3)
+        compare(page.eqPage.visible, true)
+        compare(page.headphonesPage.visible, false)
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 3)
+        verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 2)
         verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 1)
@@ -310,8 +359,8 @@ TestCase {
         fake.connect()
         fake.status = "paused"
         const page = open({ animated: false, eq: fakeEq })
-        page.switchPivot(2)
-        compare(page.pivotIndex, 2)
+        page.switchPivot(3)
+        compare(page.pivotIndex, 3)
         const eq = page.eqPage
         compare(eq.visible, true)
         compare(eq.embedded, true)
@@ -331,7 +380,7 @@ TestCase {
         verify(router.dispatch("right", false))
         compare(JSON.stringify(fakeEq.calls[0]), JSON.stringify(["cycleProfile", "speaker", 1]))
         verify(router.dispatch("rb", false))
-        compare(page.pivotIndex, 2)
+        compare(page.pivotIndex, 3)
         verify(router.dispatch("a", false))
         compare(eq.editing, false)
         compare(eq.rows.length, 6)
@@ -350,7 +399,7 @@ TestCase {
         compare(eq.focusIndex, 0)
         compare(JSON.stringify(eq.rows.map((r) => r.key)), JSON.stringify(["mode", "profile"]))
         verify(router.dispatch("lb", false))
-        compare(page.pivotIndex, 1)
+        compare(page.pivotIndex, 2)
         page.switchPivot(1)
         compare(eq.focusIndex, 0)
         verify(router.dispatch("b", false))
@@ -361,9 +410,138 @@ TestCase {
         compare(pages.depth, 1)
     }
 
+    function test_headphones_pivot() {
+        const page = open()
+        page.switchPivot(2)
+        compare(page.pivotIndex, 2)
+        const list = page.headphonesList
+        compare(list.count, 1)
+        compare(list.y, Ui.px(tc.contentTop))
+        compare(list.rowPitch, Ui.px(Ui.rowHeight))
+        let row = list.itemAtIndex(0).rowItem
+        compare(row.primary, "search")
+        compare(row.secondary, "")
+        compare(row.ring, true)
+        compare(row.ringGlyph, "bluetooth")
+        compare(row.bold, true)
+        compare(row.ringArc, 0)
+        compare(row.focused, true)
+        compare(page.hpFocusBar.rowY, list.y)
+        verify(router.dispatch("a", false))
+        compare(fake.calls, ["startSearch 120"])
+        fake.searching = true
+        fake.searchRemaining = 60
+        compare(row.secondary, "searching 60")
+        compare(row.ringArc, 180)
+        verify(router.dispatch("a", false))
+        compare(fake.calls, ["startSearch 120"])
+        verify(router.dispatch("b", false))
+        compare(fake.calls, ["startSearch 120", "stopSearch"])
+        compare(pages.depth, 2)
+
+        fake.headsets = [{ path: "/dev_b", name: "Buds", connected: false, state: "disconnected" },
+            { path: "/dev_w", name: "WH", connected: true, state: "audio active" }]
+        fake.discovered = [{ path: "/dev_n", name: "New", connected: false, state: "not paired" }]
+        fake.headsetName = "WH"
+        compare(list.count, 4)
+        verify(router.dispatch("down", false))
+        row = list.itemAtIndex(1).rowItem
+        compare(row.primary, "Buds")
+        compare(row.secondary, "disconnected")
+        compare(row.ringToggle, true)
+        compare(row.ringOn, false)
+        compare(list.itemAtIndex(2).rowItem.ringOn, true)
+        fake.calls = []
+        verify(router.dispatch("a", false))
+        compare(fake.calls, ["connectHeadset /dev_b"])
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("a", false))
+        compare(fake.calls, ["connectHeadset /dev_b", "disconnectHeadset /dev_w"])
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "WH")
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["disconnect", "forget"]))
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("a", false))
+        compare(page.sheet.shown, false)
+        compare(fake.calls[2], "forgetHeadset /dev_w")
+        verify(router.dispatch("down", false))
+        compare(list.itemAtIndex(3).rowItem.secondary, "not paired")
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+        verify(router.dispatch("a", false))
+        compare(fake.calls[3], "pairDevice /dev_n")
+        fake.discovered = [{ path: "/dev_n", name: "New", connected: false, state: "pairing" }]
+        verify(router.dispatch("a", false))
+        compare(fake.calls.length, 4)
+
+        fake.switching = true
+        verify(router.dispatch("up", false))
+        verify(router.dispatch("a", false))
+        compare(fake.calls.length, 4)
+        fake.switching = false
+
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 2)
+        compare(JSON.stringify(counters.toasts), JSON.stringify(["bluetooth/hold b 2 s to leave"]))
+        fake.headsetName = ""
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_headphones_lists_shrink() {
+        fake.discovered = [{ path: "/dev_n", name: "New", connected: false, state: "not paired" },
+            { path: "/dev_o", name: "Old", connected: false, state: "not paired" }]
+        const page = open()
+        page.switchPivot(2)
+        page.headphonesList.snapTo(2)
+        compare(page.headphonesList.focusIndex, 2)
+        fake.discovered = []
+        tryCompare(page.headphonesList, "focusIndex", 0, 1000)
+        fake.searching = true
+        fake.searchRemaining = 50
+        compare(page.headphonesList.itemAtIndex(0).rowItem.secondary, "searching 50")
+        verify(router.dispatch("lb", false))
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+        compare(fake.calls, ["stopSearch"])
+    }
+
+    function test_headphones_touch() {
+        fake.headsets = [{ path: "/dev_b", name: "Buds", connected: false, state: "disconnected" }]
+        const page = open()
+        page.switchPivot(2)
+        compare(page.touchPress("hprow", 1, 0, null), "a")
+        compare(page.headphonesList.focusIndex, 1)
+        verify(page.touchContext("hprow", 1, null))
+        compare(page.sheet.shown, true)
+        verify(router.dispatch("b", false))
+        compare(page.sheet.shown, false)
+        compare(pages.depth, 2)
+        verify(!page.touchContext("hprow", 0, null))
+    }
+
+    function test_source_role() {
+        fake.activeRole = "headphones"
+        fake.lastPhone = "Pixel 8"
+        const page = open({ animated: false, eq: fakeEq })
+        compare(page.pivotIndex, 2)
+        compare(page.headphonesPage.visible, true)
+        page.switchPivot(1)
+        compare(page.eqSlot, "bt")
+        compare(page.eqPage.slot, "bt")
+        page.switchPivot(-3)
+        compare(page.pivotIndex, 0)
+        verify(router.dispatch("a", false))
+        compare(fake.calls, ["setRole receiver"])
+        compare(JSON.stringify(counters.toasts), JSON.stringify(["/connect from your phone"]))
+        fake.activeRole = "receiver"
+        compare(page.eqSlot, "speaker")
+    }
+
     function test_eq_pivot_header_reverts_edit() {
         const page = open({ animated: false, eq: fakeEq })
-        page.switchPivot(2)
+        page.switchPivot(3)
         const eq = page.eqPage
         eq.setFocus(1)
         verify(router.dispatch("a", false))

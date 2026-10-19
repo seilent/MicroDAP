@@ -37,7 +37,12 @@ Page {
     ]
     readonly property bool phoneConnected: home.bluez !== null && home.bluez.connected === true
     readonly property bool phonePairing: home.bluez !== null && home.bluez.pairing === true
-    readonly property string bluetoothSubtitle: home.phoneConnected ? home.bluez.deviceName
+    readonly property bool sourceRole: home.bluez !== null && home.bluez.activeRole === "headphones"
+    readonly property string bluetoothSubtitle: home.sourceRole
+        ? (String(home.bluez.headsetName || "") !== "" ? String(home.bluez.headsetName)
+           : home.bluez.searching === true ? "searching " + home.bluez.searchRemaining
+           : home.menu[1].subtitle)
+        : home.phoneConnected ? home.bluez.deviceName
         : home.phonePairing ? "pairing " + home.bluez.pairingRemaining
         : home.menu[1].subtitle
     readonly property string playlistsSubtitle: home.playlistCount < 0 ? home.menu[2].subtitle

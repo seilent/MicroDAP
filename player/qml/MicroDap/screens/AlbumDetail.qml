@@ -434,7 +434,7 @@ Page {
         percent: page.batteryPercent
         battery: page.battery
         batteryPresent: page.batteryPresent
-        bluetooth: page.phoneConnected
+        bluetooth: page.phoneConnected || (page.bluez !== null && page.bluez.headsetName !== undefined && page.bluez.headsetName !== "")
         playing: page.playing
         paused: page.paused
     }

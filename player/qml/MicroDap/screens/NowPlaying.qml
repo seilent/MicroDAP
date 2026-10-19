@@ -1024,7 +1024,7 @@ Page {
             percent: np.batteryPercent
             battery: np.battery
             batteryPresent: np.batteryPresent
-            bluetooth: np.phoneConnected
+            bluetooth: np.phoneConnected || (np.bluez !== null && np.bluez.headsetName !== undefined && np.bluez.headsetName !== "")
             playing: np.playing
             paused: np.paused
             opacity: np.idleAlpha

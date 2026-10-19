@@ -14,13 +14,31 @@ Page {
     property int pivotIndex: 0
     property int shownPivot: 0
     property int pairingTimeout: 120
+    property int searchTimeout: 120
+    property var sheetRow: null
     property string shownState: ""
     property bool ready: false
 
     readonly property bool live: page.animated && !page.screenOff
-    readonly property var pivots: ["phone", "pairing", "eq"]
-    readonly property string eqSlot: page.eq !== null && page.eq.activeOutput !== undefined && String(page.eq.activeOutput) !== ""
+    readonly property var pivots: ["phone", "pairing", "headphones", "eq"]
+    readonly property int eqIndex: 3
+    readonly property string role: page.bluez !== null && page.bluez.activeRole !== undefined ? String(page.bluez.activeRole) : "receiver"
+    readonly property bool sourceRole: page.role === "headphones"
+    readonly property bool roleSwitching: page.bluez !== null && page.bluez.switching === true
+    readonly property string eqSlot: page.sourceRole ? "bt"
+        : page.eq !== null && page.eq.activeOutput !== undefined && String(page.eq.activeOutput) !== ""
         ? String(page.eq.activeOutput) : "speaker"
+    readonly property bool searching: page.bluez !== null && page.bluez.searching === true
+    readonly property int searchRemaining: page.bluez !== null && page.bluez.searchRemaining !== undefined ? page.bluez.searchRemaining : 0
+    readonly property var headsets: page.bluez !== null && page.bluez.headsets !== undefined ? page.bluez.headsets : []
+    readonly property var discovered: page.bluez !== null && page.bluez.discovered !== undefined ? page.bluez.discovered : []
+    readonly property string headsetName: page.bluez !== null && page.bluez.headsetName !== undefined ? String(page.bluez.headsetName) : ""
+    readonly property string searchLine: page.searching ? "searching " + page.searchRemaining : ""
+    readonly property var hpRows: [{ kind: "search", path: "", name: "search", connected: false, state: "" }]
+        .concat(page.headsets.map((h) => Object.assign({ kind: "headset" }, h)))
+        .concat(page.discovered.map((h) => Object.assign({ kind: "found" }, h)))
+    readonly property real searchSweep: page.searching && page.searchTimeout > 0
+        ? 360 * Math.max(0, Math.min(page.searchRemaining, page.searchTimeout)) / page.searchTimeout : 0
     readonly property bool connected: page.bluez !== null && page.bluez.connected === true
     readonly property bool transportActive: page.connected && page.bluez.transportActive === true
     readonly property bool pairing: page.bluez !== null && page.bluez.pairing === true
@@ -29,7 +47,7 @@ Page {
     readonly property string deviceName: page.bluez !== null && page.bluez.deviceName !== undefined ? page.bluez.deviceName : ""
     readonly property string lastPhone: page.bluez !== null && page.bluez.lastPhone !== undefined ? String(page.bluez.lastPhone) : ""
     readonly property string shownPhone: page.connected ? page.deviceName : page.lastPhone
-    readonly property bool guarded: page.connected
+    readonly property bool guarded: page.connected || page.headsetName !== ""
     readonly property string status: page.bluez !== null && page.bluez.status !== undefined ? page.bluez.status : ""
     readonly property string trackTitle: page.bluez !== null && page.bluez.title !== undefined ? page.bluez.title : ""
     readonly property string trackArtist: page.bluez !== null && page.bluez.artist !== undefined ? page.bluez.artist : ""
@@ -67,6 +85,10 @@ Page {
     property alias pulseHolder: pulseHolder
     property alias hintText: hintText
     property alias eqPage: eqPage
+    property alias headphonesPage: headphonesPage
+    property alias headphonesList: headphonesList
+    property alias hpFocusBar: hpFocusBar
+    property alias sheet: sheet
     property alias guardTimer: guardTimer
 
     signal openNowPlaying()
@@ -87,7 +109,7 @@ Page {
     }
 
     function contentAt(index: int): Item {
-        return index === 0 ? phonePage : index === 1 ? pairingPage : eqPage
+        return index === 0 ? phonePage : index === 1 ? pairingPage : index === 2 ? headphonesPage : eqPage
     }
 
     function resetEq(): void {
@@ -99,7 +121,7 @@ Page {
 
     function landPivot() {
         pivotAnim.stop()
-        for (const item of [phonePage, pairingPage, eqPage]) {
+        for (const item of [phonePage, pairingPage, headphonesPage, eqPage]) {
             item.x = 0
             item.opacity = 1
         }
@@ -143,6 +165,10 @@ Page {
     function back(): bool {
         if (page.stack === null || page.stack.depth < 2)
             return false
+        if (page.searching)
+            page.call("stopSearch")
+        if (page.pairing)
+            page.call("stopPairing")
         page.stack.pop()
         return true
     }
@@ -152,6 +178,9 @@ Page {
         case "row":
         case "ring":
             return "a"
+        case "hprow":
+            headphonesList.touchFocus(index)
+            return "a"
         case "pivot":
             return "tap"
         case "header":
@@ -159,6 +188,87 @@ Page {
             return ""
         default:
             return ""
+        }
+    }
+
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        if (kind !== "hprow")
+            return false
+        headphonesList.touchFocus(index)
+        return page.openHeadsetSheet()
+    }
+
+    function clampHeadphones(): void {
+        if (headphonesList.focusIndex >= page.hpRows.length)
+            headphonesList.snapTo(page.hpRows.length - 1)
+    }
+
+    function hpRow(): var {
+        return page.hpRows[headphonesList.focusIndex] === undefined ? null : page.hpRows[headphonesList.focusIndex]
+    }
+
+    function activateHeadphones(): void {
+        const row = page.hpRow()
+        if (row === null)
+            return
+        if (row.kind === "search") {
+            if (!page.searching)
+                page.call("startSearch", page.searchTimeout)
+        } else if (row.kind === "headset") {
+            page.call(row.connected ? "disconnectHeadset" : "connectHeadset", row.path)
+        } else if (row.state !== "pairing") {
+            page.call("pairDevice", row.path)
+        }
+    }
+
+    function openHeadsetSheet(): bool {
+        const row = page.hpRow()
+        if (row === null || row.kind !== "headset" || page.roleSwitching)
+            return false
+        page.sheetRow = row
+        sheet.title = row.name
+        sheet.items = [row.connected ? "disconnect" : "connect", "forget"]
+        sheet.open()
+        return true
+    }
+
+    function runSheet(index: int): void {
+        const row = page.sheetRow
+        page.sheetRow = null
+        if (row === null)
+            return
+        if (index === 0)
+            page.call(row.connected ? "disconnectHeadset" : "connectHeadset", row.path)
+        else if (index === 1)
+            page.call("forgetHeadset", row.path)
+    }
+
+    function headphonesAction(name: string, repeat: bool): bool {
+        switch (name) {
+        case "up":
+            headphonesList.moveFocus(-1)
+            return true
+        case "down":
+            headphonesList.moveFocus(1)
+            return true
+        case "a":
+            if (!repeat && !page.roleSwitching)
+                page.activateHeadphones()
+            return true
+        case "x":
+            if (!repeat)
+                page.openHeadsetSheet()
+            return true
+        case "b":
+            if (repeat)
+                return false
+            if (page.searching) {
+                page.call("stopSearch")
+                return true
+            }
+            return page.guardedBack()
+        default:
+            return false
         }
     }
 
@@ -190,8 +300,6 @@ Page {
 
     function leave(): void {
         guardTimer.stop()
-        if (page.pairing)
-            page.call("stopPairing")
         page.back()
     }
 
@@ -224,7 +332,13 @@ Page {
     }
 
     function handleAction(name: string, repeat: bool): bool {
-        if (page.pivotIndex === 2 && page.eqAction(name, repeat))
+        if (sheet.shown)
+            return sheet.handleAction(name, repeat)
+        if (page.roleSwitching && (name === "a" || name === "x" || name === "start"))
+            return true
+        if (page.pivotIndex === page.eqIndex && page.eqAction(name, repeat))
+            return true
+        if (page.pivotIndex === 2 && page.headphonesAction(name, repeat))
             return true
         switch (name) {
         case "lb":
@@ -247,10 +361,13 @@ Page {
                 page.openNowPlaying()
                 return true
             }
-            if (page.connected)
+            if (page.connected) {
                 page.togglePlayPause()
-            else if (page.lastPhone !== "")
+            } else if (page.lastPhone !== "") {
                 page.toast("", "connect from your phone")
+                if (page.sourceRole)
+                    page.call("setRole", "receiver")
+            }
             return true
         case "start":
             if (repeat)
@@ -301,6 +418,8 @@ Page {
     }
 
     Component.onCompleted: {
+        if (page.sourceRole && page.pivotIndex === 0)
+            page.pivotIndex = 2
         page.resetEq()
         page.shownPivot = page.pivotIndex
         page.shownState = page.stateLine
@@ -478,12 +597,70 @@ Page {
         }
     }
 
+    Item {
+        id: headphonesPage
+
+        width: page.width
+        height: page.height
+        visible: page.shownPivot === 2
+
+        FocusList {
+            id: headphonesList
+
+            x: 0
+            y: Ui.px(Ui.contentTop)
+            width: page.width
+            height: page.height - headphonesList.y
+            model: page.hpRows.length
+            delegate: Item {
+                id: hpItem
+
+                required property int index
+                readonly property var modelData: page.hpRows[hpItem.index] === undefined ? ({}) : page.hpRows[hpItem.index]
+                readonly property string touchKind: "hprow"
+                readonly property int touchIndex: hpItem.index
+                readonly property Item rowItem: hpListRow
+
+                width: headphonesList.width
+                height: headphonesList.rowPitch
+
+                ListRow {
+                    id: hpListRow
+
+                    width: parent.width
+                    ring: true
+                    ringGlyph: "bluetooth"
+                    ringArc: hpItem.modelData.kind === "search" ? page.searchSweep : 0
+                    ringToggle: hpItem.modelData.kind !== "search"
+                    ringOn: hpItem.modelData.connected === true
+                    bold: true
+                    primary: hpItem.modelData.name === undefined ? "" : hpItem.modelData.name
+                    secondary: hpItem.modelData.kind === "search" ? page.searchLine
+                        : hpItem.modelData.state === undefined ? "" : hpItem.modelData.state
+                    focused: page.pivotIndex === 2 && headphonesList.focusIndex === hpItem.index
+                    pressed: page.pressed && page.pivotIndex === 2 && headphonesList.focusIndex === hpItem.index
+                    animated: page.live
+                }
+            }
+        }
+
+        FocusBar {
+            id: hpFocusBar
+
+            x: Ui.px(Ui.hubEdge - Ui.focusBarOffset)
+            rowY: headphonesList.y + headphonesList.focusY
+            rowHeight: headphonesList.rowPitch
+            opacity: page.focusOpacity
+            animated: page.live
+        }
+    }
+
     EqScreen {
         id: eqPage
 
         width: page.width
         height: page.height
-        visible: page.shownPivot === 2
+        visible: page.shownPivot === page.eqIndex
         embedded: true
         slot: page.eqSlot
         eq: page.eq
@@ -492,6 +669,19 @@ Page {
         animated: page.animated
         screenOff: page.screenOff
         onToast: (first, second) => page.toast(first, second)
+    }
+
+    Sheet {
+        id: sheet
+
+        anchors.fill: parent
+        screenOff: page.screenOff
+        animated: page.live
+        onAccepted: (index) => {
+            page.runSheet(index)
+            sheet.close()
+        }
+        onRejected: page.sheetRow = null
     }
 
     CroppedHeader {
@@ -628,6 +818,14 @@ Page {
         function onConnectedChanged() {
             if (page.ready && page.live && page.connected)
                 pulse.restart()
+        }
+
+        function onHeadsetsChanged() {
+            Qt.callLater(page.clampHeadphones)
+        }
+
+        function onDiscoveredChanged() {
+            Qt.callLater(page.clampHeadphones)
         }
     }
 }

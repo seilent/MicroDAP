@@ -192,6 +192,8 @@ const QStringList &states()
         QStringLiteral("bt-eq-band"),
         QStringLiteral("pairing-pulse"),
         QStringLiteral("guard-toast"),
+        QStringLiteral("hp-sheet"),
+        QStringLiteral("wrong-role"),
         QStringLiteral("boot"),
         QStringLiteral("boot-edit"),
         QStringLiteral("boot-missing"),

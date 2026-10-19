@@ -45,6 +45,27 @@ QString BluezModel::lastPhonePath()
     return state + QStringLiteral("/microdap/last-phone");
 }
 
+QString BluezModel::lastHeadsetPath()
+{
+    const QString state = qEnvironmentVariable("XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
+    return state + QStringLiteral("/microdap/last-headset");
+}
+
+QVariantList BluezModel::headsets() const
+{
+    return m_headsets;
+}
+
+QVariantList BluezModel::discovered() const
+{
+    return m_discovered;
+}
+
+QString BluezModel::lastHeadset() const
+{
+    return m_lastHeadset;
+}
+
 QString BluezModel::lastPhone() const
 {
     return m_lastPhone;
@@ -189,7 +210,7 @@ void BluezModel::setRole(const QString &role)
 {
     if (!roles().contains(role) || role == activeRole())
         return;
-    if (m_held != Held::None && roleFor(m_held == Held::Search) != role)
+    if (m_held != Held::None && roleFor(m_held != Held::Pairing) != role)
         m_held = Held::None;
     if (role == QLatin1StringView("headphones") && pairing())
         stopPairing();
@@ -237,6 +258,20 @@ void BluezModel::runHeld()
         startPairing(m_heldSeconds);
     else if (held == Held::Search)
         startSearch(m_heldSeconds);
+    else if (held == Held::Connect)
+        connectHeadset(m_heldPath);
+    else if (held == Held::Pair)
+        pairDevice(m_heldPath);
+}
+
+bool BluezModel::holdDevice(bool pair, const QString &path)
+{
+    if (!m_switching && m_role == QLatin1StringView("headphones"))
+        return false;
+    m_held = pair ? Held::Pair : Held::Connect;
+    m_heldPath = path;
+    setRole(QStringLiteral("headphones"));
+    return true;
 }
 
 void BluezModel::dropHeld(bool search)
@@ -256,7 +291,7 @@ bool BluezModel::holdWindow(bool search, int timeoutSeconds)
     return true;
 }
 
-bool BluezModel::wrongRoleCheck(const QString &device, bool source, bool sink)
+bool BluezModel::wrongRoleCheck(const QString &device, bool source, bool sink, bool target)
 {
     if (m_switching)
         return false;
@@ -268,7 +303,8 @@ bool BluezModel::wrongRoleCheck(const QString &device, bool source, bool sink)
     if (pivot.isEmpty())
         return false;
     qInfo() << "microdap bluez: wrong role" << device << "in" << m_role << ", use the" << pivot << "pivot";
-    emit wrongRole(device, pivot);
+    if (pivot == QLatin1StringView("phone") || target)
+        emit wrongRole(device, pivot);
     return true;
 }
 
@@ -497,6 +533,30 @@ void BluezModel::updateHeadsetName(const QString &name)
         return;
     m_headsetName = name;
     emit headsetNameChanged();
+}
+
+void BluezModel::updateHeadsets(const QVariantList &headsets)
+{
+    if (m_headsets == headsets)
+        return;
+    m_headsets = headsets;
+    emit headsetsChanged();
+}
+
+void BluezModel::updateDiscovered(const QVariantList &discovered)
+{
+    if (m_discovered == discovered)
+        return;
+    m_discovered = discovered;
+    emit discoveredChanged();
+}
+
+void BluezModel::updateLastHeadset(const QString &path)
+{
+    if (m_lastHeadset == path)
+        return;
+    m_lastHeadset = path;
+    emit lastHeadsetChanged();
 }
 
 }

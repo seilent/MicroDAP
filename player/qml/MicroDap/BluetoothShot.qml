@@ -36,7 +36,7 @@ Item {
         animated: false
         bluez: root.contextBluez
         eq: root.eqShot ? sampleEq : null
-        pivotIndex: root.eqShot ? 2 : root.pairingPreset ? 1 : 0
+        pivotIndex: root.eqShot ? 3 : root.pairingPreset ? 1 : 0
         onToast: (first, second) => toast.show(first, second)
 
         Component.onCompleted: {
@@ -47,6 +47,15 @@ Item {
                 screen.eqPage.headphonesPane.openBand = 0
                 screen.eqPage.focusIndex = screen.eqPage.indexOfKey("band0:gain")
                 Qt.callLater(() => screen.eqPage.activePane.ensureVisible(screen.eqPage.focusIndex, 0))
+            }
+            if (root.fixture === "hp-sheet") {
+                screen.headphonesList.snapTo(2)
+                screen.openHeadsetSheet()
+                screen.sheet.complete()
+            }
+            if (root.fixture === "wrong-role") {
+                toast.show("Pixel 8", "use the phone pivot")
+                toast.complete()
             }
             if (root.fixture === "guard-toast") {
                 screen.guardedBack()

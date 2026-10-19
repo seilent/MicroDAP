@@ -27,6 +27,8 @@ class SystemBluezModel : public BluezModel
     Q_OBJECT
 
 public:
+    static constexpr int pairTimeoutMs = 60000;
+
     SystemBluezModel(const QDBusConnection &bluez, const QDBusConnection &session,
                      QObject *parent = nullptr);
     ~SystemBluezModel() override;
@@ -56,6 +58,10 @@ public:
     void stopPairing() override;
     void startSearch(int timeoutSeconds = defaultPairingTimeout) override;
     void stopSearch() override;
+    void connectHeadset(const QString &path) override;
+    void disconnectHeadset(const QString &path) override;
+    void forgetHeadset(const QString &path) override;
+    void pairDevice(const QString &path) override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
 
@@ -80,6 +86,9 @@ private:
     void apply();
     void clearDevice();
     void checkRole(const QString &path);
+    void checkHeadset(const QString &path);
+    void applyHeadsets();
+    void startPair(const QString &path);
     void disconnectDevice(const QString &path);
     void applyArt(const QString &address, int psm, const QString &handle);
     void updateArt();
@@ -110,6 +119,9 @@ private:
     QString m_handed;
     QString m_artSession;
     QSet<QString> m_wrongRole;
+    QMap<QString, QString> m_pairState;
+    QString m_pairAfterSearch;
+    QString m_connectTarget;
     QElapsedTimer m_activeSince;
     QTimer m_gateTimer;
     enum class Nudge { Idle, Next, Previous, Watch, Done };
