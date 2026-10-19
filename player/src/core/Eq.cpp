@@ -16,6 +16,7 @@
 #include <QStringList>
 
 #include <cmath>
+#include <algorithm>
 #include <utility>
 
 namespace microdap {
@@ -595,6 +596,82 @@ QString EqControl::displayName(const QString &path)
     return name.toUpper().left(nameMax);
 }
 
+QString EqControl::presetDir()
+{
+    return sourceDir() + QStringLiteral("/presets");
+}
+
+bool EqControl::nameOk(const QString &name)
+{
+    const QByteArray bytes = name.toUtf8();
+    if (bytes.isEmpty() || bytes.size() > presetNameMax || name.startsWith(QLatin1Char(' '))
+        || name.endsWith(QLatin1Char(' ')) || name.startsWith(QLatin1Char('.')))
+        return false;
+    for (const char c : bytes) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u < 0x20 || u == 0x7f || c == '/')
+            return false;
+    }
+    if (name.endsWith(QLatin1StringView(" ParametricEQ")) || name.endsWith(QLatin1StringView(" GraphicEQ")))
+        return false;
+    const QString folded = name.toLower();
+    return folded != QLatin1StringView("off") && folded != QLatin1StringView("flat")
+           && folded != QLatin1StringView("custom");
+}
+
+bool EqControl::nameLess(const QString &a, const QString &b)
+{
+    qsizetype i = 0;
+    qsizetype j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a.at(i).isDigit() && b.at(j).isDigit()) {
+            qsizetype ie = i;
+            qsizetype je = j;
+            while (ie < a.size() && a.at(ie).isDigit())
+                ++ie;
+            while (je < b.size() && b.at(je).isDigit())
+                ++je;
+            while (i + 1 < ie && a.at(i) == QLatin1Char('0'))
+                ++i;
+            while (j + 1 < je && b.at(j) == QLatin1Char('0'))
+                ++j;
+            if (ie - i != je - j)
+                return ie - i < je - j;
+            const int c = QStringView(a).mid(i, ie - i).compare(QStringView(b).mid(j, je - j));
+            if (c != 0)
+                return c < 0;
+            i = ie;
+            j = je;
+            continue;
+        }
+        const QChar x = a.at(i).toCaseFolded();
+        const QChar y = b.at(j).toCaseFolded();
+        if (x != y)
+            return x < y;
+        ++i;
+        ++j;
+    }
+    if (a.size() - i != b.size() - j)
+        return a.size() - i < b.size() - j;
+    return a < b;
+}
+
+QString EqControl::autoEqText(const EqProfile &profile)
+{
+    QString out = QStringLiteral("Preamp: ") + formatNumber(profile.preamp) + QStringLiteral(" dB\n");
+    for (int i = 0; i < profile.count; ++i) {
+        const EqBand &band = profile.bands[i];
+        const char *code = band.type == EqBand::LowShelf ? "LSC" : band.type == EqBand::HighShelf ? "HSC"
+                         : band.type == EqBand::BandPass ? "BP" : band.type == EqBand::LowPass ? "LPQ"
+                         : band.type == EqBand::HighPass ? "HPQ" : band.type == EqBand::AllPass ? "AP" : "PK";
+        out += QStringLiteral("Filter ") + QString::number(i + 1) + QStringLiteral(": ")
+               + (band.enabled ? QStringLiteral("ON ") : QStringLiteral("OFF ")) + QLatin1StringView(code)
+               + QStringLiteral(" Fc ") + formatNumber(band.freq) + QStringLiteral(" Hz Gain ")
+               + formatNumber(band.gain) + QStringLiteral(" dB Q ") + formatNumber(band.q) + QLatin1Char('\n');
+    }
+    return out;
+}
+
 QString EqControl::outputForSink(const QString &sink)
 {
     if (sink.isEmpty())
@@ -939,7 +1016,139 @@ QVariantMap EqControl::profileMap(const QString &output) const
     map.insert(QStringLiteral("name"), name(output));
     map.insert(QStringLiteral("missing"), false);
     map.insert(QStringLiteral("editable"), editable(output));
+    map.insert(QStringLiteral("saved"), saved(output));
     return map;
+}
+
+QString EqControl::pathOf(const QString &key) const
+{
+    for (const QString &path : m_sourcePaths) {
+        if (displayName(path) == key)
+            return path;
+    }
+    return {};
+}
+
+bool EqControl::listedName(const QString &name, const QString &except) const
+{
+    for (const QString &path : m_sourcePaths) {
+        if (path != except && displayName(path) == name)
+            return true;
+    }
+    return false;
+}
+
+bool EqControl::saved(const QString &output) const
+{
+    const QString k = key(output);
+    if (k == QLatin1StringView("off") || k == QLatin1StringView("custom"))
+        return false;
+    const QString path = pathOf(k);
+    return !path.isEmpty() && QFileInfo(path).absolutePath() == QDir::cleanPath(presetDir());
+}
+
+QString EqControl::presetName(const QString &output) const
+{
+    return saved(output) ? QFileInfo(pathOf(key(output))).completeBaseName() : QString();
+}
+
+QString EqControl::savePreset(const QString &output)
+{
+    if (key(output) != QLatin1StringView("custom"))
+        return QStringLiteral("preset not saved");
+    int count = 0;
+    for (const QString &path : std::as_const(m_sourcePaths)) {
+        if (QFileInfo(path).absolutePath() == QDir::cleanPath(presetDir()))
+            ++count;
+    }
+    if (count >= presetsMax)
+        return QStringLiteral("too many presets");
+    QString path;
+    for (int n = 1;; ++n) {
+        path = presetDir() + QStringLiteral("/Preset ") + QString::number(n) + QStringLiteral(".txt");
+        if (!listedName(displayName(path)) && !QFileInfo::exists(path))
+            break;
+    }
+    const EqProfile current = profile(output);
+    QDir().mkpath(presetDir());
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(autoEqText(current).toUtf8()) < 0
+        || !file.commit()) {
+        qWarning() << "microdap eq: cannot write preset" << path;
+        return QStringLiteral("preset not saved");
+    }
+    qInfo() << "microdap eq: preset saved" << path;
+    relist();
+    const std::optional<EqProfile> stored = fileProfile(QDir::cleanPath(path));
+    if (!stored)
+        return QStringLiteral("preset not saved");
+    select(output, true, displayName(path), *stored);
+    return {};
+}
+
+bool EqControl::deletePreset(const QString &output)
+{
+    if (!saved(output))
+        return false;
+    const QString k = key(output);
+    const QString path = pathOf(k);
+    if (!QFile::remove(path)) {
+        qWarning() << "microdap eq: cannot remove preset" << path;
+        return false;
+    }
+    qInfo() << "microdap eq: preset deleted" << path;
+    for (const QString &o : outputs()) {
+        if (key(o) == k)
+            select(o, false, storedName(o), profile(o));
+    }
+    relist();
+    return true;
+}
+
+QString EqControl::renameRefusal(const QString &output, const QString &name) const
+{
+    if (!saved(output))
+        return QStringLiteral("name not allowed");
+    if (!nameOk(name))
+        return QStringLiteral("name not allowed");
+    const QString old = pathOf(key(output));
+    const QString path = QDir::cleanPath(presetDir() + QLatin1Char('/') + name + QStringLiteral(".txt"));
+    if (listedName(displayName(path), old) || (path != old && QFileInfo::exists(path)))
+        return QStringLiteral("name taken");
+    return {};
+}
+
+bool EqControl::renamePreset(const QString &output, const QString &name)
+{
+    if (!renameRefusal(output, name).isEmpty())
+        return false;
+    const QString k = key(output);
+    const QString old = pathOf(k);
+    const QString path = QDir::cleanPath(presetDir() + QLatin1Char('/') + name + QStringLiteral(".txt"));
+    if (path == old)
+        return true;
+    QFile source(old);
+    if (!source.open(QIODevice::ReadOnly)) {
+        qWarning() << "microdap eq: cannot read preset" << old;
+        return false;
+    }
+    const QByteArray bytes = source.readAll();
+    source.close();
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(bytes) < 0 || !file.commit()) {
+        qWarning() << "microdap eq: cannot write preset" << path;
+        return false;
+    }
+    if (!QFile::remove(old))
+        qWarning() << "microdap eq: cannot remove preset" << old;
+    qInfo() << "microdap eq: preset renamed" << old << "to" << path;
+    relist();
+    const QString renamed = displayName(path);
+    for (const QString &o : outputs()) {
+        if (key(o) == k)
+            put(o, QStringLiteral("name"), renamed);
+    }
+    return true;
 }
 
 void EqControl::relist()
@@ -948,12 +1157,14 @@ void EqControl::relist()
     QVariantList list;
     QStringList paths;
     if (m_settings) {
-        QStringList dirs{sourceDir()};
+        QStringList dirs{presetDir(), sourceDir()};
         for (const QString &root : m_settings->roots())
             dirs.append(root + QStringLiteral("/EQ"));
         for (const QString &dir : std::as_const(dirs)) {
-            const QFileInfoList entries = QDir(dir).entryInfoList(
-                {QStringLiteral("*.txt")}, QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
+            QFileInfoList entries = QDir(dir).entryInfoList({QStringLiteral("*.txt")}, QDir::Files | QDir::Readable);
+            std::sort(entries.begin(), entries.end(), [](const QFileInfo &a, const QFileInfo &b) {
+                return nameLess(a.fileName(), b.fileName());
+            });
             for (const QFileInfo &entry : entries) {
                 if (entry.suffix().compare(QLatin1StringView("txt"), Qt::CaseInsensitive) != 0)
                     continue;

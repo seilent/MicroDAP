@@ -15,6 +15,7 @@ Item {
     property string pick: "tap"
     property int repeats: 0
     property bool toastShown: false
+    property var validator: null
     readonly property bool animating: progressAnim.running
     readonly property bool bare: discard.shown
     readonly property bool toastCovers: root.toastShown && Ui.landscape
@@ -160,6 +161,7 @@ Item {
     }
 
     function open(request: var): void {
+        root.validator = typeof request.validator === "function" ? request.validator : null
         entry.open(request)
         root.cancelTouch()
         root.focusCode = "1"
@@ -175,6 +177,13 @@ Item {
             discard.close()
         root.shown = false
         root.animateTo(0)
+    }
+
+    function dismiss(): void {
+        if (!root.shown)
+            return
+        root.close()
+        root.canceled()
     }
 
     function complete(): void {
@@ -207,7 +216,9 @@ Item {
     function finish(): void {
         if (!entry.ready)
             return
-        const reason = entry.refusal()
+        let reason = entry.refusal()
+        if (reason === "" && typeof root.validator === "function")
+            reason = String(root.validator(entry.text))
         if (reason !== "") {
             root.refused(entry.title, reason)
             return

@@ -7,6 +7,7 @@ Page {
 
     property var eq: null
     property QtObject dacEq: null
+    property Item keyboard: null
     property bool animated: true
     property bool screenOff: false
     property int pivotIndex: 0
@@ -36,6 +37,9 @@ Page {
     property alias headphonesPane: headphonesPane
     property alias usbPane: usbPane
     property alias speakerPane: speakerPane
+    property alias deleteDialog: deleteDialog
+
+    signal toast(string first, string second)
 
     pageId: 0
     focusCount: page.rows.length
@@ -55,6 +59,12 @@ Page {
         const out = [page.entry("row", "profile", "profile", EqFormat.profileText(p), -1, "")]
         if (!EqFormat.listed(p))
             return out
+        if (EqFormat.key(p) === "custom")
+            out.push(page.entry("row", "savePreset", "save preset", "", -1, ""))
+        if (p.saved === true) {
+            out.push(page.entry("row", "deletePreset", "delete preset", "", -1, ""))
+            out.push(page.entry("row", "renamePreset", "rename preset", "", -1, ""))
+        }
         const preamp = p.preamp === undefined ? 0 : p.preamp
         out.push(page.entry("row", "preamp", "preamp", EqFormat.preampText(preamp) + EqFormat.dacSuffix("preamp", preamp, ranges), -1, ""))
         const bands = p.bands === undefined || p.bands === null ? [] : p.bands
@@ -88,6 +98,52 @@ Page {
         page.focusIndex = Math.max(0, page.indexOfKey("band" + at))
         pane.ensureVisible(page.focusIndex, Motion.scroll)
         pane.refreshFrom(page.focusIndex)
+    }
+
+    function savePreset(): void {
+        const output = page.activePane.output
+        if (!page.canCall("savePreset"))
+            return
+        const error = String(page.eq.savePreset(output))
+        if (error !== "")
+            page.toast(error, "")
+    }
+
+    function confirmDelete(): void {
+        d.deleteOutput = page.activePane.output
+        d.deleteName = EqFormat.profileText(page.activePane.profile)
+        deleteDialog.open()
+        deleteDialog.focusIndex = 1
+        deleteDialog.barIndex = 1
+    }
+
+    function runDelete(): void {
+        const output = d.deleteOutput
+        d.deleteOutput = ""
+        if (output === "" || !page.canCall("deletePreset"))
+            return
+        if (!page.eq.deletePreset(output))
+            page.toast("preset not deleted", d.deleteName)
+        page.fixFocus()
+    }
+
+    function openRename(): void {
+        if (page.keyboard === null || !page.canCall("renamePreset"))
+            return
+        const output = page.activePane.output
+        d.renameOutput = output
+        d.renameName = EqFormat.profileText(page.activePane.profile)
+        page.keyboard.open({ title: "rename preset", text: String(page.eq.presetName(output)), kind: "text", min: 1,
+            validator: (text) => page.eq.renameRefusal(output, text) })
+    }
+
+    function renameDone(text: string): void {
+        const output = d.renameOutput
+        d.renameOutput = ""
+        if (output === "")
+            return
+        if (!page.eq.renamePreset(output, text))
+            page.toast("preset not renamed", d.renameName)
     }
 
     function removeBand(): void {
@@ -278,6 +334,18 @@ Page {
             page.toggleBand(r.band)
             return
         }
+        if (r.key === "savePreset") {
+            page.savePreset()
+            return
+        }
+        if (r.key === "deletePreset") {
+            page.confirmDelete()
+            return
+        }
+        if (r.key === "renamePreset") {
+            page.openRename()
+            return
+        }
         if (r.key === "addBand") {
             page.addBand()
             return
@@ -336,6 +404,7 @@ Page {
     }
 
     function completeAll(): void {
+        deleteDialog.complete()
         page.landPivot()
         for (const pane of page.panes) {
             pane.settle()
@@ -382,6 +451,8 @@ Page {
     }
 
     function handleAction(name: string, repeat: bool): bool {
+        if (deleteDialog.shown)
+            return deleteDialog.handleAction(name, repeat)
         if (page.editing)
             return page.handleEdit(name, repeat)
         switch (name) {
@@ -418,7 +489,17 @@ Page {
         }
     }
 
+    onFocusIndexChanged: {
+        const r = page.rows[page.focusIndex]
+        d.focusKey = r === undefined || r === null ? "" : r.key
+    }
+
     onRowsChanged: {
+        const kept = d.focusKey === "" ? -1 : page.indexOfKey(d.focusKey)
+        if (kept >= 0 && kept !== page.focusIndex) {
+            page.focusIndex = kept
+            page.activePane.ensureVisible(kept, 0)
+        }
         page.fixFocus()
         const r = page.rows[page.focusIndex]
         if (page.editing && (r === undefined || r === null || r.key !== page.editKey))
@@ -471,6 +552,25 @@ Page {
 
         property bool internal: false
         property var steps: []
+        property string focusKey: ""
+        property string deleteOutput: ""
+        property string deleteName: ""
+        property string renameOutput: ""
+        property string renameName: ""
+    }
+
+    Connections {
+        target: page.keyboard
+        enabled: d.renameOutput !== ""
+        ignoreUnknownSignals: true
+
+        function onDone(text) {
+            page.renameDone(text)
+        }
+
+        function onCanceled() {
+            d.renameOutput = ""
+        }
     }
 
     Connections {
@@ -831,7 +931,7 @@ Page {
         visible: page.shownPivot === page.pivotIndex && page.focusedRow !== null
         rowY: page.activePane.y + page.focusIndex * page.pitch - page.activePane.contentY
         rowHeight: page.pitch
-        opacity: page.activePane.opacity * page.focusOpacity
+        opacity: page.activePane.opacity * page.focusOpacity * (1 - deleteDialog.scrim.opacity)
         animated: page.live
     }
 
@@ -849,6 +949,23 @@ Page {
         labels: page.pivots
         activeIndex: page.pivotIndex
         animated: page.live
+    }
+
+    Dialog {
+        id: deleteDialog
+
+        anchors.fill: parent
+        screenOff: !page.live
+        title: "delete preset?"
+        items: ["delete preset", "keep preset"]
+        onAccepted: (index) => {
+            deleteDialog.close()
+            if (index === 0)
+                page.runDelete()
+            else
+                d.deleteOutput = ""
+        }
+        onRejected: d.deleteOutput = ""
     }
 
     SequentialAnimation {

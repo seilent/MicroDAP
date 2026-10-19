@@ -139,6 +139,10 @@ private slots:
     void liveCountEdit();
     void liveSameCountEdit();
     void addRemoveBand();
+    void presetNames();
+    void savePreset();
+    void deletePresetInUse();
+    void renamePreset();
     void copyOnEdit();
     void steps();
     void stepTypeEight();
@@ -712,6 +716,141 @@ void EqTest::addRemoveBand()
     QCOMPARE(eq.key(out), QStringLiteral("custom"));
     QCOMPARE(eq.profile(out).count, 3);
     QVERIFY(!eq.profile(out).bands[2].enabled);
+}
+
+void EqTest::presetNames()
+{
+    QVERIFY(EqControl::nameOk(QStringLiteral("Preset 1")));
+    QVERIFY(EqControl::nameOk(QStringLiteral("Mein Kopfhörer")));
+    QVERIFY(EqControl::nameOk(QString(64, QLatin1Char('a'))));
+    QVERIFY(!EqControl::nameOk(QString(65, QLatin1Char('a'))));
+    QVERIFY(!EqControl::nameOk(QString()));
+    QVERIFY(!EqControl::nameOk(QStringLiteral(" lead")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("trail ")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral(".hidden")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("a/b")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("tab\there")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("HD600 ParametricEQ")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("HD600 GraphicEQ")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("Off")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("FLAT")));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("custom")));
+    QVERIFY(EqControl::nameLess(QStringLiteral("Preset 2"), QStringLiteral("Preset 10")));
+    QVERIFY(!EqControl::nameLess(QStringLiteral("Preset 10"), QStringLiteral("Preset 2")));
+    QVERIFY(EqControl::nameLess(QStringLiteral("preset 2"), QStringLiteral("Preset 3")));
+    QVERIFY(EqControl::nameLess(QStringLiteral("a 007"), QStringLiteral("a 8")));
+    QVERIFY(EqControl::nameLess(QStringLiteral("Apple"), QStringLiteral("banana")));
+    EqProfile profile = *EqParser::parse(QString::fromUtf8(autoEq));
+    profile.bands[1].type = EqBand::LowPass;
+    const QString text = EqControl::autoEqText(profile);
+    QVERIFY(text.startsWith(QStringLiteral("Preamp: -6.2 dB\nFilter 1: ON LSC Fc 105 Hz Gain 6.3 dB Q 0.7\n")));
+    QVERIFY(text.contains(QStringLiteral("Filter 4: OFF PK Fc 200 Hz Gain 1 dB Q 1\n")));
+    const std::optional<EqProfile> back = EqParser::parse(text);
+    QVERIFY(back);
+    QCOMPARE(EqFilters::encode(*back), EqFilters::encode(profile));
+    QCOMPARE(back->count, profile.count);
+}
+
+void EqTest::savePreset()
+{
+    QVERIFY(writeFile(EqControl::sourceDir() + QStringLiteral("/Preset 2.txt"), QString::fromUtf8(autoEq)));
+    QVERIFY(writeFile(EqControl::presetDir() + QStringLiteral("/Preset 10.txt"), QString::fromUtf8(autoEq)));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    const QString out = QStringLiteral("usb");
+    QCOMPARE(eq.savePreset(out), QStringLiteral("preset not saved"));
+    EqProfile custom = EqProfile::fresh();
+    custom.bands[0].gain = 3.5;
+    custom.preamp = -3.5;
+    eq.setCustom(out, custom);
+    QVERIFY(!eq.saved(out));
+    QVERIFY(!eq.profileMap(out).value(QStringLiteral("saved")).toBool());
+    QCOMPARE(eq.savePreset(out), QString());
+    const QString first = EqControl::presetDir() + QStringLiteral("/Preset 1.txt");
+    QVERIFY(QFileInfo::exists(first));
+    QCOMPARE(readFile(first), QStringLiteral("Preamp: -3.5 dB\nFilter 1: ON PK Fc 1000 Hz Gain 3.5 dB Q 1.4\n"));
+    QCOMPARE(eq.key(out), QStringLiteral("PRESET 1"));
+    QVERIFY(eq.saved(out));
+    QCOMPARE(eq.presetName(out), QStringLiteral("Preset 1"));
+    QCOMPARE(EqFilters::encode(eq.profile(out)), EqFilters::encode(custom));
+    eq.stepGain(out, 0, 1);
+    QCOMPARE(eq.key(out), QStringLiteral("custom"));
+    QCOMPARE(eq.savePreset(out), QString());
+    QCOMPARE(eq.key(out), QStringLiteral("PRESET 3"));
+    QVERIFY(QFileInfo::exists(EqControl::presetDir() + QStringLiteral("/Preset 3.txt")));
+    QStringList names;
+    for (const QVariant &v : eq.sources())
+        names.append(v.toMap().value(QStringLiteral("name")).toString());
+    QCOMPARE(names, (QStringList{QStringLiteral("PRESET 1"), QStringLiteral("PRESET 3"), QStringLiteral("PRESET 10"),
+                                 QStringLiteral("PRESET 2")}));
+    eq.cycleProfile(QStringLiteral("headphones"), 1);
+    QCOMPARE(eq.key(QStringLiteral("headphones")), QStringLiteral("PRESET 1"));
+    eq.cycleProfile(QStringLiteral("headphones"), 1);
+    eq.cycleProfile(QStringLiteral("headphones"), 1);
+    eq.cycleProfile(QStringLiteral("headphones"), 1);
+    QCOMPARE(eq.key(QStringLiteral("headphones")), QStringLiteral("PRESET 2"));
+    QVERIFY(!eq.saved(QStringLiteral("headphones")));
+}
+
+void EqTest::deletePresetInUse()
+{
+    const QString path = EqControl::presetDir() + QStringLiteral("/Preset 1.txt");
+    QVERIFY(writeFile(path, QString::fromUtf8(autoEq)));
+    QVERIFY(writeFile(EqControl::sourceDir() + QStringLiteral("/HD600.txt"), QString::fromUtf8(autoEq)));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    eq.cycleProfile(QStringLiteral("usb"), 1);
+    eq.cycleProfile(QStringLiteral("speaker"), 1);
+    eq.cycleProfile(QStringLiteral("headphones"), 1);
+    eq.cycleProfile(QStringLiteral("headphones"), 1);
+    QCOMPARE(eq.key(QStringLiteral("usb")), QStringLiteral("PRESET 1"));
+    QCOMPARE(eq.key(QStringLiteral("speaker")), QStringLiteral("PRESET 1"));
+    QCOMPARE(eq.key(QStringLiteral("headphones")), QStringLiteral("HD600"));
+    QVERIFY(!eq.deletePreset(QStringLiteral("headphones")));
+    QVERIFY(QFileInfo::exists(EqControl::sourceDir() + QStringLiteral("/HD600.txt")));
+    QVERIFY(eq.deletePreset(QStringLiteral("usb")));
+    QVERIFY(!QFileInfo::exists(path));
+    QCOMPARE(eq.key(QStringLiteral("usb")), QStringLiteral("off"));
+    QCOMPARE(eq.key(QStringLiteral("speaker")), QStringLiteral("off"));
+    QCOMPARE(eq.key(QStringLiteral("headphones")), QStringLiteral("HD600"));
+    QCOMPARE(int(eq.sources().size()), 1);
+}
+
+void EqTest::renamePreset()
+{
+    const QString path = EqControl::presetDir() + QStringLiteral("/Preset 1.txt");
+    QVERIFY(writeFile(path, QString::fromUtf8(autoEq)));
+    QVERIFY(writeFile(EqControl::presetDir() + QStringLiteral("/Taken.txt"), QString::fromUtf8(autoEq)));
+    QVERIFY(writeFile(EqControl::sourceDir() + QStringLiteral("/HD600.txt"), QString::fromUtf8(autoEq)));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    eq.cycleProfile(QStringLiteral("usb"), 1);
+    eq.cycleProfile(QStringLiteral("speaker"), 1);
+    QCOMPARE(eq.key(QStringLiteral("usb")), QStringLiteral("PRESET 1"));
+    eq.cycleProfile(QStringLiteral("headphones"), -1);
+    eq.cycleProfile(QStringLiteral("headphones"), -1);
+    QCOMPARE(eq.key(QStringLiteral("headphones")), QStringLiteral("HD600"));
+    QCOMPARE(eq.renameRefusal(QStringLiteral("headphones"), QStringLiteral("Mine")), QStringLiteral("name not allowed"));
+    QVERIFY(!eq.renamePreset(QStringLiteral("headphones"), QStringLiteral("Mine")));
+    QVERIFY(QFileInfo::exists(EqControl::sourceDir() + QStringLiteral("/HD600.txt")));
+    QCOMPARE(eq.renameRefusal(QStringLiteral("usb"), QStringLiteral("custom")), QStringLiteral("name not allowed"));
+    QCOMPARE(eq.renameRefusal(QStringLiteral("usb"), QStringLiteral("taken")), QStringLiteral("name taken"));
+    QCOMPARE(eq.renameRefusal(QStringLiteral("usb"), QStringLiteral("hd600")), QStringLiteral("name taken"));
+    QCOMPARE(eq.renameRefusal(QStringLiteral("usb"), QStringLiteral("preset 1")), QString());
+    QCOMPARE(eq.renameRefusal(QStringLiteral("usb"), QStringLiteral("Desk")), QString());
+    const QStringList filters = settings.value(EqFilters::key(QStringLiteral("usb"), QStringLiteral("filters"))).toStringList();
+    QVERIFY(eq.renamePreset(QStringLiteral("usb"), QStringLiteral("Desk")));
+    QVERIFY(!QFileInfo::exists(path));
+    const QString renamed = EqControl::presetDir() + QStringLiteral("/Desk.txt");
+    QCOMPARE(readFile(renamed), QString::fromUtf8(autoEq));
+    QCOMPARE(eq.key(QStringLiteral("usb")), QStringLiteral("DESK"));
+    QCOMPARE(eq.key(QStringLiteral("speaker")), QStringLiteral("DESK"));
+    QCOMPARE(eq.presetName(QStringLiteral("usb")), QStringLiteral("Desk"));
+    QCOMPARE(settings.value(EqFilters::key(QStringLiteral("usb"), QStringLiteral("filters"))).toStringList(), filters);
+    QVERIFY(eq.saved(QStringLiteral("usb")));
 }
 
 void EqTest::copyOnEdit()

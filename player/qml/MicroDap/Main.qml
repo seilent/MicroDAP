@@ -119,6 +119,7 @@ Window {
         && pages.currentItem.objectName === "nowplaying" && pages.currentItem.lyricsShown === true
     readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && root.playing
         && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown && !root.lyricsHold
+        && !keyboard.shown
     readonly property bool screenOffArmed: !root.overlay && !root.off && !root.screenshot && root.power !== null
         && root.screenOffSeconds > 0 && !root.switching && !root.lyricsHold
     property alias rotor: rotor
@@ -127,6 +128,7 @@ Window {
     property alias background: bg
     property alias switchPrompt: switchPrompt
     property alias powerMenu: powerMenu
+    property alias keyboard: keyboard
     property alias saver: saver
     property alias router: router
     property alias saverTimer: saverTimer
@@ -176,6 +178,8 @@ Window {
         switchPrompt.complete()
         powerMenu.complete()
         saver.land()
+        keyboard.dismiss()
+        keyboard.complete()
     }
     onPowerScreenOffChanged: {
         if (root.powerScreenOff) {
@@ -186,6 +190,8 @@ Window {
             powerMenu.complete()
             saver.hide()
             saver.land()
+            keyboard.dismiss()
+            keyboard.complete()
             root.pendingHide = true
             root.blackFrame = true
             return
@@ -809,6 +815,7 @@ Window {
             return
         }
         root.closeSheets()
+        keyboard.dismiss()
         if (powerMenu.shown)
             powerMenu.close()
         if (saver.shown)
@@ -951,6 +958,7 @@ Window {
 
         function onCurrentItemChanged() {
             root.autoNowPage = null
+            keyboard.dismiss()
         }
     }
 
@@ -1097,7 +1105,7 @@ Window {
 
             anchors.fill: parent
             stack: pages
-            modal: powerMenu.shown ? powerMenu : switchPrompt
+            modal: powerMenu.shown ? powerMenu : switchPrompt.shown ? switchPrompt : keyboard.shown ? keyboard : switchPrompt
             saver: saver
             pad: typeof Pad === "undefined" ? null : Pad
             guide: typeof Guide === "undefined" ? null : Guide
@@ -1105,6 +1113,16 @@ Window {
             sweeping: root.sweeping
             onNowPlaying: root.openNowPlaying()
             onRotate: (raw) => root.rotateBy(raw)
+        }
+
+        Keyboard {
+            id: keyboard
+
+            anchors.fill: parent
+            screenOff: root.off
+            animated: !root.off && !root.hidden
+            toastShown: overlays.toast.shown
+            onRefused: (title, reason) => overlays.toast.show(title, reason)
         }
 
         SwitchPrompt {
@@ -1188,7 +1206,7 @@ Window {
 
             anchors.fill: parent
             router: root.router
-            dialogs: [switchPrompt, powerMenu]
+            dialogs: [switchPrompt, powerMenu, keyboard]
             enabled: root.touchOn && !root.off
             onTouched: root.touch()
         }
@@ -1388,6 +1406,8 @@ Window {
             screenOff: root.off
             eq: root.eq
             dacEq: root.dacEq
+            keyboard: keyboard
+            onToast: (first, second) => overlays.toast.show(first, second)
         }
     }
 

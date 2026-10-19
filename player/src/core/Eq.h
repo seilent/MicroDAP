@@ -140,6 +140,8 @@ public:
     static constexpr double qFine = 0.1;
     static constexpr double qCoarse = 1.0;
     static constexpr int freqCoarseSteps = 6;
+    static constexpr int presetsMax = 200;
+    static constexpr int presetNameMax = 64;
 
     explicit EqControl(Settings *settings, QObject *parent = nullptr);
     ~EqControl() override;
@@ -149,6 +151,10 @@ public:
     static QString sourceDir();
     static QString storePath(const QString &output);
     static QString displayName(const QString &path);
+    static QString presetDir();
+    static bool nameOk(const QString &name);
+    static bool nameLess(const QString &a, const QString &b);
+    static QString autoEqText(const EqProfile &profile);
     static QString outputForSink(const QString &sink);
     static QString defaultSinkOutput();
 
@@ -171,6 +177,12 @@ public:
     Q_INVOKABLE QString name(const QString &output) const;
     Q_INVOKABLE bool missing(const QString &output) const;
     Q_INVOKABLE bool editable(const QString &output) const;
+    Q_INVOKABLE bool saved(const QString &output) const;
+    Q_INVOKABLE QString presetName(const QString &output) const;
+    Q_INVOKABLE QString savePreset(const QString &output);
+    Q_INVOKABLE bool deletePreset(const QString &output);
+    Q_INVOKABLE QString renameRefusal(const QString &output, const QString &name) const;
+    Q_INVOKABLE bool renamePreset(const QString &output, const QString &name);
     Q_INVOKABLE QVariantMap profileMap(const QString &output) const;
     Q_INVOKABLE void relist();
     Q_INVOKABLE void cycleProfile(const QString &output, int direction);
@@ -196,6 +208,8 @@ signals:
 private:
     std::optional<EqProfile> fileProfile(const QString &path) const;
     EqProfile restored(const QString &output) const;
+    QString pathOf(const QString &key) const;
+    bool listedName(const QString &name, const QString &except = {}) const;
     EqProfile &custom(const QString &output) const;
     bool on(const QString &output) const;
     QString storedName(const QString &output) const;

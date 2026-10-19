@@ -336,6 +336,69 @@ TestCase {
         compare(main.pageStack.currentItem, home)
     }
 
+    function test_keyboard_hosted() {
+        const kb = main.keyboard
+        compare(main.saverArmed, true)
+        kb.open({ title: "name", kind: "text" })
+        kb.complete()
+        compare(main.router.modal, kb)
+        compare(main.router.modalUp, true)
+        compare(main.saverArmed, false)
+        compare(main.touchLayer.dialogs.indexOf(kb) >= 0, true)
+        const focus = home.focusIndex
+        verify(main.router.dispatch("right", false))
+        compare(kb.focusCode, "2")
+        compare(home.focusIndex, focus)
+        verify(main.router.dispatch("b", false))
+        compare(kb.shown, false)
+        compare(main.saverArmed, true)
+        let canceled = 0
+        const count = () => canceled++
+        kb.canceled.connect(count)
+        kb.open({ title: "name", kind: "text" })
+        kb.entry.type("a")
+        main.navigate("music")
+        main.pageStack.completeAll()
+        compare(kb.shown, false)
+        compare(canceled, 1)
+        main.pageStack.pop()
+        main.pageStack.completeAll()
+        kb.open({ title: "name", kind: "text" })
+        kb.entry.type("a")
+        fakePower.screenOff = true
+        compare(kb.shown, false)
+        compare(kb.progress, 0)
+        compare(canceled, 2)
+        fakePower.screenOff = false
+        kb.canceled.disconnect(count)
+        main.powerMenu.open()
+        kb.open({ title: "name", kind: "text" })
+        compare(main.router.modal, main.powerMenu)
+        main.powerMenu.close()
+        main.powerMenu.complete()
+        compare(main.router.modal, kb)
+        kb.validator = (text) => "no"
+        kb.open({ title: "name", kind: "text" })
+        compare(kb.validator, null)
+        kb.open({ title: "name", kind: "text", validator: (text) => text === "x" ? "taken" : "" })
+        kb.entry.type("x")
+        kb.finish()
+        compare(kb.shown, true)
+        kb.entry.erase()
+        kb.entry.type("y")
+        kb.finish()
+        compare(kb.shown, false)
+        kb.complete()
+        kb.open({ title: "name", kind: "text" })
+        fakePower.showSwitchPrompt()
+        compare(main.switchPrompt.shown, true)
+        compare(kb.shown, false)
+        compare(main.router.modal, main.switchPrompt)
+        main.switchPrompt.close()
+        main.switchPrompt.complete()
+        kb.complete()
+    }
+
     function test_not_armed_when_paused() {
         fakePlayer.status = 2
         compare(main.saverArmed, false)

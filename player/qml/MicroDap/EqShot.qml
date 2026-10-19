@@ -17,6 +17,8 @@ Item {
     readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end" || root.openShot !== null
     readonly property var bandShots: ({ "eq-bands": 3, "eq-bands-one": 1, "eq-bands-full": 10 })
     readonly property int bandShot: root.bandShots[root.fixture] === undefined ? 0 : root.bandShots[root.fixture]
+    readonly property bool customShot: root.fixture === "eq-custom"
+    readonly property bool savedShot: root.fixture === "eq-saved" || root.fixture === "eq-delete" || root.fixture === "eq-rename"
     readonly property bool dacShot: root.fixture === "eq-dac-range" || root.fixture === "eq-dac-preamp" || root.fixture === "eq-dac-long"
 
     Rectangle {
@@ -30,8 +32,10 @@ Item {
         readonly property string activeOutput: root.dacShot ? "usb" : "headphones"
         readonly property var sources: [{ name: "SENNHEISER HD 600 PARAMETRICEQ", path: "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt" }]
         readonly property var headphones: ({
-            key: "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt",
-            name: "Sennheiser HD 600 ParametricEQ",
+            key: root.customShot ? "custom" : root.savedShot ? "/home/micro/.config/microdap/eq/presets/Preset 1.txt"
+                : "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt",
+            name: root.customShot ? "" : root.savedShot ? "Preset 1" : "Sennheiser HD 600 ParametricEQ",
+            saved: root.savedShot,
             missing: false,
             preamp: -6.5,
             bands: root.typesShot ? sampleEq.types : root.bandShot > 0 ? sampleEq.autoEq.slice(0, root.bandShot) : sampleEq.autoEq
@@ -74,6 +78,18 @@ Item {
 
         signal profilesChanged()
 
+        function presetName(output) {
+            return "Preset 1"
+        }
+
+        function renameRefusal(output, name) {
+            return ""
+        }
+
+        function renamePreset(output, name) {
+            return true
+        }
+
         function profileMap(output) {
             if (output === "headphones")
                 return sampleEq.headphones
@@ -92,13 +108,22 @@ Item {
         readonly property var ranges: ({ gain: [-12, 12], q: [0.25, 8], preamp: [0, 0] })
     }
 
+    Keyboard {
+        id: keyboard
+
+        anchors.fill: parent
+        z: 1
+        animated: false
+    }
+
     EqScreen {
         id: screen
 
         anchors.fill: parent
-        animated: false
+        animated: root.fixture === "eq-delete"
         eq: sampleEq
         dacEq: root.dacShot ? sampleDacEq : null
+        keyboard: keyboard
 
         Component.onCompleted: {
             screen.completeAll()
@@ -119,6 +144,20 @@ Item {
                 if (root.openShot.edit)
                     screen.activate()
                 Qt.callLater(() => screen.activePane.ensureVisible(screen.indexOfKey(band + ":q"), 0))
+                return
+            }
+            if (root.customShot || root.savedShot) {
+                screen.focusIndex = screen.indexOfKey(root.customShot ? "savePreset"
+                    : root.fixture === "eq-saved" ? "renamePreset" : "deletePreset")
+                if (root.fixture === "eq-delete") {
+                    screen.confirmDelete()
+                    screen.completeAll()
+                }
+                if (root.fixture === "eq-rename") {
+                    screen.focusIndex = screen.indexOfKey("renamePreset")
+                    screen.openRename()
+                    keyboard.complete()
+                }
                 return
             }
             if (root.bandShot > 0) {
