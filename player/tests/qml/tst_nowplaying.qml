@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtTest
 import MicroDap
@@ -10,6 +11,14 @@ TestCase {
     visible: true
     width: 640
     height: 960
+
+    Rectangle {
+        id: artSample
+
+        width: 8
+        height: 8
+        color: "steelblue"
+    }
 
     PageStack {
         id: pages
@@ -145,6 +154,7 @@ TestCase {
         property string title: ""
         property string artist: ""
         property string album: ""
+        property string artUrl: ""
         property int trackNumber: 0
         property int numberOfTracks: 0
         property real durationMs: 0
@@ -164,6 +174,7 @@ TestCase {
             fakeBluez.title = ""
             fakeBluez.artist = ""
             fakeBluez.album = ""
+            fakeBluez.artUrl = ""
             fakeBluez.trackNumber = 0
             fakeBluez.numberOfTracks = 0
             fakeBluez.durationMs = 0
@@ -799,6 +810,7 @@ TestCase {
         compare(page.btGlyph.visible, true)
         compare(page.btGlyph.width, Ui.px(64))
         fuzzyCompare(page.btGlyph.x + page.btGlyph.width / 2, page.artItem.width / 2, 0.5)
+        compare(page.artTile.visible, false)
         compare(page.countItem.visible, true)
         compare(page.countItem.text, "4 of 11")
         compare(page.countItem.font.capitalization, Font.AllUppercase)
@@ -815,6 +827,43 @@ TestCase {
         compare(page.localLayer.visible, false)
         fakeBluez.durationMs = 0
         compare(page.progressItem.visible, false)
+    }
+
+    function sampleArt(name) {
+        const url = String(StandardPaths.writableLocation(StandardPaths.TempLocation)) + "/" + name
+        let saved = false
+        artSample.grabToImage((result) => { saved = result.saveToFile(url.replace("file://", "")) })
+        tryVerify(() => saved, 2000)
+        return url
+    }
+
+    function test_variant_phone_art() {
+        const art = tc.sampleArt("microdap-phone-art.png")
+        fakeBluez.activate()
+        const page = open()
+        compare(page.shownVariant, true)
+        compare(page.btGlyph.visible, true)
+        compare(page.artTile.visible, false)
+        fakeBluez.artUrl = art
+        tryCompare(page.artImage, "status", Image.Ready, 2000)
+        compare(page.btGlyph.visible, false)
+        compare(page.artTile.visible, true)
+        compare(String(page.artImage.source), art)
+        compare(page.artImage.width, page.artItem.width)
+        compare(page.artImage.height, page.artItem.height)
+        compare(page.artImage.fillMode, Image.PreserveAspectCrop)
+        fakeBluez.artUrl = ""
+        compare(page.btGlyph.visible, true)
+        compare(page.artTile.visible, false)
+        fakeBluez.artUrl = art.replace("microdap-phone-art.png", "microdap-phone-missing.png")
+        tryCompare(page.artImage, "status", Image.Error, 2000)
+        compare(page.btGlyph.visible, true)
+        compare(page.artTile.visible, false)
+        fakeBluez.artUrl = art
+        fakeBluez.transportActive = false
+        tryCompare(page, "shownVariant", false, 2000)
+        compare(page.artTile.visible, true)
+        verify(String(page.artImage.source) !== art)
     }
 
     function test_variant_pad() {

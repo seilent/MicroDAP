@@ -119,6 +119,9 @@
 | saver | `phone-active` | `--size 640x960` and `960x640` | phone title, artist, `from Pixel 8`, bluetooth glyph 21.3 u in the art box, no tile | 2026-10-20 |
 | bluetooth | `pairing-pulse`, `browse` | `--bluez pairing` and `--bluez last`, `--size 640x960` and `960x640` | the hint clear of the ring at s 1.4; PHONE with the last phone, DISCONNECTED and the bar | 2026-10-20 |
 | bluetooth | `guard-toast` | `--bluez connected`, `--size 640x960` and `960x640` | toast `bluetooth` / `hold b 2 s to leave` over PHONE connected | 2026-10-20 |
+| nowplaying | `--bluez art` | `--size 640x960` and `960x640` | phone thumbnail in the art square, no glyph, progress at the art width | 2026-10-20 |
+| nowplaying | `--bluez active` | `--size 640x960` and `960x640` | no handle or a fetch in flight: the bluetooth glyph, no tile | 2026-10-20 |
+| saver | `phone-active` `--bluez art` | `--size 640x960` and `960x640` | phone thumbnail in the art box on the tile, no glyph | 2026-10-20 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

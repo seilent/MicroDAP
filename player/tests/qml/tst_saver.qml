@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtTest
 import MicroDap
@@ -10,6 +11,14 @@ TestCase {
     visible: true
     width: 320
     height: 240
+
+    Rectangle {
+        id: artSample
+
+        width: 8
+        height: 8
+        color: "steelblue"
+    }
 
     QtObject {
         id: fakePower
@@ -57,6 +66,7 @@ TestCase {
         property string title: "Phone Song"
         property string artist: "Phone Artist"
         property string album: "Phone Album"
+        property string artUrl: ""
         property string status: "playing"
     }
 
@@ -109,9 +119,18 @@ TestCase {
     readonly property var saver: main.saver
     readonly property var home: main.pageStack.currentItem
 
+    function sampleArt(name) {
+        const url = String(StandardPaths.writableLocation(StandardPaths.TempLocation)) + "/" + name
+        let saved = false
+        artSample.grabToImage((result) => { saved = result.saveToFile(url.replace("file://", "")) })
+        tryVerify(() => saved, 2000)
+        return url
+    }
+
     function init() {
         tryCompare(main.pageStack, "inputLocked", false, 5000)
         main.pageStack.completeAll()
+        fakeBluez.artUrl = ""
         fakePower.screenOff = false
         fakePower.verbs = []
         fakePlayer.status = 1
@@ -455,6 +474,23 @@ TestCase {
         fuzzyCompare(saver.phoneGlyph.width, Ui.px(64 / 168 * 56), 0.01)
         verify(Qt.colorEqual(saver.artItem.color, "transparent"))
         compare(saver.shownLyric, "")
+        compare(saver.artImage.visible, false)
+        const art = tc.sampleArt("microdap-saver-art.png")
+        fakeBluez.artUrl = art
+        tryCompare(saver.artImage, "status", Image.Ready, 2000)
+        compare(saver.phoneGlyph.visible, false)
+        compare(saver.artImage.visible, true)
+        compare(String(saver.artImage.source), art)
+        compare(saver.artImage.width, Ui.px(56))
+        verify(Qt.colorEqual(saver.artItem.color, Ui.tile))
+        fakeBluez.artUrl = ""
+        compare(saver.phoneGlyph.visible, true)
+        compare(saver.artImage.visible, false)
+        fakeBluez.artUrl = art.replace("microdap-saver-art.png", "microdap-saver-missing.png")
+        tryCompare(saver.artImage, "status", Image.Error, 2000)
+        compare(saver.phoneGlyph.visible, true)
+        verify(Qt.colorEqual(saver.artItem.color, "transparent"))
+        fakeBluez.artUrl = art
         fakeBluez.status = "paused"
         saver.hide()
         saver.land()
@@ -464,6 +500,7 @@ TestCase {
         compare(saver.phone, false)
         compare(saver.title, "Sticking With You")
         compare(saver.phoneGlyph.visible, false)
+        verify(String(saver.artImage.source) !== art)
         main.bluez = null
         fakeBluez.transportActive = true
         fakePlayer.status = 1

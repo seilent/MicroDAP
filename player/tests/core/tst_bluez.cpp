@@ -172,7 +172,7 @@ void BluezTest::commands()
 void BluezTest::presets()
 {
     FakeBluezModel fake;
-    QCOMPARE(FakeBluezModel::presets().size(), 5);
+    QCOMPARE(FakeBluezModel::presets().size(), 6);
     QVERIFY(!fake.applyPreset(QStringLiteral("bogus")));
     QVERIFY(fake.lastPhone().isEmpty());
     QVERIFY(fake.applyPreset(QStringLiteral("last")));
@@ -195,8 +195,15 @@ void BluezTest::presets()
     QCOMPARE(fake.positionMs(), qint64(125000));
     QCOMPARE(fake.durationMs(), qint64(228000));
     QCOMPARE(fake.volume(), 50);
+    QVERIFY(fake.artUrl().isEmpty());
+
+    QVERIFY(fake.applyPreset(QStringLiteral("art")));
+    QVERIFY(fake.transportActive());
+    QCOMPARE(fake.title(), QStringLiteral("Track Four"));
+    QVERIFY(QFileInfo(QUrl(fake.artUrl()).toLocalFile()).size() > 0);
 
     QVERIFY(fake.applyPreset(QStringLiteral("pairing")));
+    QVERIFY(fake.artUrl().isEmpty());
     QVERIFY(fake.pairing());
     QCOMPARE(fake.pairingRemaining(), 73);
     QVERIFY(!fake.connected());

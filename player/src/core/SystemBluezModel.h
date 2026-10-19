@@ -1,11 +1,13 @@
 #pragma once
 
 #include "BluezModel.h"
+#include "PhoneArt.h"
 
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QDBusServiceWatcher>
+#include <QElapsedTimer>
 #include <QList>
 #include <QMap>
 #include <QString>
@@ -26,6 +28,7 @@ class SystemBluezModel : public BluezModel
 public:
     SystemBluezModel(const QDBusConnection &bluez, const QDBusConnection &session,
                      QObject *parent = nullptr);
+    ~SystemBluezModel() override;
 
     static void registerMetaTypes();
     static QString bluezService();
@@ -38,6 +41,7 @@ public:
     QString transportPath() const;
     QString playerPath() const;
     bool pollingPosition() const;
+    PhoneArt *phoneArt();
 
     void refresh();
 
@@ -67,6 +71,10 @@ private:
     void applyAgent(const QVariantMap &properties);
     void apply();
     void clearDevice();
+    void applyArt(const QString &address, int psm, const QString &handle);
+    void updateArt();
+    void nudge(const QString &handle);
+    void nudgeTimeout();
     void select(QString &devicePath, QString &transportPath, QString &playerPath) const;
     QString childWithInterface(const QString &devicePath, const QString &interface) const;
     void syncPolling();
@@ -87,6 +95,18 @@ private:
     QTimer m_positionTimer;
     bool m_positionPending = false;
     quint64 m_agentGeneration = 0;
+    PhoneArt m_art;
+    QString m_imgHandle;
+    QString m_handed;
+    QString m_artSession;
+    QElapsedTimer m_activeSince;
+    QTimer m_gateTimer;
+    enum class Nudge { Idle, Next, Previous, Watch, Done };
+    Nudge m_nudge = Nudge::Idle;
+    QString m_nudgeDevice;
+    QString m_nudgeTitle;
+    int m_nudgeNumber = 0;
+    QTimer m_nudgeTimer;
 };
 
 }

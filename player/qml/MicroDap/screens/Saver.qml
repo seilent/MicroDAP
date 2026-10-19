@@ -12,6 +12,7 @@ Item {
     property string album: ""
     property string artPath: ""
     property bool phone: false
+    property string phoneArtUrl: ""
     property string fixedClock: ""
     property real progress: 0
     property real drift: Motion.saverDriftFrom
@@ -28,7 +29,9 @@ Item {
     readonly property bool animating: showAnim.running || hideAnim.running || dimAnim.running || lyricSwap.running
                                       || lyricRise.running
     readonly property bool drifting: driftLoop.running && !driftLoop.paused
-    readonly property string artUrl: saver.artPath === "" ? "" : "file://" + saver.artPath
+    readonly property string artUrl: saver.phone ? saver.phoneArtUrl
+                                                 : saver.artPath === "" ? "" : "file://" + saver.artPath
+    readonly property bool phoneArtShown: saver.phone && saver.artUrl !== "" && artImage.status !== Image.Error
     readonly property real artY: Ui.px(Ui.saverArtY)
     readonly property real textX: Ui.px(Ui.saverTextX)
     readonly property real titleBaseline: saver.artY + Ui.px(Ui.saverTitleDrop)
@@ -38,6 +41,7 @@ Item {
     property alias clockItem: clockItem
     property alias artItem: artItem
     property alias phoneGlyph: phoneGlyph
+    property alias artImage: artImage
     property alias titleItem: titleItem
     property alias artistItem: artistItem
     property alias albumItem: albumItem
@@ -213,22 +217,24 @@ Item {
         y: saver.artY
         width: Ui.px(Ui.saverArt)
         height: Ui.px(Ui.saverArt)
-        color: saver.phone ? "transparent" : Ui.tile
+        color: saver.phone && !saver.phoneArtShown ? "transparent" : Ui.tile
 
         Glyph {
             id: phoneGlyph
 
             anchors.centerIn: parent
-            visible: saver.phone
+            visible: saver.phone && !saver.phoneArtShown
             name: "bluetooth"
             size: Ui.npBtGlyph / Ui.npArt * Ui.saverArt
             color: Ui.textFull
         }
 
         Image {
+            id: artImage
+
             anchors.fill: parent
             source: saver.artUrl
-            visible: !saver.phone && saver.artUrl !== ""
+            visible: saver.phone ? saver.phoneArtShown : saver.artUrl !== ""
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             cache: true

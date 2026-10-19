@@ -48,6 +48,8 @@ Page {
     readonly property bool paused: np.shownVariant ? np.phoneStatus === "paused" : np.localPaused
     readonly property bool phoneConnected: np.bluez !== null && np.bluez.connected === true
     readonly property string phoneName: np.bluez !== null && np.bluez.deviceName !== undefined ? np.bluez.deviceName : ""
+    readonly property string phoneArt: np.bluez !== null && np.bluez.artUrl !== undefined && np.bluez.artUrl !== null ? np.bluez.artUrl : ""
+    readonly property bool phoneArtShown: np.shownVariant && np.phoneArt !== "" && artImage.status !== Image.Error
     readonly property string fromLabelText: "from " + np.phoneName
     readonly property string artistText: np.shownVariant ? np.phoneField("artist") : np.shown.artist
     readonly property string albumText: np.shownVariant ? np.phoneField("album") : np.shown.album
@@ -133,6 +135,8 @@ Page {
     property alias statusStrip: statusStrip
     property alias artItem: artItem
     property alias btGlyph: btGlyph
+    property alias artTile: artTile
+    property alias artImage: artImage
     property alias fromLabel: fromLabel
     property alias artistItem: artistItem
     property alias albumItem: albumItem
@@ -1087,13 +1091,17 @@ Page {
             }
 
             Rectangle {
+                id: artTile
+
                 anchors.fill: parent
-                visible: !np.shownVariant
+                visible: !np.shownVariant || np.phoneArtShown
                 color: Ui.tile
 
                 Image {
+                    id: artImage
+
                     anchors.fill: parent
-                    source: np.artUrl(np.shown.artPath)
+                    source: np.shownVariant ? np.phoneArt : np.artUrl(np.shown.artPath)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     cache: true
@@ -1106,7 +1114,7 @@ Page {
                 id: btGlyph
 
                 anchors.centerIn: parent
-                visible: np.shownVariant
+                visible: np.shownVariant && !np.phoneArtShown
                 name: "bluetooth"
                 size: Ui.npBtGlyph
                 color: Ui.textFull

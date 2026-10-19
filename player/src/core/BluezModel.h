@@ -16,6 +16,7 @@ class BluezModel : public QObject
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     Q_PROPERTY(QString artist READ artist NOTIFY artistChanged)
     Q_PROPERTY(QString album READ album NOTIFY albumChanged)
+    Q_PROPERTY(QString artUrl READ artUrl NOTIFY artUrlChanged)
     Q_PROPERTY(int trackNumber READ trackNumber NOTIFY trackNumberChanged)
     Q_PROPERTY(int numberOfTracks READ numberOfTracks NOTIFY numberOfTracksChanged)
     Q_PROPERTY(qint64 durationMs READ durationMs NOTIFY durationMsChanged)
@@ -48,6 +49,7 @@ public:
     QString title() const;
     QString artist() const;
     QString album() const;
+    QString artUrl() const;
     int trackNumber() const;
     int numberOfTracks() const;
     qint64 durationMs() const;
@@ -83,6 +85,7 @@ signals:
     void titleChanged();
     void artistChanged();
     void albumChanged();
+    void artUrlChanged();
     void trackNumberChanged();
     void numberOfTracksChanged();
     void durationMsChanged();
@@ -108,6 +111,7 @@ protected:
     void updateTitle(const QString &title);
     void updateArtist(const QString &artist);
     void updateAlbum(const QString &album);
+    void updateArtUrl(const QString &url);
     void updateTrackNumber(int number);
     void updateNumberOfTracks(int count);
     void updateDurationMs(qint64 ms);
@@ -130,6 +134,7 @@ private:
     QString m_title;
     QString m_artist;
     QString m_album;
+    QString m_artUrl;
     int m_trackNumber = 0;
     int m_numberOfTracks = 0;
     qint64 m_durationMs = 0;

@@ -1110,6 +1110,7 @@ Window {
             screenOff: root.off
             clockMode: root.settings !== null && root.settings.clock !== undefined ? String(root.settings.clock) : "24h"
             phone: root.phoneActive
+            phoneArtUrl: root.phoneField("artUrl")
             title: root.phoneActive ? root.phoneField("title") : root.field("title")
             artist: root.phoneActive ? root.phoneField("artist") : root.field("artist")
             album: root.phoneActive ? (root.phoneField("deviceName") === "" ? "" : "from " + root.phoneField("deviceName")) : root.field("album")

@@ -14,6 +14,7 @@ Item {
         anchors.fill: parent
         fixedClock: "7:13"
         phone: root.phone
+        phoneArtUrl: root.phone && typeof BluezModel !== "undefined" && BluezModel !== null ? BluezModel.artUrl : ""
         title: root.phone ? "Track Four" : "Sticking With You"
         artist: root.phone ? "Phone Artist" : "Addison Road"
         album: root.phone ? "from Pixel 8" : "Addison Road"

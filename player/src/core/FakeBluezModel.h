@@ -3,6 +3,9 @@
 #include "BluezModel.h"
 
 #include <QStringList>
+#include <QTemporaryDir>
+
+#include <memory>
 
 namespace microdap {
 
@@ -30,6 +33,7 @@ public:
     void setTitle(const QString &title);
     void setArtist(const QString &artist);
     void setAlbum(const QString &album);
+    void setArtUrl(const QString &url);
     void setTrackNumber(int number);
     void setNumberOfTracks(int count);
     void setDurationMs(qint64 ms);
@@ -54,8 +58,10 @@ public:
 
 private:
     void clearAll();
+    QString sampleArt();
 
     QStringList m_commands;
+    std::unique_ptr<QTemporaryDir> m_artDir;
 };
 
 }

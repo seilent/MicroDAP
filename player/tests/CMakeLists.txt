@@ -276,6 +276,15 @@ else()
 endif()
 microdap_test_env(systembluez)
 
+qt_add_executable(tst_phoneart core/tst_phoneart.cpp)
+target_link_libraries(tst_phoneart PRIVATE microdapcore Qt6::DBus Qt6::Test)
+if(DBUS_RUN_SESSION)
+    add_test(NAME phoneart COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_phoneart>)
+else()
+    add_test(NAME phoneart COMMAND tst_phoneart)
+endif()
+microdap_test_env(phoneart)
+
 qt_add_executable(tst_dbuspad core/tst_dbuspad.cpp)
 target_compile_definitions(tst_dbuspad PRIVATE
     MICRODAP_FAKE_INPUTPLUMBER="${CMAKE_CURRENT_SOURCE_DIR}/fake_inputplumber.py"

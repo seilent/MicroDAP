@@ -10,12 +10,16 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QUrl>
 
 namespace microdap {
 
 namespace {
 
 constexpr int positionPollMs = 1000;
+constexpr int artGateMs = 1000;
+constexpr int nudgeStepMs = 3000;
+constexpr int nudgeWatchMs = 2000;
 
 QString propertiesInterface()
 {
@@ -97,6 +101,7 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     , m_session(session)
     , m_bluezWatcher(bluezService(), bluez, QDBusServiceWatcher::WatchForOwnerChange)
     , m_agentWatcher(agentService(), session, QDBusServiceWatcher::WatchForOwnerChange)
+    , m_art(session)
 {
     registerMetaTypes();
     QFile last(lastPhonePath());
@@ -110,6 +115,13 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
             || !file.commit())
             qWarning() << "microdap bluez: cannot write" << path;
     });
+
+    m_gateTimer.setSingleShot(true);
+    connect(&m_gateTimer, &QTimer::timeout, this, &SystemBluezModel::apply);
+    m_nudgeTimer.setSingleShot(true);
+    connect(&m_nudgeTimer, &QTimer::timeout, this, &SystemBluezModel::nudgeTimeout);
+    connect(&m_art, &PhoneArt::artChanged, this, &SystemBluezModel::updateArt);
+    connect(&m_art, &PhoneArt::sessionOpenChanged, this, &SystemBluezModel::apply, Qt::QueuedConnection);
 
     m_positionTimer.setInterval(positionPollMs);
     connect(&m_positionTimer, &QTimer::timeout, this, &SystemBluezModel::pollPosition);
@@ -161,6 +173,11 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     }
 }
 
+SystemBluezModel::~SystemBluezModel()
+{
+    disconnect(&m_art, nullptr, this, nullptr);
+}
+
 void SystemBluezModel::registerMetaTypes()
 {
     qDBusRegisterMetaType<InterfaceList>();
@@ -210,6 +227,11 @@ QString SystemBluezModel::playerPath() const
 bool SystemBluezModel::pollingPosition() const
 {
     return m_positionTimer.isActive();
+}
+
+PhoneArt *SystemBluezModel::phoneArt()
+{
+    return &m_art;
 }
 
 void SystemBluezModel::refresh()
@@ -409,6 +431,16 @@ void SystemBluezModel::clearDevice()
     updateDeviceName({});
     m_transportVolume = -1;
     forgetVolume();
+    m_activeSince.invalidate();
+    m_gateTimer.stop();
+    m_nudgeTimer.stop();
+    m_nudge = Nudge::Idle;
+    m_nudgeDevice.clear();
+    m_handed.clear();
+    m_artSession.clear();
+    m_imgHandle.clear();
+    m_art.setTarget({}, 0, {});
+    updateArtUrl({});
 }
 
 void SystemBluezModel::apply()
@@ -440,6 +472,7 @@ void SystemBluezModel::apply()
     else
         updateBattery(-1);
 
+    const bool wasActive = transportActive();
     const QString state = transport.value(QStringLiteral("State")).toString();
     if (transportPath.isEmpty())
         updateTransport(false, QStringLiteral("none"));
@@ -447,6 +480,10 @@ void SystemBluezModel::apply()
         updateTransport(state == QLatin1StringView("active"), state);
     else
         updateTransport(false, QStringLiteral("idle"));
+    if (!transportActive())
+        m_activeSince.invalidate();
+    else if (!wasActive || !m_activeSince.isValid())
+        m_activeSince.start();
     if (transport.contains(QStringLiteral("Volume"))) {
         const int raw = transport.value(QStringLiteral("Volume")).toInt();
         if (raw != m_transportVolume) {
@@ -469,6 +506,91 @@ void SystemBluezModel::apply()
     updateRepeat(player.value(QStringLiteral("Repeat"), QStringLiteral("off")).toString());
     updateConnected(true);
     syncPolling();
+    applyArt(device.value(QStringLiteral("Address")).toString(),
+             player.value(QStringLiteral("ObexPort")).toInt(),
+             track.value(QStringLiteral("ImgHandle")).toString());
+}
+
+void SystemBluezModel::applyArt(const QString &address, int psm, const QString &handle)
+{
+    if (m_art.sessionPath() != m_artSession) {
+        m_artSession = m_art.sessionPath();
+        m_handed.clear();
+    }
+    const bool playing = status() == QLatin1StringView("playing");
+    const qint64 ran = m_activeSince.isValid() ? m_activeSince.elapsed() : -1;
+    if (handle.isEmpty() || !playing || ran >= artGateMs) {
+        m_handed = handle;
+        m_gateTimer.stop();
+    } else if (ran >= 0 && !m_gateTimer.isActive()) {
+        m_gateTimer.start(static_cast<int>(artGateMs - ran));
+    }
+    m_imgHandle = handle;
+    m_art.setTarget(address, psm, m_handed);
+    updateArt();
+    nudge(handle);
+}
+
+void SystemBluezModel::updateArt()
+{
+    const QString path = m_art.artPath(m_imgHandle);
+    updateArtUrl(path.isEmpty() ? QString() : QUrl::fromLocalFile(path).toString());
+}
+
+void SystemBluezModel::nudge(const QString &handle)
+{
+    if (m_devicePath != m_nudgeDevice) {
+        m_nudgeDevice = m_devicePath;
+        m_nudge = Nudge::Idle;
+        m_nudgeTimer.stop();
+    }
+    if (m_nudge == Nudge::Idle) {
+        if (!m_art.sessionOpen())
+            return;
+        if (!handle.isEmpty() || title().isEmpty() || status() != QLatin1StringView("paused")) {
+            m_nudge = Nudge::Done;
+            return;
+        }
+        m_nudge = Nudge::Next;
+        m_nudgeTitle = title();
+        m_nudgeNumber = trackNumber();
+        m_nudgeTimer.start(nudgeStepMs);
+        next();
+        return;
+    }
+    if (m_nudge == Nudge::Next) {
+        const bool moved = title() != m_nudgeTitle || trackNumber() != m_nudgeNumber
+                           || (m_nudgeNumber == 0 && !handle.isEmpty());
+        if (!moved)
+            return;
+        m_nudge = Nudge::Previous;
+        m_nudgeTimer.start(nudgeStepMs);
+        previous();
+        return;
+    }
+    if (m_nudge == Nudge::Previous) {
+        if (title() != m_nudgeTitle || trackNumber() != m_nudgeNumber)
+            return;
+        m_nudge = Nudge::Watch;
+        m_nudgeTimer.start(nudgeWatchMs);
+    }
+    if (m_nudge == Nudge::Watch && status() == QLatin1StringView("playing") && title() == m_nudgeTitle
+        && trackNumber() == m_nudgeNumber) {
+        m_nudge = Nudge::Done;
+        m_nudgeTimer.stop();
+        pause();
+    }
+}
+
+void SystemBluezModel::nudgeTimeout()
+{
+    if (m_nudge == Nudge::Next || m_nudge == Nudge::Previous) {
+        qInfo() << "microdap bluez: first track art nudge got no answer";
+        if (status() == QLatin1StringView("playing"))
+            pause();
+    }
+    if (m_nudge != Nudge::Idle)
+        m_nudge = Nudge::Done;
 }
 
 void SystemBluezModel::syncPolling()

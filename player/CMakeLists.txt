@@ -99,6 +99,8 @@ add_library(microdapcore STATIC
     src/core/OutputWatch.h
     src/core/OverlayBridge.cpp
     src/core/OverlayBridge.h
+    src/core/PhoneArt.cpp
+    src/core/PhoneArt.h
     src/core/PadSource.h
     src/core/PlayThrough.cpp
     src/core/PlayThrough.h

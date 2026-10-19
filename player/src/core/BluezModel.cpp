@@ -65,6 +65,11 @@ QString BluezModel::album() const
     return m_album;
 }
 
+QString BluezModel::artUrl() const
+{
+    return m_artUrl;
+}
+
 int BluezModel::trackNumber() const
 {
     return m_trackNumber;
@@ -198,6 +203,14 @@ void BluezModel::updateTitle(const QString &title)
         return;
     m_title = title;
     emit titleChanged();
+}
+
+void BluezModel::updateArtUrl(const QString &url)
+{
+    if (m_artUrl == url)
+        return;
+    m_artUrl = url;
+    emit artUrlChanged();
 }
 
 void BluezModel::updateArtist(const QString &artist)

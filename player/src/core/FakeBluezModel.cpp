@@ -1,5 +1,10 @@
 #include "FakeBluezModel.h"
 
+#include <QImage>
+#include <QLinearGradient>
+#include <QPainter>
+#include <QUrl>
+
 namespace microdap {
 
 namespace {
@@ -7,6 +12,7 @@ namespace {
 constexpr qint64 presetPositionMs = 125000;
 constexpr qint64 presetDurationMs = 228000;
 constexpr int presetPairingRemaining = 73;
+constexpr int sampleArtSide = 200;
 
 }
 
@@ -21,6 +27,7 @@ QStringList FakeBluezModel::presets()
         QStringLiteral("off"),
         QStringLiteral("connected"),
         QStringLiteral("active"),
+        QStringLiteral("art"),
         QStringLiteral("pairing"),
         QStringLiteral("last"),
     };
@@ -31,6 +38,7 @@ void FakeBluezModel::clearAll()
     setTransportState(QStringLiteral("none"));
     setStatus(QStringLiteral("stopped"));
     setTrack({}, {}, {}, 0, 0, 0);
+    setArtUrl({});
     setPositionMs(0);
     setBattery(-1);
     setPairing(false);
@@ -53,7 +61,7 @@ bool FakeBluezModel::applyPreset(const QString &name)
         setConnected(true);
         return true;
     }
-    if (name == QLatin1StringView("active")) {
+    if (name == QLatin1StringView("active") || name == QLatin1StringView("art")) {
         clearAll();
         setDeviceName(QStringLiteral("Pixel 8"));
         setBattery(73);
@@ -64,6 +72,8 @@ bool FakeBluezModel::applyPreset(const QString &name)
         setStatus(QStringLiteral("playing"));
         setTransportVolume(64);
         setTransportState(QStringLiteral("active"));
+        if (name == QLatin1StringView("art"))
+            setArtUrl(sampleArt());
         return true;
     }
     if (name == QLatin1StringView("last")) {
@@ -144,6 +154,30 @@ void FakeBluezModel::setArtist(const QString &artist)
 void FakeBluezModel::setAlbum(const QString &album)
 {
     updateAlbum(album);
+}
+
+void FakeBluezModel::setArtUrl(const QString &url)
+{
+    updateArtUrl(url);
+}
+
+QString FakeBluezModel::sampleArt()
+{
+    if (!m_artDir)
+        m_artDir = std::make_unique<QTemporaryDir>();
+    if (!m_artDir->isValid())
+        return {};
+    const QString path = m_artDir->filePath(QStringLiteral("phone.jpg"));
+    QImage image(sampleArtSide, sampleArtSide, QImage::Format_RGB32);
+    QPainter painter(&image);
+    QLinearGradient gradient(0, 0, sampleArtSide, sampleArtSide);
+    gradient.setColorAt(0, QColor(0x2a, 0x4d, 0x69));
+    gradient.setColorAt(1, QColor(0xd9, 0x7b, 0x3f));
+    painter.fillRect(image.rect(), gradient);
+    painter.end();
+    if (!image.save(path, "JPEG"))
+        return {};
+    return QUrl::fromLocalFile(path).toString();
 }
 
 void FakeBluezModel::setTrackNumber(int number)
