@@ -265,12 +265,49 @@ TestCase {
         tc.checkFocusAlphas(page)
     }
 
-    function test_no_ring() {
+    function test_play_ring() {
         const page = open()
-        compare(page.ring, undefined)
+        const ring = page.playRing
+        compare(ring.width, Ui.px(28.6))
+        fuzzyCompare(ring.x + ring.width / 2, Ui.px(50), 0.01)
+        fuzzyCompare(ring.y + ring.height / 2, Ui.px(42.9), 0.01)
+        fuzzyCompare(ring.y + ring.height / 2, page.focusBar.y + page.focusBar.height / 2, 0.01)
+        compare(ring.glyph, "play")
+        compare(ring.strokeWidth, Ui.px(3))
+        fuzzyCompare(ring.ringAlpha, 0.6, 1e-6)
+        compare(page.playRingHit.width, Ui.px(62))
+        compare(page.playRingHit.height, Ui.px(64))
         compare(page.focusBar.x, Ui.px(62))
         verify(router.dispatch("y", false))
         compare(counters.shuffles, 1)
+    }
+
+    function test_play_ring_tap_shuffles() {
+        const page = open()
+        tc.tapAt(page.playRingHit, Ui.px(50), Ui.px(42))
+        compare(counters.shuffles, 1)
+        compare(counters.navigated, [])
+        compare(pages.currentItem, page)
+        mousePress(page.playRingHit, Ui.px(50), Ui.px(42))
+        compare(page.playRing.pressed, true)
+        mouseMove(page.playRingHit, Ui.px(50), Ui.px(42) + Ui.px(40))
+        mouseRelease(page.playRingHit, Ui.px(50), Ui.px(42) + Ui.px(40))
+        wait(0)
+        wait(0)
+        compare(page.playRing.pressed, false)
+        compare(counters.shuffles, 1)
+    }
+
+    function test_no_bar_on_music() {
+        const page = open()
+        compare(page.focusIndex, 0)
+        compare(page.focusBar.opacity, 0)
+        verify(router.dispatch("down", false))
+        compare(page.focusBar.opacity, 1)
+        verify(router.dispatch("down", false))
+        compare(page.focusBar.opacity, 1)
+        page.setFocus(0)
+        compare(page.focusBar.opacity, 0)
     }
 
     function test_bar_follows_animated() {
@@ -328,7 +365,7 @@ TestCase {
         fuzzyCompare(page.menuPanel.y, Ui.px(94), 0.01)
         fuzzyCompare(page.menuPanel.scale, 0.44, 1e-6)
         fuzzyCompare(page.menuPanel.opacity, 0.6, 1e-6)
-        fuzzyCompare(page.focusBar.opacity, 1, 1e-6)
+        compare(page.focusBar.opacity, 0)
         fuzzyCompare(page.menuPanel.angle, -12, 1e-6)
         compare(page.menuPanel.transformOrigin, Item.TopLeft)
         fuzzyCompare(page.menuPanel.hinge, page.menuPanel.width * 0.44, 0.01)
@@ -768,7 +805,8 @@ TestCase {
         tryCompare(page.menuItem(4), "opacity", 1, 1500)
         tryCompare(page, "peekEnter", 1, 1500)
         fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-3)
-        fuzzyCompare(page.focusBar.opacity, 1, 1e-3)
+        fuzzyCompare(page.barEnter, 1, 1e-3)
+        compare(page.focusBar.opacity, 0)
     }
 
     function test_complete_all() {
@@ -895,7 +933,8 @@ TestCase {
         fuzzyCompare(item.x, Ui.px(70), 0.01)
         compare(item.opacity, 1)
         fuzzyCompare(page.quickplayPanel.opacity, 0.4, 1e-3)
-        fuzzyCompare(page.focusBar.opacity, 1, 1e-3)
+        fuzzyCompare(page.barEnter, 1, 1e-3)
+        compare(page.focusBar.opacity, 0)
     }
 
     function test_exit_skipped_without_animated() {

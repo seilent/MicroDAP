@@ -63,6 +63,8 @@ Page {
     property alias quickplayPanel: quickplayPanel
     property alias quickplay: quickplay
     property alias focusBar: focusBar
+    property alias playRing: playRing
+    property alias playRingHit: playRingHit
     property alias sheet: sheet
     property alias watermark: watermark
     property alias menuRepeater: menuRepeater
@@ -203,6 +205,9 @@ Page {
             return "a"
         case "peek":
             return !Ui.landscape && !home.quickplayShown ? "left" : ""
+        case "ring":
+            playRing.pressed = true
+            return ""
         case "menu-peek": {
             if (Ui.landscape || !home.quickplayShown)
                 return ""
@@ -212,6 +217,27 @@ Page {
         default:
             return ""
         }
+    }
+
+    function touchMove(kind: string, index: int, dx: real, dy: real, hit: Item): void {
+        const slop = Ui.px(Ui.touchSlop)
+        if (dx * dx + dy * dy > slop * slop)
+            playRing.pressed = false
+    }
+
+    function touchLift(kind: string, index: int, dx: real, dy: real, hit: Item): void {
+        const slop = Ui.px(Ui.touchSlop)
+        if (!playRing.pressed || dx * dx + dy * dy > slop * slop) {
+            playRing.pressed = false
+            return
+        }
+        ringReturn.restart()
+        home.shuffleAll()
+    }
+
+    function touchCancel(kind: string, index: int, hit: Item): void {
+        ringReturn.stop()
+        playRing.pressed = false
     }
 
     function handleAction(name: string, repeat: bool): bool {
@@ -334,11 +360,38 @@ Page {
         FocusBar {
             id: focusBar
 
+            readonly property real musicY: home.itemBaseline(0) - Ui.px(Ui.homeBarTop)
+
             x: Ui.px(Ui.homeBarX)
             rowY: home.itemBaseline(home.focusIndex) - Ui.px(Ui.homeBarTop)
             rowHeight: Ui.px(Ui.homeBarH)
             animated: home.animated
             opacity: home.barEnter * (1 - home.barExitCurve) * home.focusOpacity
+                * Math.min(1, Math.abs(focusBar.y - focusBar.musicY) / Ui.px(home.pitch))
+        }
+
+        Ring {
+            id: playRing
+
+            x: Ui.px(Ui.homeRingX - Ui.homeRingSize / 2)
+            y: Ui.px(Ui.homeRingY - Ui.homeRingSize / 2)
+            size: Ui.homeRingSize
+            glyph: "play"
+            visible: Ui.landscape || !home.quickplayShown
+            opacity: home.peekEnter * (1 - home.peekExitCurve)
+            animated: home.animated
+        }
+
+        Item {
+            id: playRingHit
+
+            readonly property string touchKind: playRing.visible ? "ring" : ""
+            readonly property bool touchTrack: true
+
+            x: 0
+            y: 0
+            width: Ui.px(Math.min(Ui.homeBarX, Ui.homeRingX + Ui.homeRingSize / 2))
+            height: Ui.px(Ui.homeRingHitBottom)
         }
 
         Repeater {
@@ -493,6 +546,13 @@ Page {
             color: Ui.white(Ui.watermark.alpha)
             font: Ui.font(Ui.watermark)
         }
+    }
+
+    Timer {
+        id: ringReturn
+
+        interval: Motion.touchReturnDelay
+        onTriggered: playRing.pressed = false
     }
 
     Sheet {

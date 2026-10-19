@@ -242,12 +242,12 @@ TestCase {
         menu.complete()
         compare(main.pageStack.dialogFade, 1)
         compare(home.dialogUp, true)
-        fuzzyCompare(home.focusBar.opacity, 0, 1e-6)
+        fuzzyCompare(home.focusOpacity, 0, 1e-6)
         verify(main.router.dispatch("b", false))
         compare(menu.shown, false)
         menu.complete()
         compare(home.dialogUp, false)
-        fuzzyCompare(home.focusBar.opacity, 1, 1e-6)
+        fuzzyCompare(home.focusOpacity, 1, 1e-6)
         compare(fakePower.verbs, [])
     }
 

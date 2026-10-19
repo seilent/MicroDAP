@@ -232,7 +232,7 @@ TestCase {
             compare(item.x, Ui.px(Ui.homeTextX))
         }
         compare(home.watermark.opacity, 1)
-        compare(home.focusBar.opacity, 1)
+        compare(home.focusOpacity, 1)
         compare(home.quickplay.active, false)
         compare(home.quickplay.flick.contentY, 0)
         compare(home.quickplay.scrolling, false)
@@ -241,7 +241,7 @@ TestCase {
         overlayMain.overlayMapped = true
         for (let i = 0; i < home.menuRepeater.count; i++)
             compare(home.menuRepeater.itemAt(i).opacity, 1)
-        compare(home.focusBar.opacity, 1)
+        compare(home.focusOpacity, 1)
     }
 
     function test_menu_lists_dap_items() {

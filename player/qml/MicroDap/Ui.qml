@@ -438,4 +438,8 @@ QtObject {
     readonly property real homeBarX: ui.homeTextX - ui.focusBarOffset
     readonly property real homeBarTop: ui.capHeight * ui.homeItem.size
     readonly property real homeBarH: ui.homeBarTop + ui.homeSubtitleDrop + ui.capHeight * ui.homeSubtitle.size
+    readonly property real homeRingX: 50
+    readonly property real homeRingY: ui.homeFirstBaseline - ui.homeBarTop + ui.homeBarH / 2
+    readonly property real homeRingSize: 28.6
+    readonly property real homeRingHitBottom: 64
 }
