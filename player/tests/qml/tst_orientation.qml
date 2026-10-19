@@ -491,7 +491,7 @@ TestCase {
         main.navigate("settings")
         const page = main.pageStack.currentItem
         page.completeAll()
-        page.focusIndex = page.indexOfKey("saver")
+        page.focusKey("saver")
         page.handleAction("a", false)
         page.handleAction("right", false)
         compare(page.editing, true)
@@ -664,9 +664,8 @@ TestCase {
         main.navigate("settings")
         const page = main.pageStack.currentItem
         page.completeAll()
-        const about = page.indexOfKey("about")
-        page.focusIndex = about
-        page.keepFocusVisible()
+        verify(page.focusKey("about"))
+        const about = page.focusIndex
         tc.setOrientation("landscape")
         compare(main.pageStack.depth, 2)
         compare(main.pageStack.currentItem, page)
@@ -679,8 +678,7 @@ TestCase {
         main.navigate("settings")
         const page = main.pageStack.currentItem
         page.completeAll()
-        page.focusIndex = page.indexOfKey("about")
-        page.keepFocusVisible()
+        page.focusKey("pair")
         const bottom = page.flick.contentY
         verify(bottom > 0)
         main.navigate("eq")
@@ -872,7 +870,7 @@ TestCase {
         main.navigate("settings")
         const page = main.pageStack.currentItem
         page.completeAll()
-        page.focusIndex = page.indexOfKey("saver")
+        page.focusKey("saver")
         page.handleAction("a", false)
         page.handleAction("right", false)
         page.handleAction("a", false)
@@ -941,7 +939,7 @@ TestCase {
         main.navigate("settings")
         const page = main.pageStack.currentItem
         page.completeAll()
-        page.focusIndex = page.indexOfKey("saver")
+        page.focusKey("saver")
         page.handleAction("a", false)
         compare(page.editing, true)
         fakeSensor.report("left-up", Ui.landscapeTurn)

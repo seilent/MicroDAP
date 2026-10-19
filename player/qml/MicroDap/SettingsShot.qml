@@ -25,19 +25,19 @@ Item {
 
     function applyFixture(): void {
         if (root.bootShot || root.aboutShot) {
-            screen.focusIndex = screen.indexOfKey(root.bootShot ? "boot" : "about")
+            screen.focusKey(root.bootShot ? "boot" : "about")
             if (root.fixture === "boot-edit") {
                 screen.activate()
                 screen.step(1)
             } else if (root.aboutShot) {
                 screen.activate()
-                screen.focusIndex = screen.indexOfKey("update")
+                screen.focusKey("update")
             }
             screen.keepFocusVisible()
             return
         }
         if (root.levelShot || root.rateShot || root.dacShot) {
-            screen.focusIndex = screen.indexOfKey(root.levelShot ? "level" : root.dacShot || root.fixture === "sample-rate-locked" ? "eq" : "rate")
+            screen.focusKey(root.levelShot ? "level" : root.dacShot || root.fixture === "sample-rate-locked" ? "eq" : "rate")
             if (root.fixture === "bit-perfect-edit" || root.fixture === "sample-rate-edit") {
                 screen.activate()
                 for (let i = 0; i < (root.levelShot ? 1 : 7); i++)
@@ -47,7 +47,7 @@ Item {
             return
         }
         if (root.fixture === "touch" || root.fixture === "touch-edit") {
-            screen.focusIndex = screen.indexOfKey("touch")
+            screen.focusKey("touch")
             if (root.fixture === "touch-edit") {
                 screen.activate()
                 screen.step(1)
@@ -56,7 +56,7 @@ Item {
             return
         }
         if (root.fixture.startsWith("auto-rotate")) {
-            screen.focusIndex = screen.indexOfKey(root.fixture === "auto-rotate-below" ? "saver" : "autoRotate")
+            screen.focusKey(root.fixture === "auto-rotate-below" ? "saver" : "autoRotate")
             if (root.fixture === "auto-rotate-edit") {
                 screen.activate()
                 screen.step(1)
@@ -64,10 +64,12 @@ Item {
             screen.keepFocusVisible()
             return
         }
-        const index = screen.indexOfKey("orientation")
-        if (index < 0 || !root.fixture.startsWith("orientation"))
+        if (root.fixture.startsWith("pivot-")) {
+            screen.switchPivot(screen.pivots.indexOf(root.fixture.substring(6)))
             return
-        screen.focusIndex = index
+        }
+        if (!root.fixture.startsWith("orientation") || !screen.focusKey("orientation"))
+            return
         if (root.fixture === "orientation-edit" || root.fixture === "orientation-edit-end") {
             screen.activate()
             for (let i = 0; i < (root.fixture === "orientation-edit" ? 1 : 3); i++)

@@ -176,12 +176,12 @@ QList<Row> build()
     out.push_back(steps("power", "suspend", "suspend after", "suspendMinutes", numbers({0, 5, 10, 30, 60})));
     out.push_back(toggle("power", "wifi", "wi-fi when off", "wifiOffScreenOff"));
 
-    Row boot = choice("power", "boot", "boot into", "bootSession", {});
+    Row boot = choice("system", "boot", "boot into", "bootSession", {});
     out.push_back(shown(readOnly(draft(boot, "boot target write"), "boot"), "boot"));
 
-    Row closePlayer = action("power", "closePlayer", "close player", "closePlayer");
+    Row closePlayer = action("system", "closePlayer", "close player", "closePlayer");
     out.push_back(shown(closePlayer, "overlay"));
-    out.push_back(action("power", "about", "about", "about"));
+    out.push_back(action("system", "about", "about", "about"));
 
     return out;
 }
@@ -190,7 +190,8 @@ QList<Row> build()
 
 QStringList SettingsRows::pivots()
 {
-    return {QStringLiteral("output"), QStringLiteral("library"), QStringLiteral("display"), QStringLiteral("power")};
+    return {QStringLiteral("output"), QStringLiteral("library"), QStringLiteral("display"), QStringLiteral("power"),
+            QStringLiteral("system")};
 }
 
 QStringList SettingsRows::types()

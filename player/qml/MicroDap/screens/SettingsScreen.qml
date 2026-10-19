@@ -22,6 +22,8 @@ Page {
     property bool screenOff: false
     property bool foldersOpen: false
     property bool aboutOpen: false
+    property int pivotIndex: 0
+    property int shownPivot: 0
     property bool editing: false
     property string editKey: ""
     property var editOriginal: null
@@ -41,6 +43,8 @@ Page {
     readonly property bool usbPresent: page.outputControl !== null && page.outputControl.usbPresent === true
     readonly property bool usbActive: page.outputControl !== null && page.outputControl.activeOutput === "usb"
     readonly property var table: Env.settingsRows
+    readonly property var pivots: page.buildPivots()
+    readonly property string shownName: page.pivots[page.shownPivot] === undefined ? "" : page.pivots[page.shownPivot]
     readonly property var outputs: page.usbPresent ? page.valuesOf("output") : page.valuesOf("output").filter((v) => v !== "usb")
     readonly property var codecs: page.valuesOf("codec")
     readonly property var hpGains: page.valuesOf("hpGain")
@@ -137,7 +141,9 @@ Page {
     readonly property real focusY: page.rowTopOf(page.focusIndex) - flick.contentY
     readonly property real focusHeight: page.focusedRow === null ? 0 : page.rowHeightOf(page.focusedRow)
     readonly property bool scrolling: scrollAnim.running
+    readonly property bool switching: pivotAnim.running
     property alias header: header
+    property alias strip: strip
     property alias flick: flick
     property alias focusBar: focusBar
     property alias sheet: sheet
@@ -153,8 +159,8 @@ Page {
         return page.rowAtY(flick.contentY)
     }
 
-    function feather(): void {
-        page.entrance(Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true, page.firstVisible())
+    function feather(dir: int): void {
+        page.entrance(dir * Motion.pivotShift, Motion.pivotRowStagger, Motion.pivotRowCap, Motion.pivotRows, true, page.firstVisible())
     }
 
     function refreshFrom(index: int): void {
@@ -264,8 +270,13 @@ Page {
         return r === null ? [] : r.values
     }
 
-    function label(title: string): var {
-        return { kind: "label", key: "label-" + title, title: title, value: "", readOnly: true }
+    function buildPivots(): var {
+        const out = []
+        for (const r of page.table) {
+            if (out.indexOf(r.pivot) < 0)
+                out.push(r.pivot)
+        }
+        return out
     }
 
     function ruleOn(rule: string): bool {
@@ -376,14 +387,9 @@ Page {
 
     function buildRows(): var {
         const out = []
-        let pivot = ""
         for (const spec of page.table) {
-            if (!page.shownOn(spec.shown))
+            if (spec.pivot !== page.shownName || !page.shownOn(spec.shown))
                 continue
-            if (spec.pivot !== pivot) {
-                pivot = spec.pivot
-                out.push(page.label(pivot))
-            }
             out.push(page.row(spec))
             if (spec.key === "folders" && page.foldersOpen) {
                 for (const f of page.folders)
@@ -405,7 +411,7 @@ Page {
     }
 
     function rowHeightOf(r: var): real {
-        return Ui.px(r.kind === "label" ? Ui.rowHeight : Ui.settingsPitch)
+        return Ui.px(Ui.settingsPitch)
     }
 
     function buildTops(list: var): var {
@@ -433,7 +439,88 @@ Page {
 
     function isFocusable(index: int): bool {
         const r = page.rows[index]
-        return r !== undefined && r !== null && r.kind !== "label"
+        return r !== undefined && r !== null
+    }
+
+    function pivotOfKey(key: string): int {
+        const r = page.tableRow(key)
+        if (r !== null)
+            return page.pivots.indexOf(r.pivot)
+        if (key.startsWith("root:"))
+            return page.pivots.indexOf(page.tableRow("folders").pivot)
+        if (["image", "update", "track", "pcm"].indexOf(key) >= 0)
+            return page.pivots.indexOf(page.tableRow("about").pivot)
+        return -1
+    }
+
+    function focusKey(key: string): bool {
+        const pivot = page.pivotOfKey(key)
+        if (pivot >= 0 && pivot !== page.pivotIndex) {
+            page.cancelEdit()
+            d.internal = true
+            page.pivotIndex = pivot
+            d.internal = false
+            page.landPivot()
+        }
+        const index = page.indexOfKey(key)
+        if (index < 0)
+            return false
+        page.focusIndex = index
+        page.keepFocusVisible()
+        return true
+    }
+
+    function savePivot(): void {
+        const r = page.focusedRow
+        d.spots[page.shownPivot] = { key: r === null ? "" : r.key, index: page.focusIndex, y: scrollAnim.running ? scrollAnim.to : flick.contentY }
+    }
+
+    function restorePivot(): void {
+        scrollAnim.stop()
+        touchScroller.stop()
+        const spot = d.spots[page.shownPivot]
+        if (spot === undefined) {
+            page.focusIndex = Math.max(0, page.nearestFocusable(0, 1))
+            flick.contentY = 0
+            return
+        }
+        const at = page.indexOfKey(spot.key)
+        page.focusIndex = at >= 0 ? at : Math.max(0, Math.min(spot.index, page.rows.length - 1))
+        page.fixFocus()
+        flick.contentY = page.visibleY(page.focusIndex, spot.y)
+    }
+
+    function landPivot(): void {
+        pivotAnim.stop()
+        flick.x = 0
+        flick.opacity = 1
+        page.settle()
+        if (page.shownPivot === page.pivotIndex)
+            return
+        page.savePivot()
+        page.shownPivot = page.pivotIndex
+        page.restorePivot()
+    }
+
+    function switchPivot(delta: int): bool {
+        const target = Math.max(0, Math.min(page.pivots.length - 1, page.pivotIndex + delta))
+        if (target === page.pivotIndex)
+            return false
+        page.landPivot()
+        page.cancelEdit()
+        if (sheet.shown)
+            sheet.close()
+        const dir = target > page.pivotIndex ? 1 : -1
+        d.internal = true
+        page.pivotIndex = target
+        d.internal = false
+        if (!page.live) {
+            page.landPivot()
+            return true
+        }
+        pivotAnim.dir = dir
+        pivotAnim.start()
+        return true
     }
 
     function nearestFocusable(from: int, dir: int): int {
@@ -867,6 +954,7 @@ Page {
     }
 
     function completeAll() {
+        page.landPivot()
         page.settle()
         page.completeScroll()
         sheet.complete()
@@ -880,6 +968,8 @@ Page {
     }
 
     function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        if (kind === "pivot")
+            return "tap"
         if (page.editing) {
             if (kind === "header")
                 return "b"
@@ -900,6 +990,14 @@ Page {
     }
 
     function touchTap(kind: string, index: int, hit: Item) {
+        if (kind === "pivot") {
+            page.cancelEdit()
+            if (sheet.shown)
+                sheet.close()
+            if (index !== page.pivotIndex)
+                page.switchPivot(index - page.pivotIndex)
+            return
+        }
         if (!page.editing && (kind === "row" || kind === "sub"))
             page.ensureVisible(Motion.scroll)
     }
@@ -907,6 +1005,13 @@ Page {
     function handleAction(name: string, repeat: bool): bool {
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
+        if (name === "lb" || name === "rb") {
+            if (!repeat)
+                page.switchPivot(name === "lb" ? -1 : 1)
+            return true
+        }
+        if (page.switching)
+            page.landPivot()
         if (page.editing)
             return page.handleEdit(name, repeat)
         switch (name) {
@@ -955,7 +1060,12 @@ Page {
 
     onEntered: (first, kind) => {
         if (page.arriving)
-            page.feather()
+            page.feather(1)
+    }
+
+    onPivotIndexChanged: {
+        if (d.ready && !d.internal)
+            page.landPivot()
     }
 
     onLiveChanged: {
@@ -973,13 +1083,18 @@ Page {
         }
         page.folders = list
         page.refreshBootChoices()
+        page.shownPivot = page.pivotIndex
         page.focusIndex = Math.max(0, page.nearestFocusable(0, 1))
+        d.ready = true
     }
 
     QtObject {
         id: d
 
         property int pendingFrom: -1
+        property bool internal: false
+        property bool ready: false
+        property var spots: ({})
     }
 
     Connections {
@@ -1007,15 +1122,13 @@ Page {
         required property var modelData
         readonly property bool isFocused: page.focusIndex === item.index
         readonly property bool editing: page.editing && page.editKey === item.modelData.key
-        readonly property bool label: item.modelData.kind === "label"
         readonly property bool sub: item.modelData.kind === "sub"
         readonly property bool info: item.modelData.kind === "info"
         readonly property bool hasSwatch: item.modelData.key === "accent"
-        readonly property string touchKind: item.label || item.info ? "" : item.sub ? "sub" : "row"
+        readonly property string touchKind: item.info ? "" : item.sub ? "sub" : "row"
         readonly property int touchIndex: item.index
-        readonly property var titleRole: item.label ? Ui.sectionLabel : item.sub ? Ui.settingsSub : item.info ? Ui.settingsValue : Ui.settingsItem
-        readonly property real titleAlpha: item.label ? Ui.sectionLabel.alpha
-            : item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
+        readonly property var titleRole: item.sub ? Ui.settingsSub : item.info ? Ui.settingsValue : Ui.settingsItem
+        readonly property real titleAlpha: item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
         readonly property real valueAlpha: item.isFocused ? Ui.settingsValueFocused : Ui.settingsValueDim
         readonly property Item titleItem: titleText
         readonly property Item valueItem: valueText
@@ -1111,9 +1224,7 @@ Page {
             id: titleText
 
             x: Ui.px(Ui.hubEdge)
-            y: item.label
-                ? item.height - Ui.px(Ui.settingsLabelBaselineInset) - titleText.baselineOffset
-                : (item.height - titleText.height) / 2
+            y: (item.height - titleText.height) / 2
             width: swatch.visible ? swatch.x - Ui.px(Ui.gutter) - titleText.x
                 : valueText.visible ? valueText.x - Ui.px(Ui.gutter) - titleText.x : item.width - Ui.px(Ui.hubEdge) - titleText.x
             text: item.modelData.title
@@ -1230,10 +1341,10 @@ Page {
     FocusBar {
         id: focusBar
 
-        visible: page.focusedRow !== null
+        visible: page.focusedRow !== null && page.shownPivot === page.pivotIndex
         rowY: flick.y + page.focusY
         rowHeight: page.focusHeight
-        opacity: page.focusOpacity
+        opacity: flick.opacity * page.focusOpacity
         animated: page.live
     }
 
@@ -1241,6 +1352,15 @@ Page {
         id: header
 
         text: "settings"
+        shift: strip.headerShift
+        animated: page.live
+    }
+
+    PivotStrip {
+        id: strip
+
+        labels: page.pivots
+        activeIndex: page.pivotIndex
         animated: page.live
     }
 
@@ -1255,11 +1375,67 @@ Page {
         }
     }
 
+    Repeater {
+        model: sheet.shown ? strip.count : 0
+
+        delegate: Item {
+            id: pivotHit
+
+            required property int index
+            readonly property Item label: strip.labelItem(pivotHit.index)
+            readonly property string touchKind: "pivot"
+            readonly property int touchIndex: pivotHit.index
+
+            x: strip.x + strip.restX - strip.activeX + strip.positionOf(pivotHit.index)
+            y: strip.y + (pivotHit.label === null ? 0 : pivotHit.label.y)
+            width: strip.widthOf(pivotHit.index)
+            height: pivotHit.label === null ? 0 : Math.max(0, Math.min(pivotHit.label.height, sheet.height - sheet.panel.height - pivotHit.y))
+        }
+    }
+
     NumberAnimation {
         id: scrollAnim
 
         target: flick
         property: "contentY"
         easing.type: Motion.easeIn
+    }
+
+    SequentialAnimation {
+        id: pivotAnim
+
+        property real dir: 1
+
+        ParallelAnimation {
+            NumberAnimation {
+                target: flick
+                property: "x"
+                to: -pivotAnim.dir * Ui.px(Motion.pivotShift)
+                duration: Motion.pivotOut
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.strip
+            }
+            NumberAnimation {
+                target: flick
+                property: "opacity"
+                to: 0
+                duration: Motion.pivotOut
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.strip
+            }
+        }
+        ScriptAction {
+            script: {
+                page.savePivot()
+                page.shownPivot = page.pivotIndex
+                page.restorePivot()
+                flick.x = 0
+                flick.opacity = 1
+                page.feather(pivotAnim.dir)
+            }
+        }
+        PauseAnimation {
+            duration: Motion.pivotRows + Motion.pivotRowCap * Motion.pivotRowStagger
+        }
     }
 }

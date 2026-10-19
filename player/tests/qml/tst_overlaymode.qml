@@ -294,7 +294,7 @@ TestCase {
         overlayMain.navigate("settings")
         overlayMain.pageStack.completeAll()
         const page = overlayMain.pageStack.currentItem
-        page.focusIndex = page.indexOfKey("scale")
+        page.focusKey("scale")
         overlayMain.overlayMapped = false
         compare(overlayMain.pageStack.depth, 2)
         compare(overlayMain.saverTimer.running, false)
@@ -369,13 +369,16 @@ TestCase {
         overlayMain.pageStack.completeAll()
         const page = overlayMain.pageStack.currentItem
         compare(page.overlay, true)
-        compare(page.indexOfKey("gameMode"), -1)
-        compare(page.indexOfKey("keepPhone"), -1)
-        compare(page.rows[page.indexOfKey("closePlayer")].title, "close player")
-        compare(page.rows[page.indexOfKey("toasts")].title, "toasts in game")
-        compare(page.rows[page.indexOfKey("pair")].value, "pair in dap mode")
+        compare(page.focusKey("gameMode"), false)
+        compare(page.focusKey("keepPhone"), false)
+        verify(page.focusKey("toasts"))
+        compare(page.focusedRow.title, "toasts in game")
+        verify(page.focusKey("pair"))
+        compare(page.focusedRow.value, "pair in dap mode")
+        verify(page.focusKey("closePlayer"))
+        compare(page.focusedRow.title, "close player")
         page.bridge = fakeBridge
-        page.focusIndex = page.indexOfKey("closePlayer")
+        page.focusKey("closePlayer")
         overlayMain.router.dispatch("a", false)
         compare(page.editing, false)
         compare(page.sheet.title, "close player")
@@ -389,7 +392,7 @@ TestCase {
         overlayMain.navigate("settings")
         overlayMain.pageStack.completeAll()
         const page = overlayMain.pageStack.currentItem
-        page.focusIndex = page.indexOfKey("toasts")
+        page.focusKey("toasts")
         verify(overlayMain.router.dispatch("a", false))
         compare(page.editing, true)
         verify(overlayMain.router.dispatch("right", false))

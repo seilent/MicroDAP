@@ -498,7 +498,8 @@ foreach(screen IN ITEMS artist album settings playlists history eq power saver s
     set_property(TEST screenshot-${screen}-landscape APPEND PROPERTY ENVIRONMENT "MICRODAP_FONT_DIR=${MICRODAP_TEST_FONT_DIR}")
 endforeach()
 
-foreach(shot IN ITEMS settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
+foreach(shot IN ITEMS settings:pivot-library settings:pivot-display settings:pivot-power settings:pivot-system
+        settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
         settings:about-missing power:power-none power:power-long)
     string(REPLACE ":" ";" parts ${shot})
     list(GET parts 0 screen)

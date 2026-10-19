@@ -251,19 +251,20 @@ TestCase {
         Page {}
     }
 
+    readonly property var expectedPivots: ["output", "library", "display", "power", "system"]
     readonly property var expectedKeys: [
-        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair",
-        "label-library", "folders", "rescan",
-        "label-display", "accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts",
-        "label-power", "screenOff", "suspend", "wifi", "boot",
-        "about"
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair"],
+        ["folders", "rescan"],
+        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts"],
+        ["screenOff", "suspend", "wifi"],
+        ["boot", "about"]
     ]
     readonly property var overlayKeys: [
-        "label-output", "output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair",
-        "label-library", "folders", "rescan",
-        "label-display", "accent", "accentArt", "scale", "saver", "toasts",
-        "label-power", "screenOff", "suspend", "wifi", "boot", "closePlayer",
-        "about"
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair"],
+        ["folders", "rescan"],
+        ["accent", "accentArt", "scale", "saver", "toasts"],
+        ["screenOff", "suspend", "wifi"],
+        ["boot", "closePlayer", "about"]
     ]
 
     function setWindow(w, h) {
@@ -364,17 +365,38 @@ TestCase {
     }
 
     function keyIndex(page, key) {
+        const pivot = page.pivotOfKey(key)
+        if (pivot >= 0 && pivot !== page.pivotIndex)
+            page.switchPivot(pivot - page.pivotIndex)
         const i = page.indexOfKey(key)
         verify(i >= 0)
         return i
     }
 
+    function absent(page, key) {
+        for (const list of tc.allKeys(page))
+            verify(list.indexOf(key) < 0, key)
+    }
+
+    function allKeys(page) {
+        const start = page.pivotIndex
+        const out = []
+        for (let p = 0; p < page.pivots.length; p++) {
+            page.switchPivot(p - page.pivotIndex)
+            out.push(tc.keys(page))
+        }
+        page.switchPivot(start - page.pivotIndex)
+        return out
+    }
+
     function rowOf(page, key) {
-        return page.rows[tc.keyIndex(page, key)]
+        const i = tc.keyIndex(page, key)
+        return page.rows[i]
     }
 
     function itemOf(page, key) {
-        return tc.rowItem(page, tc.keyIndex(page, key))
+        const i = tc.keyIndex(page, key)
+        return tc.rowItem(page, i)
     }
 
     function focusKey(page, key) {
@@ -401,22 +423,114 @@ TestCase {
     function test_groups_and_order() {
         const page = open()
         compare(page.header.text, "settings")
-        compare(JSON.stringify(tc.keys(page)), JSON.stringify(tc.expectedKeys))
+        compare(JSON.stringify(page.pivots), JSON.stringify(tc.expectedPivots))
+        compare(JSON.stringify(page.strip.labels), JSON.stringify(tc.expectedPivots))
+        compare(page.pivotIndex, 0)
+        compare(JSON.stringify(tc.allKeys(page)), JSON.stringify(tc.expectedKeys))
         compare(page.rows[0].title, "output")
-        compare(tc.rowOf(page, "label-library").title, "library")
-        compare(tc.rowOf(page, "label-display").title, "display")
-        compare(tc.rowOf(page, "label-power").title, "power")
+        for (const r of page.rows)
+            verify(r.kind !== "label")
+        page.switchPivot(4)
         compare(page.rows[page.rows.length - 1].title, "about")
+        page.switchPivot(-4)
         compare(page.flick.y, Ui.px(128))
-        compare(page.focusIndex, 1)
+        compare(page.focusIndex, 0)
         compare(page.editing, false)
+    }
+
+    function test_pivots_switch_and_keep_focus() {
+        const page = open()
+        compare(router.dispatch("lb", false), true)
+        compare(page.pivotIndex, 0)
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("down", false))
+        compare(page.focusIndex, 2)
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 1)
+        compare(page.shownPivot, 1)
+        compare(page.focusIndex, 0)
+        compare(page.focusedRow.key, "folders")
+        verify(router.dispatch("down", false))
+        compare(router.dispatch("down", false), false)
+        compare(page.focusedRow.key, "rescan")
+        verify(router.dispatch("lb", false))
+        compare(page.pivotIndex, 0)
+        compare(page.focusedRow.key, "hpAmp")
+        for (let i = 0; i < 4; i++)
+            router.dispatch("rb", false)
+        compare(page.pivotIndex, 4)
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 4)
+        compare(page.focusedRow.key, "boot")
+    }
+
+    function test_pivot_animates_t5() {
+        const page = open({ animated: true })
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 1)
+        compare(page.shownPivot, 0)
+        verify(page.switching)
+        compare(page.focusBar.visible, false)
+        tryCompare(page, "shownPivot", 1, 1000)
+        compare(page.focusedRow.key, "folders")
+        tryCompare(page, "switching", false, 2000)
+        compare(page.flick.x, 0)
+        compare(page.flick.opacity, 1)
+        compare(page.focusBar.visible, true)
+    }
+
+    function test_pivot_label_tap_switches() {
+        const page = open()
+        const label = page.strip.labelItem(1)
+        tc.tapAt(label, label.width / 2, label.height / 2)
+        compare(page.pivotIndex, 1)
+        compare(page.focusedRow.key, "folders")
+        compare(page.editing, false)
+        compare(pages.depth, 2)
+    }
+
+    function test_pivot_label_tap_reverts_edit() {
+        const page = open()
+        tc.edit(page, "volumeStep")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.volumeStep, 10)
+        const label = page.strip.labelItem(2)
+        tc.tapAt(label, label.width / 2, label.height / 2)
+        compare(page.editing, false)
+        compare(fakeSettings.volumeStep, 5)
+        compare(page.pivotIndex, 2)
+    }
+
+    function test_pivot_label_tap_closes_sheet() {
+        const page = open({ overlay: true, bridge: fakeBridge })
+        tc.focusKey(page, "closePlayer")
+        verify(router.dispatch("a", false))
+        compare(page.sheet.shown, true)
+        const label = page.strip.labelItem(4)
+        tc.tapAt(label, label.width / 2, label.height / 2)
+        compare(page.sheet.shown, false)
+        compare(page.pivotIndex, 4)
+        compare(fakeBridge.closes, 0)
+    }
+
+    function test_open_from_home_lands_on_output() {
+        const m = tc.openInMain()
+        m.page.switchPivot(3)
+        compare(m.page.pivotIndex, 3)
+        m.main.pageStack.pop()
+        m.main.navigate("settings")
+        const page = m.main.pageStack.currentItem
+        compare(page.objectName, "settings")
+        page.completeAll()
+        compare(page.pivotIndex, 0)
+        compare(page.focusedRow.key, "output")
     }
 
     function test_dap_rows_removed() {
         const page = open()
-        compare(page.indexOfKey("keepPhone"), -1)
-        compare(page.indexOfKey("gameMode"), -1)
-        compare(page.indexOfKey("closePlayer"), -1)
+        tc.absent(page, "keepPhone")
+        tc.absent(page, "gameMode")
+        tc.absent(page, "closePlayer")
         compare(tc.keyIndex(page, "about"), tc.keyIndex(page, "boot") + 1)
         for (const r of page.rows) {
             verify(r.title !== "keep phone in game mode")
@@ -424,25 +538,15 @@ TestCase {
             verify(r.title !== "close player")
         }
         const overlayPage = open({ overlay: true, bridge: fakeBridge })
-        compare(overlayPage.indexOfKey("keepPhone"), -1)
-        compare(overlayPage.indexOfKey("gameMode"), -1)
+        verify(tc.allKeys(overlayPage).every((list) => list.indexOf("keepPhone") < 0 && list.indexOf("gameMode") < 0))
         compare(tc.keyIndex(overlayPage, "closePlayer"), tc.keyIndex(overlayPage, "boot") + 1)
     }
 
     function test_row_geometry() {
         const page = open()
-        const label = tc.rowItem(page, 0)
-        compare(label.height, Ui.px(40))
-        compare(label.titleItem.font.pixelSize, Ui.fontPx(8))
-        compare(label.titleItem.font.styleName, "Regular")
-        compare(label.titleItem.font.capitalization, Font.AllUppercase)
-        compare(label.titleItem.x, Ui.px(20))
-        fuzzyCompare(label.titleItem.y + label.titleItem.baselineOffset, Ui.px(40 - 8), 0.5)
-        fuzzyCompare(label.titleItem.color.a, 0.6, 1 / 255)
-        compare(label.valueItem.visible, false)
-        const row = tc.rowItem(page, 1)
+        const row = tc.rowItem(page, 0)
         compare(row.height, Ui.px(43))
-        compare(row.y, Ui.px(40))
+        compare(row.y, 0)
         compare(row.titleItem.font.pixelSize, Ui.fontPx(17))
         compare(row.titleItem.font.styleName, "Bold")
         compare(row.titleItem.font.capitalization, Font.AllUppercase)
@@ -460,31 +564,21 @@ TestCase {
         fuzzyCompare(pair.titleItem.color.a, 0.6, 1 / 255)
         compare(pair.valueItem.visible, false)
         compare(page.focusBar.x, Ui.px(12))
-        fuzzyCompare(page.focusBar.y, Ui.px(128 + 40), 0.01)
+        fuzzyCompare(page.focusBar.y, Ui.px(128), 0.01)
         compare(page.focusBar.rowHeight, Ui.px(43))
+        compare(page.strip.y, 0)
+        compare(page.strip.labelItem(0).x + page.strip.labelItem(0).parent.x, Ui.px(20))
     }
 
-    function test_labels_skipped() {
+    function test_rows_stop_at_pivot_ends() {
         const page = open()
         compare(router.dispatch("up", false), false)
-        compare(page.focusIndex, 1)
+        compare(page.focusIndex, 0)
         for (let i = 0; i < 10; i++)
             verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "pair"))
-        verify(router.dispatch("down", false))
-        compare(page.focusIndex, tc.keyIndex(page, "folders"))
-        verify(router.dispatch("down", false))
-        compare(page.focusIndex, tc.keyIndex(page, "rescan"))
-        verify(router.dispatch("down", false))
-        compare(page.focusIndex, tc.keyIndex(page, "accent"))
-        verify(router.dispatch("up", false))
-        compare(page.focusIndex, tc.keyIndex(page, "rescan"))
-        verify(router.dispatch("up", false))
-        compare(page.focusIndex, tc.keyIndex(page, "folders"))
-        for (let i = 0; i < 25; i++)
-            router.dispatch("down", false)
-        compare(page.focusIndex, tc.keyIndex(page, "about"))
         compare(router.dispatch("down", false), false)
+        compare(page.pivotIndex, 0)
         page.completeScroll()
         const top = page.rowTopOf(page.focusIndex) - page.flick.contentY
         verify(top >= 0)
@@ -1440,7 +1534,7 @@ TestCase {
         compare(tc.itemOf(page, "toasts").titleItem.text, "toasts in game")
         compare(tc.rowOf(page, "toasts").value, "off")
         verify(tc.keyIndex(page, "toasts") > tc.keyIndex(page, "saver"))
-        verify(tc.keyIndex(page, "toasts") < tc.keyIndex(page, "label-power"))
+        compare(tc.rowOf(page, "toasts").spec.pivot, "display")
         tc.edit(page, "toasts")
         verify(router.dispatch("right", false))
         compare(fakeSettings.overlayToasts, true)
@@ -1457,8 +1551,7 @@ TestCase {
 
     function test_overlay_mode_rows() {
         const page = open({ overlay: true, bridge: fakeBridge })
-        compare(JSON.stringify(tc.keys(page)), JSON.stringify(tc.overlayKeys))
-        compare(page.indexOfKey("rgb"), -1)
+        compare(JSON.stringify(tc.allKeys(page)), JSON.stringify(tc.overlayKeys))
         compare(tc.rowOf(page, "hpGain").title, "headphone gain")
         compare(tc.rowOf(page, "closePlayer").title, "close player")
         compare(tc.rowOf(page, "pair").value, "pair in dap mode")
@@ -1520,7 +1613,7 @@ TestCase {
         compare(page.rows[folders + 2].title, "/run/media/micro/SD")
         compare(page.rows[folders + 2].value, "off")
         compare(page.rows[folders + 3].key, "rescan")
-        compare(page.rows[folders + 4].kind, "label")
+        compare(page.rows.length, folders + 4)
         compare(page.focusIndex, folders)
         const sub = tc.rowItem(page, folders + 1)
         compare(sub.height, Ui.px(43))
@@ -1549,7 +1642,7 @@ TestCase {
         router.dispatch("a", false)
         compare(page.foldersOpen, false)
         compare(page.rows[folders + 1].key, "rescan")
-        compare(page.rows[folders + 2].kind, "label")
+        compare(page.rows.length, folders + 2)
     }
 
     function test_accent_hue_swatch() {
@@ -1625,9 +1718,9 @@ TestCase {
 
     function test_accent_rows_in_overlay() {
         const page = open({ overlay: true, bridge: fakeBridge })
-        verify(page.indexOfKey("accent") >= 0)
-        verify(page.indexOfKey("accentArt") >= 0)
-        compare(page.indexOfKey("rgb"), -1)
+        tc.keyIndex(page, "accent")
+        tc.keyIndex(page, "accentArt")
+        tc.absent(page, "rgb")
         tc.edit(page, "accent")
         verify(router.dispatch("right", false))
         compare(fakeSettings.accentHue, 0)
@@ -1711,7 +1804,7 @@ TestCase {
 
     function test_orientation_absent_in_overlay() {
         const page = open({ overlay: true, bridge: fakeBridge })
-        compare(page.indexOfKey("orientation"), -1)
+        tc.absent(page, "orientation")
     }
 
     function openInMain(properties) {
@@ -1730,7 +1823,7 @@ TestCase {
         const m = tc.openInMain()
         const page = m.page
         compare(Ui.orientationActive, true)
-        page.focusIndex = page.indexOfKey("orientation")
+        page.focusKey("orientation")
         verify(page.handleAction("a", false))
         compare(page.editing, true)
         page.handleAction("right", false)
@@ -1741,7 +1834,7 @@ TestCase {
         tryCompare(Ui, "turn", Ui.landscapeTurn, 1000)
         compare(m.main.pageStack.currentItem, page)
         compare(tc.rowOf(page, "orientation").value, "landscape")
-        page.focusIndex = page.indexOfKey("orientation")
+        page.focusKey("orientation")
         page.handleAction("a", false)
         page.handleAction("left", false)
         page.handleAction("b", false)
@@ -1756,7 +1849,7 @@ TestCase {
         tryCompare(Ui, "orientationActive", false, 1000)
         compare(tc.rowOf(m.page, "orientation").value, "external display")
         compare(tc.rowOf(m.page, "orientation").readOnly, true)
-        m.page.focusIndex = m.page.indexOfKey("orientation")
+        m.page.focusKey("orientation")
         m.page.handleAction("a", false)
         compare(m.page.editing, false)
         fakeOutputs.internal = true
@@ -1838,7 +1931,7 @@ TestCase {
 
     function test_auto_rotate_absent_in_overlay() {
         const page = open({ overlay: true, bridge: fakeBridge, sensor: fakeSensor })
-        compare(page.indexOfKey("autoRotate"), -1)
+        tc.absent(page, "autoRotate")
     }
 
     function test_auto_rotate_in_main() {
@@ -1846,7 +1939,7 @@ TestCase {
         const page = m.page
         compare(tc.rowOf(page, "autoRotate").value, "off")
         compare(fakeSensor.wanted[fakeSensor.wanted.length - 1], false)
-        page.focusIndex = page.indexOfKey("autoRotate")
+        page.focusKey("autoRotate")
         page.handleAction("a", false)
         page.handleAction("right", false)
         compare(fakeSettings.autoRotate, false)
@@ -1866,7 +1959,7 @@ TestCase {
         const m = tc.openInMain()
         const page = m.page
         const spy = createTemporaryObject(spyComponent, tc, { target: m.main, signalName: "orientationApplied" })
-        page.focusIndex = page.indexOfKey("orientation")
+        page.focusKey("orientation")
         page.handleAction("a", false)
         page.handleAction("right", false)
         page.handleAction("right", false)
@@ -1883,7 +1976,7 @@ TestCase {
     function test_chord_confirms_saver_edit() {
         const m = tc.openInMain()
         const page = m.page
-        page.focusIndex = page.indexOfKey("saver")
+        page.focusKey("saver")
         page.handleAction("a", false)
         page.handleAction("right", false)
         compare(fakeSettings.saverSeconds, 60)
@@ -1912,7 +2005,7 @@ TestCase {
         tryCompare(Ui, "turn", Ui.landscapeTurn, 1000)
         compare(Ui.userScale, 1.0)
         compare(tc.rowOf(page, "scale").value, "1.0")
-        page.focusIndex = page.indexOfKey("scale")
+        page.focusKey("scale")
         page.handleAction("a", false)
         compare(page.editing, true)
         compare(page.editOriginal, 1.1)
@@ -2033,7 +2126,7 @@ TestCase {
         tc.focusKey(page, "about")
         const about = tc.keyIndex(page, "about")
         compare(page.rows[about].value, Env.version)
-        compare(page.rows.length, tc.expectedKeys.length)
+        compare(page.rows.length, tc.expectedKeys[4].length)
         verify(router.dispatch("a", false))
         compare(page.aboutOpen, true)
         compare(page.editing, false)
@@ -2048,8 +2141,8 @@ TestCase {
         compare(tc.rowOf(page, "track").value, "44100 hz 16 bit")
         compare(tc.rowOf(page, "pcm").title, "output")
         compare(tc.rowOf(page, "pcm").value, "44100 S24_LE")
-        compare(page.indexOfKey("drift"), -1)
-        compare(page.indexOfKey("armada"), -1)
+        tc.absent(page, "drift")
+        tc.absent(page, "armada")
         const track = tc.itemOf(page, "track")
         compare(track.titleItem.font.pixelSize, Ui.fontPx(11))
         compare(track.titleItem.font.styleName, "Light")
@@ -2070,7 +2163,7 @@ TestCase {
         compare(page.indexOfKey("pcm"), -1)
         tc.focusKey(page, "about")
         router.dispatch("a", false)
-        compare(page.rows.length, tc.expectedKeys.length)
+        compare(page.rows.length, tc.expectedKeys[4].length)
         compare(fakePower.updateReloads, 1)
     }
 
@@ -2186,8 +2279,8 @@ TestCase {
 
     function test_boot_into_hidden_without_settings_key() {
         const page = open({ settings: null })
-        compare(page.indexOfKey("boot"), -1)
-        compare(page.indexOfKey("about"), page.indexOfKey("wifi") + 1)
+        tc.absent(page, "boot")
+        compare(JSON.stringify(tc.allKeys(page)[4]), JSON.stringify(["about"]))
     }
 
     function test_boot_into_overlay() {
@@ -2254,13 +2347,13 @@ TestCase {
     function test_page_lt_rt() {
         const page = open()
         verify(router.dispatch("rt", false))
-        verify(page.focusIndex > 1)
+        verify(page.focusIndex > 0)
         page.completeScroll()
         const top = page.rowTopOf(page.focusIndex) - page.flick.contentY
         verify(top >= 0)
         verify(top + Ui.px(43) <= page.flick.height + 0.01)
         verify(router.dispatch("lt", false))
-        compare(page.focusIndex, 1)
+        compare(page.focusIndex, 0)
         compare(router.dispatch("lt", false), false)
     }
 
@@ -2300,6 +2393,7 @@ TestCase {
         compare(first.stagger, 0)
         compare(output.stagger, 22)
         compare(tc.rowItem(page, 3).stagger, 3 * 22)
+        compare(first.modelData.key, "output")
         tryCompare(output, "enter", 1, 2000)
         tryCompare(tc.rowItem(page, 3), "enter", 1, 2000)
         fuzzyCompare(output.x, 0, 0.01)
@@ -2383,7 +2477,7 @@ TestCase {
     }
 
     function tapHeaderWord(page) {
-        tc.tapAt(page.header, page.header.textX + Ui.px(4), page.header.textBaseline - Ui.px(4))
+        tc.tapAt(page.header, Math.max(page.header.textX, 0) + Ui.px(4), page.header.textBaseline - Ui.px(4))
     }
 
     function tapRow(page, key, fraction) {
@@ -2456,12 +2550,12 @@ TestCase {
 
     function test_touch_row_listed_after_auto_rotate() {
         const page = open()
-        compare(page.indexOfKey("touch"), page.indexOfKey("autoRotate") + 1)
+        compare(tc.keyIndex(page, "touch"), tc.keyIndex(page, "autoRotate") + 1)
         compare(tc.rowOf(page, "touch").title, "touch")
         compare(tc.rowOf(page, "touch").value, "on")
         pages.clear()
         const overlay = open({ overlay: true })
-        compare(overlay.indexOfKey("touch"), -1)
+        tc.absent(overlay, "touch")
     }
 
     function test_touch_step_writes_only_at_a() {
@@ -2539,10 +2633,10 @@ TestCase {
         compare(page.editing, false)
     }
 
-    function test_touch_drag_from_label_scrolls() {
+    function test_touch_drag_from_row_scrolls() {
         const page = open()
-        const label = tc.itemOf(page, "label-output")
-        const y = label.mapToItem(page, 0, label.height / 2).y
+        const first = tc.itemOf(page, "hpGain")
+        const y = first.mapToItem(page, 0, first.height / 2).y
         verify(y > page.flick.y && y < page.height)
         tc.dragUp(page, page.width / 2, y, Ui.px(100))
         verify(page.flick.contentY > 0)
