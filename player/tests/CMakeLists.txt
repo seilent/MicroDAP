@@ -54,6 +54,13 @@ add_test(NAME playlists COMMAND tst_playlists)
 set_tests_properties(playlists PROPERTIES FIXTURES_REQUIRED library-fixtures)
 microdap_test_env(playlists)
 
+qt_add_executable(tst_lyrics core/tst_lyrics.cpp)
+target_compile_definitions(tst_lyrics PRIVATE MICRODAP_FIXTURE_MUSIC="${fixtures}" MICRODAP_FIXTURE_FORMATS="${formats}")
+target_link_libraries(tst_lyrics PRIVATE microdapcore Qt6::Test)
+add_test(NAME lyrics COMMAND tst_lyrics)
+set_tests_properties(lyrics PROPERTIES FIXTURES_REQUIRED library-fixtures)
+microdap_test_env(lyrics)
+
 qt_add_executable(tst_state core/tst_state.cpp)
 target_link_libraries(tst_state PRIVATE microdapcore Qt6::Test)
 add_test(NAME state COMMAND tst_state)

@@ -71,6 +71,8 @@ add_library(microdapcore STATIC
     src/core/Library.h
     src/core/LibraryWatcher.cpp
     src/core/LibraryWatcher.h
+    src/core/Lyrics.cpp
+    src/core/Lyrics.h
     src/core/Models.cpp
     src/core/Models.h
     src/core/Mpris.cpp

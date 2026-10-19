@@ -13,6 +13,7 @@
 #include "Keep.h"
 #include "Library.h"
 #include "LibraryWatcher.h"
+#include "Lyrics.h"
 #include "Models.h"
 #include "Mpris.h"
 #include "OutputControl.h"
@@ -191,6 +192,17 @@ int main(int argc, char *argv[])
     microdap::PlaylistsModel playlists(&library);
     microdap::AudioInfo audioInfo;
     microdap::Player player(&library);
+    microdap::Lyrics lyrics;
+    const auto lyricsTracks = [queue = player.queue(), &lyrics] {
+        lyrics.setTracks(queue->get(queue->currentIndex()).value(QStringLiteral("path")).toString(),
+                         queue->get(queue->nextIndex()).value(QStringLiteral("path")).toString());
+    };
+    for (const auto signal : {&microdap::Queue::indexChanged, &microdap::Queue::countChanged,
+                              &microdap::Queue::orderChanged, &microdap::Queue::repeatChanged,
+                              &microdap::Queue::shuffleChanged})
+        QObject::connect(player.queue(), signal, &lyrics, lyricsTracks);
+    QObject::connect(&library, &microdap::Library::scanned, &lyrics, &microdap::Lyrics::refresh);
+    lyricsTracks();
     std::unique_ptr<microdap::BluezModel> bluez;
     if (qEnvironmentVariableIntValue("MICRODAP_BLUEZ_FAKE") == 1)
         bluez = std::make_unique<microdap::FakeBluezModel>();
@@ -459,6 +471,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("AlbumsGrid"), &albumsGrid);
     engine.rootContext()->setContextProperty(QStringLiteral("Playlists"), &playlists);
     engine.rootContext()->setContextProperty(QStringLiteral("Favorites"), &favorites);
+    engine.rootContext()->setContextProperty(QStringLiteral("Lyrics"), &lyrics);
     engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);
     engine.rootContext()->setContextProperty(QStringLiteral("OutputControl"),
                                              static_cast<QObject *>(outputControl.get()));
