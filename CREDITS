@@ -1,0 +1,20 @@
+# Credits
+
+`third_party/flatdap/link/` is the flatcomp link codec and session from flatdap (https://github.com/seilent/flatdap),
+GPL-3.0-or-later, at the commit in `third_party/flatdap/PIN`, copied as is. It carries this permission from the
+flatdap LICENSE:
+
+                     Additional permission under GNU GPL version 3 section 7
+
+  If you modify this Program, or any covered work, by linking or
+combining it with the Fraunhofer FDK AAC Codec Library (fdk-aac), or a
+modified version of that library, containing parts covered by the
+terms of the Software License for The Fraunhofer FDK AAC Codec Library
+for Android, or with libdbus, or a modified version of that library,
+containing parts covered by the terms of the Academic Free License
+version 2.1, the licensors of this Program grant you additional
+permission to convey the resulting work.  You must follow the terms of
+those licenses for those parts, and you must convey the Corresponding
+Source of the parts of the resulting work that are covered by this
+License.  This permission covers only the parts of the work that are
+flatdap's own code.

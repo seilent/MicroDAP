@@ -10,6 +10,7 @@ the `microdap` RPM; settings live in MicroSET (`microdap.*` and the device keys)
 | `player/` | Qt 6 QML player (`microdap-player`) with its C++ core, and `microdap-fiio` |
 | `data/` | Session, hotkey, schema, unit, preset and udev files, and the helper scripts in `data/libexec/` |
 | `tests/` | Bash tests for the scripts and the installed files |
+| `third_party/flatdap/` | flatdap link codec and session, copied as is at the commit in `PIN` (see [CREDITS](CREDITS)) |
 | `build/` | Builder image (`Containerfile`, `deps.sh`), `ci.sh`, the MicroSET pin (`microset.env`), the Selawik fetch for the QML tests |
 
 ## Installed files
@@ -45,4 +46,4 @@ Builds the builder image (Fedora 44), then in it MicroSET from `MICROSET_SRC` (d
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later. See [LICENSE](LICENSE) and [CREDITS](CREDITS).

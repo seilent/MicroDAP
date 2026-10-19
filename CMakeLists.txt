@@ -4,6 +4,7 @@ project(microdap LANGUAGES CXX)
 include(GNUInstallDirs)
 
 enable_testing()
+add_subdirectory(third_party/flatdap)
 add_subdirectory(player)
 
 install(PROGRAMS

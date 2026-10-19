@@ -203,6 +203,12 @@ target_link_libraries(tst_biquad PRIVATE microdapcore Qt6::Test)
 add_test(NAME biquad COMMAND tst_biquad)
 microdap_test_env(biquad)
 
+qt_add_executable(tst_linkproto core/tst_linkproto.cpp)
+target_compile_definitions(tst_linkproto PRIVATE MICRODAP_FLATDAP_LINK="${PROJECT_SOURCE_DIR}/../third_party/flatdap/link")
+target_link_libraries(tst_linkproto PRIVATE flatdap_link Qt6::Test)
+add_test(NAME linkproto COMMAND tst_linkproto)
+microdap_test_env(linkproto)
+
 qt_add_executable(tst_replaygain core/tst_replaygain.cpp)
 target_link_libraries(tst_replaygain PRIVATE microdapcore Qt6::Test)
 add_test(NAME replaygain COMMAND tst_replaygain)
