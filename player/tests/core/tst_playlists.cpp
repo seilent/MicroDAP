@@ -1,3 +1,4 @@
+#include "Favorites.h"
 #include "Library.h"
 #include "LibraryWatcher.h"
 #include "PlaylistStore.h"
@@ -135,6 +136,7 @@ private slots:
     void ownWriteIgnored();
     void outsideEditKept();
     void cardPlaylists();
+    void favoriteOrder();
 };
 
 void PlaylistsTest::roundTrip()
@@ -453,6 +455,39 @@ void PlaylistsTest::cardPlaylists()
                     {card + QStringLiteral("/Playlists/%")})
                  .toInt(),
              2);
+}
+
+void PlaylistsTest::favoriteOrder()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Library library(dir.filePath(QStringLiteral("library.db")), dir.filePath(QStringLiteral("art")));
+    QVERIFY(library.isOpen());
+    const QString internal = QStringLiteral("internal");
+    const QString card = QStringLiteral("CARD");
+    QVERIFY(library.stampFavorites(internal, {{QStringLiteral("../e.flac"), 0}}));
+    QVERIFY(library.stampFavorites(internal, {{QStringLiteral("../a.flac"), 0}}));
+    QVERIFY(library.stampFavorites(card, {{QStringLiteral("../c.flac"), 0}}));
+    const QList<std::pair<QString, QStringList>> media{
+        {internal, {QStringLiteral("../a.flac"), QStringLiteral("../b.flac"), QStringLiteral("../e.flac")}},
+        {card, {QStringLiteral("../c.flac"), QStringLiteral("../d.flac")}}};
+    QList<qint64> seqs;
+    QStringList names;
+    for (const auto &[medium, files] : media) {
+        const QHash<QString, qint64> stamps = library.favoriteStamps(medium);
+        for (const QString &file : files) {
+            seqs.append(stamps.value(Library::favoriteKey(file, 0), -1));
+            names.append(medium + QLatin1Char(':') + file);
+        }
+    }
+    QStringList ordered;
+    for (qsizetype i : Favorites::order(seqs))
+        ordered.append(names.at(i));
+    QCOMPARE(ordered, (QStringList{QStringLiteral("CARD:../c.flac"), QStringLiteral("internal:../a.flac"),
+                                   QStringLiteral("internal:../e.flac"), QStringLiteral("internal:../b.flac"),
+                                   QStringLiteral("CARD:../d.flac")}));
+    QCOMPARE(Favorites::order({}), QList<qsizetype>());
+    QCOMPARE(Favorites::order({-1, -1, -1}), (QList<qsizetype>{0, 1, 2}));
 }
 
 QTEST_GUILESS_MAIN(PlaylistsTest)

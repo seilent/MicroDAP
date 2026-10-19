@@ -53,6 +53,8 @@ add_library(microdapcore STATIC
     src/core/Eq.h
     src/core/FakeBluezModel.cpp
     src/core/FakeBluezModel.h
+    src/core/Favorites.cpp
+    src/core/Favorites.h
     src/core/FiioWorker.cpp
     src/core/FiioWorker.h
     src/core/GuideKey.cpp

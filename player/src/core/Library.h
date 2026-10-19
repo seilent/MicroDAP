@@ -9,6 +9,7 @@
 #include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QStringList>
 #include <QVariant>
@@ -16,6 +17,7 @@
 
 #include <atomic>
 #include <span>
+#include <utility>
 
 namespace microdap {
 
@@ -74,6 +76,12 @@ public:
     Q_INVOKABLE bool pin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;
+
+    static QString favoriteKey(const QString &relPath, int cue);
+    bool stampFavorites(const QString &medium, const QList<std::pair<QString, int>> &entries);
+    bool dropFavoriteStamp(const QString &medium, const QString &relPath, int cue);
+    QHash<QString, qint64> favoriteStamps(const QString &medium) const;
+    bool keepFavoriteStamps(const QString &medium, const QSet<QString> &keys);
 
     PlaylistStore &playlistStore();
     PlaylistStore::Edit editPlaylist(const QString &path, const PlaylistStore::Change &change);

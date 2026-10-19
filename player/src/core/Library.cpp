@@ -23,7 +23,7 @@ namespace {
 
 std::atomic_int connectionCounter{0};
 
-constexpr int schemaVersion = 6;
+constexpr int schemaVersion = 7;
 
 constexpr const char *trackArtistsTable =
     "CREATE TABLE IF NOT EXISTS track_artists("
@@ -55,6 +55,10 @@ constexpr const char *metaTable =
     "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value NOT NULL)";
 constexpr const char *setMinReader =
     "INSERT OR REPLACE INTO meta(key, value) VALUES('min_reader', 5)";
+constexpr const char *favoriteOrderTable =
+    "CREATE TABLE IF NOT EXISTS favorite_order(medium TEXT NOT NULL, rel_path TEXT NOT NULL, "
+    "cue_index INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL, PRIMARY KEY(medium, rel_path, cue_index))";
+constexpr const char *setFavoriteSeq = "INSERT OR IGNORE INTO meta(key, value) VALUES('favorite_seq', 0)";
 
 const char *const schema[] = {
     "CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
@@ -93,6 +97,8 @@ const char *const schema[] = {
     "ref_id INTEGER NOT NULL, pos INTEGER NOT NULL)",
     metaTable,
     setMinReader,
+    favoriteOrderTable,
+    setFavoriteSeq,
 };
 
 const char *const toVersion2[] = {
@@ -133,6 +139,11 @@ const char *const toVersion6[] = {
     markReread,
 };
 
+const char *const toVersion7[] = {
+    favoriteOrderTable,
+    setFavoriteSeq,
+};
+
 struct Orphans
 {
     const char *table;
@@ -159,6 +170,7 @@ const Migration migrations[] = {
     {4, toVersion4},
     {5, toVersion5},
     {6, toVersion6},
+    {7, toVersion7},
 };
 
 const char *const pruneAlbumsAndArtists[] = {
@@ -929,6 +941,85 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
                                      .arg(skipped);
     }
     return true;
+}
+
+QString Library::favoriteKey(const QString &relPath, int cue)
+{
+    return relPath + QLatin1Char('\n') + QString::number(cue);
+}
+
+bool Library::stampFavorites(const QString &medium, const QList<std::pair<QString, int>> &entries)
+{
+    if (entries.isEmpty())
+        return true;
+    bool ok = m_db.transaction();
+    const bool began = ok;
+    QSqlQuery seq(m_db);
+    QSqlQuery stamp(m_db);
+    stamp.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO favorite_order(medium, rel_path, cue_index, seq) VALUES(?, ?, ?, "
+        "(SELECT value FROM meta WHERE key = 'favorite_seq'))"));
+    for (const auto &[relPath, cue] : entries) {
+        ok = ok && seq.exec(QStringLiteral("UPDATE meta SET value = value + 1 WHERE key = 'favorite_seq'"));
+        stamp.bindValue(0, medium);
+        stamp.bindValue(1, relPath);
+        stamp.bindValue(2, cue);
+        ok = ok && run(stamp);
+    }
+    ok = ok && m_db.commit();
+    if (!ok && began)
+        m_db.rollback();
+    return ok;
+}
+
+bool Library::dropFavoriteStamp(const QString &medium, const QString &relPath, int cue)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("DELETE FROM favorite_order WHERE medium = ? AND rel_path = ? AND cue_index = ?"));
+    query.addBindValue(medium);
+    query.addBindValue(relPath);
+    query.addBindValue(cue);
+    return run(query);
+}
+
+QHash<QString, qint64> Library::favoriteStamps(const QString &medium) const
+{
+    QHash<QString, qint64> stamps;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT rel_path, cue_index, seq FROM favorite_order WHERE medium = ?"));
+    query.addBindValue(medium);
+    if (!query.exec())
+        return stamps;
+    while (query.next())
+        stamps.insert(favoriteKey(query.value(0).toString(), query.value(1).toInt()), query.value(2).toLongLong());
+    return stamps;
+}
+
+bool Library::keepFavoriteStamps(const QString &medium, const QSet<QString> &keys)
+{
+    QList<std::pair<QString, int>> gone;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT rel_path, cue_index FROM favorite_order WHERE medium = ?"));
+    query.addBindValue(medium);
+    if (!query.exec())
+        return false;
+    while (query.next()) {
+        const QString relPath = query.value(0).toString();
+        const int cue = query.value(1).toInt();
+        if (!keys.contains(favoriteKey(relPath, cue)))
+            gone.append({relPath, cue});
+    }
+    query.finish();
+    if (gone.isEmpty())
+        return true;
+    bool ok = m_db.transaction();
+    const bool began = ok;
+    for (const auto &[relPath, cue] : std::as_const(gone))
+        ok = ok && dropFavoriteStamp(medium, relPath, cue);
+    ok = ok && m_db.commit();
+    if (!ok && began)
+        m_db.rollback();
+    return ok;
 }
 
 PlaylistStore &Library::playlistStore()

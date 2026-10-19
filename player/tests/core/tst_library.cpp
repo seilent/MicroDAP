@@ -442,6 +442,7 @@ private slots:
     void trackTags();
     void trackArtFirst();
     void newFormats();
+    void migrateFrom6();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -509,7 +510,7 @@ void LibraryTest::initTestCase()
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
     QVERIFY(m_library->isOpen());
-    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 6);
+    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 7);
     QCOMPARE(scalar(m_library->database(), QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'"))
                  .toInt(),
              5);
@@ -839,7 +840,7 @@ void LibraryTest::migrate()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 8);
 
@@ -1503,7 +1504,7 @@ void LibraryTest::migrateFrom2()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE name = 'Old'")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items "
                                        "WHERE playlist_id NOT IN (SELECT id FROM playlists)"))
@@ -1960,7 +1961,7 @@ void LibraryTest::migrateFrom3()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pins WHERE kind = 'playlist' AND pos = 99")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items")).toInt(), 0);
@@ -1998,7 +1999,7 @@ void LibraryTest::migrateFrom4()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 6);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), playlists);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE mtime = -1 AND size = -1")).toInt(),
              playlists);
@@ -2568,7 +2569,7 @@ void LibraryTest::migrateFrom5()
         Library library(path, m_dir.path() + QStringLiteral("/art5"));
         QVERIFY(library.isOpen());
         const QSqlDatabase db = library.database();
-        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 6);
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
         QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 5);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pragma_table_info('tracks') WHERE name IN "
                                            "('rg_track_gain', 'rg_album_gain', 'rg_track_peak', 'rg_album_peak', "
@@ -2596,7 +2597,7 @@ void LibraryTest::migrateFrom5()
 
     Library again(path, m_dir.path() + QStringLiteral("/art5"));
     QVERIFY(again.isOpen());
-    QCOMPARE(scalar(again.database(), QStringLiteral("PRAGMA user_version")).toInt(), 6);
+    QCOMPARE(scalar(again.database(), QStringLiteral("PRAGMA user_version")).toInt(), 7);
     QCOMPARE(scalar(again.database(), QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), 3);
 }
 
@@ -2636,7 +2637,7 @@ void LibraryTest::migrateFailureRollsBack()
         Library library(orphan, m_dir.path() + QStringLiteral("/art5"));
         QVERIFY(library.isOpen());
         const QSqlDatabase db = library.database();
-        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 6);
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = 99")).toInt(), 0);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items WHERE playlist_id = 99")).toInt(), 0);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists WHERE track_id = 99")).toInt(), 0);
@@ -2677,17 +2678,17 @@ void LibraryTest::newerReader()
 {
     const QString path = m_dir.path() + QStringLiteral("/newer.db");
     QVERIFY(QFile::copy(m_library->dbPath(), path));
-    QVERIFY(setPragma(path, {QStringLiteral("PRAGMA user_version = 7")}));
+    QVERIFY(setPragma(path, {QStringLiteral("PRAGMA user_version = 8")}));
     const int songs = m_library->songCount();
     QVERIFY(songs > 0);
     {
         Library library(path, m_dir.path() + QStringLiteral("/art"));
         QVERIFY(library.isOpen());
-        QCOMPARE(scalar(library.database(), QStringLiteral("PRAGMA user_version")).toInt(), 7);
+        QCOMPARE(scalar(library.database(), QStringLiteral("PRAGMA user_version")).toInt(), 8);
         QCOMPARE(library.songCount(), songs);
     }
 
-    QVERIFY(setPragma(path, {QStringLiteral("UPDATE meta SET value = 7 WHERE key = 'min_reader'")}));
+    QVERIFY(setPragma(path, {QStringLiteral("UPDATE meta SET value = 8 WHERE key = 'min_reader'")}));
     const QByteArray hash = fileHash(path);
     QVERIFY(!hash.isEmpty());
     {
@@ -2805,6 +2806,41 @@ void LibraryTest::trackTags()
     QVERIFY(QFileInfo::exists(artA));
     QVERIFY(QFileInfo::exists(artB));
     QVERIFY(!scalar(db, QStringLiteral("SELECT art_path FROM albums WHERE title = 'Tagged'")).isNull());
+}
+
+void LibraryTest::migrateFrom6()
+{
+    const QString path = m_dir.path() + QStringLiteral("/migrate6.db");
+    QVERIFY(QFile::copy(m_library->dbPath(), path));
+    QVERIFY(setPragma(path, {QStringLiteral("DROP TABLE favorite_order"),
+                             QStringLiteral("DELETE FROM meta WHERE key = 'favorite_seq'"),
+                             QStringLiteral("PRAGMA user_version = 6")}));
+    const QHash<QString, QStringList> before = dumpVersion5(path);
+    {
+        Library library(path, m_dir.path() + QStringLiteral("/art"));
+        QVERIFY(library.isOpen());
+        const QSqlDatabase db = library.database();
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 5);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'favorite_seq'")).toInt(), 0);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM favorite_order")).toInt(), 0);
+        QVERIFY(library.stampFavorites(QStringLiteral("internal"), {{QStringLiteral("../a.flac"), 0},
+                                                                    {QStringLiteral("../b.flac"), 0}}));
+        QVERIFY(library.stampFavorites(QStringLiteral("CARD"), {{QStringLiteral("../c.flac"), 2}}));
+        QVERIFY(library.stampFavorites(QStringLiteral("internal"), {{QStringLiteral("../a.flac"), 0}}));
+        const QHash<QString, qint64> internal = library.favoriteStamps(QStringLiteral("internal"));
+        QCOMPARE(internal.value(Library::favoriteKey(QStringLiteral("../a.flac"), 0)), 4);
+        QCOMPARE(internal.value(Library::favoriteKey(QStringLiteral("../b.flac"), 0)), 2);
+        const QString cKey = Library::favoriteKey(QStringLiteral("../c.flac"), 2);
+        QCOMPARE(library.favoriteStamps(QStringLiteral("CARD")).value(cKey), 3);
+        const QString aKey = Library::favoriteKey(QStringLiteral("../a.flac"), 0);
+        QVERIFY(library.keepFavoriteStamps(QStringLiteral("internal"), {aKey}));
+        QCOMPARE(library.favoriteStamps(QStringLiteral("internal")).size(), 1);
+        QCOMPARE(library.favoriteStamps(QStringLiteral("CARD")).size(), 1);
+        QVERIFY(library.dropFavoriteStamp(QStringLiteral("CARD"), QStringLiteral("../c.flac"), 2));
+        QVERIFY(library.favoriteStamps(QStringLiteral("CARD")).isEmpty());
+    }
+    QCOMPARE(dumpVersion5(path), before);
 }
 
 void LibraryTest::newFormats()
