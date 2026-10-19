@@ -99,6 +99,7 @@ const QStringList &screens()
         QStringLiteral("playlists"),
         QStringLiteral("history"),
         QStringLiteral("eq"),
+        QStringLiteral("keyboard"),
         QStringLiteral("power"),
         QStringLiteral("saver"),
         QStringLiteral("saver-dim"),
@@ -182,6 +183,17 @@ const QStringList &states()
         QStringLiteral("about-missing"),
         QStringLiteral("power-none"),
         QStringLiteral("power-long"),
+        QStringLiteral("kb-empty"),
+        QStringLiteral("kb-long"),
+        QStringLiteral("kb-petal"),
+        QStringLiteral("kb-petal-corner"),
+        QStringLiteral("kb-shift"),
+        QStringLiteral("kb-symbols"),
+        QStringLiteral("kb-discard"),
+        QStringLiteral("kb-number-freq"),
+        QStringLiteral("kb-number-q"),
+        QStringLiteral("kb-number-gain"),
+        QStringLiteral("kb-refused"),
     };
     return names;
 }

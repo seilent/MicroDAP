@@ -11,6 +11,7 @@ Item {
     property bool dead: false
     property bool tapping: false
     property bool dragging: false
+    property bool tracking: false
     property int pointId: -1
     property Item owner: null
     property Item page: null
@@ -162,6 +163,7 @@ Item {
         layer.down = false
         layer.tapping = false
         layer.dragging = false
+        layer.tracking = false
         layer.pending = null
         layer.owner = null
         layer.page = null
@@ -176,8 +178,16 @@ Item {
         layer.samples = []
     }
 
+    function endTrack() {
+        if (!layer.tracking)
+            return
+        layer.tracking = false
+        layer.owner.touchCancel(layer.kind, layer.hitIndex, layer.hit)
+    }
+
     function abort() {
         holdTimer.stop()
+        layer.endTrack()
         layer.stopFling()
         if (layer.dragging && layer.scroll !== null)
             layer.scroll.stop()
@@ -295,6 +305,10 @@ Item {
         if (layer.owner !== null) {
             const x = layer.localIn(found.hit, p).x
             layer.action = String(layer.owner.touchPress(layer.kind, layer.hitIndex, x, found.hit))
+            if (found.hit.touchTrack === true && typeof layer.owner.touchMove === "function") {
+                layer.tracking = true
+                layer.frame = found.hit
+            }
         }
         if (layer.action === "a") {
             const presser = layer.ancestorWith(found.hit, "press")
@@ -311,7 +325,7 @@ Item {
             layer.last = layer.start
             layer.tapping = true
             layer.sample(layer.start.y)
-            if (layer.owner !== null && typeof layer.owner.touchContext === "function")
+            if (!layer.tracking && layer.owner !== null && typeof layer.owner.touchContext === "function")
                 holdTimer.restart()
         }
         layer.touched()
@@ -340,6 +354,10 @@ Item {
             return
         const local = layer.localIn(layer.frame, p)
         layer.last = local
+        if (layer.tracking) {
+            layer.owner.touchMove(layer.kind, layer.hitIndex, local.x - layer.start.x, local.y - layer.start.y, layer.hit)
+            return
+        }
         layer.sample(local.y)
         if (layer.dragging) {
             layer.scroll.dragTo(local.y)
@@ -406,6 +424,23 @@ Item {
                 layer.flung = scroll
                 scroll.release(-Math.max(-Ui.px(Ui.flingCap), Math.min(Ui.px(Ui.flingCap), v)))
             }
+            layer.touched()
+            return
+        }
+        if (layer.tracking) {
+            const owner = layer.owner
+            const kind = layer.kind
+            const index = layer.hitIndex
+            const hit = layer.hit
+            const dx = pending.local.x - layer.start.x
+            const dy = pending.local.y - layer.start.y
+            const whole = layer.intact()
+            layer.tracking = false
+            layer.clear()
+            if (whole)
+                owner.touchLift(kind, index, dx, dy, hit)
+            else
+                owner.touchCancel(kind, index, hit)
             layer.touched()
             return
         }

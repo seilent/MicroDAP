@@ -1048,6 +1048,7 @@ Window {
                 : root.shotScreen === "playlists" ? playlistsShotComponent
                 : root.shotScreen === "history" ? historyShotComponent
                 : root.shotScreen === "eq" ? eqShotComponent
+                : root.shotScreen === "keyboard" ? keyboardShotComponent
                 : null
         }
 
@@ -1358,6 +1359,13 @@ Window {
         id: hubShotComponent
         HubShot {
             pivot: root.shotPivot
+            fixture: root.shotState
+        }
+    }
+
+    Component {
+        id: keyboardShotComponent
+        KeyboardShot {
             fixture: root.shotState
         }
     }

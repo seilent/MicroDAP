@@ -412,6 +412,13 @@ QtObject {
     readonly property real qpHintPitch: 11
     readonly property real qpHintW: 140
     readonly property real qpTilePad: 5
+    readonly property real kbFieldH: 37
+    readonly property real kbFieldPad: 10
+    readonly property real kbFieldBorder: 1
+    readonly property real kbCursorW: 2
+    readonly property real kbGap: 8
+    readonly property real kbKey: (Math.min(ui.canvasW, ui.canvasH) - 2 * ui.edge - 3 * ui.qpGutter) / 4
+    readonly property int kbRepeatMs: 100
     readonly property real homeMenuXLandscape: 240
     readonly property real homeBarX: ui.homeTextX - ui.focusBarOffset
     readonly property real homeBarTop: ui.capHeight * ui.homeItem.size

@@ -181,6 +181,7 @@ set(microdap_qml
     qml/MicroDap/components/Toast.qml
     qml/MicroDap/components/VolumeOverlay.qml
     qml/MicroDap/components/JumpLetter.qml
+    qml/MicroDap/components/Keyboard.qml
     qml/MicroDap/GlyphPaths.js
     qml/MicroDap/EqFormat.js
     qml/MicroDap/ComponentsShot.qml
@@ -216,6 +217,7 @@ set(microdap_qml
     qml/MicroDap/PlaylistsShot.qml
     qml/MicroDap/HistoryShot.qml
     qml/MicroDap/EqShot.qml
+    qml/MicroDap/KeyboardShot.qml
 )
 foreach(file IN LISTS microdap_qml)
     get_filename_component(alias ${file} NAME)
@@ -230,6 +232,8 @@ qt_add_qml_module(microdapui
     RESOURCE_PREFIX /qt/qml
     QML_FILES ${microdap_qml}
     SOURCES
+        src/core/KeyboardModel.cpp
+        src/core/KeyboardModel.h
         src/ui/Env.cpp
         src/ui/Env.h
 )

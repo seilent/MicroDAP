@@ -501,7 +501,9 @@ endforeach()
 foreach(shot IN ITEMS settings:pivot-library settings:pivot-display settings:pivot-power settings:pivot-system
         settings:accent-edit settings:saver-sheet settings:sample-rate-edit settings:touch settings:touch-edit
         settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
-        settings:about-missing power:power-none power:power-long)
+        settings:about-missing power:power-none power:power-long keyboard:browse keyboard:kb-empty keyboard:kb-long
+        keyboard:kb-petal keyboard:kb-petal-corner keyboard:kb-shift keyboard:kb-symbols keyboard:kb-discard
+        keyboard:kb-number-freq keyboard:kb-number-q keyboard:kb-number-gain keyboard:kb-refused)
     string(REPLACE ":" ";" parts ${shot})
     list(GET parts 0 screen)
     list(GET parts 1 state)

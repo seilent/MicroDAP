@@ -74,6 +74,18 @@
 | settings | `saver-sheet` | `--size 640x960` and `960x640` | live row: 15 S previewed under the focus, the accent mark kept on 30 S | pending |
 | settings | `touch`, `touch-edit` | `--size 640x960` and `960x640` | TOUCH ON, then OFF after one A, no sheet | pending |
 | settings | `accent-edit` | `--size 640x960` and `960x640` | ACCENT edit mode, swatch on hue 0 | pending |
+| keyboard | `browse` | `--size 640x960` and `960x640` | typed text, cursor at the end, focus on DONE | pending |
+| keyboard | `kb-empty` | `--size 640x960` and `960x640` | hint in the field, DONE at 0.4 only under the minimum | pending |
+| keyboard | `kb-long` | `--size 640x960` and `960x640` | text wider than the field keeps the end | pending |
+| keyboard | `kb-petal` | `--size 640x960` and `960x640` | key 7 petal, pick left, cells one pitch inward | pending |
+| keyboard | `kb-petal-corner` | `--size 640x960` and `960x640` | key 1 petal, up cell over the field | pending |
+| keyboard | `kb-shift` | `--size 640x960` and `960x640` | SHIFT locked in the accent, capital labels | pending |
+| keyboard | `kb-symbols` | `--size 640x960` and `960x640` | symbols page, `abc` label | pending |
+| keyboard | `kb-discard` | `--size 640x960` and `960x640` | discard confirm, KEEP focused, keyboard bare under it | pending |
+| keyboard | `kb-number-freq` | `--size 640x960` and `960x640` | `0` three cells wide, `done` two rows, unit HZ | pending |
+| keyboard | `kb-number-q` | `--size 640x960` and `960x640` | `0` two cells, `.` | pending |
+| keyboard | `kb-number-gain` | `--size 640x960` and `960x640` | `-` `0` `.`, unit DB | pending |
+| keyboard | `kb-refused` | `--size 640x960` and `960x640` | toast GAIN over `-24 to 12 db`, draft kept | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured
