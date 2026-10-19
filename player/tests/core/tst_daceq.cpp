@@ -1696,6 +1696,12 @@ void DacEqTest::framesBandCount()
     profile.bands[2].enabled = false;
     frames = DacEq::framesFor(model, profile);
     QCOMPARE(bandOfPayload(frames.bands[2])->gain, 0.0);
+    profile.bands[0].freq = 1234.0;
+    profile.bands[0].freqIndex = -1;
+    profile.bands[0].q = 0.71;
+    frames = DacEq::framesFor(model, profile);
+    QCOMPARE(bandOfPayload(frames.bands[0])->freq, 1234.0);
+    QCOMPARE(bandOfPayload(frames.bands[0])->q, 0.71);
     profile.count = 1;
     frames = DacEq::framesFor(model, profile);
     QCOMPARE(bandOfPayload(frames.bands[0])->gain, 3.0);

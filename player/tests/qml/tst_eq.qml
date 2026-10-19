@@ -153,6 +153,32 @@ TestCase {
             fakeEq.profilesChanged()
         }
 
+        function setPreamp(output, value) {
+            fakeEq.calls = fakeEq.calls.concat([["setPreamp", output, value]])
+            const next = Object.assign({}, fakeEq.preamps)
+            next[output] = value
+            fakeEq.preamps = next
+            fakeEq.makeCustom(output)
+            fakeEq.profilesChanged()
+            return true
+        }
+
+        function setBandValue(output, band, field, value) {
+            fakeEq.calls = fakeEq.calls.concat([["setBandValue", output, band, field, value]])
+            const sets = Object.assign({}, fakeEq.bandSets)
+            const list = sets[output].slice()
+            const b = Object.assign({}, list[band])
+            b[field] = value
+            if (field === "freq")
+                b.freqIndex = -1
+            list[band] = b
+            sets[output] = list
+            fakeEq.bandSets = sets
+            fakeEq.makeCustom(output)
+            fakeEq.profilesChanged()
+            return true
+        }
+
         function addBand(output) {
             fakeEq.calls = fakeEq.calls.concat([["addBand", output]])
             const sets = Object.assign({}, fakeEq.bandSets)
@@ -294,6 +320,117 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(page.editing, true)
         compare(page.editKey, page.rows[index].key)
+    }
+
+    function test_type_value_preamp() {
+        const page = open()
+        page.setFocus(tc.at(page, "preamp"))
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "preamp")
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["type value"]))
+        page.sheet.complete()
+        verify(router.dispatch("a", false))
+        page.sheet.complete()
+        compare(page.sheet.shown, false)
+        compare(kb.shown, true)
+        compare(kb.entry.title, "preamp")
+        compare(kb.entry.number, true)
+        compare(kb.entry.text, "-6.5")
+        compare(kb.entry.unit, "db")
+        for (let i = 0; i < 4; i++)
+            kb.entry.erase()
+        kb.entry.type("3")
+        kb.finish()
+        compare(kb.shown, true)
+        compare(fakeEq.calls.length, 0)
+        kb.entry.erase()
+        for (const ch of "-3.25")
+            kb.entry.type(ch)
+        compare(kb.entry.text, "-3.2")
+        kb.finish()
+        compare(kb.shown, false)
+        compare(tc.callAt(0), JSON.stringify(["setPreamp", "headphones", -3.2]))
+        compare(page.rows[tc.at(page, "preamp")].value, "-3.2 db")
+        compare(page.editing, false)
+    }
+
+    function test_type_value_band_fields() {
+        const page = open()
+        page.setFocus(2)
+        verify(router.dispatch("a", false))
+        page.setFocus(tc.at(page, "band0:type"))
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+        page.setFocus(tc.at(page, "profile"))
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+        page.setFocus(tc.at(page, "band0:freq"))
+        verify(router.dispatch("x", false))
+        page.sheet.complete()
+        verify(router.dispatch("a", false))
+        compare(kb.entry.title, "frequency")
+        compare(kb.entry.text, "105")
+        compare(kb.entry.type("."), false)
+        kb.entry.erase()
+        kb.entry.erase()
+        kb.entry.erase()
+        for (const ch of "1234")
+            kb.entry.type(ch)
+        kb.finish()
+        compare(tc.callAt(0), JSON.stringify(["setBandValue", "headphones", 0, "freq", 1234]))
+        compare(page.rows[tc.at(page, "band0:freq")].value, "1234 hz")
+        compare(page.rows[tc.at(page, "band0")].value, "ls 1234 hz +2.1 db q 0.70")
+        page.setFocus(tc.at(page, "band0:q"))
+        verify(router.dispatch("x", false))
+        page.sheet.complete()
+        verify(router.dispatch("a", false))
+        compare(kb.entry.text, "0.70")
+        compare(kb.entry.type("1"), false)
+        kb.back()
+        kb.complete()
+        compare(kb.shown, false)
+        compare(fakeEq.calls.length, 1)
+        tc.edit(page, tc.at(page, "band0:gain"))
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+        verify(router.dispatch("a", false))
+    }
+
+    function test_type_value_long_press() {
+        const page = open()
+        const item = tc.rowItem(page.headphonesPane, tc.at(page, "preamp"))
+        mousePress(item, item.width / 2, item.height / 2)
+        wait(Ui.seekHoldMs + 150)
+        mouseRelease(item, item.width / 2, item.height / 2)
+        wait(0)
+        wait(0)
+        compare(page.editing, false)
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "preamp")
+        page.sheet.close()
+        page.sheet.complete()
+        const profile = tc.rowItem(page.headphonesPane, 0)
+        mousePress(profile, profile.width / 2, profile.height / 2)
+        wait(Ui.seekHoldMs + 150)
+        mouseRelease(profile, profile.width / 2, profile.height / 2)
+        wait(0)
+        wait(0)
+        compare(page.sheet.shown, false)
+    }
+
+    function test_off_grid_frequency_text() {
+        const sets = Object.assign({}, fakeEq.bandSets)
+        const list = sets.headphones.slice()
+        list[0] = { type: "peak", freq: 1450, freqIndex: -1, gain: 1, q: 1 }
+        list[1] = { type: "peak", freq: 2500, freqIndex: -1, gain: 1, q: 1 }
+        list[2] = { type: "peak", freq: 1414.2, freqIndex: 37, gain: 1, q: 1 }
+        sets.headphones = list
+        fakeEq.bandSets = sets
+        const page = open()
+        compare(page.rows[tc.at(page, "band0")].value, "pk 1450 hz +1.0 db q 1.00")
+        compare(page.rows[tc.at(page, "band1")].value, "pk 2.5 khz +1.0 db q 1.00")
+        compare(page.rows[tc.at(page, "band2")].value, "pk 1.4 khz +1.0 db q 1.00")
     }
 
     function test_preset_rows() {

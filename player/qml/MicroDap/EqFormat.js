@@ -47,11 +47,29 @@ function gainText(v) {
     return signed(v, true) + " db"
 }
 
-function freqText(f) {
+function freqText(f, index) {
     var r = Math.round(Number(f))
-    if (r < 1000)
+    var offGrid = index !== undefined && index !== null && Number(index) < 0
+    if (r < 1000 || (offGrid && r % 100 !== 0))
         return r + " hz"
     return String(Math.round(Number(f) / 100) / 10) + " khz"
+}
+
+var typedFields = ["preamp", "freq", "gain", "q"]
+
+function entryText(field, value) {
+    if (field === "freq")
+        return String(Math.round(Number(value)))
+    return Number(value).toFixed(field === "q" ? 2 : 1)
+}
+
+function typedRequest(field, title, value) {
+    if (field === "freq")
+        return { title: title, kind: "number", unit: "hz", text: entryText(field, value), minValue: 20, maxValue: 20000 }
+    if (field === "q")
+        return { title: title, kind: "number", extras: ".", decimals: 2, text: entryText(field, value), minValue: 0.1, maxValue: 10 }
+    return { title: title, kind: "number", extras: "-.", decimals: 1, unit: "db", text: entryText(field, value),
+        minValue: -24, maxValue: field === "preamp" ? 0 : 12 }
 }
 
 function qText(q) {
@@ -80,7 +98,7 @@ function bandText(b) {
         return "off"
     const t = String(b.type)
     const gain = gainFree(t) ? "" : " " + gainText(b.gain)
-    return typeShort(t) + " " + freqText(b.freq) + gain + " q " + qText(b.q)
+    return typeShort(t) + " " + freqText(b.freq, b.freqIndex) + gain + " q " + qText(b.q)
 }
 
 function fieldInert(b, field) {
@@ -93,7 +111,7 @@ function fieldText(b, field) {
     if (field === "type")
         return typeLong(String(b.type))
     if (field === "freq")
-        return freqText(b.freq)
+        return freqText(b.freq, b.freqIndex)
     if (field === "gain")
         return fieldInert(b, field) ? "not used" : gainText(b.gain)
     return qText(b.q)

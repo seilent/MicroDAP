@@ -193,6 +193,8 @@ public:
     Q_INVOKABLE void stepQ(const QString &output, int band, int direction, bool coarse = false);
     Q_INVOKABLE void stepBand(const QString &output, int band, const QString &field, int direction,
                               bool coarse = false);
+    Q_INVOKABLE bool setPreamp(const QString &output, double value);
+    Q_INVOKABLE bool setBandValue(const QString &output, int band, const QString &field, double value);
     Q_INVOKABLE bool addBand(const QString &output);
     Q_INVOKABLE bool removeBand(const QString &output);
     Q_INVOKABLE void sync();

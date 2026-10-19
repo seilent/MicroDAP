@@ -38,6 +38,7 @@ Page {
     property alias usbPane: usbPane
     property alias speakerPane: speakerPane
     property alias deleteDialog: deleteDialog
+    property alias sheet: sheet
 
     signal toast(string first, string second)
 
@@ -127,10 +128,52 @@ Page {
         page.fixFocus()
     }
 
+    function typable(r: var): bool {
+        if (r === null || r === undefined || r.readOnly === true)
+            return false
+        return r.key === "preamp" || (r.kind === "sub" && r.field !== "type")
+    }
+
+    function openTypeSheet(): bool {
+        const r = page.focusedRow
+        if (page.editing || page.keyboard === null || !page.typable(r))
+            return false
+        sheet.title = r.title
+        sheet.items = ["type value"]
+        sheet.open()
+        return true
+    }
+
+    function openType(): void {
+        const r = page.focusedRow
+        const p = page.activePane.profile
+        if (!page.typable(r) || p === null || page.keyboard === null)
+            return
+        const field = r.key === "preamp" ? "preamp" : r.field
+        const value = field === "preamp" ? p.preamp : p.bands[r.band][field]
+        d.typeOutput = page.activePane.output
+        d.typeBand = r.band
+        d.typeField = field
+        d.kbTarget = "type"
+        page.keyboard.validator = null
+        page.keyboard.open(EqFormat.typedRequest(field, r.title, value))
+    }
+
+    function typeDone(text: string): void {
+        const value = Number(text)
+        if (d.typeField === "preamp") {
+            if (page.canCall("setPreamp"))
+                page.eq.setPreamp(d.typeOutput, value)
+        } else if (page.canCall("setBandValue")) {
+            page.eq.setBandValue(d.typeOutput, d.typeBand, d.typeField, value)
+        }
+    }
+
     function openRename(): void {
         if (page.keyboard === null || !page.canCall("renamePreset"))
             return
         const output = page.activePane.output
+        d.kbTarget = "rename"
         d.renameOutput = output
         d.renameName = EqFormat.profileText(page.activePane.profile)
         page.keyboard.open({ title: "rename preset", text: String(page.eq.presetName(output)), kind: "text", min: 1,
@@ -405,6 +448,7 @@ Page {
 
     function completeAll(): void {
         deleteDialog.complete()
+        sheet.complete()
         page.landPivot()
         for (const pane of page.panes) {
             pane.settle()
@@ -441,6 +485,12 @@ Page {
         }
     }
 
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        if (page.editing || (kind !== "row" && kind !== "sub"))
+            return false
+        return page.openTypeSheet()
+    }
+
     function touchTap(kind: string, index: int, hit: Item) {
         if (page.editing)
             return
@@ -453,6 +503,8 @@ Page {
     function handleAction(name: string, repeat: bool): bool {
         if (deleteDialog.shown)
             return deleteDialog.handleAction(name, repeat)
+        if (sheet.shown)
+            return sheet.handleAction(name, repeat)
         if (page.editing)
             return page.handleEdit(name, repeat)
         switch (name) {
@@ -477,6 +529,9 @@ Page {
                 page.activate()
             return true
         case "x":
+            if (!repeat)
+                page.openTypeSheet()
+            return true
         case "y":
         case "back":
             return true
@@ -557,18 +612,28 @@ Page {
         property string deleteName: ""
         property string renameOutput: ""
         property string renameName: ""
+        property string kbTarget: ""
+        property string typeOutput: ""
+        property int typeBand: -1
+        property string typeField: ""
     }
 
     Connections {
         target: page.keyboard
-        enabled: d.renameOutput !== ""
+        enabled: d.kbTarget !== ""
         ignoreUnknownSignals: true
 
         function onDone(text) {
-            page.renameDone(text)
+            const target = d.kbTarget
+            d.kbTarget = ""
+            if (target === "rename")
+                page.renameDone(text)
+            else
+                page.typeDone(text)
         }
 
         function onCanceled() {
+            d.kbTarget = ""
             d.renameOutput = ""
         }
     }
@@ -966,6 +1031,18 @@ Page {
                 d.deleteOutput = ""
         }
         onRejected: d.deleteOutput = ""
+    }
+
+    Sheet {
+        id: sheet
+
+        anchors.fill: parent
+        screenOff: !page.live
+        onAccepted: (index) => {
+            sheet.close()
+            if (index === 0)
+                page.openType()
+        }
     }
 
     SequentialAnimation {

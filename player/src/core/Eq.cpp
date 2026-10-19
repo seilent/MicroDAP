@@ -1393,6 +1393,53 @@ void EqControl::changed(const QString &output)
         emit activeProfileChanged();
 }
 
+bool EqControl::setPreamp(const QString &output, double value)
+{
+    if (!std::isfinite(value) || value < EqParser::minPreamp || value > EqParser::maxPreamp)
+        return false;
+    EqProfile *profile = beginEdit(output);
+    if (!profile)
+        return false;
+    profile->preamp = std::round(value * 10.0) / 10.0;
+    endEdit(output);
+    return true;
+}
+
+bool EqControl::setBandValue(const QString &output, int band, const QString &field, double value)
+{
+    if (!std::isfinite(value) || band < 0 || band >= profile(output).count)
+        return false;
+    const bool freq = field == QLatin1StringView("freq");
+    const bool gain = field == QLatin1StringView("gain");
+    const bool q = field == QLatin1StringView("q");
+    if ((freq && (value < EqParser::minFreq || value > EqParser::maxFreq))
+        || (gain && (value < EqParser::minGain || value > EqParser::maxGain))
+        || (q && (value < EqParser::minQ || value > EqParser::maxQ)) || (!freq && !gain && !q))
+        return false;
+    const EqBand current = profile(output).bands[band];
+    if (gain && current.enabled && gainFree(current.type))
+        return false;
+    EqBand *b = beginBandEdit(output, band);
+    if (!b)
+        return false;
+    if (freq) {
+        b->freq = std::round(value);
+        b->freqIndex = -1;
+        for (int g = 0; g < EqGrid::size; ++g) {
+            if (EqGrid::frequency(g) == b->freq) {
+                b->freqIndex = g;
+                break;
+            }
+        }
+    } else if (gain) {
+        b->gain = std::round(value * 10.0) / 10.0;
+    } else {
+        b->q = std::round(value * 100.0) / 100.0;
+    }
+    endEdit(output);
+    return true;
+}
+
 bool EqControl::addBand(const QString &output)
 {
     if (!editable(output) || profile(output).count >= EqProfile::bandCount)

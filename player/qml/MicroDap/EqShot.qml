@@ -17,6 +17,7 @@ Item {
     readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end" || root.openShot !== null
     readonly property var bandShots: ({ "eq-bands": 3, "eq-bands-one": 1, "eq-bands-full": 10 })
     readonly property int bandShot: root.bandShots[root.fixture] === undefined ? 0 : root.bandShots[root.fixture]
+    readonly property bool typeShot: root.fixture.startsWith("eq-typed-")
     readonly property bool customShot: root.fixture === "eq-custom"
     readonly property bool savedShot: root.fixture === "eq-saved" || root.fixture === "eq-delete" || root.fixture === "eq-rename"
     readonly property bool dacShot: root.fixture === "eq-dac-range" || root.fixture === "eq-dac-preamp" || root.fixture === "eq-dac-long"
@@ -120,12 +121,13 @@ Item {
         id: screen
 
         anchors.fill: parent
-        animated: root.fixture === "eq-delete"
+        animated: root.fixture === "eq-delete" || root.fixture === "eq-typed-sheet"
         eq: sampleEq
         dacEq: root.dacShot ? sampleDacEq : null
         keyboard: keyboard
 
         Component.onCompleted: {
+            screen.focusBar.animated = false
             screen.completeAll()
             if (root.dacShot) {
                 const band = root.fixture === "eq-dac-range" ? 0 : 1
@@ -146,12 +148,25 @@ Item {
                 Qt.callLater(() => screen.activePane.ensureVisible(screen.indexOfKey(band + ":q"), 0))
                 return
             }
+            if (root.typeShot) {
+                if (root.fixture === "eq-typed-sheet") {
+                    screen.focusIndex = screen.indexOfKey("preamp")
+                    screen.openTypeSheet()
+                    Qt.callLater(screen.completeAll)
+                    return
+                }
+                screen.headphonesPane.openBand = 1
+                screen.focusIndex = screen.indexOfKey(root.fixture === "eq-typed-freq" ? "band1:freq" : "band1:gain")
+                screen.openType()
+                keyboard.complete()
+                return
+            }
             if (root.customShot || root.savedShot) {
                 screen.focusIndex = screen.indexOfKey(root.customShot ? "savePreset"
                     : root.fixture === "eq-saved" ? "renamePreset" : "deletePreset")
                 if (root.fixture === "eq-delete") {
                     screen.confirmDelete()
-                    screen.completeAll()
+                    Qt.callLater(screen.completeAll)
                 }
                 if (root.fixture === "eq-rename") {
                     screen.focusIndex = screen.indexOfKey("renamePreset")
