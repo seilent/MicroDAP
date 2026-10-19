@@ -65,7 +65,7 @@ d = json.load(open(sys.argv[1]))
 assert d["owner"] == "microdap", d["owner"]
 want = {"output_level", "sample_rate", "play_through", "resume", "auto_now_playing", "roots", "accent_hue",
         "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch", "rgb", "overlay_toasts", "clock",
-        "battery_percent", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
+        "battery_percent", "quickplay", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
 keys = d["keys"]
 assert {k.split(".", 1)[1] for k in keys} == want, sorted(keys)
 for name, e in keys.items():

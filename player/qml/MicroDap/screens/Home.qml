@@ -11,6 +11,7 @@ Page {
     property bool animated: true
     property bool overlay: false
     property bool quickplayShown: false
+    property bool quickplayOn: true
     property real pan: 0
     property real peekEnter: 1
     property real barEnter: 1
@@ -107,7 +108,7 @@ Page {
     }
 
     function showQuickplay() {
-        if (home.quickplayShown)
+        if (home.quickplayShown || !home.quickplayOn)
             return
         home.quickplayShown = true
         home.animatePan(1)
@@ -204,7 +205,7 @@ Page {
             home.setFocus(index)
             return "a"
         case "peek":
-            return !Ui.landscape && !home.quickplayShown ? "left" : ""
+            return !Ui.landscape && !home.quickplayShown && home.quickplayOn ? "left" : ""
         case "ring":
             playRing.pressed = true
             return ""
@@ -291,6 +292,11 @@ Page {
 
     onActivated: (index) => home.navigate(home.menu[index].name)
 
+    onQuickplayOnChanged: {
+        if (!home.quickplayOn)
+            home.showMenu()
+    }
+
     onLeaving: home.runExit()
 
     onEntered: (first, kind) => {
@@ -313,12 +319,13 @@ Page {
     Item {
         id: quickplayPanel
 
-        readonly property string touchKind: Ui.landscape ? "" : "peek"
+        readonly property string touchKind: Ui.landscape || !home.quickplayOn ? "" : "peek"
 
         x: 0
         y: home.quickplayY
         width: Ui.px(Ui.qpW)
         height: home.height
+        visible: home.quickplayOn
         opacity: home.quickplayAlpha
         transformOrigin: Item.TopLeft
         scale: home.quickplayScale

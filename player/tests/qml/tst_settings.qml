@@ -65,6 +65,7 @@ TestCase {
         property bool autoNowPlaying: false
         property string clock: "24h"
         property bool batteryPercent: false
+        property bool quickplay: true
         property string bootSession: "steam"
         property var sessionChoices: ["microdap", "microemu", "steam"]
         property bool available: true
@@ -260,14 +261,14 @@ TestCase {
     readonly property var expectedKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "clock", "batteryPercent", "rgb", "toasts"],
+        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "scale", "saver", "clock", "batteryPercent", "toasts"],
+        ["accent", "accentArt", "scale", "saver", "clock", "batteryPercent", "quickplay", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "closePlayer", "about"]
     ]
@@ -317,6 +318,7 @@ TestCase {
         fakeSettings.autoNowPlaying = false
         fakeSettings.clock = "24h"
         fakeSettings.batteryPercent = false
+        fakeSettings.quickplay = true
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -754,6 +756,11 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(page.valueOpen, false)
         compare(fakeSettings.batteryPercent, true)
+        verify(page.focusKey("quickplay"))
+        compare(tc.rowOf(page, "quickplay").value, "on")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.quickplay, false)
+        compare(tc.rowOf(page, "quickplay").value, "off")
     }
 
     function test_value_sheet_hold_applies_nothing() {

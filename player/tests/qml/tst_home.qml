@@ -356,6 +356,25 @@ TestCase {
         compare(page.quickplay.active, false)
     }
 
+    function test_quickplay_off() {
+        const page = open({ quickplayOn: false })
+        compare(page.quickplayPanel.visible, false)
+        compare(page.quickplayPanel.touchKind, "")
+        verify(router.dispatch("left", false))
+        compare(page.quickplayShown, false)
+        verify(router.dispatch("back", false))
+        compare(page.quickplayShown, false)
+        compare(page.playRing.visible, true)
+        tc.tapAt(page.playRingHit, Ui.px(50), Ui.px(42))
+        compare(counters.shuffles, 1)
+        page.quickplayOn = true
+        compare(page.quickplayPanel.visible, true)
+        verify(router.dispatch("left", false))
+        compare(page.quickplayShown, true)
+        page.quickplayOn = false
+        compare(page.quickplayShown, false)
+    }
+
     function test_t6_end_state() {
         const page = open()
         verify(router.dispatch("left", false))

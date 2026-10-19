@@ -63,6 +63,7 @@ Item {
         historyModel: root.contextRecent !== null ? root.contextRecent : sampleHistory
         newModel: root.contextNew !== null ? root.contextNew : sampleNew
         pinsModel: root.contextPins !== null ? root.contextPins : root.quickplay ? samplePins : null
+        quickplayOn: root.fixture !== "quickplay-off"
 
         Component.onCompleted: {
             if (root.quickplay)

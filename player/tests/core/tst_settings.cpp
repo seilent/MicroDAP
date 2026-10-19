@@ -141,6 +141,7 @@ void SettingsTest::defaultsWithoutDaemon()
     QVERIFY(!settings.autoNowPlaying());
     QCOMPARE(settings.clock(), QStringLiteral("24h"));
     QVERIFY(!settings.batteryPercent());
+    QVERIFY(settings.quickplay());
     settings.setPlayThrough(QStringLiteral("genres"));
     QCOMPARE(settings.playThrough(), QStringLiteral("off"));
     settings.setResume(QStringLiteral("track"));

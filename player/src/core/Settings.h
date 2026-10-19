@@ -45,6 +45,7 @@ class Settings : public QObject
     Q_PROPERTY(bool autoNowPlaying READ autoNowPlaying WRITE setAutoNowPlaying NOTIFY autoNowPlayingChanged)
     Q_PROPERTY(QString clock READ clock WRITE setClock NOTIFY clockChanged)
     Q_PROPERTY(bool batteryPercent READ batteryPercent WRITE setBatteryPercent NOTIFY batteryPercentChanged)
+    Q_PROPERTY(bool quickplay READ quickplay WRITE setQuickplay NOTIFY quickplayChanged)
     Q_PROPERTY(QString bootSession READ bootSession WRITE setBootSession NOTIFY bootSessionChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
@@ -146,6 +147,8 @@ public:
     void setClock(const QString &mode);
     bool batteryPercent() const;
     void setBatteryPercent(bool on);
+    bool quickplay() const;
+    void setQuickplay(bool on);
     QString bootSession() const;
     void setBootSession(const QString &name);
     Q_INVOKABLE QStringList bootSessions() const;
@@ -178,6 +181,7 @@ signals:
     void autoNowPlayingChanged();
     void clockChanged();
     void batteryPercentChanged();
+    void quickplayChanged();
     void bootSessionChanged();
     void availableChanged();
     void valueChanged(const QString &key);

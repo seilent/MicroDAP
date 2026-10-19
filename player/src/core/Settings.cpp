@@ -58,6 +58,7 @@ const QString keyResume = QStringLiteral("microdap.resume");
 const QString keyAutoNowPlaying = QStringLiteral("microdap.auto_now_playing");
 const QString keyClock = QStringLiteral("microdap.clock");
 const QString keyBatteryPercent = QStringLiteral("microdap.battery_percent");
+const QString keyQuickplay = QStringLiteral("microdap.quickplay");
 
 constexpr Key keys[] = {
     {"audio.output", QMetaType::QString, &Settings::outputChanged},
@@ -88,6 +89,7 @@ constexpr Key keys[] = {
     {"microdap.auto_now_playing", QMetaType::Bool, &Settings::autoNowPlayingChanged},
     {"microdap.clock", QMetaType::QString, &Settings::clockChanged},
     {"microdap.battery_percent", QMetaType::Bool, &Settings::batteryPercentChanged},
+    {"microdap.quickplay", QMetaType::Bool, &Settings::quickplayChanged},
 };
 
 const Key *find(const QString &key)
@@ -173,6 +175,7 @@ QVariantMap defaults()
         {keyAutoNowPlaying, false},
         {keyClock, QStringLiteral("24h")},
         {keyBatteryPercent, false},
+        {keyQuickplay, true},
     };
     for (const QString &slot : EqControl::outputs()) {
         out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
@@ -877,6 +880,16 @@ bool Settings::batteryPercent() const
 void Settings::setBatteryPercent(bool on)
 {
     store(keyBatteryPercent, on);
+}
+
+bool Settings::quickplay() const
+{
+    return m_values.value(keyQuickplay).toBool();
+}
+
+void Settings::setQuickplay(bool on)
+{
+    store(keyQuickplay, on);
 }
 
 bool Settings::touch() const

@@ -115,6 +115,7 @@ Page {
     readonly property bool autoNowPlaying: page.settings !== null && page.settings.autoNowPlaying === true
     readonly property string clockMode: page.settings !== null && page.settings.clock !== undefined ? String(page.settings.clock) : "24h"
     readonly property bool batteryPercent: page.settings !== null && page.settings.batteryPercent === true
+    readonly property bool quickplay: page.settings === null || page.settings.quickplay !== false
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
@@ -366,6 +367,8 @@ Page {
             return page.clockMode
         case "batteryPercent":
             return page.batteryPercent ? "on" : "off"
+        case "quickplay":
+            return page.quickplay ? "on" : "off"
         case "rgb":
             return page.rgbValue
         case "toasts":
@@ -850,6 +853,8 @@ Page {
             return page.clockMode
         case "batteryPercent":
             return page.batteryPercent
+        case "quickplay":
+            return page.quickplay
         case "rgb":
             return page.rgb
         case "toasts":

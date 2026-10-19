@@ -185,6 +185,7 @@ const QStringList &states()
         QStringLiteral("power-long"),
         QStringLiteral("tracknum"),
         QStringLiteral("seek"),
+        QStringLiteral("quickplay-off"),
         QStringLiteral("clock-24h"),
         QStringLiteral("clock-12h"),
         QStringLiteral("percent"),

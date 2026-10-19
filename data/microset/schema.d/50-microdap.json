@@ -142,6 +142,14 @@
       "label": "Battery percent",
       "ui": {"order": 9}
     },
+    "microdap.quickplay": {
+      "type": "b",
+      "default": true,
+      "applier": null,
+      "group": "microdap_display",
+      "label": "Quickplay",
+      "ui": {"order": 10}
+    },
     "microdap.screen_off_seconds": {
       "type": "u",
       "default": 300,

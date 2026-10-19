@@ -46,6 +46,7 @@ KEYS = {
     'microdap.auto_now_playing': ('b', False, {}),
     'microdap.clock': ('s', '24h', {'enum': ['24h', '12h', 'off']}),
     'microdap.battery_percent': ('b', False, {}),
+    'microdap.quickplay': ('b', True, {}),
     'microdap.roots': ('as', [], {}),
     'microdap.accent_hue': ('u', 350, {}),
     'microdap.accent_from_art': ('b', False, {}),

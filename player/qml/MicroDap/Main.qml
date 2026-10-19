@@ -1120,6 +1120,7 @@ Window {
             newModel: root.quickplayNew
             pinsModel: root.pins
             playlistCount: root.playlistCount
+            quickplayOn: root.settings === null || root.settings.quickplay !== false
             onNavigate: (name) => root.navigate(name)
             onNowPlayingBluetooth: root.openNowPlaying()
             onPlayRequested: (entry) => root.playEntry(entry)
