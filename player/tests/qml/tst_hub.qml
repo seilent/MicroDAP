@@ -826,6 +826,23 @@ TestCase {
         compare(pages.depth, 1)
     }
 
+    function test_folders_playing_row_in_accent() {
+        fakePlayer.current = { id: 12 }
+        const page = open({ pivotIndex: 5, player: fakePlayer })
+        router.dispatch("a", false)
+        page.foldersPane.forceLayout()
+        const one = tc.rowAt(page.foldersPane, 2)
+        const two = tc.rowAt(page.foldersPane, 3)
+        compare(tc.rowAt(page.foldersPane, 1).rowItem.playing, false)
+        compare(one.rowItem.playing, false)
+        compare(two.rowItem.playing, true)
+        compare(two.rowItem.primaryColor, Ui.accent)
+        fakePlayer.current = { id: 11 }
+        compare(one.rowItem.playing, true)
+        compare(two.rowItem.playing, false)
+        fakePlayer.current = {}
+    }
+
     function test_folders_play_recursive() {
         const page = open({ pivotIndex: 5, player: fakePlayer })
         router.dispatch("a", false)
