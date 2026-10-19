@@ -75,6 +75,7 @@ Page {
     readonly property int battery: np.status !== null && np.status.battery !== undefined ? np.status.battery : -1
     readonly property bool batteryPresent: np.status !== null && np.status.batteryPresent === true
     readonly property string clock: np.status !== null && np.status.clock !== undefined ? np.status.clock : ""
+    readonly property bool batteryPercent: np.status !== null && np.status.batteryPercent === true
     readonly property real idleAlpha: np.idle ? Motion.idleAlpha : 1
     readonly property real edgeX: Ui.px(Ui.edge)
     readonly property real artSide: Ui.px(Ui.npArt)
@@ -764,6 +765,7 @@ Page {
             anchors.right: parent.right
             anchors.top: parent.top
             clock: np.clock
+            percent: np.batteryPercent
             battery: np.battery
             batteryPresent: np.batteryPresent
             bluetooth: np.phoneConnected

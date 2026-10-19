@@ -15,9 +15,10 @@ Item {
     QtObject {
         id: sampleStatus
 
-        readonly property int battery: 73
+        readonly property int battery: root.fixture === "percent-low" ? 5 : 73
         readonly property bool batteryPresent: true
-        readonly property string clock: ""
+        readonly property string clock: root.fixture === "clock-12h" ? "7:30" : root.fixture.startsWith("clock") || root.fixture.startsWith("percent") ? "19:30" : ""
+        readonly property bool batteryPercent: root.fixture.startsWith("percent")
     }
 
     QtObject {

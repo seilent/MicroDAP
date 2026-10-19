@@ -125,6 +125,23 @@
       "label": "Toasts in game",
       "ui": {"order": 7}
     },
+    "microdap.clock": {
+      "type": "s",
+      "default": "24h",
+      "enum": ["24h", "12h", "off"],
+      "applier": null,
+      "group": "microdap_display",
+      "label": "Clock",
+      "ui": {"order": 8}
+    },
+    "microdap.battery_percent": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_display",
+      "label": "Battery percent",
+      "ui": {"order": 9}
+    },
     "microdap.screen_off_seconds": {
       "type": "u",
       "default": 300,

@@ -10,6 +10,7 @@ Item {
     property bool bluetooth: false
     property bool playing: false
     property bool paused: false
+    property bool percent: false
     readonly property real glyphSize: Ui.px(Ui.statusHeight)
     readonly property real stripTop: Ui.px(Ui.statusTop)
     readonly property bool batteryLow: root.battery < Ui.batteryLowPercent
@@ -19,6 +20,7 @@ Item {
     property alias playGlyph: playGlyph
     property alias bluetoothGlyph: bluetoothGlyph
     property alias batteryGlyph: batteryGlyph
+    property alias percentText: percentText
 
     implicitHeight: root.stripTop + root.glyphSize
 
@@ -57,6 +59,16 @@ Item {
             visible: root.bluetooth
             name: "bluetooth"
             color: Ui.textFull
+        }
+
+        Text {
+            id: percentText
+
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.percent && root.batteryPresent && root.battery >= 0
+            text: root.battery + "%"
+            color: Ui.white(Ui.time.alpha)
+            font: Ui.font(Ui.time)
         }
 
         Glyph {

@@ -307,6 +307,30 @@ TestCase {
         status.battery = 100
     }
 
+    function test_status_battery_percent() {
+        status.battery = 73
+        compare(status.percentText.visible, false)
+        status.percent = true
+        compare(status.percentText.visible, true)
+        compare(status.percentText.text, "73%")
+        compare(status.percentText.font.styleName, "Regular")
+        compare(status.percentText.font.pixelSize, Ui.fontPx(13))
+        fuzzyCompare(status.percentText.color.a, 0.85, 1 / 255)
+        status.row.forceLayout()
+        fuzzyCompare(status.batteryGlyph.x - status.percentText.x - status.percentText.width, Ui.px(Ui.statusGap), 0.5)
+        status.battery = 5
+        compare(status.batteryGlyph.color, Ui.accent)
+        fuzzyCompare(status.percentText.color.r, 1, 1 / 255)
+        fuzzyCompare(status.percentText.color.g, 1, 1 / 255)
+        fuzzyCompare(status.percentText.color.b, 1, 1 / 255)
+        fuzzyCompare(status.percentText.color.a, Ui.time.alpha, 1 / 255)
+        status.batteryPresent = false
+        compare(status.percentText.visible, false)
+        status.batteryPresent = true
+        status.percent = false
+        status.battery = 100
+    }
+
     function test_status_glyphs() {
         status.playing = false
         status.paused = false

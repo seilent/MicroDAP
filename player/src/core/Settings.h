@@ -43,6 +43,8 @@ class Settings : public QObject
     Q_PROPERTY(QString playThrough READ playThrough WRITE setPlayThrough NOTIFY playThroughChanged)
     Q_PROPERTY(QString resume READ resume WRITE setResume NOTIFY resumeChanged)
     Q_PROPERTY(bool autoNowPlaying READ autoNowPlaying WRITE setAutoNowPlaying NOTIFY autoNowPlayingChanged)
+    Q_PROPERTY(QString clock READ clock WRITE setClock NOTIFY clockChanged)
+    Q_PROPERTY(bool batteryPercent READ batteryPercent WRITE setBatteryPercent NOTIFY batteryPercentChanged)
     Q_PROPERTY(QString bootSession READ bootSession WRITE setBootSession NOTIFY bootSessionChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
@@ -74,6 +76,7 @@ public:
     static QStringList sampleRates();
     static QStringList playThroughModes();
     static QStringList resumeModes();
+    static QStringList clockModes();
     Q_INVOKABLE static QStringList defaultRoots();
     static QList<int> saverSteps();
     static QList<int> screenOffSteps();
@@ -139,6 +142,10 @@ public:
     void setResume(const QString &mode);
     bool autoNowPlaying() const;
     void setAutoNowPlaying(bool on);
+    QString clock() const;
+    void setClock(const QString &mode);
+    bool batteryPercent() const;
+    void setBatteryPercent(bool on);
     QString bootSession() const;
     void setBootSession(const QString &name);
     Q_INVOKABLE QStringList bootSessions() const;
@@ -169,6 +176,8 @@ signals:
     void playThroughChanged();
     void resumeChanged();
     void autoNowPlayingChanged();
+    void clockChanged();
+    void batteryPercentChanged();
     void bootSessionChanged();
     void availableChanged();
     void valueChanged(const QString &key);

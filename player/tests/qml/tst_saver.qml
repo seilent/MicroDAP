@@ -147,6 +147,12 @@ TestCase {
         verify(/^\d{1,2}:\d{2}$/.test(saver.clockText))
         compare(saver.formatClock(new Date(2026, 9, 6, 7, 13)), "7:13")
         compare(saver.formatClock(new Date(2026, 9, 6, 0, 5)), "0:05")
+        saver.clockMode = "12h"
+        compare(saver.formatClock(new Date(2026, 9, 6, 19, 30)), "7:30")
+        compare(saver.formatClock(new Date(2026, 9, 6, 0, 5)), "12:05")
+        saver.clockMode = "off"
+        compare(saver.formatClock(new Date(2026, 9, 6, 7, 13)), "")
+        saver.clockMode = "24h"
         compare(saver.clockTimer.interval, 1000)
         compare(saver.clockTimer.running, true)
         compare(saver.drifting, true)

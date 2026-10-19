@@ -139,6 +139,8 @@ void SettingsTest::defaultsWithoutDaemon()
     QCOMPARE(settings.playThrough(), QStringLiteral("off"));
     QCOMPARE(settings.resume(), QStringLiteral("position"));
     QVERIFY(!settings.autoNowPlaying());
+    QCOMPARE(settings.clock(), QStringLiteral("24h"));
+    QVERIFY(!settings.batteryPercent());
     settings.setPlayThrough(QStringLiteral("genres"));
     QCOMPARE(settings.playThrough(), QStringLiteral("off"));
     settings.setResume(QStringLiteral("track"));
@@ -637,6 +639,7 @@ void SettingsTest::rowTable()
     QCOMPARE(strings(SettingsRows::find(QStringLiteral("rgb"))->values), Settings::rgbModes());
     QCOMPARE(strings(SettingsRows::find(QStringLiteral("playThrough"))->values), Settings::playThroughModes());
     QCOMPARE(strings(SettingsRows::find(QStringLiteral("resume"))->values), Settings::resumeModes());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("clock"))->values), Settings::clockModes());
     QCOMPARE(ints(SettingsRows::find(QStringLiteral("saver"))->values), Settings::saverSteps());
     QCOMPARE(ints(SettingsRows::find(QStringLiteral("screenOff"))->values), Settings::screenOffSteps());
     QCOMPARE(ints(SettingsRows::find(QStringLiteral("suspend"))->values), Settings::suspendSteps());

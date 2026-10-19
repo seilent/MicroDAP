@@ -21,6 +21,7 @@ Item {
     property string lyricText: ""
     property string shownLyric: ""
     property var lyricLines: []
+    property string clockMode: "24h"
 
     readonly property bool live: !saver.screenOff
     readonly property bool animating: showAnim.running || hideAnim.running || dimAnim.running || lyricSwap.running
@@ -53,7 +54,9 @@ Item {
     opacity: saver.progress
 
     function formatClock(date: var): string {
-        const h = date.getHours()
+        if (saver.clockMode === "off")
+            return ""
+        const h = saver.clockMode === "12h" ? (date.getHours() + 11) % 12 + 1 : date.getHours()
         const m = date.getMinutes()
         return h + ":" + (m < 10 ? "0" : "") + m
     }
@@ -160,6 +163,7 @@ Item {
     onFixedClockChanged: saver.refreshClock()
     onLyricsOnChanged: saver.refreshLyric(false)
     onLyricsChanged: saver.readLines()
+    onClockModeChanged: saver.refreshClock()
 
     Connections {
         target: saver.shown && saver.live ? saver.player : null

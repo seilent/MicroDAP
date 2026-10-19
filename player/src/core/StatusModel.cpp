@@ -88,8 +88,14 @@ QString StatusModel::defaultPowerSupplyRoot()
                                 QStringLiteral("/sys/class/power_supply"));
 }
 
-QString StatusModel::formatClock(const QTime &time)
+QString StatusModel::formatClock(const QTime &time, const QString &mode)
 {
+    if (mode == QLatin1StringView("off"))
+        return {};
+    if (mode == QLatin1StringView("12h")) {
+        const int hour = time.hour() % 12;
+        return QStringLiteral("%1:%2").arg(hour == 0 ? 12 : hour).arg(time.minute(), 2, 10, QLatin1Char('0'));
+    }
     return time.toString(QStringLiteral("h:mm"));
 }
 
@@ -189,9 +195,36 @@ void StatusModel::apply(int percent, bool charging, bool present)
     }
 }
 
+QString StatusModel::clockMode() const
+{
+    return m_clockMode;
+}
+
+void StatusModel::setClockMode(const QString &mode)
+{
+    if (mode == m_clockMode)
+        return;
+    m_clockMode = mode;
+    emit clockModeChanged();
+    updateClock();
+}
+
+bool StatusModel::batteryPercent() const
+{
+    return m_batteryPercent;
+}
+
+void StatusModel::setBatteryPercent(bool on)
+{
+    if (on == m_batteryPercent)
+        return;
+    m_batteryPercent = on;
+    emit batteryPercentChanged();
+}
+
 void StatusModel::updateClock()
 {
-    const QString now = formatClock(QTime::currentTime());
+    const QString now = formatClock(QTime::currentTime(), m_clockMode);
     if (now == m_clock)
         return;
     m_clock = now;

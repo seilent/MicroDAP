@@ -113,6 +113,8 @@ Page {
     readonly property string playThrough: page.settings !== null && page.settings.playThrough !== undefined ? String(page.settings.playThrough) : "off"
     readonly property string resume: page.settings !== null && page.settings.resume !== undefined ? String(page.settings.resume) : "position"
     readonly property bool autoNowPlaying: page.settings !== null && page.settings.autoNowPlaying === true
+    readonly property string clockMode: page.settings !== null && page.settings.clock !== undefined ? String(page.settings.clock) : "24h"
+    readonly property bool batteryPercent: page.settings !== null && page.settings.batteryPercent === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
@@ -360,6 +362,10 @@ Page {
             return Ui.userScale.toFixed(1)
         case "saver":
             return page.minutes(page.saverSeconds)
+        case "clock":
+            return page.clockMode
+        case "batteryPercent":
+            return page.batteryPercent ? "on" : "off"
         case "rgb":
             return page.rgbValue
         case "toasts":
@@ -840,6 +846,10 @@ Page {
             return page.savedScale
         case "saver":
             return page.saverSeconds
+        case "clock":
+            return page.clockMode
+        case "batteryPercent":
+            return page.batteryPercent
         case "rgb":
             return page.rgb
         case "toasts":

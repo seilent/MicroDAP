@@ -970,6 +970,7 @@ Window {
 
             anchors.fill: parent
             screenOff: root.off
+            clockMode: root.settings !== null && root.settings.clock !== undefined ? String(root.settings.clock) : "24h"
             title: root.field("title")
             artist: root.field("artist")
             album: root.field("album")

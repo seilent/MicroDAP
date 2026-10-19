@@ -63,6 +63,8 @@ TestCase {
         property string playThrough: "off"
         property string resume: "position"
         property bool autoNowPlaying: false
+        property string clock: "24h"
+        property bool batteryPercent: false
         property string bootSession: "steam"
         property var sessionChoices: ["microdap", "microemu", "steam"]
         property bool available: true
@@ -258,14 +260,14 @@ TestCase {
     readonly property var expectedKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts"],
+        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "clock", "batteryPercent", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "scale", "saver", "toasts"],
+        ["accent", "accentArt", "scale", "saver", "clock", "batteryPercent", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "closePlayer", "about"]
     ]
@@ -313,6 +315,8 @@ TestCase {
         fakeSettings.playThrough = "off"
         fakeSettings.resume = "position"
         fakeSettings.autoNowPlaying = false
+        fakeSettings.clock = "24h"
+        fakeSettings.batteryPercent = false
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -733,6 +737,23 @@ TestCase {
         compare(page.valueOpen, false)
         compare(fakeSettings.autoNowPlaying, true)
         compare(tc.rowOf(page, "autoNowPlaying").value, "on")
+    }
+
+    function test_clock_and_battery_percent_rows() {
+        const page = open()
+        verify(page.focusKey("clock"))
+        compare(tc.rowOf(page, "clock").value, "24h")
+        compare(tc.rowOf(page, "batteryPercent").value, "off")
+        verify(router.dispatch("a", false))
+        page.sheet.complete()
+        compare(tc.items(page), JSON.stringify(["24h", "12h", "off"]))
+        verify(router.dispatch("down", false))
+        compare(fakeSettings.clock, "12h")
+        verify(router.dispatch("a", false))
+        verify(page.focusKey("batteryPercent"))
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.batteryPercent, true)
     }
 
     function test_value_sheet_hold_applies_nothing() {

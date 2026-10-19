@@ -33,6 +33,7 @@ Page {
     readonly property int battery: page.status !== null && page.status.battery !== undefined ? page.status.battery : -1
     readonly property bool batteryPresent: page.status !== null && page.status.batteryPresent === true
     readonly property string clock: page.status !== null && page.status.clock !== undefined ? page.status.clock : ""
+    readonly property bool batteryPercent: page.status !== null && page.status.batteryPercent === true
     readonly property int rowIndex: trackList.focusIndex
     readonly property var focusedRow: page.rows[page.rowIndex] === undefined ? null : page.rows[page.rowIndex]
     readonly property string artUrl: page.artPath === "" ? "" : "file://" + page.artPath
@@ -429,6 +430,7 @@ Page {
         anchors.right: parent.right
         anchors.top: parent.top
         clock: page.clock
+        percent: page.batteryPercent
         battery: page.battery
         batteryPresent: page.batteryPresent
         bluetooth: page.phoneConnected

@@ -338,6 +338,12 @@ int main(int argc, char *argv[])
         libraryWatcher = std::make_unique<microdap::LibraryWatcher>(&library);
     }
     microdap::StatusModel status;
+    status.setClockMode(settings.clock());
+    status.setBatteryPercent(settings.batteryPercent());
+    QObject::connect(&settings, &microdap::Settings::clockChanged, &status,
+                     [&settings, &status] { status.setClockMode(settings.clock()); });
+    QObject::connect(&settings, &microdap::Settings::batteryPercentChanged, &status,
+                     [&settings, &status] { status.setBatteryPercent(settings.batteryPercent()); });
 
     microdap::AccentControl accent;
     accent.setSliderHue(settings.accentHue());

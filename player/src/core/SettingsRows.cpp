@@ -169,6 +169,8 @@ QList<Row> build()
     out.push_back(bounded(draft(scale, "relayout under the open sheet")));
 
     out.push_back(steps("display", "saver", "saver", "saverSeconds", numbers({10, 15, 30, 60, 120, 300})));
+    out.push_back(choice("display", "clock", "clock", "clock", words({"24h", "12h", "off"})));
+    out.push_back(toggle("display", "batteryPercent", "battery percent", "batteryPercent"));
 
     Row rgb = choice("display", "rgb", "rgb", "rgb", words({"accent", "off", "system"}));
     out.push_back(shown(readOnly(rgb, "rgb"), "dap"));

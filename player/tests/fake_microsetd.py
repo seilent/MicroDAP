@@ -44,6 +44,8 @@ KEYS = {
     'microdap.play_through': ('s', 'off', {'enum': ['off', 'folders', 'albums']}),
     'microdap.resume': ('s', 'position', {'enum': ['off', 'track', 'position']}),
     'microdap.auto_now_playing': ('b', False, {}),
+    'microdap.clock': ('s', '24h', {'enum': ['24h', '12h', 'off']}),
+    'microdap.battery_percent': ('b', False, {}),
     'microdap.roots': ('as', [], {}),
     'microdap.accent_hue': ('u', 350, {}),
     'microdap.accent_from_art': ('b', False, {}),

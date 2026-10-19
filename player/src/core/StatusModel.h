@@ -19,6 +19,8 @@ class StatusModel : public QObject
     Q_PROPERTY(bool charging READ charging NOTIFY chargingChanged)
     Q_PROPERTY(bool batteryPresent READ batteryPresent NOTIFY batteryChanged)
     Q_PROPERTY(QString clock READ clock NOTIFY clockChanged)
+    Q_PROPERTY(QString clockMode READ clockMode WRITE setClockMode NOTIFY clockModeChanged)
+    Q_PROPERTY(bool batteryPercent READ batteryPercent WRITE setBatteryPercent NOTIFY batteryPercentChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
 
 public:
@@ -27,13 +29,17 @@ public:
                 QObject *parent = nullptr);
 
     static QString defaultPowerSupplyRoot();
-    static QString formatClock(const QTime &time);
+    static QString formatClock(const QTime &time, const QString &mode = QStringLiteral("24h"));
 
     bool usesUPower() const;
     int battery() const;
     bool charging() const;
     bool batteryPresent() const;
     QString clock() const;
+    QString clockMode() const;
+    void setClockMode(const QString &mode);
+    bool batteryPercent() const;
+    void setBatteryPercent(bool on);
     bool active() const;
     void setActive(bool active);
 
@@ -43,6 +49,8 @@ signals:
     void batteryChanged();
     void chargingChanged();
     void clockChanged();
+    void clockModeChanged();
+    void batteryPercentChanged();
     void activeChanged();
 
 private slots:
@@ -64,6 +72,8 @@ private:
     bool m_charging = false;
     bool m_present = false;
     QString m_clock;
+    QString m_clockMode = QStringLiteral("24h");
+    bool m_batteryPercent = false;
     bool m_active = true;
 };
 

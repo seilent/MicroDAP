@@ -64,8 +64,8 @@ import json, re, sys
 d = json.load(open(sys.argv[1]))
 assert d["owner"] == "microdap", d["owner"]
 want = {"output_level", "sample_rate", "play_through", "resume", "auto_now_playing", "roots", "accent_hue",
-        "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch", "rgb", "overlay_toasts",
-        "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
+        "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch", "rgb", "overlay_toasts", "clock",
+        "battery_percent", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
 keys = d["keys"]
 assert {k.split(".", 1)[1] for k in keys} == want, sorted(keys)
 for name, e in keys.items():
@@ -84,6 +84,7 @@ assert keys["microdap.play_through"]["enum"] == ["off", "folders", "albums"]
 assert keys["microdap.resume"]["enum"] == ["off", "track", "position"]
 assert keys["microdap.resume"]["default"] == "position"
 assert keys["microdap.auto_now_playing"]["default"] is False
+assert keys["microdap.clock"]["enum"] == ["24h", "12h", "off"]
 PY
 
 for f in $(find "${data}" -type f) "${repo}/CMakeLists.txt"; do

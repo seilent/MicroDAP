@@ -904,6 +904,10 @@ void PowerTest::clockFormat()
     QCOMPARE(StatusModel::formatClock(QTime(7, 13)), QStringLiteral("7:13"));
     QCOMPARE(StatusModel::formatClock(QTime(0, 5)), QStringLiteral("0:05"));
     QCOMPARE(StatusModel::formatClock(QTime(19, 30, 59)), QStringLiteral("19:30"));
+    QCOMPARE(StatusModel::formatClock(QTime(19, 30), QStringLiteral("12h")), QStringLiteral("7:30"));
+    QCOMPARE(StatusModel::formatClock(QTime(0, 5), QStringLiteral("12h")), QStringLiteral("12:05"));
+    QCOMPARE(StatusModel::formatClock(QTime(12, 0), QStringLiteral("12h")), QStringLiteral("12:00"));
+    QCOMPARE(StatusModel::formatClock(QTime(7, 13), QStringLiteral("off")), QString());
 }
 
 void PowerTest::switchHeldOrder()
