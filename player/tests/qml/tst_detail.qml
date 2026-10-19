@@ -600,8 +600,9 @@ TestCase {
         compare(page.artItem.height, Ui.px(116))
         compare(page.artItem.source.toString(), "file:///tmp/microdap-album.jpg")
         compare(page.trackList.x, 0)
-        compare(page.trackList.y, Ui.px(155 + 116 + 12))
-        compare(page.trackList.y, Ui.px(283))
+        compare(page.trackList.y + page.trackList.topMargin, Ui.px(155 + 116 + 12))
+        compare(page.trackList.y + page.trackList.topMargin, Ui.px(283))
+        compare(page.trackList.contentY, -page.trackList.topMargin)
         compare(page.trackList.rowPitch, Ui.px(40))
         compare(page.rows.length, 3)
         compare(page.rowIndex, 0)
@@ -609,6 +610,45 @@ TestCase {
         compare(page.focusBar.rowY, Ui.px(283))
         compare(page.backdrop.source.toString(), "")
         verify(Qt.colorEqual(page.surface.color, Ui.bg))
+    }
+
+    function test_album_art_collapse() {
+        const page = openAlbum()
+        const list = page.trackList
+        const at = (u) => { list.contentY = Ui.px(u) - list.topMargin }
+        const rowsTop = () => list.y - list.contentY
+        compare(Ui.tileS, 71)
+        compare(list.y, Ui.px(103 + 71 + 12))
+        compare(list.topMargin, Ui.px(45 + 52))
+        at(0)
+        compare(page.artItem.width * page.artItem.scale, Ui.px(116))
+        compare(page.artItem.y, Ui.px(155))
+        compare(page.titleItem.x, Ui.px(16))
+        at(22.5)
+        fuzzyCompare(page.artItem.width * page.artItem.scale, Ui.px(93.5), 0.01)
+        fuzzyCompare(rowsTop(), Ui.px(283 - 22.5), 0.01)
+        fuzzyCompare(page.artItem.y + page.artItem.width * page.artItem.scale + Ui.px(12), rowsTop(), 0.01)
+        at(45)
+        fuzzyCompare(page.artItem.width * page.artItem.scale, Ui.px(71), 0.01)
+        compare(page.artItem.y, Ui.px(155))
+        compare(page.titleItem.x, Ui.px(16))
+        for (const u of [46, 48, 50, 52, 54, 56, 70, 90]) {
+            at(u)
+            const artBottom = page.artItem.y + page.artItem.width * page.artItem.scale
+            fuzzyCompare(artBottom + Ui.px(12), rowsTop(), 0.01)
+            const albumBottom = tc.textBaseline(page.titleItem) + Ui.px(4.2)
+            if (page.artItem.y < albumBottom)
+                verify(page.titleItem.x >= page.artItem.x + page.artItem.width * page.artItem.scale, "text right of art at " + u)
+        }
+        at(97)
+        compare(page.artItem.y, Ui.px(103))
+        fuzzyCompare(page.titleItem.x, Ui.px(16 + 71 + 8), 0.01)
+        fuzzyCompare(page.artistItem.x, Ui.px(95), 0.01)
+        fuzzyCompare(tc.textBaseline(page.artistItem), Ui.px(117), 0.01)
+        fuzzyCompare(rowsTop(), list.y, 0.01)
+        at(150)
+        compare(page.artItem.y, Ui.px(103))
+        at(0)
     }
 
     function test_album_rows() {
@@ -700,6 +740,11 @@ TestCase {
         fuzzyCompare(page.titleItem.width, pages.width - Ui.px(216 + 16), 0.01)
         compare(page.trackList.x, Ui.px(216 - 20))
         compare(page.trackList.y, Ui.px(98))
+        compare(page.trackList.topMargin, 0)
+        page.trackList.contentY = Ui.px(40)
+        compare(page.artItem.scale, 1)
+        compare(page.artItem.y, Ui.px(98))
+        page.trackList.contentY = 0
         compare(page.focusBar.x, Ui.px(216 - 8))
         const row = tc.rowAt(page.trackList, 0)
         fuzzyCompare(page.trackList.x + row.rowItem.trailingItem.x + row.rowItem.trailingItem.width, pages.width - Ui.px(20), 0.01)

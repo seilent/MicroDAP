@@ -93,6 +93,7 @@
 | components | `tracknum` | `--size 640x960` and `960x640` | 9999 title at +24 u, 10000 title one digit right | pending |
 | nowplaying | `seek` | `--size 640x960` and `960x640` | fill and times at the 60 % target | pending |
 | home | browse | `--size 640x960` and `960x640` | play ring left of `music` at the bar center, no bar on `music` | pending |
+| album | `art-collapse`, `art-dock`, `art-docked` | `--size 640x960`, docked also `960x640` | art 71 u at 155; art at 150 with the lines at 60 u; docked art at 103 beside the lines, rows from 186 | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

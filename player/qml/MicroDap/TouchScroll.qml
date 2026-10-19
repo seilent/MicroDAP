@@ -16,8 +16,9 @@ Item {
     signal moved()
 
     function write(y: real): bool {
-        const end = Math.max(0, scroll.limit())
-        const target = Math.max(0, Math.min(end, y))
+        const low = -scroll.flick.topMargin
+        const end = Math.max(low, scroll.limit())
+        const target = Math.max(low, Math.min(end, y))
         scroll.lastWrite = target
         scroll.flick.contentY = target
         scroll.moved()

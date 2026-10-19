@@ -303,6 +303,10 @@ QtObject {
     readonly property real albumArtTop: ui.landscape ? ui.contentTop : ui.npArtTop
     readonly property real albumRowsGap: 12
     readonly property real albumRowsTop: ui.landscape ? ui.contentTop : ui.albumArtTop + ui.tileL + ui.albumRowsGap
+    readonly property real albumDockTop: ui.npTextTop - ui.capHeight * ui.npArtist.size
+    readonly property real albumDockX: ui.albumArtX + ui.tileS + ui.tileLGutter
+    readonly property real albumCollapse: ui.tileL - ui.tileS
+    readonly property real albumDock: ui.albumArtTop - ui.albumDockTop
 
     function detailRingX(index: int): real {
         return ui.hubEdge + index * (ui.detailRing + ui.detailRingGap)

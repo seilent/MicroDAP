@@ -36,15 +36,20 @@ Page {
     readonly property int rowIndex: trackList.focusIndex
     readonly property var focusedRow: page.rows[page.rowIndex] === undefined ? null : page.rows[page.rowIndex]
     readonly property string artUrl: page.artPath === "" ? "" : "file://" + page.artPath
+    readonly property bool collapses: !Ui.landscape
+    readonly property real offset: page.collapses ? Math.max(0, trackList.contentY + trackList.topMargin) : 0
+    readonly property real dockShift: Math.max(0, Math.min(Ui.px(Ui.albumDock), page.offset - Ui.px(Ui.albumCollapse)))
+    readonly property real textMove: Ui.px(Ui.albumArtTop - Ui.npAlbumBaseline) - albumMetrics.descent
     readonly property real artX: Ui.px(Ui.albumArtX)
-    readonly property real artY: Ui.px(Ui.albumArtTop)
-    readonly property real artSide: Ui.px(Ui.tileL)
-    readonly property real textX: Ui.px(Ui.landscape ? Ui.npColumnRight : Ui.edge)
+    readonly property real artY: Ui.px(Ui.albumArtTop) - page.dockShift
+    readonly property real artSide: Ui.px(Ui.tileL) - Math.min(page.offset, Ui.px(Ui.albumCollapse))
+    readonly property real textX: Ui.landscape ? Ui.px(Ui.npColumnRight)
+        : Ui.px(Ui.edge) + Ui.px(Ui.albumDockX - Ui.edge) * Math.min(1, page.dockShift / page.textMove)
     readonly property real textWidth: page.width - Ui.px(Ui.edge) - page.textX
     readonly property real artistBaseline: Ui.px(Ui.landscape ? Ui.npArtistBaselineLandscape : Ui.npTextTop)
     readonly property real albumBaseline: Ui.px(Ui.landscape ? Ui.npAlbumBaselineLandscape : Ui.npAlbumBaseline)
     readonly property real listX: Ui.px(Ui.detailListX)
-    readonly property real listY: Ui.px(Ui.albumRowsTop)
+    readonly property real listY: page.collapses ? Ui.px(Ui.albumDockTop + Ui.tileS + Ui.albumRowsGap) : Ui.px(Ui.albumRowsTop)
 
     property alias backRing: backRing
     property alias statusStrip: statusStrip
@@ -374,8 +379,15 @@ Page {
         y: page.listY
         width: page.width - page.listX
         height: page.height - trackList.y
+        topMargin: page.collapses ? Ui.px(Ui.albumCollapse + Ui.albumDock) : 0
         model: page.rows
         delegate: TrackRow {}
+    }
+
+    FontMetrics {
+        id: albumMetrics
+
+        font: Ui.font(Ui.npAlbum)
     }
 
     FocusBar {
@@ -454,9 +466,11 @@ Page {
         x: page.artX
         y: page.artY
         size: Ui.tileL
+        transformOrigin: Item.TopLeft
+        scale: page.artSide / Ui.px(Ui.tileL)
         captioned: false
         source: page.artUrl
-        animated: page.live
+        animated: false
     }
 
     Sheet {

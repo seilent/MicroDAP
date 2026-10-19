@@ -67,7 +67,8 @@ Item {
         }
 
         function albumTracks(id: int): var {
-            return sampleLibrary.tracks.filter((t) => t[2] === id).map((t) => sampleLibrary.rowOf(t))
+            const all = root.fixture.startsWith("art-")
+            return sampleLibrary.tracks.filter((t) => all || t[2] === id).map((t) => sampleLibrary.rowOf(t))
         }
     }
 
@@ -107,6 +108,11 @@ Item {
             Component.onCompleted: {
                 albumPage.completeAll()
                 albumPage.pressed = root.fixture === "pressed"
+                const shift = root.fixture === "art-collapse" ? 45 : root.fixture === "art-dock" ? 50 : root.fixture === "art-docked" ? 120 : -1
+                if (shift >= 0) {
+                    albumPage.trackList.contentY = Ui.px(shift) - albumPage.trackList.topMargin
+                    albumPage.trackList.clampFocusToView()
+                }
             }
         }
     }

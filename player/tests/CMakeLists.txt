@@ -507,7 +507,8 @@ foreach(shot IN ITEMS settings:pivot-library settings:pivot-display settings:piv
         settings:accent-edit settings:saver-sheet settings:sample-rate-edit settings:touch settings:touch-edit
         settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
         settings:about-missing settings:play-through settings:play-through-sheet settings:resume-sheet
-        power:power-none power:power-long nowplaying:seek components:tracknum keyboard:browse keyboard:kb-empty keyboard:kb-long
+        power:power-none power:power-long nowplaying:seek components:tracknum album:art-collapse album:art-dock
+        album:art-docked keyboard:browse keyboard:kb-empty keyboard:kb-long
         keyboard:kb-petal keyboard:kb-petal-corner keyboard:kb-shift keyboard:kb-symbols keyboard:kb-discard
         keyboard:kb-number-freq keyboard:kb-number-q keyboard:kb-number-gain keyboard:kb-refused)
     string(REPLACE ":" ";" parts ${shot})

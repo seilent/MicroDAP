@@ -8,7 +8,7 @@ ListView {
     property real rowPitch: Ui.px(Ui.rowHeight)
     readonly property int pageRows: Math.max(1, Math.floor(list.height / list.rowPitch))
     readonly property real pageDistance: list.pageRows * list.rowPitch
-    readonly property real maxContentY: Math.max(0, list.contentHeight - list.height)
+    readonly property real maxContentY: Math.max(-list.topMargin, list.contentHeight - list.height)
     readonly property real focusY: list.focusIndex * list.rowPitch - list.contentY
     readonly property bool scrolling: scrollAnimation.running
     readonly property real scrollTarget: scrollAnimation.to
@@ -54,7 +54,9 @@ ListView {
 
     function visibleY(index: int, fromY: real): real {
         if (list.height <= 0)
-            return Math.max(0, fromY)
+            return Math.max(-list.topMargin, fromY)
+        if (index <= 0)
+            return -list.topMargin
         const top = index * list.rowPitch
         const low = top - (list.height - list.rowPitch)
         let y = fromY
@@ -62,12 +64,12 @@ ListView {
             y = top
         else if (y < low)
             y = low
-        return Math.max(0, Math.min(list.maxContentY, y))
+        return Math.max(-list.topMargin, Math.min(list.maxContentY, y))
     }
 
     function scrollTo(y: real, duration: int) {
         touchScroller.stop()
-        const target = Math.max(0, Math.min(list.maxContentY, y))
+        const target = Math.max(-list.topMargin, Math.min(list.maxContentY, y))
         scrollAnimation.stop()
         if (target === list.contentY)
             return
@@ -144,7 +146,7 @@ ListView {
     function clampFocusToView() {
         if (list.count <= 0)
             return
-        const first = Math.ceil(list.contentY / list.rowPitch - 0.001)
+        const first = Math.max(0, Math.ceil(list.contentY / list.rowPitch - 0.001))
         const last = Math.min(list.count - 1, Math.floor((list.contentY + list.height) / list.rowPitch + 0.001) - 1)
         if (last < first || list.focusIndex >= first && list.focusIndex <= last)
             return
