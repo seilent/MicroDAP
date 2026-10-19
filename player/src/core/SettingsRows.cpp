@@ -127,6 +127,14 @@ QList<Row> build()
 
     out.push_back(steps("output", "volumeStep", "volume step", "volumeStep", numbers({2, 5, 10})));
 
+    Row maxVolume = steps("output", "maxVolume", "max volume", "maxVolume",
+                          numbers({50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100}));
+    out.push_back(bounded(draft(maxVolume, "raises the cap; a lower cap lowers the level at once")));
+
+    Row powerOnVolume = steps("output", "powerOnVolume", "power on volume", "powerOnVolume",
+                              numbers({0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100}));
+    out.push_back(bounded(draft(powerOnVolume, "sets the level at the next boot")));
+
     Row balance = range("output", "balance", "balance", "edit", "balance", -20, 20, 1);
     out.push_back(readOnly(bounded(balance), "slot"));
 

@@ -35,6 +35,8 @@ const QString keyHpGain = QStringLiteral("audio.hp_gain");
 const QString keyHpAmp = QStringLiteral("audio.hp_amp");
 const QString keySpkGain = QStringLiteral("audio.speaker_gain");
 const QString keyVolumeStep = QStringLiteral("audio.volume_step");
+const QString keyMaxVolume = QStringLiteral("audio.max_volume");
+const QString keyPowerOnVolume = QStringLiteral("audio.power_on_volume");
 const QString keyBtCodec = QStringLiteral("audio.bt_codec");
 const QString keyOrientation = QStringLiteral("display.orientation");
 const QString keyAutoRotate = QStringLiteral("display.auto_rotate");
@@ -66,6 +68,8 @@ constexpr Key keys[] = {
     {"audio.hp_amp", QMetaType::QString, &Settings::hpAmpChanged},
     {"audio.speaker_gain", QMetaType::UInt, &Settings::spkGainChanged},
     {"audio.volume_step", QMetaType::UInt, &Settings::volumeStepChanged},
+    {"audio.max_volume", QMetaType::UInt, &Settings::maxVolumeChanged},
+    {"audio.power_on_volume", QMetaType::UInt, &Settings::powerOnVolumeChanged},
     {"audio.bt_codec", QMetaType::QString, &Settings::btCodecChanged},
     {"display.orientation", QMetaType::QString, &Settings::orientationChanged},
     {"display.auto_rotate", QMetaType::Bool, &Settings::autoRotateChanged},
@@ -159,6 +163,8 @@ QVariantMap defaults()
         {keyHpAmp, QStringLiteral("lohifi")},
         {keySpkGain, 102u},
         {keyVolumeStep, 5u},
+        {keyMaxVolume, 100u},
+        {keyPowerOnVolume, 0u},
         {keyBtCodec, QStringLiteral("auto")},
         {keyOrientation, QStringLiteral("portrait")},
         {keyAutoRotate, true},
@@ -323,6 +329,22 @@ QList<int> Settings::spkGains()
 QList<int> Settings::volumeSteps()
 {
     return {2, 5, 10};
+}
+
+QList<int> Settings::maxVolumeSteps()
+{
+    QList<int> out;
+    for (int v = 50; v <= 100; v += 5)
+        out.push_back(v);
+    return out;
+}
+
+QList<int> Settings::powerOnVolumeSteps()
+{
+    QList<int> out{0};
+    for (int v = 10; v <= 100; v += 5)
+        out.push_back(v);
+    return out;
 }
 
 QStringList Settings::crossfeedModes()
@@ -572,6 +594,11 @@ void Settings::load()
     const QStringList watched = m_values.keys();
     for (const QString &key : watched)
         m_client->watch(key);
+    listAll();
+}
+
+void Settings::listAll()
+{
     MicroSet::Error error;
     const QVariantMap values = m_client->list(QString(), &error);
     if (!error.ok()) {
@@ -579,10 +606,8 @@ void Settings::load()
         return;
     }
     m_available = true;
-    for (auto it = values.cbegin(); it != values.cend(); ++it) {
-        if (m_values.contains(it.key()))
-            m_values.insert(it.key(), it.value());
-    }
+    for (auto it = values.cbegin(); it != values.cend(); ++it)
+        take(it.key(), it.value());
     if (m_values.value(keyRoots).toStringList() == oldDefaultRoots())
         store(keyRoots, QStringList());
 }
@@ -593,6 +618,7 @@ void Settings::take(const QString &key, const QVariant &value)
         return;
     if (!m_available) {
         m_available = true;
+        listAll();
         emit availableChanged();
     }
     if (m_values.value(key) == value)
@@ -819,6 +845,30 @@ void Settings::setVolumeStep(int step)
 {
     if (volumeSteps().contains(step))
         store(keyVolumeStep, QVariant::fromValue(uint(step)));
+}
+
+int Settings::maxVolume() const
+{
+    const int value = m_values.value(keyMaxVolume).toInt();
+    return maxVolumeSteps().contains(value) ? value : 100;
+}
+
+void Settings::setMaxVolume(int percent)
+{
+    if (maxVolumeSteps().contains(percent))
+        store(keyMaxVolume, QVariant::fromValue(uint(percent)));
+}
+
+int Settings::powerOnVolume() const
+{
+    const int value = m_values.value(keyPowerOnVolume).toInt();
+    return powerOnVolumeSteps().contains(value) ? value : 0;
+}
+
+void Settings::setPowerOnVolume(int percent)
+{
+    if (powerOnVolumeSteps().contains(percent))
+        store(keyPowerOnVolume, QVariant::fromValue(uint(percent)));
 }
 
 QString Settings::outputSlot() const

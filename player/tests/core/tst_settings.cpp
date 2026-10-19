@@ -71,6 +71,7 @@ private slots:
     void rotationSubscribe();
     void rowTable();
     void balanceCrossfeedSlot();
+    void volumeKeys();
 
 private:
     QString ini(const QString &text);
@@ -324,11 +325,16 @@ void SettingsTest::daemonLater()
     QCOMPARE(settings.output(), QStringLiteral("auto"));
     QSignalSpy available(&settings, &Settings::availableChanged);
     QSignalSpy output(&settings, &Settings::outputChanged);
+    QSignalSpy cap(&settings, &Settings::maxVolumeChanged);
+    int capAtAvailable = -1;
+    connect(&settings, &Settings::availableChanged, this, [&] { capAtAvailable = settings.maxVolume(); });
     const QString state = m_dir->path() + QStringLiteral("/later.json");
-    QVERIFY(writeFile(state, QStringLiteral("{\"audio.output\": \"usb\"}")));
+    QVERIFY(writeFile(state, QStringLiteral("{\"audio.output\": \"usb\", \"audio.max_volume\": 60}")));
     QVERIFY(m_set.start({state}));
     QTRY_VERIFY_WITH_TIMEOUT(settings.available(), waitMs);
     QCOMPARE(available.count(), 1);
+    QCOMPARE(capAtAvailable, 60);
+    QCOMPARE(cap.count(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(settings.output(), QStringLiteral("usb"), waitMs);
     QCOMPARE(output.count(), 1);
 }
@@ -657,6 +663,12 @@ void SettingsTest::rowTable()
     QCOMPARE(saverLyrics->pivot, QStringLiteral("display"));
     QCOMPARE(saverLyrics->kind, QStringLiteral("flip"));
     QCOMPARE(saverLyrics->setting, QStringLiteral("saverLyrics"));
+    for (const char *key : {"maxVolume", "powerOnVolume"}) {
+        const SettingsRows::Row *row = SettingsRows::find(QString::fromLatin1(key));
+        QVERIFY2(row && row->bounded && row->draft && row->kind == QLatin1StringView("sheet"), key);
+    }
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("maxVolume"))->values), Settings::maxVolumeSteps());
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("powerOnVolume"))->values), Settings::powerOnVolumeSteps());
     const SettingsRows::Row *balance = SettingsRows::find(QStringLiteral("balance"));
     QVERIFY(balance && balance->bounded && !balance->draft);
     QCOMPARE(balance->kind, QStringLiteral("edit"));
@@ -667,6 +679,27 @@ void SettingsTest::rowTable()
     QCOMPARE(crossfeed->kind, QStringLiteral("sheet"));
     QCOMPARE(strings(crossfeed->values), Settings::crossfeedModes());
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
+}
+
+void SettingsTest::volumeKeys()
+{
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    Settings settings(&client);
+    QCOMPARE(settings.maxVolume(), 100);
+    QCOMPARE(settings.powerOnVolume(), 0);
+    QSignalSpy cap(&settings, &Settings::maxVolumeChanged);
+    settings.setMaxVolume(70);
+    settings.setMaxVolume(52);
+    settings.setPowerOnVolume(40);
+    settings.setPowerOnVolume(5);
+    QCOMPARE(settings.maxVolume(), 70);
+    QCOMPARE(settings.powerOnVolume(), 40);
+    QCOMPARE(cap.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.max_volume")).toUInt(), 70u, waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.power_on_volume")).toUInt(), 40u, waitMs);
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("audio.max_volume"), FakeService::variant(55u)});
+    QTRY_COMPARE_WITH_TIMEOUT(settings.maxVolume(), 55, waitMs);
+    QCOMPARE(cap.count(), 2);
 }
 
 void SettingsTest::balanceCrossfeedSlot()

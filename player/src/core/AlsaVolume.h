@@ -64,6 +64,7 @@ class AlsaVolume : public QObject
 public:
     static constexpr int defaultPacingMs = 250;
     static constexpr int maxRewrites = 8;
+    static constexpr int pullWindowMs = 1000;
     static constexpr double linearToleranceDb = 1.0;
 
     explicit AlsaVolume(std::unique_ptr<MixerBackend> backend, int pacingMs = defaultPacingMs,
@@ -74,6 +75,7 @@ public:
     static double dbOfPercent(double percent);
     static double dbOfStep(int step, const MixerRange &range);
     static int stepFor(int step, int deltaPercent, const MixerRange &range);
+    static int capStepOf(int capPercent, const MixerRange &range);
 
     bool open(const QString &cardId);
     void close();
@@ -87,6 +89,10 @@ public:
     void setOwnedStep(int step);
     void setStep(int step);
     void pressed(int deltaPercent);
+    void setPercent(int percent, bool report = true);
+    bool setCap(int percent);
+    int cap() const;
+    int capStep() const;
     void watchReturn(int ms);
     void nudge();
 
@@ -98,6 +104,7 @@ signals:
 private:
     bool usableRange(MixerRange *range);
     int clamped(int step) const;
+    void pullDown();
     void onActivated();
     void write();
     void lose(const char *reason);
@@ -108,13 +115,17 @@ private:
     QList<QSocketNotifier *> m_notifiers;
     QTimer m_send;
     QTimer m_watch;
+    QTimer m_pullTimer;
     QElapsedTimer m_clock;
     QString m_cardId;
     MixerRange m_range;
     qint64 m_sentMs;
+    qint64 m_pullStartMs = -pullWindowMs;
     long m_hw = -1;
     int m_owned = 0;
+    int m_cap = 100;
     int m_rewrites = 0;
+    int m_pulls = 0;
     bool m_open = false;
     bool m_pending = false;
 };

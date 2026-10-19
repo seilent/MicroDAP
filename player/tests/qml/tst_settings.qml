@@ -43,6 +43,8 @@ TestCase {
         property string hpAmp: "lohifi"
         property int spkGain: 102
         property int volumeStep: 5
+        property int maxVolume: 100
+        property int powerOnVolume: 0
         property string outputSlot: "headphones"
         property int balance: 0
         property string crossfeed: "off"
@@ -263,14 +265,14 @@ TestCase {
 
     readonly property var expectedPivots: ["output", "library", "display", "power", "system"]
     readonly property var expectedKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "toasts"],
         ["screenOff", "suspend", "wifi"],
@@ -300,6 +302,8 @@ TestCase {
         fakeSettings.hpAmp = "lohifi"
         fakeSettings.spkGain = 102
         fakeSettings.volumeStep = 5
+        fakeSettings.maxVolume = 100
+        fakeSettings.powerOnVolume = 0
         fakeSettings.outputSlot = "headphones"
         fakeSettings.balance = 0
         fakeSettings.crossfeed = "off"
@@ -945,7 +949,7 @@ TestCase {
 
     function test_value_sheet_drafts_apply_only_on_a() {
         const page = open()
-        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "codec", "level", "rate", "crossfeed", "orientation", "scale", "boot"]) {
+        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "codec", "level", "rate", "crossfeed", "orientation", "scale", "boot"]) {
             verify(tc.rowOf(page, key).spec.draft, key)
             const before = String(page.currentOf(key))
             tc.sheetOpen(page, key)
@@ -1121,7 +1125,7 @@ TestCase {
     function test_mixer_rows_order() {
         const page = open()
         const output = tc.keyIndex(page, "output")
-        compare(JSON.stringify(tc.keys(page).slice(output, output + 7)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "balance", "codec"]))
+        compare(JSON.stringify(tc.keys(page).slice(output, output + 9)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec"]))
         compare(tc.rowOf(page, "hpGain").title, "headphone gain")
         compare(tc.rowOf(page, "hpGain").value, "normal")
         compare(tc.rowOf(page, "hpAmp").title, "headphone amp")
@@ -1303,6 +1307,47 @@ TestCase {
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
         compare(item.valueItem.font.styleName, "Light")
         compare(item.valueItem.font.capitalization, Font.AllUppercase)
+    }
+
+    function test_max_and_power_on_volume_rows() {
+        const page = open()
+        compare(tc.keyIndex(page, "maxVolume"), tc.keyIndex(page, "volumeStep") + 1)
+        compare(tc.keyIndex(page, "powerOnVolume"), tc.keyIndex(page, "maxVolume") + 1)
+        compare(tc.rowOf(page, "maxVolume").title, "max volume")
+        compare(tc.rowOf(page, "maxVolume").value, "100")
+        compare(tc.rowOf(page, "powerOnVolume").title, "power on volume")
+        compare(tc.rowOf(page, "powerOnVolume").value, "last")
+        tc.sheetOpen(page, "maxVolume")
+        compare(tc.items(page), JSON.stringify(["100", "95", "90", "85", "80", "75", "70", "65", "60", "55", "50"]))
+        compare(tc.focused(page), "100")
+        verify(router.dispatch("up", false))
+        compare(tc.focused(page), "100")
+        for (let i = 0; i < 6; i++)
+            verify(router.dispatch("down", false))
+        compare(tc.focused(page), "70")
+        compare(fakeSettings.maxVolume, 100)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.maxVolume, 70)
+        compare(tc.rowOf(page, "maxVolume").value, "70")
+        tc.sheetOpen(page, "maxVolume")
+        for (let i = 0; i < 12; i++)
+            router.dispatch("down", false)
+        compare(tc.focused(page), "50")
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.maxVolume, 70)
+        tc.sheetOpen(page, "powerOnVolume")
+        const items = page.sheet.items
+        compare(items[0], "100")
+        compare(items[items.length - 1], "last")
+        compare(page.sheet.mark, items.length - 1)
+        verify(router.dispatch("down", false))
+        compare(tc.focused(page), "last")
+        verify(router.dispatch("up", false))
+        compare(tc.focused(page), "10")
+        compare(fakeSettings.powerOnVolume, 0)
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.powerOnVolume, 10)
+        compare(tc.rowOf(page, "powerOnVolume").value, "10")
     }
 
     function test_balance_row() {

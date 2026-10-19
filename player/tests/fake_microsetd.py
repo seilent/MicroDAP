@@ -30,6 +30,8 @@ KEYS = {
     'audio.hp_amp': ('s', 'lohifi', {'enum': ['lohifi', 'ulp', 'hifi']}),
     'audio.speaker_gain': ('u', 102, {'enum': [84, 90, 96, 99, 102, 105, 108]}),
     'audio.volume_step': ('u', 5, {'enum': [2, 5, 10]}),
+    'audio.max_volume': ('u', 100, {'enum': list(range(50, 101, 5))}),
+    'audio.power_on_volume': ('u', 0, {'enum': [0] + list(range(10, 101, 5))}),
     'audio.bt_codec': ('s', 'auto', {'enum': ['auto', 'aptx', 'aac', 'ldac', 'sbc']}),
     'display.orientation': ('s', 'portrait', {}),
     'display.auto_rotate': ('b', True, {}),

@@ -7,8 +7,10 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QMetaMethod>
 #include <QPointer>
+#include <QSaveFile>
 #include <QSocketNotifier>
 
 #include <cerrno>
@@ -241,6 +243,32 @@ pa_cvolume PulseSinkVolume::stepped(const pa_cvolume &volume, int percent)
     return out;
 }
 
+pa_cvolume PulseSinkVolume::scaledTo(const pa_cvolume &volume, pa_volume_t top)
+{
+    pa_cvolume out = volume;
+    pa_volume_t max = PA_VOLUME_MUTED;
+    for (quint8 i = 0; i < out.channels && i < PA_CHANNELS_MAX; ++i)
+        max = qMax(max, out.values[i]);
+    for (quint8 i = 0; i < out.channels && i < PA_CHANNELS_MAX; ++i)
+        out.values[i] = max == PA_VOLUME_MUTED ? top : pa_volume_t(qRound64(double(out.values[i]) * top / max));
+    return out;
+}
+
+pa_cvolume PulseSinkVolume::capped(const pa_cvolume &volume, int capPercent)
+{
+    const pa_volume_t cap = pa_volume_t(qint64(PA_VOLUME_NORM) * qBound(0, capPercent, 100) / 100);
+    pa_volume_t max = PA_VOLUME_MUTED;
+    for (quint8 i = 0; i < volume.channels && i < PA_CHANNELS_MAX; ++i)
+        max = qMax(max, volume.values[i]);
+    return max > cap ? scaledTo(volume, cap) : volume;
+}
+
+pa_cvolume PulseSinkVolume::leveled(const pa_cvolume &volume, int percent, int capPercent)
+{
+    const int target = qBound(0, qMin(percent, capPercent), 100);
+    return scaledTo(volume, pa_volume_t(qint64(PA_VOLUME_NORM) * target / 100));
+}
+
 int PulseSinkVolume::level(const pa_cvolume &volume)
 {
     pa_volume_t max = PA_VOLUME_MUTED;
@@ -262,6 +290,34 @@ void PulseSinkVolume::step(int percent)
         return;
     m_pendingSteps += direction;
     m_pendingPercent += percent;
+    m_pendingSet = -1;
+}
+
+void PulseSinkVolume::set(int percent)
+{
+    if (!m_mainloop)
+        return;
+    const int target = qBound(0, percent, 100);
+    if (m_valid) {
+        applyLevel(target);
+        return;
+    }
+    m_pendingSteps = 0;
+    m_pendingPercent = 0;
+    m_pendingSet = target;
+}
+
+void PulseSinkVolume::setCap(int percent)
+{
+    m_cap = qBound(0, percent, 100);
+    if (!m_valid)
+        return;
+    const pa_cvolume c = capped(m_volume, m_cap);
+    if (pa_cvolume_equal(&c, &m_volume))
+        return;
+    m_volume = c;
+    qInfo() << "microdap volume: cap" << m_cap;
+    push(false);
 }
 
 void PulseSinkVolume::dropPending()
@@ -271,6 +327,7 @@ void PulseSinkVolume::dropPending()
     m_unmute = false;
     m_pendingSteps = 0;
     m_pendingPercent = 0;
+    m_pendingSet = -1;
     if (sending)
         validate();
 }
@@ -365,9 +422,13 @@ void PulseSinkVolume::onValidSink(pa_context *context, const pa_sink_info *info,
     self->m_volume = info->volume;
     self->m_valid = true;
     const int percent = self->m_pendingPercent;
+    const int set = self->m_pendingSet;
     self->m_pendingSteps = 0;
     self->m_pendingPercent = 0;
-    if (percent != 0)
+    self->m_pendingSet = -1;
+    if (set >= 0)
+        self->applyLevel(set);
+    else if (percent != 0)
         self->apply(percent);
 }
 
@@ -425,6 +486,7 @@ void PulseSinkVolume::teardown(bool reconnect)
     m_revalidate = false;
     m_pendingSteps = 0;
     m_pendingPercent = 0;
+    m_pendingSet = -1;
     if (reconnect)
         m_reconnect.start();
 }
@@ -450,14 +512,29 @@ void PulseSinkVolume::validate()
 
 void PulseSinkVolume::apply(int percent)
 {
-    m_volume = stepped(m_volume, percent);
+    m_volume = capped(stepped(m_volume, percent), m_cap);
     if (percent > 0)
         m_unmute = true;
+    push(true);
+}
+
+void PulseSinkVolume::applyLevel(int percent)
+{
+    m_volume = leveled(m_volume, percent, m_cap);
+    if (qMin(percent, m_cap) > 0)
+        m_unmute = true;
+    push(true);
+}
+
+void PulseSinkVolume::push(bool report)
+{
     const qint64 now = m_clock.elapsed();
     m_lastSetMs = now;
-    const int percentLevel = level(m_volume);
-    qInfo() << "microdap volume:" << percentLevel;
-    emit levelChanged(percentLevel);
+    if (report) {
+        const int percentLevel = level(m_volume);
+        qInfo() << "microdap volume:" << percentLevel;
+        emit levelChanged(percentLevel);
+    }
     if (m_send.isActive())
         return;
     const qint64 wait = sendGapMs - (now - m_sentMs);
@@ -839,9 +916,124 @@ void RoutedSinkVolume::step(int percent)
     keepOwned();
     if (percent > 0 && !m_sink.isEmpty())
         m_dac->unmuteSink(m_sink);
+    markDirty();
+}
+
+void RoutedSinkVolume::set(int percent)
+{
+    if (m_route == Route::Pulse) {
+        m_pulse->set(percent);
+        return;
+    }
+    if (!mixerOn(false)) {
+        qWarning().noquote() << "microdap volume: set skipped, mixer not open on" << m_card;
+        return;
+    }
+    m_alsa->setPercent(percent);
+    keepOwned();
+    if (percent > 0 && !m_sink.isEmpty())
+        m_dac->unmuteSink(m_sink);
+    markDirty();
+}
+
+void RoutedSinkVolume::setCap(int percent)
+{
+    m_pulse->setCap(percent);
+    if (m_alsa->setCap(percent) && m_route == Route::Alsa && mixerOn(false)) {
+        keepOwned();
+        markDirty();
+    }
+    const QString path = capFile();
+    if (path.isEmpty())
+        return;
+    QSaveFile save(path);
+    const bool written = QDir().mkpath(QFileInfo(path).absolutePath()) && save.open(QIODevice::WriteOnly)
+                         && save.write(QByteArray::number(qBound(0, percent, 100)) + '\n') > 0 && save.commit();
+    if (!written)
+        qWarning().noquote() << "microdap volume: cannot write" << path;
+}
+
+QString RoutedSinkVolume::capFile()
+{
+    const QString dir = envPath("MICRODAP_RUNTIME_DIR", qEnvironmentVariable("XDG_RUNTIME_DIR"));
+    return dir.isEmpty() ? QString() : dir + QStringLiteral("/microdap/max-volume");
+}
+
+int RoutedSinkVolume::lastCap(int fallback)
+{
+    QFile file(capFile());
+    if (!file.open(QIODevice::ReadOnly))
+        return fallback;
+    bool ok = false;
+    const int percent = file.readAll().trimmed().toInt(&ok);
+    return ok && percent >= 0 && percent <= 100 ? percent : fallback;
+}
+
+void RoutedSinkVolume::setPowerOn(int percent)
+{
+    m_powerOn = qBound(0, percent, 100);
+}
+
+QString RoutedSinkVolume::powerOnMarker()
+{
+    const QString dir = envPath("MICRODAP_RUNTIME_DIR", qEnvironmentVariable("XDG_RUNTIME_DIR"));
+    return dir.isEmpty() ? QString() : dir + QStringLiteral("/microdap/power-on");
+}
+
+QString RoutedSinkVolume::systemPowerOnMarker()
+{
+    const QString dir = envPath("MICRODAP_RUNTIME_DIR", qEnvironmentVariable("XDG_RUNTIME_DIR"));
+    return dir.isEmpty() ? QString() : dir + QStringLiteral("/microos-audio/power-on");
+}
+
+QString RoutedSinkVolume::bootId()
+{
+    QFile file(envPath("MICRODAP_BOOT_ID", QStringLiteral("/proc/sys/kernel/random/boot_id")));
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QString::fromLatin1(file.readAll()).trimmed();
+}
+
+void RoutedSinkVolume::markDirty()
+{
     m_dirty = true;
     if (m_storeAllowed)
         m_store.start();
+}
+
+void RoutedSinkVolume::applyPowerOn()
+{
+    if (m_powerOnDone)
+        return;
+    m_powerOnDone = true;
+    const QString boot = bootId();
+    const QString path = powerOnMarker();
+    if (boot.isEmpty() || path.isEmpty()) {
+        qWarning() << "microdap volume: no boot id or runtime dir, power on volume skipped";
+        return;
+    }
+    QFile marker(path);
+    if (marker.open(QIODevice::ReadOnly) && QString::fromLatin1(marker.readAll()).trimmed() == boot)
+        return;
+    QFile system(systemPowerOnMarker());
+    QStringList set;
+    if (system.open(QIODevice::ReadOnly))
+        set = QString::fromLatin1(system.readAll()).split(QLatin1Char('\n'));
+    const bool systemSet = set.size() > 1 && set.at(0).trimmed() == boot && !m_sink.isEmpty()
+                           && set.at(1).trimmed() == m_sink;
+    if (systemSet) {
+        qInfo().noquote() << "microdap volume: power on volume already set by microos-audio on" << m_sink;
+    } else if (m_powerOn > 0 && mixerOn(false)) {
+        qInfo().noquote() << "microdap volume: power on volume" << m_powerOn << "on" << m_card;
+        m_alsa->setPercent(m_powerOn, false);
+        keepOwned();
+        markDirty();
+    }
+    QSaveFile save(path);
+    const bool written = QDir().mkpath(QFileInfo(path).absolutePath()) && save.open(QIODevice::WriteOnly)
+                         && save.write(boot.toLatin1() + '\n') > 0 && save.commit();
+    if (!written)
+        qWarning().noquote() << "microdap volume: cannot write" << path;
 }
 
 void RoutedSinkVolume::setRoute(Route route, const QString &cardId, const QString &sink)
@@ -859,10 +1051,12 @@ void RoutedSinkVolume::setRoute(Route route, const QString &cardId, const QStrin
     m_route = route;
     m_card = card;
     m_sink = route == Route::Alsa ? sink : QString();
-    if (route == Route::Alsa)
+    if (route == Route::Alsa) {
         qInfo().noquote() << "microdap volume: route alsa hw:CARD=" + card;
-    else
+        applyPowerOn();
+    } else {
         qInfo() << "microdap volume: route pulse";
+    }
 }
 
 void RoutedSinkVolume::setStoreAllowed(bool allowed)

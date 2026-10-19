@@ -34,6 +34,8 @@ class Settings : public QObject
     Q_PROPERTY(QString hpAmp READ hpAmp WRITE setHpAmp NOTIFY hpAmpChanged)
     Q_PROPERTY(int spkGain READ spkGain WRITE setSpkGain NOTIFY spkGainChanged)
     Q_PROPERTY(int volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
+    Q_PROPERTY(int maxVolume READ maxVolume WRITE setMaxVolume NOTIFY maxVolumeChanged)
+    Q_PROPERTY(int powerOnVolume READ powerOnVolume WRITE setPowerOnVolume NOTIFY powerOnVolumeChanged)
     Q_PROPERTY(QString outputSlot READ outputSlot WRITE setOutputSlot NOTIFY outputSlotChanged)
     Q_PROPERTY(int balance READ balance WRITE setBalance NOTIFY balanceChanged)
     Q_PROPERTY(QString crossfeed READ crossfeed WRITE setCrossfeed NOTIFY crossfeedChanged)
@@ -75,6 +77,8 @@ public:
     static QStringList hpAmps();
     static QList<int> spkGains();
     static QList<int> volumeSteps();
+    static QList<int> maxVolumeSteps();
+    static QList<int> powerOnVolumeSteps();
     static QStringList crossfeedModes();
     static QStringList crossfeedSlots();
     static QString balanceKey(const QString &slot);
@@ -133,6 +137,10 @@ public:
     void setSpkGain(int step);
     int volumeStep() const;
     void setVolumeStep(int step);
+    int maxVolume() const;
+    void setMaxVolume(int percent);
+    int powerOnVolume() const;
+    void setPowerOnVolume(int percent);
     QString outputSlot() const;
     void setOutputSlot(const QString &slot);
     int balance() const;
@@ -184,6 +192,8 @@ signals:
     void hpAmpChanged();
     void spkGainChanged();
     void volumeStepChanged();
+    void maxVolumeChanged();
+    void powerOnVolumeChanged();
     void outputSlotChanged();
     void balanceChanged();
     void crossfeedChanged();
@@ -206,6 +216,7 @@ signals:
 
 private:
     void load();
+    void listAll();
     void take(const QString &key, const QVariant &value);
     void store(const QString &key, const QVariant &value);
     void refresh(const QString &key);

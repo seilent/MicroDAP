@@ -242,6 +242,15 @@ int main(int argc, char *argv[])
         reservation = std::make_unique<microdap::DeviceReservation>(bounds.reservation);
         pulseVolume = new microdap::PulseSinkVolume;
         routedVolume = new microdap::RoutedSinkVolume(pulseVolume, pulseVolume, alsaVolume.get(), bounds.storeDelayMs);
+        routedVolume->setCap(settings.available() ? settings.maxVolume()
+                                                  : microdap::RoutedSinkVolume::lastCap(settings.maxVolume()));
+        routedVolume->setPowerOn(settings.powerOnVolume());
+        QObject::connect(&settings, &microdap::Settings::maxVolumeChanged, routedVolume,
+                         [&settings, routedVolume] { routedVolume->setCap(settings.maxVolume()); });
+        QObject::connect(&settings, &microdap::Settings::availableChanged, routedVolume,
+                         [&settings, routedVolume] { routedVolume->setCap(settings.maxVolume()); });
+        QObject::connect(&settings, &microdap::Settings::powerOnVolumeChanged, routedVolume,
+                         [&settings, routedVolume] { routedVolume->setPowerOn(settings.powerOnVolume()); });
         microdap::DacEq::Ports dacPorts;
         dacPorts.eq = eqControl.get();
         dacPorts.dac = pulseVolume;

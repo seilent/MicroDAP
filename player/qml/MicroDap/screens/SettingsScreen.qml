@@ -60,6 +60,8 @@ Page {
     readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
     readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
     readonly property int volumeStep: page.settings !== null && page.settings.volumeStep !== undefined ? Number(page.settings.volumeStep) : 5
+    readonly property int maxVolume: page.settings !== null && page.settings.maxVolume !== undefined ? Number(page.settings.maxVolume) : 100
+    readonly property int powerOnVolume: page.settings !== null && page.settings.powerOnVolume !== undefined ? Number(page.settings.powerOnVolume) : 0
     readonly property string outputSlot: page.settings !== null && page.settings.outputSlot !== undefined ? String(page.settings.outputSlot) : ""
     readonly property bool crossfeedSlot: page.outputSlot === "headphones" || page.outputSlot === "usb"
     readonly property int balance: page.settings !== null && page.settings.balance !== undefined ? Number(page.settings.balance) : 0
@@ -251,6 +253,10 @@ Page {
         return EqFormat.listed(page.eq.profileMap(output)) ? text + " (dac)" : text
     }
 
+    function powerOnText(value: int): string {
+        return value <= 0 ? "last" : String(value)
+    }
+
     function balanceText(value: int): string {
         return value === 0 ? "center" : (value < 0 ? "l " : "r ") + Math.abs(value) / 2 + " db"
     }
@@ -354,6 +360,10 @@ Page {
             return page.spkGainText(page.spkGain)
         case "volumeStep":
             return page.volumeStep + "%"
+        case "maxVolume":
+            return String(page.maxVolume)
+        case "powerOnVolume":
+            return page.powerOnText(page.powerOnVolume)
         case "balance":
             return page.balanceText(page.balance) + (page.outputSlot === "" ? "" : page.chainNote)
         case "crossfeed":
@@ -743,6 +753,8 @@ Page {
             return page.levelWord(String(value))
         case "crossfeed":
             return page.crossfeedWord(String(value))
+        case "powerOnVolume":
+            return page.powerOnText(Number(value))
         case "orientation":
             return String(value).replace("-", " ")
         case "scale":
@@ -871,6 +883,10 @@ Page {
             return page.spkGain
         case "volumeStep":
             return page.volumeStep
+        case "maxVolume":
+            return page.maxVolume
+        case "powerOnVolume":
+            return page.powerOnVolume
         case "balance":
             return page.balance
         case "crossfeed":

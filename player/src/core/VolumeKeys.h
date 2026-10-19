@@ -89,6 +89,8 @@ public:
     using QObject::QObject;
 
     virtual void step(int percent) = 0;
+    virtual void set(int) {}
+    virtual void setCap(int) {}
     virtual void dropPending() {}
 
 signals:
@@ -109,12 +111,17 @@ public:
     ~PulseSinkVolume() override;
 
     static pa_cvolume stepped(const pa_cvolume &volume, int percent);
+    static pa_cvolume scaledTo(const pa_cvolume &volume, pa_volume_t top);
+    static pa_cvolume capped(const pa_cvolume &volume, int capPercent);
+    static pa_cvolume leveled(const pa_cvolume &volume, int percent, int capPercent);
     static int level(const pa_cvolume &volume);
     static int alsaCardOf(const pa_proplist *props);
     static DacCard dacCardOf(const pa_proplist *props);
     static bool isBluezInput(const pa_proplist *props);
 
     void step(int percent) override;
+    void set(int percent) override;
+    void setCap(int percent) override;
     void dropPending() override;
 
     void cardInfo(quint32 sinkIndex, std::function<void(const DacCard &)> done) override;
@@ -159,6 +166,8 @@ private:
     void teardown(bool reconnect);
     void validate();
     void apply(int percent);
+    void applyLevel(int percent);
+    void push(bool report);
     void send();
     bool quiet() const;
     void querySink(quint32 index, const QByteArray &name, std::function<void(const pa_sink_info *)> done);
@@ -186,6 +195,8 @@ private:
     qint64 m_sentMs = -sendGapMs;
     int m_pendingSteps = 0;
     int m_pendingPercent = 0;
+    int m_pendingSet = -1;
+    int m_cap = 100;
     bool m_valid = false;
     bool m_validating = false;
     bool m_revalidate = false;
@@ -205,6 +216,15 @@ public:
                      QObject *parent = nullptr);
 
     void step(int percent) override;
+    void set(int percent) override;
+    void setCap(int percent) override;
+    void setPowerOn(int percent);
+
+    static QString capFile();
+    static int lastCap(int fallback);
+    static QString powerOnMarker();
+    static QString systemPowerOnMarker();
+    static QString bootId();
 
     void setRoute(Route route, const QString &cardId, const QString &sink) override;
     void setStoreAllowed(bool allowed) override;
@@ -216,6 +236,8 @@ public:
 
 private:
     void keepOwned();
+    void markDirty();
+    void applyPowerOn();
     bool mixerOn(bool requireOpen) const;
 
     SinkVolume *m_pulse;
@@ -226,6 +248,8 @@ private:
     QString m_card;
     QString m_sink;
     Route m_route = Route::Pulse;
+    int m_powerOn = 0;
+    bool m_powerOnDone = false;
     bool m_storeAllowed = false;
     bool m_dirty = false;
 };

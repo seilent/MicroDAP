@@ -155,6 +155,8 @@ AlsaVolume::AlsaVolume(std::unique_ptr<MixerBackend> backend, int pacingMs, QObj
     connect(&m_send, &QTimer::timeout, this, &AlsaVolume::write);
     m_watch.setSingleShot(true);
     m_watch.setTimerType(Qt::PreciseTimer);
+    m_pullTimer.setSingleShot(true);
+    connect(&m_pullTimer, &QTimer::timeout, this, &AlsaVolume::pullDown);
     connect(&m_watch, &QTimer::timeout, this, [this] {
         qInfo().noquote() << "microdap volume: watch ended on" << m_cardId << "step" << m_owned << "rewrites"
                           << m_rewrites;
@@ -204,6 +206,18 @@ int AlsaVolume::stepFor(int step, int deltaPercent, const MixerRange &range)
     return int(qBound(range.min, target, range.max));
 }
 
+int AlsaVolume::capStepOf(int capPercent, const MixerRange &range)
+{
+    if (range.max <= range.min || capPercent >= 100)
+        return int(range.max);
+    const double db = dbOfPercent(capPercent);
+    if (db >= range.maxDb)
+        return int(range.max);
+    const double perStep = (range.maxDb - range.minDb) / double(range.max - range.min);
+    const long step = range.min + long(std::floor((db - range.minDb) / perStep + 1e-9));
+    return int(qBound(range.min, step, range.max));
+}
+
 bool AlsaVolume::open(const QString &cardId)
 {
     if (m_open && cardId == m_cardId)
@@ -240,7 +254,8 @@ bool AlsaVolume::open(const QString &cardId)
     }
     qInfo().noquote() << "microdap volume: hw:CARD=" + cardId << "open, step" << value << "range"
                       << m_range.minDb << "to" << m_range.maxDb << "dB";
-    if (m_pending)
+    m_owned = clamped(m_owned);
+    if (m_pending || m_hw > capStep())
         write();
     return m_open;
 }
@@ -288,6 +303,7 @@ double AlsaVolume::rangeDb() const
 void AlsaVolume::setOwnedStep(int step)
 {
     m_owned = clamped(step);
+    pullDown();
 }
 
 void AlsaVolume::setStep(int step)
@@ -310,12 +326,56 @@ void AlsaVolume::pressed(int deltaPercent)
 {
     if (deltaPercent == 0 || m_range.max <= m_range.min)
         return;
-    const int next = stepFor(m_owned, deltaPercent, m_range);
+    const int next = qMin(stepFor(m_owned, deltaPercent, m_range), capStep());
     const int percent = qRound(percentOfDb(dbOfStep(next, m_range)));
     qInfo() << "microdap volume:" << percent;
     emit levelChanged(percent);
     if (next != m_owned)
         setStep(next);
+}
+
+void AlsaVolume::setPercent(int percent, bool report)
+{
+    if (m_range.max <= m_range.min)
+        return;
+    const double perStep = (m_range.maxDb - m_range.minDb) / double(m_range.max - m_range.min);
+    const double db = dbOfPercent(qBound(0, percent, 100));
+    const long nearest = std::isinf(db) ? m_range.min : m_range.min + long(qRound64((db - m_range.minDb) / perStep));
+    const int next = clamped(int(qBound(m_range.min, nearest, m_range.max)));
+    const int level = qRound(percentOfDb(dbOfStep(next, m_range)));
+    qInfo() << "microdap volume:" << level;
+    if (report)
+        emit levelChanged(level);
+    if (next != m_owned || m_hw != next)
+        setStep(next);
+}
+
+bool AlsaVolume::setCap(int percent)
+{
+    m_cap = qBound(0, percent, 100);
+    const int before = m_owned;
+    m_owned = clamped(m_owned);
+    pullDown();
+    return m_owned != before;
+}
+
+int AlsaVolume::cap() const
+{
+    return m_cap;
+}
+
+int AlsaVolume::capStep() const
+{
+    return capStepOf(m_cap, m_range);
+}
+
+void AlsaVolume::pullDown()
+{
+    if (!m_open || m_hw <= capStep())
+        return;
+    qInfo().noquote() << "microdap volume: cap" << m_cap << "on" << m_cardId << "step" << m_hw << "to" << m_owned;
+    m_send.stop();
+    write();
 }
 
 void AlsaVolume::watchReturn(int ms)
@@ -335,7 +395,7 @@ void AlsaVolume::nudge()
 {
     if (!m_open || m_hw != m_owned || m_range.max <= m_range.min)
         return;
-    const long neighbor = m_owned < m_range.max ? m_owned + 1 : m_owned - 1;
+    const long neighbor = m_owned < capStep() ? m_owned + 1 : m_owned - 1;
     const int err = m_backend->set(neighbor);
     if (err == -ENODEV) {
         lose("write failed");
@@ -370,7 +430,7 @@ int AlsaVolume::clamped(int step) const
 {
     if (m_range.max <= m_range.min)
         return step;
-    return int(qBound(m_range.min, long(step), m_range.max));
+    return int(qBound(m_range.min, long(step), long(capStep())));
 }
 
 void AlsaVolume::onActivated()
@@ -398,6 +458,24 @@ void AlsaVolume::onActivated()
         return;
     m_hw = value;
     emit foreignStep(int(value));
+    if (m_open && m_hw > capStep()) {
+        const qint64 now = m_clock.elapsed();
+        if (now - m_pullStartMs >= pullWindowMs) {
+            m_pullStartMs = now;
+            m_pulls = 0;
+        }
+        if (m_pulls >= maxRewrites) {
+            if (!m_pullTimer.isActive()) {
+                qWarning().noquote() << "microdap volume: cap pull down on" << m_cardId << "held after" << m_pulls
+                                     << "in" << pullWindowMs << "ms";
+                m_pullTimer.start(int(pullWindowMs - (now - m_pullStartMs)));
+            }
+            return;
+        }
+        ++m_pulls;
+        pullDown();
+        return;
+    }
     if (!m_open || !m_watch.isActive())
         return;
     if (m_rewrites >= maxRewrites) {
@@ -447,6 +525,7 @@ void AlsaVolume::closeMixer()
         m_pending = true;
     }
     m_watch.stop();
+    m_pullTimer.stop();
     if (m_open)
         m_backend->close();
     m_open = false;

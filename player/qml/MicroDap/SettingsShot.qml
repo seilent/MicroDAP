@@ -26,6 +26,15 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.fixture.startsWith("max-volume") || root.fixture.startsWith("power-on")) {
+            screen.focusKey(root.fixture.startsWith("max-volume") ? "maxVolume" : "powerOnVolume")
+            screen.keepFocusVisible()
+            if (root.fixture.endsWith("-sheet")) {
+                screen.activate()
+                screen.sheet.handleAction("down", false)
+            }
+            return
+        }
         if (root.chainShot) {
             screen.focusKey(root.fixture.startsWith("balance") ? "balance" : "crossfeed")
             screen.keepFocusVisible()
@@ -112,6 +121,8 @@ Item {
         property string hpAmp: "lohifi"
         property int spkGain: 102
         property int volumeStep: 5
+        property int maxVolume: root.fixture.startsWith("max-volume") ? 70 : 100
+        property int powerOnVolume: root.fixture.startsWith("power-on") ? 40 : 0
         readonly property string outputSlot: root.fixture === "crossfeed-speaker" ? "speaker" : sampleOutput.activeOutput
         property int balance: root.chainShot ? -7 : 0
         property string crossfeed: root.chainShot ? "janMeier" : "off"
