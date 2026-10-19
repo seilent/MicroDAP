@@ -430,10 +430,6 @@ TestCase {
         fuzzyCompare(row.secondaryItem.y + row.secondaryItem.height, 72, 0.5)
         verify(row.secondaryBaseline > row.primaryBaseline)
         verify(row.secondaryBaseline < row.height)
-        compare(row.dotItem.x, Ui.px(Ui.hubEdge - Ui.playingDotOffset))
-        compare(row.dotItem.x, 28)
-        compare(row.dotItem.width, 8)
-        fuzzyCompare(row.dotItem.y, row.primaryBaseline - Ui.px(Ui.playingDot), 0.5)
         compare(row.ringItem, null)
         row.ring = true
         verify(row.ringItem !== null)

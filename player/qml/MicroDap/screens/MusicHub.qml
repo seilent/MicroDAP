@@ -12,6 +12,8 @@ Page {
     property QtObject favorites: null
     property var foldersModel: null
     property QtObject player: null
+    readonly property int currentId: hub.player !== null && hub.player.current !== undefined && hub.player.current !== null
+        && hub.player.current.id !== undefined && hub.player.current.id !== null ? Number(hub.player.current.id) : -1
     property QtObject library: null
     property bool animated: true
     property bool screenOff: false
@@ -1064,6 +1066,7 @@ Page {
         required property string title
         required property string subtitle
         required property string number
+        required property var model
         readonly property bool divider: row.kind === "divider"
         readonly property bool pathLine: row.kind === "path"
         readonly property bool isFocused: row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
@@ -1086,6 +1089,7 @@ Page {
             ringGlyph: "play"
             primary: row.divider || row.pathLine ? "" : row.title
             secondary: row.divider ? "" : row.subtitle
+            playing: row.kind === "song" && hub.currentId >= 0 && Number(row.model.id) === hub.currentId
             focused: row.isFocused
             pressed: row.isFocused && hub.pressed
             animated: hub.live

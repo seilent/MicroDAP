@@ -7,6 +7,8 @@ Page {
     property var historyModel: null
     property var newModel: null
     property QtObject player: null
+    readonly property int currentId: page.player !== null && page.player.current !== undefined && page.player.current !== null
+        && page.player.current.id !== undefined && page.player.current.id !== null ? Number(page.player.current.id) : -1
     property QtObject library: null
     property bool animated: true
     property bool screenOff: false
@@ -376,6 +378,7 @@ Page {
         required property int index
         required property string title
         required property string subtitle
+        required property var model
         readonly property var pane: row.ListView.view
         readonly property bool isFocused: row.pane !== null && page.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
@@ -442,6 +445,7 @@ Page {
             width: row.width
             primary: row.title
             secondary: row.subtitle
+            playing: row.model.kind === "song" && page.currentId >= 0 && Number(row.model.id) === page.currentId
             focused: row.isFocused
             pressed: row.isFocused && page.pressed
             animated: page.live

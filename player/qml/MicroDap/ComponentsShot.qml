@@ -90,7 +90,6 @@ Item {
             secondary: "Addison Road"
             trailing: "4:02"
             playing: true
-            playingDot: true
             animated: false
         }
 

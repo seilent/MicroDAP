@@ -330,7 +330,7 @@ Page {
             number: row.modelData.number
             primary: row.modelData.title
             trailing: row.modelData.duration
-            playingDot: row.isPlaying
+            playing: row.isPlaying
             focused: row.isFocused
             pressed: row.isFocused && page.pressed
             animated: page.live

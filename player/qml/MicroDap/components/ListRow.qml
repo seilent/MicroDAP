@@ -10,7 +10,6 @@ PressScale {
     property string trailing: ""
     property bool focused: false
     property bool playing: false
-    property bool playingDot: false
     property bool bold: false
     property bool countLine: false
     property bool ring: false
@@ -28,24 +27,10 @@ PressScale {
     readonly property Item primaryItem: primaryText
     readonly property Item secondaryItem: secondaryText
     readonly property Item trailingItem: trailingText
-    readonly property Item dotItem: dot
     readonly property Item ringItem: ringLoader.item
 
     width: Ui.windowW
     height: Ui.px(Ui.rowHeight)
-
-    Rectangle {
-        id: dot
-
-        visible: root.playingDot
-        x: Ui.px(Ui.hubEdge - Ui.playingDotOffset)
-        anchors.baseline: primaryText.baseline
-        anchors.baselineOffset: -Ui.px(Ui.playingDot)
-        width: Ui.px(Ui.playingDot)
-        height: Ui.px(Ui.playingDot)
-        radius: dot.width / 2
-        color: Ui.accent
-    }
 
     Loader {
         id: ringLoader

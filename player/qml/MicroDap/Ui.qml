@@ -265,8 +265,6 @@ QtObject {
     readonly property real rowTextInset: 4
     readonly property real rowRing: 20
     readonly property real songIndent: 24
-    readonly property real playingDot: 4
-    readonly property real playingDotOffset: 6
     readonly property real detailRow: 124
     readonly property real detailNameDrop: 15
     readonly property real detailNameBaseline: ui.pivotBaseline + ui.detailNameDrop

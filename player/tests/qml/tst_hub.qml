@@ -74,6 +74,7 @@ TestCase {
 
         property var calls: []
         property var idCalls: []
+        property var current: ({})
         property QtObject queue: QtObject {
             property int count: 12
         }
@@ -529,6 +530,20 @@ TestCase {
         compare(fakePlayer.calls[1].kind, "all")
         compare(fakePlayer.calls[1].startId, 4)
         compare(page.songsPane.itemAtIndex(5).rowItem.number, "4")
+    }
+
+    function test_songs_playing_row_in_accent() {
+        fakePlayer.current = { id: 4 }
+        const page = open({ pivotIndex: 2, player: fakePlayer })
+        const first = page.songsPane.itemAtIndex(1)
+        const playing = page.songsPane.itemAtIndex(5)
+        compare(first.rowItem.playing, false)
+        compare(playing.rowItem.playing, true)
+        compare(playing.rowItem.primaryColor, Ui.accent)
+        fakePlayer.current = { id: 1 }
+        compare(first.rowItem.playing, true)
+        compare(playing.rowItem.playing, false)
+        fakePlayer.current = {}
     }
 
     function test_song_play_without_player() {

@@ -426,6 +426,12 @@ TestCase {
         compare(row.rowItem.primary, "All That Matters")
         compare(row.rowItem.secondary, "Addison Road")
         compare(row.rowItem.focused, true)
+        const current = fakePlayer.current
+        fakePlayer.current = { id: 2 }
+        compare(row.rowItem.playing, true)
+        compare(row.rowItem.primaryColor, Ui.accent)
+        compare(tc.rowAt(page.songsPane, 0).rowItem.playing, false)
+        fakePlayer.current = current
         router.dispatch("lb", false)
         compare(page.pivotIndex, 0)
         compare(page.switchPivot(-1), false)
@@ -615,21 +621,18 @@ TestCase {
         compare(first.rowItem.trailing, "3:34")
         compare(first.rowItem.trailingItem.visible, true)
         fuzzyCompare(first.rowItem.trailingItem.x + first.rowItem.trailingItem.width, pages.width - Ui.px(20), 0.01)
-        compare(first.rowItem.playingDot, false)
-        compare(first.rowItem.dotItem.visible, false)
+        compare(first.rowItem.playing, false)
+        verify(!Qt.colorEqual(first.rowItem.primaryColor, Ui.accent))
         const third = tc.rowAt(page.trackList, 2)
         compare(third.rowItem.trailing, "3:48")
-        compare(third.rowItem.playingDot, true)
-        compare(third.rowItem.dotItem.visible, true)
-        compare(third.rowItem.dotItem.width, Ui.px(4))
-        compare(third.rowItem.dotItem.height, Ui.px(4))
-        compare(third.rowItem.dotItem.radius, Ui.px(2))
-        compare(third.rowItem.dotItem.color, Ui.accent)
-        verify(third.rowItem.dotItem.x + third.rowItem.dotItem.width <= Ui.px(20))
-        compare(third.rowItem.playing, false)
+        compare(third.rowItem.playing, true)
+        compare(third.rowItem.primaryColor, Ui.accent)
+        compare(third.rowItem.focused, false)
         fakePlayer.current = { id: 1 }
-        compare(first.rowItem.dotItem.visible, true)
-        compare(third.rowItem.dotItem.visible, false)
+        compare(first.rowItem.playing, true)
+        compare(first.rowItem.focused, true)
+        compare(first.rowItem.primaryColor, Ui.accent)
+        compare(third.rowItem.playing, false)
     }
 
     function test_album_play_from_row() {

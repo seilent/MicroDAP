@@ -9,6 +9,8 @@ Page {
     property string artPath: ""
     property QtObject library: null
     property QtObject player: null
+    readonly property int currentId: page.player !== null && page.player.current !== undefined && page.player.current !== null
+        && page.player.current.id !== undefined && page.player.current.id !== null ? Number(page.player.current.id) : -1
     property bool animated: true
     property bool screenOff: false
     property int pivotIndex: 0
@@ -668,6 +670,7 @@ Page {
             number: row.modelData.number
             primary: row.modelData.title
             secondary: row.modelData.subtitle
+            playing: page.currentId >= 0 && Number(row.modelData.id) === page.currentId
             focused: row.isFocused
             pressed: row.isFocused && page.pressed
             animated: page.live
