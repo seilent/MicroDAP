@@ -1,3 +1,4 @@
+#include "Cue.h"
 #include "Eq.h"
 #include "Library.h"
 #include "LibraryWatcher.h"
@@ -3156,10 +3157,20 @@ void LibraryTest::cueEmbedded()
     const QString tagged = music + QStringLiteral("/tagged.flac");
     const QString block = music + QStringLiteral("/block.flac");
     const QString single = music + QStringLiteral("/single.flac");
+    const QString id3 = music + QStringLiteral("/id3.flac");
     for (const QString &path : {tagged, block, single})
         QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/01 One.flac"), path));
     QVERIFY(retag(tagged, "CUESHEET", {QString::fromLatin1(imageSheet)}));
     QVERIFY(insertBlock(block, 5, cueBlock({{1, 0}, {2, 44100}})));
+    {
+        QFile source(block);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        const QByteArray flac = source.readAll();
+        QByteArray head = QByteArrayLiteral("ID3\x03\x00\x00\x00\x00\x00\x14") + QByteArray(20, '\0');
+        head += QByteArrayLiteral("ID3\x04\x00\x10\x00\x00\x01\x01") + QByteArray(129, '\0');
+        head += QByteArrayLiteral("3DI\x04\x00\x10\x00\x00\x01\x01");
+        QVERIFY(writeBytes(id3, head + flac));
+    }
     QVERIFY(retag(single, "CUESHEET", {QStringLiteral("FILE \"x.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n")}));
     Library library(m_dir.path() + QStringLiteral("/cue-embedded.db"), m_dir.path() + QStringLiteral("/cue-art"));
     QVERIFY(rescanned(library, {music}));
@@ -3174,6 +3185,11 @@ void LibraryTest::cueEmbedded()
     QCOMPARE(fromBlock.at(1).start, 75);
     QCOMPARE(fromBlock.at(0).end, 75);
     QCOMPARE(fromBlock.at(1).artist, fromBlock.at(0).artist);
+    QCOMPARE(flacCueBlock(id3), flacCueBlock(block));
+    QVERIFY(!flacCueBlock(block).isEmpty());
+    const QList<CueRow> fromId3 = cueRows(db, id3);
+    QCOMPARE(fromId3.size(), 2);
+    QCOMPARE(fromId3.at(1).start, 75);
     const QList<CueRow> one = cueRows(db, single);
     QCOMPARE(one.size(), 1);
     QCOMPARE(one.first().cue, 0);

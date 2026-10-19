@@ -16,6 +16,7 @@ constexpr qsizetype maxEntries = 256;
 constexpr quint64 maxSeconds = 4000000;
 constexpr int cueBlockType = 5;
 constexpr qint64 cueBlockCap = 1 << 20;
+constexpr int id3TagCap = 4;
 
 struct Raw
 {
@@ -253,7 +254,21 @@ bool parseCueBlock(const QByteArray &block, int rate, CueSheet &out)
 QByteArray flacCueBlock(const QString &path)
 {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly) || file.read(4) != "fLaC")
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    for (int tags = 0; tags < id3TagCap; ++tags) {
+        const qint64 at = file.pos();
+        const QByteArray id3 = file.read(10);
+        if (id3.size() != 10 || !id3.startsWith("ID3") || quint8(id3.at(3)) < 2 || quint8(id3.at(3)) > 4) {
+            file.seek(at);
+            break;
+        }
+        const qint64 size = qint64(quint8(id3.at(6)) & 0x7f) << 21 | qint64(quint8(id3.at(7)) & 0x7f) << 14
+                            | qint64(quint8(id3.at(8)) & 0x7f) << 7 | qint64(quint8(id3.at(9)) & 0x7f);
+        if (!file.seek(at + 10 + size + ((quint8(id3.at(5)) & 0x10) ? 10 : 0)))
+            return {};
+    }
+    if (file.read(4) != "fLaC")
         return {};
     for (;;) {
         const QByteArray header = file.read(4);
