@@ -1,6 +1,9 @@
 #include "FakeBluezModel.h"
+#include "HubModels.h"
+#include "Library.h"
 #include "LinkProfile.h"
 #include "LinkServer.h"
+#include "Models.h"
 #include "Player.h"
 #include "Queue.h"
 #include "Settings.h"
@@ -14,8 +17,11 @@
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusUnixFileDescriptor>
+#include <QDirIterator>
 #include <QElapsedTimer>
+#include <QTemporaryDir>
 #include <QSignalSpy>
+#include <QSqlQuery>
 #include <QtTest>
 
 #include <limits>
@@ -160,6 +166,148 @@ struct Rig
         return phone.frames();
     }
 };
+
+bool copyTree(const QString &from, const QString &to)
+{
+    QDirIterator it(from, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QFileInfo info = it.nextFileInfo();
+        const QString target = to + QLatin1Char('/') + QDir(from).relativeFilePath(info.absoluteFilePath());
+        if (!QDir().mkpath(QFileInfo(target).absolutePath()) || !QFile::copy(info.absoluteFilePath(), target))
+            return false;
+    }
+    return true;
+}
+
+struct LibRig
+{
+    QTemporaryDir dir;
+    QString music;
+    Library library;
+    Settings settings{nullptr};
+    Player player{&library};
+    ArtistsModel artists{&library};
+    AlbumsModel albums{&library};
+    SongsModel songs{&library};
+    PlaylistsModel playlists{&library};
+    FolderModel folders{&library};
+    LinkServer server{&player, &settings};
+    Phone phone;
+    qint64 t = 1000;
+
+    LibRig()
+        : music(dir.filePath(QStringLiteral("music")))
+        , library(dir.filePath(QStringLiteral("library.db")), dir.filePath(QStringLiteral("art")))
+    {
+        copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One"), music + QStringLiteral("/Album One"));
+        copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Single"), music + QStringLiteral("/Single"));
+        settings.setCompanion(true);
+        folders.setRoots({music});
+        server.setClock([this] { return LinkTime{t, t + 5000000}; });
+        server.setSources({&library, &artists, &albums, &songs, &playlists, &folders, nullptr});
+    }
+
+    bool scan()
+    {
+        QSignalSpy spy(&library, &Library::scanned);
+        library.rescan({music});
+        return spy.wait(60000) && spy.takeFirst().at(3).toBool();
+    }
+
+    void connect()
+    {
+        server.open(phone.dev, phoneA);
+        phone.dev = -1;
+        phone.hello();
+        server.poll();
+        phone.frames();
+    }
+
+    std::vector<fd::LinkFrame> ask(uint8_t type, const fd::LinkWriter &w)
+    {
+        phone.send(type, w);
+        server.poll();
+        return phone.frames();
+    }
+
+    qint64 id(const QString &title)
+    {
+        QSqlQuery query(library.database());
+        query.prepare(QStringLiteral("SELECT id FROM tracks WHERE title = ?"));
+        query.addBindValue(title);
+        return query.exec() && query.next() ? query.value(0).toLongLong() : -1;
+    }
+};
+
+uint64_t errorCode(const std::vector<fd::LinkFrame> &frames, uint8_t type)
+{
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type == type && (f.flags & proto::flagError))
+            return body(f).u("code");
+    }
+    return 0;
+}
+
+bool okReply(const std::vector<fd::LinkFrame> &frames, uint8_t type)
+{
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type == type && f.flags == proto::flagReply)
+            return true;
+    }
+    return false;
+}
+
+struct Rows
+{
+    QStringList names;
+    QStringList keys;
+    QList<quint64> counts;
+    QList<quint64> firsts;
+    quint64 total = 0;
+    int pages = 0;
+    bool more = false;
+};
+
+Rows rowsOf(const std::vector<fd::LinkFrame> &frames, uint8_t type, const char *field)
+{
+    Rows out;
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type != type || (f.flags & proto::flagReply))
+            continue;
+        const fd::LinkBody b = body(f);
+        ++out.pages;
+        out.total = b.u("total");
+        out.more = b.u("more") != 0;
+        for (const fd::LinkField *r : b.all(field)) {
+            for (const fd::LinkField &x : r->rec) {
+                const std::string_view name = x.def ? x.def->field : "";
+                if (name == "name" || name == "title")
+                    out.names.push_back(QString::fromStdString(x.s));
+                else if (name == "key")
+                    out.keys.push_back(QString::fromStdString(x.s));
+                else if (name == "count")
+                    out.counts.push_back(x.u);
+                else if (name == "first" || name == "track")
+                    out.firsts.push_back(x.u);
+            }
+        }
+    }
+    return out;
+}
+
+fd::LinkWriter libGet(uint8_t view, const std::string &parent = {}, int offset = 0, int count = -1)
+{
+    fd::LinkWriter w;
+    w.u8(proto::tag::LIB_GET::view, view);
+    if (!parent.empty())
+        w.str(proto::tag::LIB_GET::parent, parent);
+    w.u32(proto::tag::LIB_GET::offset, uint32_t(offset));
+    if (count >= 0)
+        w.u32(proto::tag::LIB_GET::count, uint32_t(count));
+    else if (count == -2)
+        w.u32(proto::tag::LIB_GET::count, std::numeric_limits<uint32_t>::max());
+    return w;
+}
 
 class SilentBluez : public FakeBluezModel
 {
@@ -330,6 +478,12 @@ private slots:
     void endSendsShutdown();
     void queueRevCounts();
     void address();
+    void libraryPaging();
+    void libraryViews();
+    void libraryRevs();
+    void pruneBumpsSnapRev();
+    void playAndQueue();
+    void libraryScale();
     void profileRegisters();
     void profileBackoffOnNotPermitted();
     void profileAlreadyExistsIsOurs();
@@ -356,7 +510,8 @@ void LinkTest::helloReply()
     QCOMPARE(b.u("screenH"), 960u);
     QCOMPARE(b.u("backdropW"), 960u);
     QCOMPARE(b.u("backdropH"), 960u);
-    QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::stateClock);
+    QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::library | uint64_t(1) << proto::feature::queue
+                                  | uint64_t(1) << proto::feature::stateClock);
     QCOMPARE(b.u("minor"), uint64_t(proto::minor));
     QVERIFY(find(frames, proto::msg::STATE));
     QVERIFY(rig.server.connected());
@@ -742,6 +897,228 @@ void LinkTest::address()
 {
     QCOMPARE(LinkServer::address(phoneA), QStringLiteral("AA:BB:CC:DD:EE:FF"));
     QCOMPARE(LinkServer::address(QStringLiteral("AA:BB:CC:DD:EE:FF")), QStringLiteral("AA:BB:CC:DD:EE:FF"));
+}
+
+void LinkTest::libraryPaging()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    std::vector<fd::LinkFrame> frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::songs, {}, 0, 2));
+    QVERIFY(okReply(frames, proto::msg::LIB_GET));
+    Rows rows = rowsOf(frames, proto::msg::LIB, "row");
+    QCOMPARE(rows.total, 5u);
+    QCOMPARE(rows.names.size(), 2);
+    QVERIFY(rows.more);
+    QCOMPARE(rows.keys.at(0), QString::number(rows.firsts.at(0)));
+    QCOMPARE(rows.counts, QList<quint64>({1, 1}));
+    const QStringList head = rows.names;
+    frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::songs, {}, 2));
+    rows = rowsOf(frames, proto::msg::LIB, "row");
+    QCOMPARE(rows.names.size(), 3);
+    QVERIFY(!rows.more);
+    QStringList all = head + rows.names;
+    QCOMPARE(QSet<QString>(all.begin(), all.end()),
+             QSet<QString>({QStringLiteral("One"), QStringLiteral("Two"), QStringLiteral("Three"), QStringLiteral("Four"),
+                            QStringLiteral("Single")}));
+    rows = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::songs, {}, 1, -2)), proto::msg::LIB, "row");
+    QCOMPARE(rows.names.size(), 4);
+    QVERIFY(!rows.more);
+    frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::songs, {}, 6));
+    QCOMPARE(errorCode(frames, proto::msg::LIB_GET), uint64_t(proto::err::badValue));
+    frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::songs, "x"));
+    QCOMPARE(errorCode(frames, proto::msg::LIB_GET), uint64_t(proto::err::badValue));
+}
+
+void LinkTest::libraryViews()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    Rows albums = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albums)), proto::msg::LIB, "row");
+    QCOMPARE(albums.names, QStringList({QStringLiteral("Album One"), QStringLiteral("Single")}));
+    QCOMPARE(albums.counts, QList<quint64>({4, 1}));
+    QCOMPARE(albums.keys.at(0), QString::number(rig.id(QStringLiteral("One"))));
+    Rows tracks = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albumTracks, albums.keys.at(0).toStdString())),
+                         proto::msg::LIB, "row");
+    QCOMPARE(tracks.names, QStringList({QStringLiteral("One"), QStringLiteral("Two"), QStringLiteral("Three"),
+                                        QStringLiteral("Four")}));
+    std::vector<fd::LinkFrame> frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albumTracks,
+                                                                           std::to_string(rig.id(QStringLiteral("Two")))));
+    QCOMPARE(errorCode(frames, proto::msg::LIB_GET), uint64_t(proto::err::staleRev));
+    Rows artists = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artists)), proto::msg::LIB, "row");
+    QVERIFY(artists.names.contains(QStringLiteral("Artist A")));
+    QCOMPARE(artists.names, artists.keys);
+    Rows artistAlbums = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artistAlbums, "Artist A")),
+                               proto::msg::LIB, "row");
+    QCOMPARE(artistAlbums.names, QStringList({QStringLiteral("Album One")}));
+    frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artistAlbums, "Nobody"));
+    QCOMPARE(errorCode(frames, proto::msg::LIB_GET), uint64_t(proto::err::staleRev));
+    Rows top = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::folders)), proto::msg::LIB, "row");
+    QCOMPARE(top.keys, QStringList({QDir::cleanPath(rig.music)}));
+    QCOMPARE(top.counts, QList<quint64>({5}));
+    Rows inside = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::folders, top.keys.at(0).toStdString())),
+                         proto::msg::LIB, "row");
+    QCOMPARE(inside.names, QStringList({QStringLiteral("Album One"), QStringLiteral("Single")}));
+    QCOMPARE(inside.counts, QList<quint64>({4, 1}));
+    Rows lists = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::playlists)), proto::msg::LIB, "row");
+    QCOMPARE(lists.total, 0u);
+}
+
+void LinkTest::libraryRevs()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    fd::LinkWriter stale = libGet(proto::val::VIEW::songs);
+    stale.u32(proto::tag::LIB_GET::libRev, rig.server.libRev() + 1);
+    QCOMPARE(errorCode(rig.ask(proto::msg::LIB_GET, stale), proto::msg::LIB_GET), uint64_t(proto::err::staleRev));
+    fd::LinkWriter snap = libGet(proto::val::VIEW::songs);
+    snap.u32(proto::tag::LIB_GET::snapRev, rig.server.snapRev());
+    QVERIFY(okReply(rig.ask(proto::msg::LIB_GET, snap), proto::msg::LIB_GET));
+    fd::LinkWriter listSnap = libGet(proto::val::VIEW::playlists);
+    listSnap.u32(proto::tag::LIB_GET::snapRev, rig.server.snapRev());
+    QCOMPARE(errorCode(rig.ask(proto::msg::LIB_GET, listSnap), proto::msg::LIB_GET), uint64_t(proto::err::badValue));
+    fd::LinkWriter play;
+    play.u8(proto::tag::PLAY::view, proto::val::VIEW::songs);
+    QCOMPARE(errorCode(rig.ask(proto::msg::PLAY, play), proto::msg::PLAY), uint64_t(proto::err::staleRev));
+    const quint32 lib = rig.server.libRev();
+    emit rig.library.playlistsChanged();
+    QVERIFY(rig.server.libRev() != lib);
+    const quint32 before = rig.server.snapRev();
+    rig.folders.setRoots({rig.music + QStringLiteral("/Single")});
+    QVERIFY(rig.server.snapRev() != before);
+}
+
+void LinkTest::libraryScale()
+{
+    LibRig rig;
+    QSqlDatabase db = rig.library.database();
+    QSqlQuery q(db);
+    QVERIFY(db.transaction());
+    constexpr int artists = 300;
+    constexpr int albums = 700;
+    constexpr int tracks = 8400;
+    for (int a = 1; a <= artists; ++a) {
+        q.prepare(QStringLiteral("INSERT INTO artists(id, name) VALUES(?, ?)"));
+        q.addBindValue(a);
+        q.addBindValue(QStringLiteral("Artist %1").arg(a, 4, 10, QLatin1Char('0')));
+        QVERIFY(q.exec());
+    }
+    for (int b = 1; b <= albums; ++b) {
+        q.prepare(QStringLiteral("INSERT INTO albums(id, title, artist, year, added) VALUES(?, ?, ?, 2000, 0)"));
+        q.addBindValue(b);
+        q.addBindValue(QStringLiteral("Album %1").arg(b, 4, 10, QLatin1Char('0')));
+        q.addBindValue(QStringLiteral("Artist %1").arg((b - 1) % artists + 1, 4, 10, QLatin1Char('0')));
+        QVERIFY(q.exec());
+    }
+    for (int t = 1; t <= tracks; ++t) {
+        const int album = (t - 1) % albums + 1;
+        q.prepare(QStringLiteral("INSERT INTO tracks(id, path, mtime, size, title, artist, album_artist, album_id, "
+                                 "track_no, disc_no, duration_ms, added) VALUES(?, ?, 0, 0, ?, ?, ?, ?, ?, 1, 200000, 0)"));
+        q.addBindValue(t);
+        q.addBindValue(QStringLiteral("/scale/%1.flac").arg(t));
+        q.addBindValue(QStringLiteral("Song %1").arg(t, 5, 10, QLatin1Char('0')));
+        q.addBindValue(QStringLiteral("Artist %1").arg((album - 1) % artists + 1, 4, 10, QLatin1Char('0')));
+        q.addBindValue(QStringLiteral("Artist %1").arg((album - 1) % artists + 1, 4, 10, QLatin1Char('0')));
+        q.addBindValue(album);
+        q.addBindValue((t - 1) / albums + 1);
+        QVERIFY(q.exec());
+        q.prepare(QStringLiteral("INSERT INTO track_artists(track_id, artist_id, pos) VALUES(?, ?, 0)"));
+        q.addBindValue(t);
+        q.addBindValue((album - 1) % artists + 1);
+        QVERIFY(q.exec());
+    }
+    QVERIFY(db.commit());
+    rig.connect();
+    QElapsedTimer timer;
+    timer.start();
+    Rows albumRows = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albums, {}, 0, 100)), proto::msg::LIB, "row");
+    const qint64 albumPage = timer.restart();
+    Rows fill = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albums)), proto::msg::LIB, "row");
+    const qint64 albumFill = timer.restart();
+    Rows artistRows = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artists, {}, 0, 100)), proto::msg::LIB, "row");
+    const qint64 artistPage = timer.restart();
+    LinkView view({&rig.library, &rig.artists, &rig.albums, &rig.songs, &rig.playlists, &rig.folders, nullptr});
+    QCOMPARE(view.open(proto::val::VIEW::albums, {}), uint8_t(0));
+    const QVariantList all = view.tracks();
+    const qint64 albumTracks = timer.restart();
+    const QList<QueueEntry> entries = rig.library.queueEntries(all);
+    const qint64 queueEntries = timer.restart();
+    QCOMPARE(view.open(proto::val::VIEW::artists, {}), uint8_t(0));
+    const qint64 artistTracks = (view.tracks(), timer.restart());
+    qInfo().noquote() << "link scale: albums page" << albumPage << "ms," << albumRows.names.size() << "rows; albums fill"
+                      << albumFill << "ms," << fill.names.size() << "rows; artists page" << artistPage << "ms;"
+                      << "albums PLAY tracks" << albumTracks << "ms, queue entries" << queueEntries << "ms for"
+                      << entries.size() << "; artists PLAY tracks" << artistTracks << "ms";
+    QCOMPARE(albumRows.names.size(), 100);
+    QCOMPARE(artistRows.names.size(), 100);
+    QCOMPARE(entries.size(), tracks);
+}
+
+void LinkTest::pruneBumpsSnapRev()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    const quint32 snap = rig.server.snapRev();
+    const quint32 lib = rig.server.libRev();
+    QVERIFY(QDir(rig.music + QStringLiteral("/Single")).removeRecursively());
+    QVERIFY(rig.scan());
+    QVERIFY(rig.server.snapRev() != snap);
+    QVERIFY(rig.server.libRev() != lib);
+    rig.server.poll();
+    const fd::LinkFrame *state = nullptr;
+    const std::vector<fd::LinkFrame> frames = rig.phone.frames();
+    state = find(frames, proto::msg::STATE);
+    QVERIFY(state);
+    QCOMPARE(body(*state).u("snapRev"), uint64_t(rig.server.snapRev()));
+    QCOMPARE(body(*state).u("libRev"), uint64_t(rig.server.libRev()));
+}
+
+void LinkTest::playAndQueue()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    Rows albums = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albums)), proto::msg::LIB, "row");
+    fd::LinkWriter play;
+    play.u8(proto::tag::PLAY::view, proto::val::VIEW::albumTracks)
+        .str(proto::tag::PLAY::parent, albums.keys.at(0).toStdString())
+        .u32(proto::tag::PLAY::libRev, rig.server.libRev())
+        .u32(proto::tag::PLAY::start, 1);
+    QVERIFY(okReply(rig.ask(proto::msg::PLAY, play), proto::msg::PLAY));
+    Queue *queue = rig.player.queue();
+    QCOMPARE(queue->count(), 4);
+    QCOMPARE(queue->entry(queue->currentIndex()).title, QStringLiteral("Two"));
+    fd::LinkWriter page;
+    page.u8(proto::tag::QUEUE_OP::cmd, proto::val::QUEUE_CMD::page);
+    Rows items = rowsOf(rig.ask(proto::msg::QUEUE_OP, page), proto::msg::QUEUE, "item");
+    QCOMPARE(items.names, QStringList({QStringLiteral("One"), QStringLiteral("Two"), QStringLiteral("Three"),
+                                       QStringLiteral("Four")}));
+    fd::LinkWriter stale;
+    stale.u8(proto::tag::QUEUE_OP::cmd, proto::val::QUEUE_CMD::remove).u32(proto::tag::QUEUE_OP::rev, queue->rev() + 1)
+        .u32(proto::tag::QUEUE_OP::slot, 3);
+    QCOMPARE(errorCode(rig.ask(proto::msg::QUEUE_OP, stale), proto::msg::QUEUE_OP), uint64_t(proto::err::staleRev));
+    fd::LinkWriter remove;
+    remove.u8(proto::tag::QUEUE_OP::cmd, proto::val::QUEUE_CMD::remove).u32(proto::tag::QUEUE_OP::rev, queue->rev())
+        .u32(proto::tag::QUEUE_OP::slot, 3);
+    QVERIFY(okReply(rig.ask(proto::msg::QUEUE_OP, remove), proto::msg::QUEUE_OP));
+    QCOMPARE(queue->count(), 3);
+    const quint32 rev = queue->rev();
+    QCOMPARE(rig.player.enqueueTracks({rig.id(QStringLiteral("Single"))}), 1);
+    QVERIFY(queue->rev() != rev);
+    fd::LinkWriter tracks;
+    tracks.u64(proto::tag::PLAY::track, uint64_t(rig.id(QStringLiteral("Single"))))
+        .u64(proto::tag::PLAY::track, uint64_t(rig.id(QStringLiteral("One"))));
+    QVERIFY(okReply(rig.ask(proto::msg::PLAY, tracks), proto::msg::PLAY));
+    QCOMPARE(queue->count(), 2);
+    fd::LinkWriter gone;
+    gone.u64(proto::tag::PLAY::track, 999999);
+    QCOMPARE(errorCode(rig.ask(proto::msg::PLAY, gone), proto::msg::PLAY), uint64_t(proto::err::staleRev));
+    fd::LinkWriter unknownFavorite;
+    unknownFavorite.u8(proto::tag::ACTION::cmd, proto::val::ACTION_CMD::favorite).u64(proto::tag::ACTION::track, 999999);
+    QCOMPARE(errorCode(rig.ask(proto::msg::ACTION, unknownFavorite), proto::msg::ACTION), uint64_t(proto::err::staleRev));
 }
 
 void LinkTest::profileRegisters()

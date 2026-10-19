@@ -963,6 +963,42 @@ QVariantList FolderModel::tracks(int id) const
     return out;
 }
 
+int FolderModel::find(const QString &path) const
+{
+    if (path.isEmpty())
+        return -1;
+    for (qsizetype i = 0; i < m_dirs.size(); ++i) {
+        if (m_dirs.at(i).path == path)
+            return static_cast<int>(i);
+    }
+    return -2;
+}
+
+QVariantList FolderModel::entries(int id) const
+{
+    QVariantList out;
+    if (id < -1 || id >= m_dirs.size())
+        return out;
+    const QList<int> &dirs = id < 0 ? m_top : m_dirs.at(id).dirs;
+    for (int dir : dirs) {
+        const Dir &d = m_dirs.at(dir);
+        QVariantList ids;
+        collect(dir, ids);
+        out.append(QVariantMap{{QStringLiteral("kind"), QStringLiteral("folder")},
+                               {QStringLiteral("name"), d.name},
+                               {QStringLiteral("path"), d.path},
+                               {QStringLiteral("count"), d.total},
+                               {QStringLiteral("first"), ids.isEmpty() ? QVariant() : ids.constFirst()}});
+    }
+    if (id < 0)
+        return out;
+    for (const Song &song : m_dirs.at(id).songs)
+        out.append(QVariantMap{{QStringLiteral("kind"), QStringLiteral("song")},
+                               {QStringLiteral("id"), song.id},
+                               {QStringLiteral("name"), song.title}});
+    return out;
+}
+
 QString FolderModel::name(int id) const
 {
     return id >= 0 && id < m_dirs.size() ? m_dirs.at(id).name : QString();

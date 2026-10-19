@@ -2,6 +2,7 @@
 
 #include "BluezModel.h"
 #include "Favorites.h"
+#include "HubModels.h"
 #include "Library.h"
 #include "Player.h"
 #include "Queue.h"
@@ -12,6 +13,7 @@
 
 #include <QDebug>
 #include <QRandomGenerator>
+#include <QSet>
 #include <QSocketNotifier>
 
 #include <algorithm>
@@ -29,6 +31,8 @@ namespace proto = fd::proto;
 constexpr uint16_t screenW = 640;
 constexpr uint16_t screenH = 960;
 constexpr uint16_t backdropSide = 960;
+constexpr int linkQueueArtists = 8;
+constexpr size_t linkNameMax = 255;
 
 qint64 clockMs(clockid_t id)
 {
@@ -62,7 +66,7 @@ LinkTime LinkServer::now()
 
 quint64 LinkServer::features()
 {
-    return 1ull << proto::feature::stateClock;
+    return 1ull << proto::feature::library | 1ull << proto::feature::queue | 1ull << proto::feature::stateClock;
 }
 
 quint32 LinkServer::randomRev()
@@ -186,10 +190,29 @@ void LinkServer::setFavorites(Favorites *favorites)
     m_favorites = favorites;
     if (!favorites)
         return;
-    connect(favorites, &Favorites::changed, this, [this] {
-        if (!m_peers.empty())
-            m_soon.start();
-    });
+    connect(favorites, &Favorites::changed, this, [this] { bumpLib(false); });
+}
+
+void LinkServer::setSources(const LinkSources &sources)
+{
+    m_sources = sources;
+    if (!m_favorites && sources.favorites)
+        setFavorites(sources.favorites);
+    if (Library *lib = sources.library) {
+        connect(lib, &Library::tracksChanged, this, [this] { bumpLib(true); });
+        connect(lib, &Library::playlistsChanged, this, [this] { bumpLib(false); });
+    }
+    if (FolderModel *folders = sources.folders)
+        connect(folders, &FolderModel::rootsChanged, this, [this] { bumpLib(true); });
+}
+
+void LinkServer::bumpLib(bool snap)
+{
+    ++m_libRev;
+    if (snap)
+        ++m_snapRev;
+    if (!m_peers.empty())
+        m_soon.start();
 }
 
 void LinkServer::setClock(Clock clock)
@@ -440,6 +463,8 @@ void LinkServer::poll()
         }
     }
     updateConnected();
+    if (m_sources.folders)
+        m_sources.folders->setActive(m_connected);
     if (m_connected && m_sent.playing && m_sentAt >= 0) {
         const qint64 t = m_sentAt + proto::stateIntervalMs;
         if (m_nextAt < 0 || t < m_nextAt)
@@ -570,7 +595,7 @@ void LinkServer::state(Peer &p, qint64 now)
     const LinkSig s = sig(at.mono);
     const bool moved = s.position != m_seen;
     m_seen = s.position;
-    bool due = m_sentAt < 0 || !s.same(m_sent);
+    bool due = m_sentAt < 0 || !s.same(m_sent) || m_libRev != m_sentRev;
     if (!due && s.playing) {
         const qint64 expect = m_sent.position + (m_sent.playing ? now - m_sentAt : 0);
         due = now - m_sentAt >= proto::stateIntervalMs || (moved && std::llabs(s.position - expect) > 2000);
@@ -586,6 +611,7 @@ void LinkServer::state(Peer &p, qint64 now)
     if (!p.s->push(proto::msg::STATE, w, now))
         return;
     m_sent = s;
+    m_sentRev = m_libRev;
     m_sentAt = now;
     tick(p, now);
 }
@@ -631,6 +657,8 @@ void LinkServer::command(fd::LinkCommand &c, int64_t now)
         emit phoneHello();
         return;
     }
+    if (library(*p, c, now))
+        return;
     if (c.type != m::TRANSPORT && c.type != m::VOLUME)
         return;
     const uint8_t code = p->refused ? uint8_t(proto::err::refused) : c.type == m::TRANSPORT ? transport(c) : volume(c);
@@ -725,6 +753,285 @@ uint8_t LinkServer::volume(const fd::LinkCommand &c)
         return 0;
     }
     return proto::err::badValue;
+}
+
+bool LinkServer::knownTracks(const QVariantList &ids) const
+{
+    Library *lib = m_player->library();
+    if (!lib)
+        return false;
+    QSet<qint64> found;
+    for (const QVariant &r : lib->trackRows(ids))
+        found.insert(r.toMap().value(QStringLiteral("id")).toLongLong());
+    for (const QVariant &id : ids) {
+        if (!found.contains(id.toLongLong()))
+            return false;
+    }
+    return true;
+}
+
+uint8_t LinkServer::revCode(const fd::LinkBody &b, bool list, bool need) const
+{
+    const bool snap = b.has("snapRev");
+    if (snap && list && !b.has("libRev"))
+        return proto::err::badValue;
+    if (snap && !list)
+        return b.u("snapRev") == m_snapRev ? 0 : uint8_t(proto::err::staleRev);
+    if (!b.has("libRev"))
+        return need ? uint8_t(proto::err::staleRev) : 0;
+    return b.u("libRev") == m_libRev ? 0 : uint8_t(proto::err::staleRev);
+}
+
+bool LinkServer::library(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    namespace m = proto::msg;
+    if (c.type != m::LIB_GET && c.type != m::PLAY && c.type != m::QUEUE_OP && c.type != m::ACTION)
+        return false;
+    uint8_t code = 0;
+    if (p.refused)
+        code = proto::err::refused;
+    else if (c.type == m::LIB_GET)
+        code = libGet(p, c, now);
+    else if (c.type == m::PLAY)
+        code = play(c);
+    else if (c.type == m::QUEUE_OP && c.body.u("cmd", 255) == proto::val::QUEUE_CMD::page)
+        code = queuePage(p, c, now);
+    else if (c.type == m::QUEUE_OP)
+        code = queueOp(c);
+    else
+        code = action(c);
+    if (!code)
+        p.s->reply(c, fd::LinkWriter(), now);
+    else
+        p.s->fail(c, code, fd::link_err_text(code), now);
+    m_soon.start();
+    return true;
+}
+
+bool LinkServer::pages(Peer &p, uint8_t type, const fd::LinkWriter &head, const uint8_t tags[4], quint32 &at,
+                       quint32 end, quint32 total, const std::function<void(quint32, fd::LinkWriter &)> &rec,
+                       qint64 now)
+{
+    const size_t fill = size_t(proto::maxPayload) * proto::pageFillPct / 100;
+    const size_t fixed = head.size() + 3 * proto::tlvHeaderBytes + 9;
+    bool first = true;
+    do {
+        if (!first && p.s->queued() > fd::kLinkQueueBytes / 2)
+            return true;
+        std::vector<fd::LinkWriter> recs;
+        size_t used = fixed;
+        while (at + recs.size() < end) {
+            fd::LinkWriter w;
+            rec(at + quint32(recs.size()), w);
+            const size_t n = proto::tlvHeaderBytes + w.size();
+            if (!recs.empty() && used + n > fill)
+                break;
+            used += n;
+            recs.push_back(std::move(w));
+        }
+        if (p.s->queued() + used + proto::headerBytes > fd::kLinkQueueBytes)
+            return false;
+        const quint32 n = quint32(recs.size());
+        fd::LinkWriter body = head;
+        body.u32(tags[0], at).u32(tags[1], total).flag(tags[2], at + n < total);
+        for (const fd::LinkWriter &w : recs)
+            body.rec(tags[3], w);
+        if (!p.s->push(type, body, now))
+            return false;
+        at += n;
+        first = false;
+    } while (at < end);
+    return true;
+}
+
+uint8_t LinkServer::libGet(Peer &p, const fd::LinkCommand &c, qint64 now)
+{
+    namespace t = proto::tag::LIB;
+    namespace r = proto::tag::LibRow;
+    if (!c.body.has("view"))
+        return proto::err::badValue;
+    const uint8_t view = uint8_t(c.body.u("view"));
+    const bool list = view == proto::val::VIEW::playlists || view == proto::val::VIEW::favorites;
+    if (const uint8_t e = revCode(c.body, list, false))
+        return e;
+    const QString parent = QString::fromStdString(c.body.str("parent"));
+    LinkView v(m_sources);
+    if (const uint8_t e = v.open(view, parent))
+        return e;
+    const quint64 offset = c.body.u("offset");
+    if (offset > v.total())
+        return proto::err::badValue;
+    const quint64 count = c.body.has("count") ? c.body.u("count") : v.total();
+    const quint32 end = count >= v.total() - offset ? v.total() : quint32(offset + count);
+    fd::LinkWriter head;
+    head.u32(t::libRev, m_libRev).u8(t::view, view).str(t::parent, utf8(parent)).u32(t::snapRev, m_snapRev);
+    const uint8_t tags[4] = {t::offset, t::total, t::more, t::row};
+    quint32 at = quint32(offset);
+    const bool ok = pages(p, proto::msg::LIB, head, tags, at, end, v.total(), [&v](quint32 i, fd::LinkWriter &w) {
+        const LinkRow row = v.row(i);
+        w.str(r::name, utf8(row.name)).u32(r::count, row.count);
+        if (row.hasFirst)
+            w.u64(r::first, uint64_t(row.first));
+        w.str(r::key, utf8(row.key));
+    }, now);
+    return ok ? 0 : uint8_t(proto::err::busy);
+}
+
+uint8_t LinkServer::play(const fd::LinkCommand &c)
+{
+    if (!m_player->library() || !m_player->library()->isOpen())
+        return proto::err::noLibrary;
+    QVariantList tracks;
+    const std::vector<const fd::LinkField *> ids = c.body.all("track");
+    if (!ids.empty()) {
+        if (ids.size() > size_t(proto::playMaxTracks))
+            return proto::err::tooBig;
+        for (const fd::LinkField *f : ids)
+            tracks.push_back(qint64(f->u));
+        if (!knownTracks(tracks))
+            return proto::err::staleRev;
+    } else {
+        if (!c.body.has("view"))
+            return proto::err::badValue;
+        const uint8_t view = uint8_t(c.body.u("view"));
+        const bool list = view == proto::val::VIEW::playlists || view == proto::val::VIEW::favorites;
+        if (const uint8_t e = revCode(c.body, list, true))
+            return e;
+        LinkView v(m_sources);
+        if (const uint8_t e = v.open(view, QString::fromStdString(c.body.str("parent"))))
+            return e;
+        tracks = v.tracks();
+    }
+    const quint64 start = c.body.u("start");
+    if (tracks.isEmpty() || start >= quint64(tracks.size()))
+        return proto::err::badValue;
+    const QList<QueueEntry> entries = m_player->library()->queueEntries(tracks);
+    if (entries.size() != tracks.size())
+        return proto::err::staleRev;
+    if (c.body.u("shuffle") != 0)
+        m_player->queue()->setShuffle(true);
+    m_player->play(entries, int(start));
+    return 0;
+}
+
+uint8_t LinkServer::queuePage(Peer &p, const fd::LinkCommand &c, qint64 now)
+{
+    namespace t = proto::tag::QUEUE;
+    namespace q = proto::tag::QueueItem;
+    Queue *queue = m_player->queue();
+    if (c.body.has("rev") && c.body.u("rev") != queue->rev())
+        return proto::err::staleRev;
+    const quint32 slots = quint32(std::max(0, queue->count()));
+    const quint64 offset = c.body.u("offset");
+    if (offset > slots)
+        return proto::err::badValue;
+    const quint64 count = c.body.has("count") ? c.body.u("count") : slots;
+    const quint32 end = count >= slots - offset ? slots : quint32(offset + count);
+    fd::LinkWriter head;
+    head.u32(t::rev, queue->rev());
+    const uint8_t tags[4] = {t::offset, t::total, t::more, t::item};
+    Library *lib = m_player->library();
+    quint32 at = quint32(offset);
+    const bool ok = pages(p, proto::msg::QUEUE, head, tags, at, end, slots, [queue, lib](quint32 i, fd::LinkWriter &w) {
+        const QueueEntry e = queue->entry(queue->rowAt(int(i)));
+        w.u64(q::track, uint64_t(std::max<qint64>(0, e.id))).str(q::title, utf8(e.title));
+        QStringList names = lib && e.id > 0 ? lib->trackArtists(e.id) : QStringList();
+        if (names.isEmpty() && !e.artist.isEmpty())
+            names = {e.artist};
+        int kept = 0;
+        for (const QString &a : std::as_const(names)) {
+            const std::string name = utf8(a);
+            if (kept >= linkQueueArtists || name.size() > linkNameMax)
+                continue;
+            w.str(q::artists, name);
+            ++kept;
+        }
+        if (!e.album.isEmpty())
+            w.str(q::album, utf8(e.album));
+        if (e.durationMs > 0)
+            w.u32(q::durationMs, uint32_t(e.durationMs));
+    }, now);
+    return ok ? 0 : uint8_t(proto::err::busy);
+}
+
+uint8_t LinkServer::queueOp(const fd::LinkCommand &c)
+{
+    namespace q = proto::val::QUEUE_CMD;
+    Queue *queue = m_player->queue();
+    if (!c.body.has("rev") || c.body.u("rev") != queue->rev())
+        return proto::err::staleRev;
+    const quint64 slot = c.body.u("slot", UINT64_MAX);
+    const quint64 slots = quint64(std::max(0, queue->count()));
+    const bool in = slot < slots;
+    switch (c.body.u("cmd", 255)) {
+    case q::playAt:
+        if (!in)
+            return proto::err::badValue;
+        m_player->playAt(queue->rowAt(int(slot)));
+        return 0;
+    case q::remove:
+        if (!in)
+            return proto::err::badValue;
+        queue->remove(queue->rowAt(int(slot)));
+        return 0;
+    case q::move:
+        if (!in || c.body.u("to", UINT64_MAX) >= slots)
+            return proto::err::badValue;
+        queue->moveSlot(int(slot), int(c.body.u("to")));
+        return 0;
+    case q::playNext: {
+        const std::vector<const fd::LinkField *> ids = c.body.all("track");
+        if (ids.empty()) {
+            if (!in)
+                return proto::err::badValue;
+            queue->playNextRow(queue->rowAt(int(slot)));
+            return 0;
+        }
+        if (ids.size() > size_t(proto::playMaxTracks))
+            return proto::err::tooBig;
+        QVariantList tracks;
+        for (const fd::LinkField *f : ids)
+            tracks.push_back(qint64(f->u));
+        if (!knownTracks(tracks))
+            return proto::err::staleRev;
+        return m_player->playNextTracks(tracks) > 0 ? 0 : uint8_t(proto::err::badValue);
+    }
+    case q::clear:
+        m_player->stop();
+        queue->clear();
+        return 0;
+    default:
+        return proto::err::badValue;
+    }
+}
+
+uint8_t LinkServer::action(const fd::LinkCommand &c)
+{
+    namespace a = proto::val::ACTION_CMD;
+    Library *lib = m_player->library();
+    if (!lib || !lib->isOpen())
+        return proto::err::noLibrary;
+    switch (c.body.u("cmd", 255)) {
+    case a::rescan:
+        lib->rescanRoots();
+        return 0;
+    case a::shuffleLibrary:
+        return m_player->playSource(QStringLiteral("all"), 0, QStringLiteral("shuffle")) > 0 ? 0
+                                                                                            : uint8_t(proto::err::noLibrary);
+    case a::favorite: {
+        if (!c.body.has("track"))
+            return proto::err::badValue;
+        const qint64 id = qint64(c.body.u("track"));
+        if (!knownTracks({id}))
+            return proto::err::staleRev;
+        if (!m_favorites)
+            return proto::err::busy;
+        m_favorites->toggle(id);
+        return 0;
+    }
+    default:
+        return proto::err::badValue;
+    }
 }
 
 }

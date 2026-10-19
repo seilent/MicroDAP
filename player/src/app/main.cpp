@@ -471,12 +471,17 @@ int main(int argc, char *argv[])
     }
     std::unique_ptr<microdap::LinkServer> link;
     std::unique_ptr<microdap::LinkProfile> linkProfile;
+    std::unique_ptr<microdap::FolderModel> linkFolders;
     if (!overlayMode) {
+        linkFolders = std::make_unique<microdap::FolderModel>(&library);
+        linkFolders->setRoots(settings.roots());
+        QObject::connect(&settings, &microdap::Settings::rootsChanged, linkFolders.get(),
+                         [&settings, folders = linkFolders.get()] { folders->setRoots(settings.roots()); });
         link = std::make_unique<microdap::LinkServer>(&player, &settings);
         link->setBluez(bluez.get());
         link->setStatus(&status);
         link->setVolume(routedVolume);
-        link->setFavorites(&favorites);
+        link->setSources({&library, &artists, &albums, &songs, &playlists, linkFolders.get(), &favorites});
         linkProfile = std::make_unique<microdap::LinkProfile>(QDBusConnection::systemBus());
         QObject::connect(linkProfile.get(), &microdap::LinkProfile::connection, link.get(), &microdap::LinkServer::open);
         QObject::connect(linkProfile.get(), &microdap::LinkProfile::ended, link.get(), &microdap::LinkServer::end);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BluezModel.h"
+#include "LinkLibrary.h"
 #include "LinkProto.h"
 
 #include <QDeadlineTimer>
@@ -79,6 +80,7 @@ public:
     void setFavorites(Favorites *favorites);
     void setClock(Clock clock);
     void setPairWindowMs(int ms);
+    void setSources(const LinkSources &sources);
 
     fd::LinkHello hello() const;
     bool connected() const;
@@ -126,6 +128,17 @@ private:
     void updateConnected();
     uint8_t transport(const fd::LinkCommand &c);
     uint8_t volume(const fd::LinkCommand &c);
+    bool library(Peer &p, fd::LinkCommand &c, qint64 now);
+    uint8_t revCode(const fd::LinkBody &b, bool list, bool need) const;
+    uint8_t libGet(Peer &p, const fd::LinkCommand &c, qint64 now);
+    uint8_t play(const fd::LinkCommand &c);
+    uint8_t queuePage(Peer &p, const fd::LinkCommand &c, qint64 now);
+    uint8_t queueOp(const fd::LinkCommand &c);
+    uint8_t action(const fd::LinkCommand &c);
+    bool pages(Peer &p, uint8_t type, const fd::LinkWriter &head, const uint8_t tags[4], quint32 &at, quint32 end,
+               quint32 total, const std::function<void(quint32, fd::LinkWriter &)> &rec, qint64 now);
+    bool knownTracks(const QVariantList &ids) const;
+    void bumpLib(bool snap);
     bool phone() const;
     int cap() const;
     void setPairWindow(bool on);
@@ -139,6 +152,7 @@ private:
     QPointer<SinkVolume> m_volume;
     QPointer<Favorites> m_favorites;
     QString m_confirmName;
+    LinkSources m_sources;
     Clock m_clock;
     std::vector<std::unique_ptr<Peer>> m_peers;
     Peer *m_ticking = nullptr;
@@ -150,6 +164,7 @@ private:
     int m_windowMs = BluezModel::defaultPairingTimeout * 1000;
     LinkSig m_sent;
     qint64 m_sentAt = -1;
+    quint32 m_sentRev = 0;
     qint64 m_seen = 0;
     qint64 m_nextAt = -1;
     quint32 m_gen = 0;

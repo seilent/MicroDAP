@@ -245,6 +245,8 @@ public:
     Q_INVOKABLE QString name(int id) const;
     Q_INVOKABLE QString pathLine(const QFont &font, qreal width) const;
     QStringList pathParts() const;
+    int find(const QString &path) const;
+    QVariantList entries(int id) const;
 
     static QString fitPath(const QStringList &parts, const Advance &advance, qreal width);
     static bool folderLess(const QString &a, const QString &b);
