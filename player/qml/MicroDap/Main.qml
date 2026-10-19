@@ -1268,8 +1268,12 @@ Window {
             animated: !root.hidden
             overlay: root.overlay
             bluez: root.bluez
+            eq: root.eq
+            dacEq: root.dacEq
+            keyboard: keyboard
             screenOff: root.off
             onOpenNowPlaying: root.openNowPlaying()
+            onToast: (first, second) => overlays.toast.show(first, second)
         }
     }
 
@@ -1572,7 +1576,9 @@ Window {
 
     Component {
         id: bluetoothShotComponent
-        BluetoothShot {}
+        BluetoothShot {
+            fixture: root.shotState
+        }
     }
 
     Component {

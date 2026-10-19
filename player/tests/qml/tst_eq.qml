@@ -718,6 +718,32 @@ TestCase {
         compare(page.rows[1].value, "Desk")
     }
 
+    function test_slot_change_closes_overlays() {
+        fakeEq.makeCustom("headphones")
+        fakeEq.makeCustom("speaker")
+        const page = open({ embedded: true, slot: "headphones" })
+        page.setFocus(2)
+        verify(router.dispatch("a", false))
+        page.setFocus(page.indexOfKey("renamePreset"))
+        verify(router.dispatch("a", false))
+        compare(kb.shown, true)
+        page.slot = "speaker"
+        compare(kb.shown, false)
+        compare(fakeEq.calls.filter((c) => c[0] === "renamePreset").length, 0)
+        page.setFocus(2)
+        verify(router.dispatch("a", false))
+        page.setFocus(page.indexOfKey("deletePreset"))
+        verify(router.dispatch("a", false))
+        compare(page.deleteDialog.shown, true)
+        page.slot = "headphones"
+        page.deleteDialog.complete()
+        compare(page.deleteDialog.shown, false)
+        compare(page.focusIndex, 0)
+        verify(router.dispatch("a", false))
+        compare(page.deleteDialog.shown, false)
+        compare(fakeEq.calls.filter((c) => c[0] === "deletePreset").length, 0)
+    }
+
     function test_rename_preset_cancel_and_failure() {
         fakeEq.makeCustom("headphones")
         const page = open()

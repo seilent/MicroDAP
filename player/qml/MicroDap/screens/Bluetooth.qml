@@ -5,6 +5,9 @@ Page {
     id: page
 
     property QtObject bluez: null
+    property var eq: null
+    property QtObject dacEq: null
+    property Item keyboard: null
     property bool animated: true
     property bool screenOff: false
     property bool overlay: false
@@ -15,7 +18,9 @@ Page {
     property bool ready: false
 
     readonly property bool live: page.animated && !page.screenOff
-    readonly property var pivots: ["phone", "pairing"]
+    readonly property var pivots: ["phone", "pairing", "eq"]
+    readonly property string eqSlot: page.eq !== null && page.eq.activeOutput !== undefined && String(page.eq.activeOutput) !== ""
+        ? String(page.eq.activeOutput) : "speaker"
     readonly property bool connected: page.bluez !== null && page.bluez.connected === true
     readonly property bool transportActive: page.connected && page.bluez.transportActive === true
     readonly property bool pairing: page.bluez !== null && page.bluez.pairing === true
@@ -56,8 +61,10 @@ Page {
     property alias pairingRing: pairingRing
     property alias pulseHolder: pulseHolder
     property alias hintText: hintText
+    property alias eqPage: eqPage
 
     signal openNowPlaying()
+    signal toast(string first, string second)
 
     function call(method: string, arg: var): bool {
         if (page.bluez === null || typeof page.bluez[method] !== "function")
@@ -74,15 +81,22 @@ Page {
     }
 
     function contentAt(index: int): Item {
-        return index === 0 ? phonePage : pairingPage
+        return index === 0 ? phonePage : index === 1 ? pairingPage : eqPage
+    }
+
+    function resetEq(): void {
+        eqPage.completeAll()
+        eqPage.confirmEdit()
+        eqPage.headphonesPane.reset()
+        eqPage.focusIndex = 0
     }
 
     function landPivot() {
         pivotAnim.stop()
-        phonePage.x = 0
-        phonePage.opacity = 1
-        pairingPage.x = 0
-        pairingPage.opacity = 1
+        for (const item of [phonePage, pairingPage, eqPage]) {
+            item.x = 0
+            item.opacity = 1
+        }
         page.shownPivot = page.pivotIndex
     }
 
@@ -93,6 +107,7 @@ Page {
         if (pivotAnim.running)
             page.landPivot()
         const dir = target > page.pivotIndex ? 1 : -1
+        page.resetEq()
         d.internal = true
         page.pivotIndex = target
         d.internal = false
@@ -109,6 +124,7 @@ Page {
 
     function completeAll() {
         page.landPivot()
+        eqPage.completeAll()
         if (stateSwap.running)
             stateSwap.stop()
         stateText.opacity = 1
@@ -144,7 +160,23 @@ Page {
             page.switchPivot(index - page.pivotIndex)
     }
 
+    function eqAction(name: string, repeat: bool): bool {
+        const busy = eqPage.editing || eqPage.sheet.shown || eqPage.deleteDialog.shown
+        if (!busy && (name === "lb" || name === "rb"))
+            return false
+        if (!busy && name === "start") {
+            if (page.connected)
+                page.togglePlayPause()
+            return true
+        }
+        if (eqPage.handleAction(name, repeat))
+            return true
+        return name === "b" && !repeat ? page.back() : false
+    }
+
     function handleAction(name: string, repeat: bool): bool {
+        if (page.pivotIndex === 2 && page.eqAction(name, repeat))
+            return true
         switch (name) {
         case "lb":
             if (!repeat)
@@ -207,12 +239,18 @@ Page {
             page.switchPivot(-1)
     }
 
+    onEqSlotChanged: {
+        eqPage.cancelEdit()
+        page.resetEq()
+    }
+
     onLiveChanged: {
         if (!page.live)
             page.completeAll()
     }
 
     Component.onCompleted: {
+        page.resetEq()
         page.shownPivot = page.pivotIndex
         page.shownState = page.stateLine
         page.ready = true
@@ -376,6 +414,22 @@ Page {
             color: Ui.white(Ui.listCount.alpha)
             font: Ui.font(Ui.listCount)
         }
+    }
+
+    EqScreen {
+        id: eqPage
+
+        width: page.width
+        height: page.height
+        visible: page.shownPivot === 2
+        embedded: true
+        slot: page.eqSlot
+        eq: page.eq
+        dacEq: page.dacEq
+        keyboard: page.keyboard
+        animated: page.animated
+        screenOff: page.screenOff
+        onToast: (first, second) => page.toast(first, second)
     }
 
     CroppedHeader {

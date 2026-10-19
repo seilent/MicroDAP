@@ -104,6 +104,40 @@ TestCase {
     }
 
     QtObject {
+        id: fakeEq
+
+        property string activeOutput: "speaker"
+        property var sources: []
+        property var keys: ({})
+        property var calls: []
+
+        signal profilesChanged()
+
+        function reset() {
+            fakeEq.activeOutput = "speaker"
+            fakeEq.keys = ({ headphones: "off", usb: "off", speaker: "off", bt: "off" })
+            fakeEq.calls = []
+        }
+
+        function profileMap(output) {
+            const key = fakeEq.keys[output] === undefined ? "off" : fakeEq.keys[output]
+            return { mode: "parametric", key: key, name: "", missing: false, preamp: 0,
+                bands: key === "off" ? [] : [{ type: "peak", freq: 1000, freqIndex: 34, gain: 0, q: 1.4 }] }
+        }
+
+        function cycleProfile(output, delta) {
+            fakeEq.calls = fakeEq.calls.concat([["cycleProfile", output, delta]])
+            const k = Object.assign({}, fakeEq.keys)
+            k[output] = k[output] === "off" ? "custom" : "off"
+            fakeEq.keys = k
+            fakeEq.profilesChanged()
+        }
+
+        function relist() {
+        }
+    }
+
+    QtObject {
         id: counters
 
         property int nowPlayingOpens: 0
@@ -130,6 +164,7 @@ TestCase {
         pages.clear()
         pages.animate = false
         fake.reset()
+        fakeEq.reset()
         counters.nowPlayingOpens = 0
     }
 
@@ -142,7 +177,7 @@ TestCase {
         const page = open()
         compare(pages.depth, 2)
         compare(page.header.text, "bluetooth")
-        compare(page.strip.labels, ["phone", "pairing"])
+        compare(page.strip.labels, ["phone", "pairing", "eq"])
         compare(page.strip.activeIndex, 0)
         compare(page.pivotIndex, 0)
         compare(page.shownPivot, 0)
@@ -248,6 +283,12 @@ TestCase {
         compare(page.phonePage.visible, false)
         compare(page.pairingPage.visible, true)
         verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 2)
+        compare(page.eqPage.visible, true)
+        compare(page.pairingPage.visible, false)
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 2)
+        verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 1)
         verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 0)
@@ -258,6 +299,71 @@ TestCase {
         compare(page.pivotIndex, 0)
         router.dispatch("rb", true)
         compare(page.pivotIndex, 0)
+    }
+
+    function test_eq_pivot() {
+        fake.connect()
+        fake.status = "paused"
+        const page = open({ animated: false, eq: fakeEq })
+        page.switchPivot(2)
+        compare(page.pivotIndex, 2)
+        const eq = page.eqPage
+        compare(eq.visible, true)
+        compare(eq.embedded, true)
+        compare(eq.header.visible, false)
+        compare(eq.strip.visible, false)
+        compare(eq.slot, "speaker")
+        compare(eq.slotText.visible, true)
+        compare(eq.slotText.text, "speaker")
+        compare(eq.slotText.font.capitalization, Font.AllUppercase)
+        fuzzyCompare(eq.slotText.y + eq.slotText.baselineOffset, Ui.px(tc.contentTop + 0.7 * 8), 0.5)
+        fuzzyCompare(eq.headphonesPane.y, Ui.px(tc.contentTop + 0.7 * 8 + 12), 0.01)
+        compare(JSON.stringify(eq.rows.map((r) => r.key)), JSON.stringify(["mode", "profile"]))
+        compare(eq.focusIndex, 0)
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("a", false))
+        compare(eq.editing, true)
+        verify(router.dispatch("right", false))
+        compare(JSON.stringify(fakeEq.calls[0]), JSON.stringify(["cycleProfile", "speaker", 1]))
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 2)
+        verify(router.dispatch("a", false))
+        compare(eq.editing, false)
+        compare(eq.rows.length, 6)
+        verify(router.dispatch("start", false))
+        compare(fake.calls, ["play"])
+        eq.setFocus(1)
+        verify(router.dispatch("a", false))
+        compare(eq.editing, true)
+        verify(router.dispatch("right", false))
+        compare(fakeEq.keys.speaker, "off")
+        fakeEq.activeOutput = "headphones"
+        compare(fakeEq.keys.speaker, "custom")
+        compare(eq.slot, "headphones")
+        compare(eq.slotText.text, "headphones")
+        compare(eq.editing, false)
+        compare(eq.focusIndex, 0)
+        compare(JSON.stringify(eq.rows.map((r) => r.key)), JSON.stringify(["mode", "profile"]))
+        verify(router.dispatch("lb", false))
+        compare(page.pivotIndex, 1)
+        page.switchPivot(1)
+        compare(eq.focusIndex, 0)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_eq_pivot_header_reverts_edit() {
+        const page = open({ animated: false, eq: fakeEq })
+        page.switchPivot(2)
+        const eq = page.eqPage
+        eq.setFocus(1)
+        verify(router.dispatch("a", false))
+        verify(router.dispatch("right", false))
+        compare(fakeEq.keys.speaker, "custom")
+        verify(router.dispatch("b", false))
+        compare(eq.editing, false)
+        compare(fakeEq.keys.speaker, "off")
+        compare(pages.depth, 2)
     }
 
     function test_pivot_switch_animated() {

@@ -188,6 +188,8 @@ const QStringList &states()
         QStringLiteral("eq-graphic"),
         QStringLiteral("eq-graphic-flat"),
         QStringLiteral("eq-graphic-edit"),
+        QStringLiteral("bt-eq"),
+        QStringLiteral("bt-eq-band"),
         QStringLiteral("boot"),
         QStringLiteral("boot-edit"),
         QStringLiteral("boot-missing"),

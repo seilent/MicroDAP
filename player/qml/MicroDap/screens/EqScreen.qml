@@ -23,8 +23,12 @@ Page {
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
     readonly property bool dacOn: page.dacEq !== null && (page.dacEq.status === "on" || page.dacEq.status === "applying")
     readonly property var dacRanges: page.dacOn && page.dacEq.ranges !== undefined ? page.dacEq.ranges : null
-    readonly property var pivots: EqFormat.outputs
-    readonly property var panes: [headphonesPane, usbPane, speakerPane]
+    property bool embedded: false
+    property string slot: ""
+    readonly property var pivots: page.embedded ? [page.slot] : EqFormat.outputs
+    readonly property var panes: page.embedded ? [headphonesPane] : [headphonesPane, usbPane, speakerPane]
+    readonly property real slotBaseline: Ui.contentTop + Ui.capHeight * Ui.sectionLabel.size
+    readonly property real rowsTop: page.embedded ? page.slotBaseline + Ui.detailLabelDrop : Ui.contentTop
     readonly property var activePane: page.panes[page.pivotIndex]
     readonly property var rows: page.activePane.rows
     readonly property var focusedRow: page.rows[page.focusIndex] === undefined ? null : page.rows[page.focusIndex]
@@ -38,6 +42,7 @@ Page {
     property alias usbPane: usbPane
     property alias speakerPane: speakerPane
     property alias deleteDialog: deleteDialog
+    property alias slotText: slotText
     property alias sheet: sheet
 
     signal toast(string first, string second)
@@ -623,6 +628,19 @@ Page {
             page.confirmEdit()
     }
 
+    onSlotChanged: {
+        page.cancelEdit()
+        if (sheet.shown)
+            sheet.close()
+        if (deleteDialog.shown)
+            deleteDialog.close()
+        d.deleteOutput = ""
+        if (d.kbTarget !== "" && page.keyboard !== null)
+            page.keyboard.dismiss()
+        headphonesPane.reset()
+        page.focusIndex = 0
+    }
+
     onPivotIndexChanged: {
         if (!d.internal) {
             page.confirmEdit()
@@ -867,7 +885,7 @@ Page {
         property int openBand: -1
         property var shownValues: ({})
         property int pendingFrom: -1
-        readonly property string output: page.pivots[pane.pivot]
+        readonly property string output: pane.pivot < page.pivots.length ? page.pivots[pane.pivot] : ""
         readonly property var profile: page.profileOf(pane.output, page.revision)
         readonly property bool listed: EqFormat.listed(pane.profile)
         readonly property var rows: page.buildRows(pane.profile, pane.listed ? pane.openBand : -1, pane.output === "usb" ? page.dacRanges : null)
@@ -984,7 +1002,7 @@ Page {
         }
 
         x: 0
-        y: Ui.px(Ui.contentTop)
+        y: Ui.px(page.rowsTop)
         width: page.width
         height: page.height - pane.y
         contentWidth: pane.width
@@ -1023,6 +1041,18 @@ Page {
 
     PageSurface {
         anchors.fill: parent
+        visible: !page.embedded
+    }
+
+    Text {
+        id: slotText
+
+        x: Ui.px(Ui.hubEdge)
+        y: Ui.px(page.slotBaseline) - slotText.baselineOffset
+        visible: page.embedded
+        text: page.slot
+        color: Ui.white(Ui.sectionLabel.alpha)
+        font: Ui.font(Ui.sectionLabel)
     }
 
     Pane {
@@ -1056,6 +1086,7 @@ Page {
     CroppedHeader {
         id: header
 
+        visible: !page.embedded
         text: "eq"
         shift: strip.headerShift
         animated: page.live
@@ -1064,6 +1095,7 @@ Page {
     PivotStrip {
         id: strip
 
+        visible: !page.embedded
         labels: page.pivots
         activeIndex: page.pivotIndex
         animated: page.live
