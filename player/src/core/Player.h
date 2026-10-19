@@ -282,6 +282,8 @@ private:
     bool m_replanFade = false;
     GstClockTime m_fadeOffset = GST_CLOCK_TIME_NONE;
     GstClockTime m_cueStop = GST_CLOCK_TIME_NONE;
+    GstClockTime m_fadeStop = GST_CLOCK_TIME_NONE;
+    QList<int> m_fadeRows;
     bool m_firstStart = false;
     bool m_skipStart = false;
 };

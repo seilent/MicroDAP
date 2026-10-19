@@ -784,14 +784,16 @@ void Player::syncChain()
     if (!m_crossfade || m_fadeSwapped || !m_fadeAdded)
         return;
     int wanted = -1;
+    QList<int> runRows;
     {
         QMutexLocker lock(&m_chainMutex);
         Chain probe = m_chain;
         probe.last = m_queue->currentIndex();
         wanted = nextRow(probe);
+        runRows = runFrom(probe, wanted).rows;
     }
     const QueueEntry next = wanted >= 0 && wanted < m_queue->count() ? m_queue->entry(wanted) : QueueEntry();
-    if (next.id == m_fadeEntry.id && next.path == m_fadeEntry.path)
+    if (next.id == m_fadeEntry.id && next.path == m_fadeEntry.path && runRows == m_fadeRows)
         return;
     if (dropFade())
         planFade();
@@ -1311,13 +1313,18 @@ void Player::setCrossfade(int ms)
 void Player::planFade()
 {
     if (m_crossfade || m_crossfadeMs <= 0 || m_builtChain != OutputChain::Pw || m_dsd || !m_deck
-        || !m_deck->element() || m_status == Stopped || !Crossfade::available()
-        || m_queue->entry(m_queue->currentIndex()).cueIndex > 0)
+        || !m_deck->element() || m_status == Stopped || !Crossfade::available())
         return;
-    GstPad *src = gst_element_get_static_pad(m_deck->element(), "src");
     gint64 duration = -1;
-    const bool known = gst_pad_query_duration(src, GST_FORMAT_TIME, &duration);
-    gst_object_unref(src);
+    bool known = false;
+    if (GST_CLOCK_TIME_IS_VALID(m_cueStop)) {
+        duration = gint64(m_cueStop);
+        known = true;
+    } else {
+        GstPad *src = gst_element_get_static_pad(m_deck->element(), "src");
+        known = gst_pad_query_duration(src, GST_FORMAT_TIME, &duration);
+        gst_object_unref(src);
+    }
     const GstClockTime length = GstClockTime(m_crossfadeMs) * GST_MSECOND;
     const CrossfadeSchedule schedule = crossfadeSchedule(known && duration > 0 ? GstClockTime(duration) : GST_CLOCK_TIME_NONE,
                                                          length, fadeLead);
@@ -1342,8 +1349,9 @@ void Player::prepareFade()
     const QueueEntry from = m_queue->entry(current);
     const QueueEntry to = row >= 0 && row < m_queue->count() ? m_queue->entry(row) : QueueEntry();
     const int rate = m_sourceFormat.value(QStringLiteral("rate")).toInt();
-    const bool fits = row >= 0 && row != current && !to.path.isEmpty() && !isDsd(to.path) && to.cueIndex <= 0
-                      && from.cueIndex <= 0
+    const bool joins = from.cueIndex > 0 && to.cueIndex > 0 && to.path == from.path && from.endFrame > 0
+                       && to.startFrame == from.endFrame;
+    const bool fits = row >= 0 && row != current && !to.path.isEmpty() && !isDsd(to.path) && !joins
                       && (to.sampleRate <= 0 || rate <= 0 || to.sampleRate == rate)
                       && lengthMs == m_crossfadeMs && !albumContinues(from, to)
                       && crossfadeFits(std::max(m_duration, from.durationMs), to.durationMs, lengthMs);
@@ -1358,19 +1366,28 @@ void Player::prepareFade()
     }
     deck->setNext([this] { return nextEntry(); });
     deck->setGain([this](const QueueEntry &entry) { return replayGainFactor(entry, m_replayGain.load()); });
-    if (!deck->start(to)) {
+    Run run;
+    if (to.cueIndex > 0) {
+        QMutexLocker lock(&m_chainMutex);
+        run = runFrom(m_chain, row);
+    }
+    const GstClockTime start = to.cueIndex > 0 ? cueStartNs(to.startFrame) : GST_CLOCK_TIME_NONE;
+    if (!deck->start(to, run.marks, start, run.stop)) {
         m_crossfade.reset();
         return;
     }
     m_deck->close();
     {
         QMutexLocker lock(&m_chainMutex);
-        m_chain.last = row;
         m_chain.pending.append(row);
+        m_chain.pending.append(run.rows);
+        m_chain.last = run.rows.isEmpty() ? row : run.rows.constLast();
     }
+    m_fadeStop = run.stop;
+    m_fadeRows = run.rows;
     m_fade = std::move(deck);
     m_fadeEntry = to;
-    if (!m_crossfade->prepare(m_fade->element())) {
+    if (!m_crossfade->prepare(m_fade->element(), GST_CLOCK_TIME_IS_VALID(start) ? start : 0)) {
         dropFade();
         return;
     }
@@ -1403,6 +1420,8 @@ bool Player::dropFade(bool idle)
             m_deck->reopen();
     }
     m_fadeEntry = {};
+    m_fadeStop = GST_CLOCK_TIME_NONE;
+    m_fadeRows.clear();
     m_fadeAdded = false;
     m_fadeSwapped = false;
     return true;
@@ -1538,7 +1557,7 @@ bool Player::queryPosition(gint64 &position) const
         const GstSegment *segment = nullptr;
         gst_event_parse_segment(event, &segment);
         if (segment->base < m_fadeOffset)
-            position = std::max<gint64>(0, position - gint64(m_fadeOffset));
+            position = std::max<gint64>(0, position - gint64(m_fadeOffset)) + rangeStartMs() * gint64(GST_MSECOND);
         gst_event_unref(event);
     }
     if (sink)
@@ -1560,11 +1579,12 @@ void Player::handleStreamStart(bool mark)
 {
     if (!mark && !std::exchange(m_firstStart, false))
         m_cueStop = GST_CLOCK_TIME_NONE;
-    const bool fadeStart = m_crossfade && m_fadeAdded && !m_fadeSwapped && m_crossfade->mixing();
+    const bool fadeStart = !mark && m_crossfade && m_fadeAdded && !m_fadeSwapped && m_crossfade->mixing();
     if (fadeStart) {
         std::swap(m_deck, m_fade);
         m_fadeSwapped = true;
         m_fadeOffset = m_crossfade->offset();
+        m_cueStop = std::exchange(m_fadeStop, GST_CLOCK_TIME_NONE);
     } else if (!m_crossfade) {
         m_fadeOffset = GST_CLOCK_TIME_NONE;
     }

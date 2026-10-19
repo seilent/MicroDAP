@@ -30,6 +30,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cmath>
+#include <numbers>
 #include <ctime>
 #include <initializer_list>
 #include <limits>
@@ -214,6 +215,7 @@ private slots:
     void cueNextFile();
     void cueSeekPrevious();
     void cueCrossfadeGapless();
+    void cueCrossfadeAcrossFiles();
     void cueStateRestore();
     void cueQueueEdit();
     void dsdRoutes();
@@ -3509,6 +3511,71 @@ void PlayerTest::cueCrossfadeGapless()
     std::lock_guard guard(ramp.lock);
     QCOMPARE(qint64(ramp.samples.size()), qint64(rampRate) * rampSeconds);
     QCOMPARE(firstBreak(ramp.samples, 0), qint64(-1));
+}
+
+void PlayerTest::cueCrossfadeAcrossFiles()
+{
+    const QString image = m_dir.path() + QStringLiteral("/xfade-image.flac");
+    const QString other = m_dir.path() + QStringLiteral("/xfade-other.flac");
+    QVERIFY(encodeRamp(image));
+    QVERIFY(encodeRamp(other));
+    const QueueEntry two = imageEntries(image).at(1);
+    const QueueEntry plain = sineEntry(other, 9, rampSeconds);
+    const qint64 fade = rampRate;
+    const qint64 whole = qint64(rampRate) * rampSeconds;
+    const qint64 rangeStart = qint64(cueTwo) * 588;
+    const qint64 rangeEnd = qint64(cueThree) * 588;
+    for (const bool into : {true, false}) {
+        auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-ramp sync=true"));
+        player->setCrossfade(1000);
+        MixerWatch watch;
+        watchMixer(*player, watch);
+        GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-ramp");
+        QVERIFY(sink);
+        std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+        Ramp ramp;
+        std::jthread puller = pullRamp(sink, ramp);
+        QSignalSpy started(player.get(), &Player::trackStarted);
+        QSignalSpy eos(player.get(), &Player::endOfStream);
+        QSignalSpy errors(player.get(), &Player::error);
+        QList<qint64> durations;
+        qint64 mixingPosition = -1;
+        connect(player.get(), &Player::trackStarted, this, [&](int index) {
+            durations.append(player->duration());
+            if (index == 1)
+                QTimer::singleShot(600, player.get(), [&] { mixingPosition = player->position(); });
+        });
+        player->play(into ? QList<QueueEntry>{plain, two} : QList<QueueEntry>{two, plain}, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 30000);
+        QTest::qWait(200);
+        puller.request_stop();
+        puller.join();
+        QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+        QCOMPARE(watch.added.load(), 1);
+        QCOMPARE(errors.count(), 0);
+        QCOMPARE(durations.last(), into ? two.durationMs : plain.durationMs);
+        QVERIFY2(mixingPosition >= 100 && mixingPosition <= 1000, qPrintable(QString::number(mixingPosition)));
+        std::lock_guard guard(ramp.lock);
+        const qint64 total = whole + (rangeEnd - rangeStart) - fade;
+        QVERIFY2(std::abs(qint64(ramp.samples.size()) - total) <= 1, qPrintable(QString::number(ramp.samples.size())));
+        if (into) {
+            QVERIFY(firstBreak(ramp.samples, 0) >= whole - fade);
+            const qint64 middle = whole - fade + fade / 2;
+            const double weight = std::cos(std::numbers::pi / 4);
+            const auto left = [](qint64 v) { return double(v & 0x7fff); };
+            const double expected = weight * left(middle) + weight * left(rangeStart + fade / 2);
+            const double mixed = double(ramp.samples.at(std::size_t(middle)) & 0x7fff);
+            QVERIFY2(std::abs(mixed - expected) <= 0.02 * expected, qPrintable(QStringLiteral("%1 %2").arg(mixed).arg(expected)));
+            const qint64 alone = rangeEnd - rangeStart - fade;
+            const std::vector<qint64> tail(ramp.samples.end() - alone, ramp.samples.end());
+            QCOMPARE(firstBreak(tail, rangeStart + fade), qint64(-1));
+        } else {
+            QCOMPARE(ramp.samples.front(), rangeStart);
+            QVERIFY(firstBreak(ramp.samples, rangeStart) >= rangeEnd - rangeStart - fade);
+            const std::vector<qint64> tail(ramp.samples.end() - (whole - fade), ramp.samples.end());
+            QCOMPARE(firstBreak(tail, fade), qint64(-1));
+        }
+    }
 }
 
 void PlayerTest::cueStateRestore()

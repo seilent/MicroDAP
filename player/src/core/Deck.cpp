@@ -127,7 +127,7 @@ void Deck::setGain(Gain gain)
     m_gain = std::move(gain);
 }
 
-bool Deck::start(const QueueEntry &entry, const QList<Mark> &marks)
+bool Deck::start(const QueueEntry &entry, const QList<Mark> &marks, GstClockTime from, GstClockTime to)
 {
     QList<Item> items;
     {
@@ -148,7 +148,7 @@ bool Deck::start(const QueueEntry &entry, const QList<Mark> &marks)
         m_playing.reset();
     }
     QMutexLocker lock(&m_lock);
-    m_open = append(entry, marks);
+    m_open = append(entry, marks, from, to);
     if (!m_open && m_bin) {
         GError *err = g_error_new_literal(GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_NOT_FOUND, "bad path");
         gst_element_post_message(m_bin, gst_message_new_error(GST_OBJECT(m_bin), err, nullptr));
@@ -359,7 +359,7 @@ GstPadProbeReturn Deck::gainProbe(GstPad *, GstPadProbeInfo *info, gpointer data
     return GST_PAD_PROBE_OK;
 }
 
-bool Deck::append(const QueueEntry &entry, const QList<Mark> &marks)
+bool Deck::append(const QueueEntry &entry, const QList<Mark> &marks, GstClockTime from, GstClockTime to)
 {
     if (!m_bin)
         return false;
@@ -383,6 +383,20 @@ bool Deck::append(const QueueEntry &entry, const QList<Mark> &marks)
     g_signal_connect_data(decoder, "pad-added", G_CALLBACK(&Deck::padAdded), gst_object_ref(pad),
                           [](gpointer data, GClosure *) { gst_object_unref(data); }, GConnectFlags(0));
     g_signal_connect(decoder, "drained", G_CALLBACK(&Deck::drained), this);
+    if (GST_CLOCK_TIME_IS_VALID(from) || GST_CLOCK_TIME_IS_VALID(to)) {
+        auto *seek = new Seek;
+        seek->decoder = decoder;
+        seek->from = GST_CLOCK_TIME_IS_VALID(from) ? from : 0;
+        seek->to = to;
+        g_signal_connect_data(decoder, "pad-added", G_CALLBACK(&Deck::seekPadAdded), seek,
+                              [](gpointer data, GClosure *) {
+                                  auto *done = static_cast<Seek *>(data);
+                                  if (done->pad)
+                                      gst_object_unref(done->pad);
+                                  delete done;
+                              },
+                              GConnectFlags(0));
+    }
     if (m_volume || !marks.isEmpty())
         gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Deck::itemProbe, new Start{this, entry, marks},
                           [](gpointer data) { delete static_cast<Start *>(data); });
@@ -390,6 +404,64 @@ bool Deck::append(const QueueEntry &entry, const QList<Mark> &marks)
     m_items.append({decoder, pad});
     gst_element_sync_state_with_parent(decoder);
     return true;
+}
+
+void Deck::seekPadAdded(GstElement *, GstPad *pad, gpointer data)
+{
+    auto *seek = static_cast<Seek *>(data);
+    if (seek->pad)
+        return;
+    seek->pad = GST_PAD(gst_object_ref(pad));
+    gst_pad_add_probe(pad,
+                      static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST
+                                                   | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM
+                                                   | GST_PAD_PROBE_TYPE_EVENT_FLUSH),
+                      &Deck::seekProbe, seek, nullptr);
+}
+
+GstPadProbeReturn Deck::seekProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    auto *seek = static_cast<Seek *>(data);
+    const bool isData = GST_PAD_PROBE_INFO_TYPE(info) & (GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST);
+    if (seek->phase == 0) {
+        if (!isData)
+            return GST_PAD_PROBE_OK;
+        seek->phase = 1;
+        gst_element_call_async(seek->decoder, &Deck::runSeek, seek, nullptr);
+        return GST_PAD_PROBE_DROP;
+    }
+    if (seek->phase == 2)
+        return GST_PAD_PROBE_REMOVE;
+    if (isData)
+        return GST_PAD_PROBE_DROP;
+    GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+    const GstEventType type = GST_EVENT_TYPE(event);
+    if (type == GST_EVENT_FLUSH_START || type == GST_EVENT_FLUSH_STOP || type == GST_EVENT_EOS)
+        return GST_PAD_PROBE_DROP;
+    if (type == GST_EVENT_SEGMENT) {
+        if (seek->phase == 3 || gst_event_get_seqnum(event) != seek->seqnum)
+            return GST_PAD_PROBE_DROP;
+        seek->phase = 2;
+        return GST_PAD_PROBE_REMOVE;
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+void Deck::runSeek(GstElement *, gpointer data)
+{
+    auto *seek = static_cast<Seek *>(data);
+    const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE);
+    GstEvent *event = gst_event_new_seek(1.0, GST_FORMAT_TIME, flags, GST_SEEK_TYPE_SET, seek->from,
+                                         GST_CLOCK_TIME_IS_VALID(seek->to) ? GST_SEEK_TYPE_SET : GST_SEEK_TYPE_NONE,
+                                         GST_CLOCK_TIME_IS_VALID(seek->to) ? seek->to : 0);
+    seek->seqnum = gst_event_get_seqnum(event);
+    if (gst_pad_send_event(seek->pad, event) || !gst_pad_is_active(seek->pad))
+        return;
+    seek->phase = 3;
+    qWarning() << "microdap player: deck item seek failed";
+    GError *err = g_error_new_literal(GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_SEEK, "item seek failed");
+    gst_element_post_message(seek->decoder, gst_message_new_error(GST_OBJECT(seek->decoder), err, nullptr));
+    g_error_free(err);
 }
 
 void Deck::drop(const Item &item)

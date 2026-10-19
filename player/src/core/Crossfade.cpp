@@ -147,6 +147,7 @@ struct Crossfade::Shared
     GstSegment segment;
     CrossfadeSchedule schedule;
     GstClockTime length = 0;
+    GstClockTime inStart = 0;
     GstClockTime offset = GST_CLOCK_TIME_NONE;
     int generation = 0;
     bool first = true;
@@ -328,7 +329,8 @@ struct Crossfade::Shared
         GstPad *peer = nullptr;
         {
             QMutexLocker lock(&self.lock);
-            if (self.state == State::Draining && !self.eosSent && begin != guint64(-1) && begin < self.length)
+            if (self.state == State::Draining && !self.eosSent && begin != guint64(-1)
+                && begin < self.inStart + self.length)
                 return GST_PAD_PROBE_PASS;
             if (self.state != State::Draining || self.eosSent)
                 return GST_PAD_PROBE_OK;
@@ -412,7 +414,7 @@ int Crossfade::generationOf(GstMessage *message)
     return generation;
 }
 
-bool Crossfade::prepare(GstElement *in)
+bool Crossfade::prepare(GstElement *in, GstClockTime inStart)
 {
     GstElement *mixer = nullptr;
     {
@@ -443,7 +445,8 @@ bool Crossfade::prepare(GstElement *in)
         ghost(mixer, "fadeB", "sink", "sink_b");
         ghost(mixer, "mix", "src", "src");
         fade(childOf(mixer, "fadeA"), m->schedule.start, m->length, true);
-        fade(childOf(mixer, "fadeB"), 0, m->length, false);
+        fade(childOf(mixer, "fadeB"), inStart, m->length, false);
+        m->inStart = inStart;
         m->mixer = GST_ELEMENT(gst_object_ref(mixer));
         m->mixOut = padOf(mixer, "sink_a");
         m->mixIn = padOf(mixer, "sink_b");

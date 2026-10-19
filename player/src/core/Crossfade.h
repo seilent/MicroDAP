@@ -39,7 +39,7 @@ public:
     static bool available();
     static int generationOf(GstMessage *message);
 
-    bool prepare(GstElement *in);
+    bool prepare(GstElement *in, GstClockTime inStart = 0);
     void cancel();
     bool abort();
     void stop();

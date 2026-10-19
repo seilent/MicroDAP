@@ -48,7 +48,8 @@ public:
 
     void setNext(Next next);
     void setGain(Gain gain);
-    bool start(const QueueEntry &entry, const QList<Mark> &marks = {});
+    bool start(const QueueEntry &entry, const QList<Mark> &marks = {}, GstClockTime from = GST_CLOCK_TIME_NONE,
+               GstClockTime to = GST_CLOCK_TIME_NONE);
     void setMarks(const QList<Mark> &marks, bool atFlush);
     void settleMarks();
     int markGeneration() const;
@@ -70,7 +71,20 @@ private:
         GstPad *pad = nullptr;
     };
 
-    bool append(const QueueEntry &entry, const QList<Mark> &marks);
+    bool append(const QueueEntry &entry, const QList<Mark> &marks, GstClockTime from = GST_CLOCK_TIME_NONE,
+                GstClockTime to = GST_CLOCK_TIME_NONE);
+    struct Seek
+    {
+        GstElement *decoder = nullptr;
+        GstPad *pad = nullptr;
+        GstClockTime from = GST_CLOCK_TIME_NONE;
+        GstClockTime to = GST_CLOCK_TIME_NONE;
+        std::atomic<int> phase{0};
+        std::atomic<guint32> seqnum{GST_SEQNUM_INVALID};
+    };
+    static void seekPadAdded(GstElement *decoder, GstPad *pad, gpointer data);
+    static GstPadProbeReturn seekProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    static void runSeek(GstElement *decoder, gpointer data);
     void drop(const Item &item);
     static void padAdded(GstElement *decoder, GstPad *pad, gpointer data);
     static void drained(GstElement *decoder, gpointer data);
