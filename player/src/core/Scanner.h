@@ -88,6 +88,7 @@ public:
     static QString mediaBase();
     static FileStamp stampOf(const QFileInfo &info);
     static PlaylistFile readPlaylist(const QString &path);
+    static QString playlistTail(const QString &line);
     static QString decodePlaylist(const QByteArray &bytes, bool utf8Only);
     static bool isMountPoint(const QString &dir);
     static QString mountOf(const QString &root);

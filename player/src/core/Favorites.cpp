@@ -26,6 +26,12 @@ QString basePrefix()
     return QDir::cleanPath(QDir(Scanner::mediaBase()).absolutePath()) + QLatin1Char('/');
 }
 
+QString entryTail(const M3uItem &item)
+{
+    const QByteArray text = item.text.trimmed();
+    return Scanner::playlistTail(QString::fromUtf8(text.mid(text.lastIndexOf('\n') + 1)).trimmed());
+}
+
 }
 
 Favorites::Favorites(Library *library, QObject *parent)
@@ -233,37 +239,62 @@ void Favorites::reload()
     rebuild();
 }
 
-void Favorites::rebuild()
+QList<qint64> Favorites::resolve(const Medium &medium, const M3u &doc) const
 {
     QHash<QString, qint64> exact;
-    QHash<QString, QList<qint64>> folded;
     {
         QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks"), m_library->database());
         while (query.next())
             exact.insert(query.value(1).toString(), query.value(0).toLongLong());
     }
+    QHash<QString, QList<qint64>> folded;
+    QList<qint64> ids(doc.items.size(), -1);
+    QList<qsizetype> missed;
+    QStringList tails;
+    for (qsizetype i = 0; i < doc.items.size(); ++i) {
+        const M3uItem &item = doc.items.at(i);
+        if (!item.entry || item.path.isEmpty())
+            continue;
+        ids[i] = exact.value(item.path, -1);
+        if (ids.at(i) < 0 && medium.card) {
+            if (folded.isEmpty()) {
+                for (auto it = exact.cbegin(); it != exact.cend(); ++it)
+                    folded[it.key().toCaseFolded()].append(it.value());
+            }
+            const QList<qint64> hits = folded.value(item.path.toCaseFolded());
+            if (hits.size() == 1)
+                ids[i] = hits.first();
+        }
+        if (ids.at(i) < 0) {
+            const QString tail = entryTail(item);
+            if (!tail.isEmpty()) {
+                missed.append(i);
+                tails.append(tail);
+            }
+        }
+    }
+    if (!missed.isEmpty()) {
+        const QList<qint64> found = m_library->tailTracks(medium.dir, tails);
+        for (qsizetype k = 0; k < missed.size(); ++k)
+            ids[missed.at(k)] = found.at(k);
+    }
+    return ids;
+}
+
+void Favorites::rebuild()
+{
     QList<qint64> ids;
     QList<qint64> seqs;
     for (const Medium &medium : std::as_const(m_media)) {
         if (medium.failed)
             continue;
         const QHash<QString, qint64> stamps = m_library->favoriteStamps(medium.id);
-        for (const M3uItem &item : medium.doc.items) {
-            if (!item.entry || item.path.isEmpty())
+        const QList<qint64> resolved = resolve(medium, medium.doc);
+        for (qsizetype i = 0; i < resolved.size(); ++i) {
+            if (resolved.at(i) < 0)
                 continue;
-            qint64 id = exact.value(item.path, -1);
-            if (id < 0 && medium.card) {
-                if (folded.isEmpty()) {
-                    for (auto it = exact.cbegin(); it != exact.cend(); ++it)
-                        folded[it.key().toCaseFolded()].append(it.value());
-                }
-                const QList<qint64> hits = folded.value(item.path.toCaseFolded());
-                if (hits.size() == 1)
-                    id = hits.first();
-            }
-            if (id < 0)
-                continue;
-            ids.append(id);
+            const M3uItem &item = medium.doc.items.at(i);
+            ids.append(resolved.at(i));
             seqs.append(stamps.value(Library::favoriteKey(key(medium, item.path), item.cue), -1));
         }
     }
@@ -307,8 +338,10 @@ void Favorites::toggle(qint64 trackId)
     }
     bool had = false;
     const PlaylistStore::Edit result = m_library->playlistStore().edit(medium->file, [&](M3u &doc) {
+        const QList<qint64> resolved = resolve(*medium, doc);
         for (qsizetype i = doc.items.size() - 1; i >= 0; --i) {
-            if (doc.items.at(i).entry && sameTrack(*medium, doc.items.at(i).path, path)) {
+            if (doc.items.at(i).entry
+                && (resolved.at(i) == trackId || sameTrack(*medium, doc.items.at(i).path, path))) {
                 const qsizetype from = PlaylistStore::unit(doc, i);
                 PlaylistStore::erase(doc, i);
                 i = from;

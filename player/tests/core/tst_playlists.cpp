@@ -145,6 +145,7 @@ private slots:
     void favoritesMigration();
     void favoritesRetry();
     void favoritesNotScanned();
+    void favoritesFallback();
 };
 
 namespace {
@@ -746,6 +747,33 @@ void PlaylistsTest::favoritesNotScanned()
     const QSqlDatabase db = rig.library->database();
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), 1);
     QCOMPARE(scalar(db, QStringLiteral("SELECT name FROM playlists")).toString(), QStringLiteral("mix"));
+}
+
+void PlaylistsTest::favoritesFallback()
+{
+    Rig rig;
+    QVERIFY(writeBytes(rig.cardFile(), "#EXTM3U\nAlbum One\\03 Three.flac\n../Music/Album One/01 One.flac\n"));
+    QVERIFY(writeBytes(rig.internalFile(), "#EXTM3U\nSingle/01 Single.mp3\n"));
+    QVERIFY(rig.scan());
+    Favorites favorites(rig.library.get());
+    const qint64 single = rig.id(rig.single());
+    const qint64 one = rig.id(rig.cardTrack(0));
+    const qint64 three = rig.id(rig.cardTrack(2));
+    QVERIFY(favorites.contains(single));
+    QVERIFY(favorites.contains(three));
+    QVERIFY(favorites.contains(one));
+    QSignalSpy notices(&favorites, &Favorites::notice);
+
+    favorites.toggle(three);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("removed from favorites"));
+    QCOMPARE(readBytes(rig.cardFile()), QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n"));
+    QVERIFY(!favorites.contains(three));
+    QVERIFY(favorites.contains(one));
+
+    favorites.toggle(single);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("removed from favorites"));
+    QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n"));
+    QCOMPARE(favorites.count(), 1);
 }
 
 QTEST_GUILESS_MAIN(PlaylistsTest)

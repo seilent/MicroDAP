@@ -85,6 +85,8 @@ public:
     QHash<QString, qint64> favoriteStamps(const QString &medium) const;
     bool keepFavoriteStamps(const QString &medium, const QSet<QString> &keys);
 
+    QList<qint64> tailTracks(const QString &dir, const QStringList &tails) const;
+
     PlaylistStore &playlistStore();
     PlaylistStore::Edit editPlaylist(const QString &path, const PlaylistStore::Change &change);
 

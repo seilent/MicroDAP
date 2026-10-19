@@ -171,18 +171,6 @@ bool hasLyricsTag(TagLib::PropertyMap &map)
     return false;
 }
 
-QString playlistTail(const QString &line)
-{
-    QString text = line;
-    text.replace(QLatin1Char('\\'), QLatin1Char('/'));
-    if (text.isEmpty() || text.startsWith(QLatin1Char('/')) || text.startsWith(QLatin1Char('#'))
-        || text.startsWith(QLatin1StringView("file:"), Qt::CaseInsensitive)
-        || text.split(QLatin1Char('/')).contains(QLatin1StringView("..")))
-        return {};
-    const QString clean = QDir::cleanPath(text);
-    return clean == QLatin1StringView(".") ? QString() : clean;
-}
-
 std::atomic<Scanner::MountCheck> mountCheck{nullptr};
 std::atomic<Scanner::DeviceCheck> deviceCheck{nullptr};
 
@@ -295,6 +283,18 @@ QString Scanner::decodePlaylist(const QByteArray &bytes, bool utf8Only)
     QStringDecoder decoder(QStringDecoder::Utf8);
     const QString text = decoder(data);
     return decoder.hasError() ? QString::fromLatin1(data) : text;
+}
+
+QString Scanner::playlistTail(const QString &line)
+{
+    QString text = line;
+    text.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    if (text.isEmpty() || text.startsWith(QLatin1Char('/')) || text.startsWith(QLatin1Char('#'))
+        || text.startsWith(QLatin1StringView("file:"), Qt::CaseInsensitive)
+        || text.split(QLatin1Char('/')).contains(QLatin1StringView("..")))
+        return {};
+    const QString clean = QDir::cleanPath(text);
+    return clean == QLatin1StringView(".") ? QString() : clean;
 }
 
 PlaylistFile Scanner::readPlaylist(const QString &path)

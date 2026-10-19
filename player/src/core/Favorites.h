@@ -58,6 +58,7 @@ private:
     bool sameTrack(const Medium &medium, const QString &a, const QString &b) const;
     void readMedium(Medium &medium);
     void migrate(Medium &medium);
+    QList<qint64> resolve(const Medium &medium, const M3u &doc) const;
     void rebuild();
 
     Library *m_library;

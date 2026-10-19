@@ -350,6 +350,17 @@ qint64 tailMatch(const QString &dir, const QString &root, const QString &tail, c
     return tied ? -1 : best;
 }
 
+QHash<QString, QList<TailTrack>> tracksByName(const QSqlDatabase &db)
+{
+    QHash<QString, QList<TailTrack>> byName;
+    QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks ORDER BY id"), db);
+    while (query.next()) {
+        const QString path = query.value(1).toString();
+        byName[QFileInfo(path).fileName().toCaseFolded()].append({query.value(0).toLongLong(), path});
+    }
+    return byName;
+}
+
 }
 
 Library::Library(QObject *parent)
@@ -929,11 +940,7 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
                     root = playlistRoot(dir);
                 if (!byNameBuilt) {
                     byNameBuilt = true;
-                    QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks ORDER BY id"), m_db);
-                    while (query.next()) {
-                        const QString path = query.value(1).toString();
-                        byName[QFileInfo(path).fileName().toCaseFolded()].append({query.value(0).toLongLong(), path});
-                    }
+                    byName = tracksByName(m_db);
                 }
                 const qint64 id = root->isEmpty() ? -1
                                                   : tailMatch(dir, *root, tail,
@@ -1019,6 +1026,26 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
                                      .arg(skipped);
     }
     return true;
+}
+
+QList<qint64> Library::tailTracks(const QString &dir, const QStringList &tails) const
+{
+    QList<qint64> ids(tails.size(), -1);
+    const QString root = playlistRoot(dir);
+    if (root.isEmpty())
+        return ids;
+    QHash<QString, QList<TailTrack>> byName;
+    bool byNameBuilt = false;
+    for (qsizetype i = 0; i < tails.size(); ++i) {
+        if (tails.at(i).isEmpty())
+            continue;
+        if (!byNameBuilt) {
+            byNameBuilt = true;
+            byName = tracksByName(m_db);
+        }
+        ids[i] = tailMatch(dir, root, tails.at(i), byName.value(QFileInfo(tails.at(i)).fileName().toCaseFolded()));
+    }
+    return ids;
 }
 
 QString Library::playlistRoot(const QString &dir) const
