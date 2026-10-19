@@ -205,6 +205,9 @@ class Fake:
         self.adapter = Adapter(bus, self)
         bus.add_signal_receiver(self.on_signal, dbus_interface=PROPERTIES, signal_name='PropertiesChanged',
                                 arg0=SERVICE)
+        self.companion = []
+        bus.add_signal_receiver(lambda path: self.companion.append(str(path)), dbus_interface=SERVICE,
+                                signal_name='CompanionPaired')
         self.name = dbus.service.BusName(BLUEZ, bus)
 
     def on_signal(self, interface, changed, invalidated):
@@ -453,6 +456,83 @@ class Driver:
         in_loop(self.fake.flip, phone, 'Connected', dbus.Boolean(True))
         self.check(wait_for(lambda: not self.active(), 2), 'window did not close when a paired phone connected')
         self.check_restored('known phone')
+
+    def confirm_async(self, device, passkey):
+        box = {}
+
+        def run():
+            bus = dbus.bus.BusConnection(ADDRESS, mainloop=dbus.mainloop.NULL_MAIN_LOOP)
+            agent = dbus.Interface(bus.get_object(self.fake.agent[2], AGENT_PATH, introspect=False), AGENT)
+            try:
+                agent.RequestConfirmation(dbus.ObjectPath(device), dbus.UInt32(passkey), timeout=20)
+                box['result'] = 'ok'
+            except dbus.DBusException as e:
+                box['result'] = e.get_dbus_name()
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return thread, box
+
+    def test_companion(self):
+        old = ADAPTER_PATH + '/dev_30_00_00_00_00_01'
+        phone = ADAPTER_PATH + '/dev_30_00_00_00_00_02'
+        stranger = ADAPTER_PATH + '/dev_30_00_00_00_00_03'
+        in_loop(self.fake.add_device, old, [uuid('110a')])
+        in_loop(self.fake.flip, old, 'Paired', dbus.Boolean(True))
+        in_loop(self.fake.add_device, phone, [uuid('110a')])
+        in_loop(self.fake.add_device, stranger, [uuid('110a')])
+        self.fake.devices[phone].props['Alias'] = dbus.String('Pixel')
+        self.fake.removed.clear()
+        self.expect_ok('StartCompanionPairing(10)', self.service.StartCompanionPairing, dbus.UInt32(10))
+        self.check_open('companion window', 10)
+        self.check(str(self.service_get('PairingMode')) == 'companion', 'PairingMode not companion')
+        self.check(self.fake.agent is not None and self.fake.agent[1] == 'DisplayYesNo',
+                   f'companion agent capability {self.fake.agent}')
+        known = [str(p) for p in self.service_get('CompanionKnown')]
+        self.check(old in known and phone not in known and stranger not in known, f'CompanionKnown at open {known}')
+        self.expect_rejected('RequestAuthorization companion', self.agent.RequestAuthorization, dbus.ObjectPath(phone))
+        thread, box = self.confirm_async(phone, 123456)
+        self.check(wait_for(lambda: bool(self.service_get('ConfirmPending')), 3), 'confirmation not held')
+        self.check(int(self.service_get('ConfirmPasskey')) == 123456, 'ConfirmPasskey not 123456')
+        self.check(str(self.service_get('ConfirmName')) == 'Pixel', f'ConfirmName {self.service_get("ConfirmName")}')
+        self.expect_rejected('second RequestConfirmation', self.agent.RequestConfirmation, dbus.ObjectPath(stranger),
+                             dbus.UInt32(1))
+        self.expect_ok('AnswerConfirm(another code)', self.service.AnswerConfirm, dbus.UInt32(111111), dbus.Boolean(True))
+        self.check(bool(self.service_get('ConfirmPending')) is True, 'an answer for another code was taken')
+        self.expect_ok('AnswerConfirm(True)', self.service.AnswerConfirm, dbus.UInt32(123456), dbus.Boolean(True))
+        thread.join(5)
+        known = [str(p) for p in self.service_get('CompanionKnown')]
+        self.check(old in known and phone in known and stranger not in known, f'CompanionKnown after the yes {known}')
+        self.check(box.get('result') == 'ok', f'held confirmation answered {box.get("result")}')
+        self.check(bool(self.service_get('ConfirmPending')) is False, 'ConfirmPending after the answer')
+        in_loop(self.fake.flip, stranger, 'Paired', dbus.Boolean(True))
+        self.check(wait_for(lambda: stranger in self.fake.removed, 2), 'unapproved bond in the window not removed')
+        self.check(len(self.service_get('CompanionRemoving')) == 0, 'CompanionRemoving kept after the removal')
+        self.check(stranger not in [str(p) for p in self.service_get('CompanionKnown')], 'unapproved bond known')
+        self.check(self.active() is True, 'window closed by an unapproved bond')
+        in_loop(self.fake.flip, phone, 'Paired', dbus.Boolean(True))
+        self.check(wait_for(lambda: not self.active(), 2), 'window did not close on the approved bond')
+        self.check(wait_for(lambda: self.fake.companion == [phone], 2), f'CompanionPaired {self.fake.companion}')
+        self.check(old in self.fake.devices and phone in self.fake.devices, 'bonded devices removed')
+        self.check(self.fake.agent is not None and self.fake.agent[1] == 'NoInputNoOutput',
+                   f'agent capability after the window {self.fake.agent}')
+        self.check(str(self.service_get('PairingMode')) == '', 'PairingMode not cleared')
+        self.check(len(self.service_get('CompanionKnown')) == 0, 'CompanionKnown after the window')
+        self.check_restored('companion')
+        self.expect_ok('StartCompanionPairing(1)', self.service.StartCompanionPairing, dbus.UInt32(1))
+        thread, box = self.confirm_async(stranger, 654321)
+        self.check(wait_for(lambda: bool(self.service_get('ConfirmPending')), 3), 'second confirmation not held')
+        time.sleep(2.2)
+        self.check(self.active() is True, 'expiry not deferred while a confirmation is held')
+        self.expect_ok('AnswerConfirm(False)', self.service.AnswerConfirm, dbus.UInt32(654321), dbus.Boolean(False))
+        thread.join(5)
+        self.check(box.get('result') == REJECTED, f'refused confirmation answered {box.get("result")}')
+        self.check(wait_for(lambda: not self.active(), 2), 'window did not close after the refused answer')
+        self.check_restored('companion refused')
+        self.expect_ok('RequestConfirmation audio window', self.service.StartPairing, dbus.UInt32(5))
+        self.expect_ok('RequestConfirmation audio', self.agent.RequestConfirmation, dbus.ObjectPath(phone),
+                       dbus.UInt32(1))
+        self.expect_ok('StopPairing audio', self.service.StopPairing)
 
     def terminate(self, proc, label):
         proc.send_signal(signal.SIGTERM)
@@ -712,6 +792,7 @@ def main():
         driver.test_search()
         driver.test_search_and_pairing()
         driver.test_roles()
+        driver.test_companion()
         driver.test_sigterm(proc)
         write_marker(BOOT_ID + '\n')
         proc = launch(fake, driver, env)

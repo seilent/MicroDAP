@@ -206,6 +206,10 @@ QList<Row> build()
 
     Row closePlayer = action("system", "closePlayer", "close player", "closePlayer");
     out.push_back(shown(closePlayer, "overlay"));
+    Row phoneApp = choice("system", "phoneApp", "phone app", "companion", {false, true});
+    out.push_back(shown(draft(phoneApp, "off drops the link and its bound phone"), "dap"));
+    Row pairApp = action("system", "pairApp", "pair phone app", "companionPair");
+    out.push_back(shown(pairApp, "companion"));
     out.push_back(action("system", "about", "about", "about"));
 
     return out;

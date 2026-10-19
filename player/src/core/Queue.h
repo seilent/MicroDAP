@@ -123,6 +123,7 @@ public:
     Repeat repeat() const;
     void setRepeat(Repeat repeat);
     PlayOrderModel *playOrder() const;
+    quint32 rev() const;
 
     QueueEntry entry(int row) const;
     QList<QueueEntry> entries() const;
@@ -161,6 +162,7 @@ signals:
     void repeatChanged();
     void orderChanged();
     void currentSlotChanged();
+    void revChanged();
 
 private:
     friend class PlayOrderModel;
@@ -183,6 +185,7 @@ private:
     bool m_shuffle = false;
     Repeat m_repeat = Off;
     PlayOrderModel *m_playOrder;
+    quint32 m_rev;
 };
 
 }

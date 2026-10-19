@@ -648,6 +648,15 @@ void SettingsTest::rowTable()
         QVERIFY(!row->action.isEmpty());
         QVERIFY(row->setting.isEmpty());
     }
+    const SettingsRows::Row *phoneApp = SettingsRows::find(QStringLiteral("phoneApp"));
+    QVERIFY(phoneApp && phoneApp->draft && !phoneApp->bounded);
+    QCOMPARE(phoneApp->kind, QStringLiteral("sheet"));
+    QCOMPARE(phoneApp->pivot, QStringLiteral("system"));
+    QCOMPARE(phoneApp->setting, QStringLiteral("companion"));
+    QCOMPARE(phoneApp->values, QVariantList({false, true}));
+    const SettingsRows::Row *pairApp = SettingsRows::find(QStringLiteral("pairApp"));
+    QVERIFY(pairApp && pairApp->kind == QLatin1StringView("action"));
+    QCOMPARE(pairApp->shown, QStringLiteral("companion"));
     for (const char *key : {"hpGain", "hpAmp", "spkGain"}) {
         const SettingsRows::Row *row = SettingsRows::find(QString::fromLatin1(key));
         QVERIFY2(row && row->bounded && row->draft, key);

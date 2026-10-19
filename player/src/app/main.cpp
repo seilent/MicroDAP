@@ -13,6 +13,8 @@
 #include "Keep.h"
 #include "Library.h"
 #include "LibraryWatcher.h"
+#include "LinkProfile.h"
+#include "LinkServer.h"
 #include "Lyrics.h"
 #include "Models.h"
 #include "Mpris.h"
@@ -467,6 +469,23 @@ int main(int argc, char *argv[])
         QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, outputs.get(),
                          [&power, watch = outputs.get()] { watch->setScreenOff(power.screenOff()); });
     }
+    std::unique_ptr<microdap::LinkServer> link;
+    std::unique_ptr<microdap::LinkProfile> linkProfile;
+    if (!overlayMode) {
+        link = std::make_unique<microdap::LinkServer>(&player, &settings);
+        link->setBluez(bluez.get());
+        link->setStatus(&status);
+        link->setVolume(routedVolume);
+        link->setFavorites(&favorites);
+        linkProfile = std::make_unique<microdap::LinkProfile>(QDBusConnection::systemBus());
+        QObject::connect(linkProfile.get(), &microdap::LinkProfile::connection, link.get(), &microdap::LinkServer::open);
+        QObject::connect(linkProfile.get(), &microdap::LinkProfile::ended, link.get(), &microdap::LinkServer::end);
+        QObject::connect(&settings, &microdap::Settings::companionChanged, linkProfile.get(),
+                         [&settings, profile = linkProfile.get()] { profile->setEnabled(settings.companion()); });
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, link.get(),
+                         [server = link.get()] { server->bye(fd::proto::val::BYE_REASON::shutdown); });
+        linkProfile->setEnabled(settings.companion());
+    }
     if (outputMode) {
         microdap::OutputMode *mode = outputMode.get();
         microdap::OutputControl *control = outputControl.get();
@@ -566,6 +585,8 @@ int main(int argc, char *argv[])
         engine.rootContext()->setContextProperty(QStringLiteral("OutputMode"), outputMode.get());
     if (dacEq)
         engine.rootContext()->setContextProperty(QStringLiteral("DacEq"), dacEq.get());
+    if (link)
+        engine.rootContext()->setContextProperty(QStringLiteral("Link"), link.get());
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("MicroDap", "Main");

@@ -59,6 +59,7 @@ public:
                                 const QDateTime &playedAt = QDateTime::currentDateTimeUtc());
     Q_INVOKABLE void setRating(qint64 trackId, int rating);
     Q_INVOKABLE int rating(qint64 trackId) const;
+    QStringList trackArtists(qint64 trackId) const;
     Q_INVOKABLE QVariantList artistAlbums(qint64 artistId) const;
     Q_INVOKABLE QVariantList artistTracks(qint64 artistId) const;
     Q_INVOKABLE QVariantList artistAlbumRows(qint64 artistId) const;

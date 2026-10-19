@@ -279,6 +279,7 @@ class AgentAdaptor : public QDBusAbstractAdaptor
     Q_CLASSINFO("D-Bus Interface", "net.seilent.MicroDap.Bluetooth")
     Q_PROPERTY(bool PairingActive READ pairingActive)
     Q_PROPERTY(uint PairingRemaining READ pairingRemaining)
+    Q_PROPERTY(QString PairingMode READ pairingMode)
 
 public:
     explicit AgentAdaptor(FakeObject *object)
@@ -295,6 +296,13 @@ public:
     {
         return m_object->get(SystemBluezModel::agentInterface(), QStringLiteral("PairingRemaining")).toUInt();
     }
+    QString pairingMode() const
+    {
+        return m_object->get(SystemBluezModel::agentInterface(), QStringLiteral("PairingMode")).toString();
+    }
+
+signals:
+    void CompanionPaired(const QDBusObjectPath &device);
 
 public slots:
     void StartPairing(uint seconds)
@@ -324,6 +332,19 @@ public slots:
         m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("SearchActive"), false);
         m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("SearchRemaining"),
                       QVariant::fromValue(static_cast<uint>(0)));
+    }
+
+    void StartCompanionPairing(uint seconds)
+    {
+        m_object->calls.append(QStringLiteral("StartCompanionPairing %1").arg(seconds));
+        m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("PairingMode"), QStringLiteral("companion"));
+        m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("PairingActive"), true);
+    }
+
+    void AnswerConfirm(uint passkey, bool yes)
+    {
+        m_object->calls.append(QStringLiteral("AnswerConfirm %1 %2").arg(passkey).arg(yes ? QStringLiteral("yes") : QStringLiteral("no")));
+        m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("ConfirmPending"), false);
     }
 
     void StopPairing()
@@ -511,6 +532,7 @@ private slots:
     void positionPolling();
     void controls();
     void pairing();
+    void companionPairing();
     void deviceLifecycle();
     void transportStateNone();
     void headsetsAndRoles();
@@ -774,6 +796,48 @@ void SystemBluezTest::pairing()
     QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("StopPairing")), busTimeoutMs);
     QTRY_VERIFY_WITH_TIMEOUT(!m_model->pairing(), busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(m_model->pairingRemaining(), 0, busTimeoutMs);
+}
+
+void SystemBluezTest::companionPairing()
+{
+    m_agent->calls.clear();
+    m_model->startCompanionPairing(120);
+    QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("StartCompanionPairing 120")), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->pairingMode(), QStringLiteral("companion"), busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(m_model->pairing(), busTimeoutMs);
+    m_agent->set(SystemBluezModel::agentInterface(), QStringLiteral("ConfirmPasskey"),
+                 QVariant::fromValue(static_cast<uint>(482915)));
+    m_agent->set(SystemBluezModel::agentInterface(), QStringLiteral("ConfirmName"), QStringLiteral("Pixel 8"));
+    m_agent->set(SystemBluezModel::agentInterface(), QStringLiteral("ConfirmPending"), true);
+    QTRY_VERIFY_WITH_TIMEOUT(m_model->confirmPending(), busTimeoutMs);
+    QCOMPARE(m_model->confirmPasskey(), 482915);
+    QCOMPARE(m_model->confirmName(), QStringLiteral("Pixel 8"));
+    QSignalSpy sets(m_model.get(), &BluezModel::companionSetsChanged);
+    m_agent->set(SystemBluezModel::agentInterface(), QStringLiteral("CompanionKnown"),
+                 QVariant::fromValue(QList<QDBusObjectPath>{QDBusObjectPath(devicePath())}));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->companionKnown(), QStringList{devicePath()}, busTimeoutMs);
+    QVERIFY(m_model->companionRemoving().isEmpty());
+    m_agent->set(SystemBluezModel::agentInterface(), QStringLiteral("CompanionRemoving"),
+                 QVariant::fromValue(QList<QDBusObjectPath>{QDBusObjectPath(QStringLiteral("/org/bluez/hci0/dev_33"))}));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->companionRemoving(), QStringList{QStringLiteral("/org/bluez/hci0/dev_33")},
+                              busTimeoutMs);
+    QCOMPARE(m_model->companionKnown(), QStringList{devicePath()});
+    QCOMPARE(sets.count(), 2);
+    m_agent->set(SystemBluezModel::agentInterface(), QStringLiteral("CompanionRemoving"),
+                 QVariant::fromValue(QList<QDBusObjectPath>{}));
+    QTRY_VERIFY_WITH_TIMEOUT(m_model->companionRemoving().isEmpty(), busTimeoutMs);
+    m_model->answerConfirm(482915, true);
+    QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("AnswerConfirm 482915 yes")), busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_model->confirmPending(), busTimeoutMs);
+    QSignalSpy paired(m_model.get(), &BluezModel::companionPaired);
+    QDBusMessage signal = QDBusMessage::createSignal(SystemBluezModel::agentPath(), SystemBluezModel::agentInterface(),
+                                                     QStringLiteral("CompanionPaired"));
+    signal << QVariant::fromValue(QDBusObjectPath(devicePath()));
+    QVERIFY(QDBusConnection::sessionBus().send(signal));
+    QTRY_COMPARE_WITH_TIMEOUT(paired.count(), 1, busTimeoutMs);
+    QCOMPARE(paired.at(0).at(0).toString(), devicePath());
+    m_model->stopPairing();
+    QTRY_VERIFY_WITH_TIMEOUT(!m_model->pairing(), busTimeoutMs);
 }
 
 void SystemBluezTest::deviceLifecycle()

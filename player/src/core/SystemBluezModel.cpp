@@ -70,6 +70,20 @@ QVariantMap variantMap(const QVariant &value)
     return inner.toMap();
 }
 
+QStringList objectPaths(const QVariant &value)
+{
+    const QVariant inner = unwrap(value);
+    QStringList out;
+    if (inner.metaType() == QMetaType::fromType<QDBusArgument>()) {
+        for (const QDBusObjectPath &path : qdbus_cast<QList<QDBusObjectPath>>(qvariant_cast<QDBusArgument>(inner)))
+            out.append(path.path());
+    } else if (inner.metaType() == QMetaType::fromType<QList<QDBusObjectPath>>()) {
+        for (const QDBusObjectPath &path : inner.value<QList<QDBusObjectPath>>())
+            out.append(path.path());
+    }
+    return out;
+}
+
 QStringList stringList(const QVariant &value)
 {
     const QVariant inner = unwrap(value);
@@ -234,6 +248,8 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
             qWarning() << "microdap bluez: cannot subscribe to" << agentInterface()
                        << m_session.lastError().message();
         }
+        m_session.connect(agentService(), agentPath(), agentInterface(), QStringLiteral("CompanionPaired"), this,
+                          SLOT(onCompanionPaired(QDBusObjectPath)));
         refreshAgent();
         if (role() != QLatin1StringView("receiver"))
             applyRole(role());
@@ -414,6 +430,12 @@ void SystemBluezModel::refreshAgent()
 void SystemBluezModel::applyAgent(const QVariantMap &properties)
 {
     updatePairingRemaining(properties.value(QStringLiteral("PairingRemaining")).toInt());
+    updatePairingMode(properties.value(QStringLiteral("PairingMode")).toString());
+    updateConfirm(properties.value(QStringLiteral("ConfirmPending")).toBool(),
+                  properties.value(QStringLiteral("ConfirmPasskey")).toInt(),
+                  properties.value(QStringLiteral("ConfirmName")).toString());
+    updateCompanionSets(objectPaths(properties.value(QStringLiteral("CompanionKnown"))),
+                        objectPaths(properties.value(QStringLiteral("CompanionRemoving"))));
     updatePairing(properties.value(QStringLiteral("PairingActive")).toBool());
     updateSearchRemaining(properties.value(QStringLiteral("SearchRemaining")).toInt());
     updateSearching(properties.value(QStringLiteral("SearchActive")).toBool());
@@ -430,6 +452,18 @@ void SystemBluezModel::onAgentPropertiesChanged(const QString &interface, const 
     ++m_agentGeneration;
     if (changed.contains(QStringLiteral("PairingRemaining")))
         updatePairingRemaining(changed.value(QStringLiteral("PairingRemaining")).toInt());
+    if (changed.contains(QStringLiteral("PairingMode")))
+        updatePairingMode(changed.value(QStringLiteral("PairingMode")).toString());
+    if (changed.contains(QStringLiteral("ConfirmPending")) || changed.contains(QStringLiteral("ConfirmPasskey"))
+        || changed.contains(QStringLiteral("ConfirmName")))
+        updateConfirm(changed.value(QStringLiteral("ConfirmPending"), confirmPending()).toBool(),
+                      changed.value(QStringLiteral("ConfirmPasskey"), confirmPasskey()).toInt(),
+                      changed.value(QStringLiteral("ConfirmName"), confirmName()).toString());
+    if (changed.contains(QStringLiteral("CompanionKnown")) || changed.contains(QStringLiteral("CompanionRemoving")))
+        updateCompanionSets(changed.contains(QStringLiteral("CompanionKnown"))
+                                ? objectPaths(changed.value(QStringLiteral("CompanionKnown"))) : companionKnown(),
+                            changed.contains(QStringLiteral("CompanionRemoving"))
+                                ? objectPaths(changed.value(QStringLiteral("CompanionRemoving"))) : companionRemoving());
     if (changed.contains(QStringLiteral("PairingActive")))
         updatePairing(changed.value(QStringLiteral("PairingActive")).toBool());
     if (changed.contains(QStringLiteral("SearchRemaining")))
@@ -1001,6 +1035,22 @@ void SystemBluezModel::stopSearch()
     dropHeld(true);
     m_pairAfterSearch.clear();
     callAgent(QStringLiteral("StopSearch"));
+}
+
+void SystemBluezModel::startCompanionPairing(int timeoutSeconds)
+{
+    const uint seconds = static_cast<uint>(qMax(1, timeoutSeconds));
+    callAgent(QStringLiteral("StartCompanionPairing"), {QVariant::fromValue(seconds)});
+}
+
+void SystemBluezModel::answerConfirm(int passkey, bool yes)
+{
+    callAgent(QStringLiteral("AnswerConfirm"), {QVariant::fromValue(uint(passkey)), yes});
+}
+
+void SystemBluezModel::onCompanionPaired(const QDBusObjectPath &device)
+{
+    emit companionPaired(device.path());
 }
 
 void SystemBluezModel::setShuffle(const QString &shuffle)

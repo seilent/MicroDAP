@@ -86,15 +86,19 @@ class SinkVolume : public QObject
     Q_OBJECT
 
 public:
-    using QObject::QObject;
+    explicit SinkVolume(QObject *parent = nullptr);
 
     virtual void step(int percent) = 0;
     virtual void set(int) {}
     virtual void setCap(int) {}
     virtual void dropPending() {}
+    int level() const;
 
 signals:
     void levelChanged(int percent);
+
+private:
+    int m_level = -1;
 };
 
 class PulseSinkVolume : public SinkVolume, public DacSinkPort

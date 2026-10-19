@@ -337,6 +337,22 @@
       "group": "microdap_power",
       "label": "Wi-Fi off with the screen",
       "ui": {"order": 2}
+    },
+    "microdap.companion": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_power",
+      "label": "Phone app",
+      "ui": {"order": 3}
+    },
+    "microdap.companion_phone": {
+      "type": "s",
+      "default": "",
+      "applier": null,
+      "group": "microdap_power",
+      "label": "Phone app phone",
+      "ui": {"order": 4}
     }
   },
   "groups": {

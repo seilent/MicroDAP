@@ -132,6 +132,7 @@ Page {
     readonly property int sleepLeft: page.power !== null && page.power.sleepMinutesLeft !== undefined ? Number(page.power.sleepMinutesLeft) : 0
     readonly property bool wifiOffScreenOff: page.settings !== null && page.settings.wifiOffScreenOff === true
     readonly property bool hasBoot: page.settings !== null && page.settings.bootSession !== undefined
+    readonly property bool companion: page.settings !== null && page.settings.companion === true
     readonly property string bootSession: page.hasBoot ? String(page.settings.bootSession) : ""
     readonly property bool bootReadOnly: page.bootChoices.length === 0
     readonly property string bootValue: page.bootText(page.bootSession)
@@ -163,6 +164,7 @@ Page {
     property alias repeater: repeater
 
     signal pairPhone()
+    signal pairPhoneApp()
     signal openEq()
     signal closePlayerRequested()
     signal entrance(real shift, int stagger, int cap, int duration, bool stripCurve, int from)
@@ -350,6 +352,8 @@ Page {
             return page.overlay
         case "boot":
             return page.hasBoot
+        case "companion":
+            return !page.overlay && page.companion
         default:
             return true
         }
@@ -433,6 +437,8 @@ Page {
             return page.wifiOffScreenOff ? "off" : "keep"
         case "boot":
             return page.bootValue
+        case "phoneApp":
+            return page.companion ? "on" : "off"
         case "about":
             return page.version
         default:
@@ -745,6 +751,8 @@ Page {
 
     function sheetValues(key: string): var {
         const list = page.valueList(key)
+        if (list.length > 0 && typeof list[0] === "boolean")
+            return list.slice()
         const numbers = list.filter((v) => v !== "auto" && !isNaN(Number(v)))
         const words = list.filter((v) => v === "auto")
         if (numbers.length === 0 || numbers.length + words.length !== list.length)
@@ -779,6 +787,8 @@ Page {
         case "suspend":
         case "sleep":
             return page.offOr(Number(value), "min")
+        case "phoneApp":
+            return value === true ? "on" : "off"
         default:
             return String(value)
         }
@@ -972,6 +982,8 @@ Page {
             return page.touchEnabled
         case "boot":
             return page.bootSession
+        case "phoneApp":
+            return page.companion
         default:
             return undefined
         }
@@ -1083,6 +1095,10 @@ Page {
         case "pair":
             if (!page.overlay)
                 page.pairPhone()
+            return true
+        case "pairApp":
+            if (!page.overlay && page.companion)
+                page.pairPhoneApp()
             return true
         case "eq":
             page.openEq()

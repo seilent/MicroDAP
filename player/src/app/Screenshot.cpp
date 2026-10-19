@@ -88,6 +88,7 @@ const QStringList &screens()
         QStringLiteral("home"),
         QStringLiteral("quickplay"),
         QStringLiteral("bluetooth"),
+        QStringLiteral("phoneapp"),
         QStringLiteral("prompt"),
         QStringLiteral("hub"),
         QStringLiteral("nowplaying"),
@@ -194,6 +195,14 @@ const QStringList &states()
         QStringLiteral("guard-toast"),
         QStringLiteral("hp-sheet"),
         QStringLiteral("wrong-role"),
+        QStringLiteral("app-idle"),
+        QStringLiteral("app-open"),
+        QStringLiteral("app-code"),
+        QStringLiteral("app-paired"),
+        QStringLiteral("app-connected"),
+        QStringLiteral("app-off"),
+        QStringLiteral("app-refused"),
+        QStringLiteral("app-bound"),
         QStringLiteral("boot"),
         QStringLiteral("boot-edit"),
         QStringLiteral("boot-missing"),
@@ -284,6 +293,14 @@ QString bluezForState(const QString &state)
         return QStringLiteral("active");
     if (state == QLatin1StringView("pairing"))
         return QStringLiteral("pairing");
+    if (state == QLatin1StringView("app-open"))
+        return QStringLiteral("appopen");
+    if (state == QLatin1StringView("app-refused"))
+        return QStringLiteral("appopen");
+    if (state == QLatin1StringView("app-code"))
+        return QStringLiteral("appcode");
+    if (state == QLatin1StringView("app-off"))
+        return QStringLiteral("appoff");
     return QStringLiteral("off");
 }
 

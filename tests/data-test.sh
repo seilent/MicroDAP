@@ -65,7 +65,8 @@ d = json.load(open(sys.argv[1]))
 assert d["owner"] == "microdap", d["owner"]
 want = {"output_level", "sample_rate", "play_through", "resume", "auto_now_playing", "replaygain", "crossfade_ms", "roots", "accent_hue",
         "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch", "rgb", "overlay_toasts", "clock",
-        "battery_percent", "quickplay", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
+        "battery_percent", "quickplay", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off",
+        "companion", "companion_phone"}
 want |= {f"eq_{k}_{slot}" for k in ("mode", "graphic", "graphic_preset", "parametric_on")
          for slot in ("headphones", "usb", "speaker", "bt")}
 keys = d["keys"]
@@ -91,6 +92,8 @@ assert keys["microdap.crossfade_ms"]["enum"] == [0, 1000, 2000, 3000, 5000]
 assert keys["microdap.crossfade_ms"]["default"] == 0
 assert keys["microdap.auto_now_playing"]["default"] is False
 assert keys["microdap.clock"]["enum"] == ["24h", "12h", "off"]
+assert keys["microdap.companion"]["default"] is False
+assert keys["microdap.companion_phone"]["default"] == ""
 for slot in ("headphones", "usb", "speaker", "bt"):
     assert keys[f"microdap.eq_mode_{slot}"]["enum"] == ["parametric", "graphic"]
     assert keys[f"microdap.eq_graphic_{slot}"]["default"] == ["0"] * 10

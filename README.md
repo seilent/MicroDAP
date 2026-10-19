@@ -34,6 +34,14 @@ player turned it off (`~/.local/state/microdap/wifi-off`). `microdap-radio.servi
 `~/.local/share/microdap/library.db`, schema 8. A newer schema opens when its `meta` row `min_reader` is 8 or lower.
 Schema 8 has `min_reader` 8: a player at schema 7 or older closes it and shows an empty library; the file stays as is.
 
+## Phone app link
+
+The flatcomp phone app connects over Bluetooth RFCOMM through a BlueZ `Profile1` at `/microdap/companion`, registered
+by `microdap-player` in the MicroDAP session while Settings > System > PHONE APP is ON (`microdap.companion`). The
+link exists only while that player runs. The first phone to say HELLO is bound (`microdap.companion_phone`). PAIR
+PHONE APP opens a 120 s phone app pairing window: `microdap-bt` asks for the code on the device, and the phone that
+pairs there, or an already paired phone whose app says HELLO in the window, replaces the bound one.
+
 ## Build and test
 
 ```

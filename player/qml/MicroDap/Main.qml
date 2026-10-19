@@ -34,6 +34,7 @@ Window {
     property var outputControl: root.screenshot || typeof OutputControl === "undefined" ? null : OutputControl
     property var outputMode: root.screenshot || typeof OutputMode === "undefined" ? null : OutputMode
     property var dacEq: root.screenshot || typeof DacEq === "undefined" ? null : DacEq
+    property var link: root.screenshot || typeof Link === "undefined" ? null : Link
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var accentControl: root.screenshot || typeof Accent === "undefined" ? null : Accent
     property var outputs: root.shotState === "orientation-external" ? externalShotOutputs
@@ -462,6 +463,10 @@ Window {
 
     function openPairing() {
         pages.push(bluetoothComponent, { pivotIndex: 1 })
+    }
+
+    function openPhoneApp() {
+        pages.push(phoneAppComponent, {})
     }
 
     function openNowPlaying() {
@@ -897,6 +902,15 @@ Window {
     }
 
     Connections {
+        target: root.link
+        ignoreUnknownSignals: true
+
+        function onPhoneBound(name) {
+            overlays.toast.show("phone app", name)
+        }
+    }
+
+    Connections {
         target: root.power
         ignoreUnknownSignals: true
 
@@ -1219,6 +1233,7 @@ Window {
                 : root.shotScreen === "home" ? homeShotComponent
                 : root.shotScreen === "quickplay" ? quickplayShotComponent
                 : root.shotScreen === "bluetooth" ? bluetoothShotComponent
+                : root.shotScreen === "phoneapp" ? phoneAppShotComponent
                 : root.shotScreen === "prompt" ? promptShotComponent
                 : root.shotScreen === "power" ? powerShotComponent
                 : root.shotScreen === "saver" ? saverShotComponent
@@ -1308,7 +1323,21 @@ Window {
             dacEq: root.dacEq
             keyboard: keyboard
             screenOff: root.off
+            companion: root.settings !== null && root.settings.companion === true
             onOpenNowPlaying: root.openNowPlaying()
+            onToast: (first, second) => overlays.toast.show(first, second)
+        }
+    }
+
+    Component {
+        id: phoneAppComponent
+
+        PhoneAppPairing {
+            objectName: "phoneapp"
+            animated: !root.hidden
+            bluez: root.bluez
+            link: root.link
+            screenOff: root.off
             onToast: (first, second) => overlays.toast.show(first, second)
         }
     }
@@ -1433,6 +1462,7 @@ Window {
             eq: root.eq
             sensor: root.sensor
             onPairPhone: root.openPairing()
+            onPairPhoneApp: root.openPhoneApp()
             onOpenEq: root.navigate("eq")
         }
     }
@@ -1615,6 +1645,13 @@ Window {
     Component {
         id: bluetoothShotComponent
         BluetoothShot {
+            fixture: root.shotState
+        }
+    }
+
+    Component {
+        id: phoneAppShotComponent
+        PhoneAppShot {
             fixture: root.shotState
         }
     }

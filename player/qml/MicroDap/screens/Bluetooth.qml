@@ -18,6 +18,7 @@ Page {
     property var sheetRow: null
     property string shownState: ""
     property bool ready: false
+    property bool companion: false
 
     readonly property bool live: page.animated && !page.screenOff
     readonly property var pivots: ["phone", "pairing", "headphones", "eq"]
@@ -42,6 +43,7 @@ Page {
     readonly property bool connected: page.bluez !== null && page.bluez.connected === true
     readonly property bool transportActive: page.connected && page.bluez.transportActive === true
     readonly property bool pairing: page.bluez !== null && page.bluez.pairing === true
+        && String(page.bluez.pairingMode) !== "companion"
     readonly property int pairingRemaining: page.bluez !== null && page.bluez.pairingRemaining !== undefined ? page.bluez.pairingRemaining : 0
     readonly property int battery: page.bluez !== null && page.bluez.battery !== undefined ? page.bluez.battery : -1
     readonly property string deviceName: page.bluez !== null && page.bluez.deviceName !== undefined ? page.bluez.deviceName : ""
@@ -52,7 +54,8 @@ Page {
     readonly property string trackTitle: page.bluez !== null && page.bluez.title !== undefined ? page.bluez.title : ""
     readonly property string trackArtist: page.bluez !== null && page.bluez.artist !== undefined ? page.bluez.artist : ""
     readonly property string stateLine: page.transportActive ? "audio active" : page.connected ? "connected" : "disconnected"
-    readonly property string instructions: page.pairing ? "pair from your phone, b to stop" : "press a to make this device discoverable"
+    readonly property string instructions: (page.pairing ? "pair from your phone, b to stop" : "press a to make this device discoverable")
+        + "\n" + (page.companion ? "pair the phone app from settings > system" : "for the phone app, turn it on in settings > system")
     readonly property string pairingTitle: page.overlay ? "pair in dap mode" : "discoverable"
     readonly property real arcSweep: page.pairing && page.pairingTimeout > 0
         ? 360 * Math.max(0, Math.min(1, page.pairingRemaining / page.pairingTimeout))
@@ -62,13 +65,12 @@ Page {
     readonly property real nameBlockTop: page.nameBaseline - Ui.capHeight * Ui.npArtist.size
     readonly property real nameBlockHeight: page.stateBaseline - page.nameBlockTop
     readonly property real rowTop: Ui.contentTop + 60
-    readonly property real ringCenterY: Ui.contentTop + 90
-    readonly property real pulsePeak: Math.max.apply(null, Motion.pulse.map((k) => k[1]))
-    readonly property real hintBaseline: page.ringCenterY + Ui.backRing / 2 * page.pulsePeak
-        + Ui.qpHintDrop
+    readonly property real ringCenterY: pairingPage.ringCenterY
+    readonly property real pulsePeak: pairingPage.pulsePeak
+    readonly property real hintBaseline: pairingPage.hintBaseline
     readonly property bool switching: pivotAnim.running
     readonly property bool stateSwapping: stateSwap.running
-    readonly property bool pulsing: pulse.running
+    readonly property bool pulsing: pairingPage.pulsing
 
     property alias header: header
     property alias strip: strip
@@ -79,11 +81,11 @@ Page {
     property alias batteryGlyph: batteryGlyph
     property alias transportRow: transportRow
     property alias focusBar: focusBar
-    property alias discoverableText: discoverableText
-    property alias dapModeText: dapModeText
-    property alias pairingRing: pairingRing
-    property alias pulseHolder: pulseHolder
-    property alias hintText: hintText
+    property alias discoverableText: pairingPage.discoverableText
+    property alias dapModeText: pairingPage.dapModeText
+    property alias pairingRing: pairingPage.pairingRing
+    property alias pulseHolder: pairingPage.pulseHolder
+    property alias hintText: pairingPage.hintText
     property alias eqPage: eqPage
     property alias headphonesPage: headphonesPage
     property alias headphonesList: headphonesList
@@ -157,9 +159,7 @@ Page {
             stateSwap.stop()
         stateText.opacity = 1
         page.shownState = page.stateLine
-        if (pulse.running)
-            pulse.stop()
-        pulseHolder.scale = 1
+        pairingPage.complete()
     }
 
     function back(): bool {
@@ -538,77 +538,17 @@ Page {
         }
     }
 
-    Item {
+    PairingPanel {
         id: pairingPage
 
         width: page.width
         height: page.height
         visible: page.shownPivot === 1
-
-        Text {
-            id: discoverableText
-
-            x: Ui.px(Ui.hubEdge)
-            y: Ui.px(page.nameBaseline) - discoverableText.baselineOffset
-            visible: !page.overlay
-            text: "discoverable"
-            color: Ui.white(Ui.npArtist.alpha)
-            font: Ui.font(Ui.npArtist)
-        }
-
-        Text {
-            id: dapModeText
-
-            x: Ui.px(Ui.hubEdge)
-            y: Ui.px(page.nameBaseline) - dapModeText.baselineOffset
-            visible: page.overlay
-            text: "pair in dap mode"
-            color: Ui.white(Ui.listCount.alpha)
-            font: Ui.font(Ui.listCount)
-        }
-
-        Item {
-            id: pulseHolder
-
-            x: Ui.px(Ui.canvasW / 2) - pulseHolder.width / 2
-            y: Ui.px(page.ringCenterY) - pulseHolder.height / 2
-            width: pairingRing.width
-            height: pairingRing.height
-            visible: !page.overlay
-            transformOrigin: Item.Center
-            layer.enabled: pulseHolder.scale !== 1
-            layer.smooth: true
-            layer.textureSize: Qt.size(Math.ceil(pulseHolder.width * page.pulsePeak), Math.ceil(pulseHolder.height * page.pulsePeak))
-
-            Ring {
-                id: pairingRing
-
-                readonly property string touchKind: "ring"
-
-                size: Ui.backRing
-                glyph: "bluetooth"
-                focused: true
-                arcSweep: page.arcSweep
-                pressed: page.pressed && page.pivotIndex === 1
-                animated: page.live
-            }
-        }
-
-        Text {
-            id: hintText
-
-            x: Ui.px(Ui.hubEdge)
-            y: Ui.px(page.hintBaseline) - hintText.baselineOffset
-            width: page.width - 2 * Ui.px(Ui.hubEdge)
-            visible: !page.overlay
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            lineHeight: Ui.px(Ui.qpHintPitch)
-            lineHeightMode: Text.FixedHeight
-            text: page.instructions
-            color: Ui.white(Ui.listCount.alpha)
-            font: Ui.font(Ui.listCount)
-        }
+        overlay: page.overlay
+        live: page.live
+        arcSweep: page.arcSweep
+        pressed: page.pressed && page.pivotIndex === 1
+        hint: page.instructions
     }
 
     Item {
@@ -791,47 +731,13 @@ Page {
         }
     }
 
-    SequentialAnimation {
-        id: pulse
-
-        NumberAnimation {
-            target: pulseHolder
-            property: "scale"
-            from: Motion.pulse[0][1]
-            to: Motion.pulse[1][1]
-            duration: Motion.pulse[1][0] - Motion.pulse[0][0]
-            easing.type: Motion.sine
-        }
-        NumberAnimation {
-            target: pulseHolder
-            property: "scale"
-            to: Motion.pulse[2][1]
-            duration: Motion.pulse[2][0] - Motion.pulse[1][0]
-            easing.type: Motion.sine
-        }
-        NumberAnimation {
-            target: pulseHolder
-            property: "scale"
-            to: Motion.pulse[3][1]
-            duration: Motion.pulse[3][0] - Motion.pulse[2][0]
-            easing.type: Motion.sine
-        }
-        NumberAnimation {
-            target: pulseHolder
-            property: "scale"
-            to: Motion.pulse[4][1]
-            duration: Motion.pulse[4][0] - Motion.pulse[3][0]
-            easing.type: Motion.sine
-        }
-    }
-
     Connections {
         target: page.bluez
         ignoreUnknownSignals: true
 
         function onConnectedChanged() {
             if (page.ready && page.live && page.connected)
-                pulse.restart()
+                pairingPage.pulseNow()
         }
 
         function onHeadsetsChanged() {

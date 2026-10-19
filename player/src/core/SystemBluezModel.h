@@ -68,6 +68,8 @@ public:
     void want() override;
     void setReceiverScope(bool held) override;
     void setDapSession(bool dap);
+    void startCompanionPairing(int timeoutSeconds = defaultPairingTimeout) override;
+    void answerConfirm(int passkey, bool yes) override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
 
@@ -85,6 +87,7 @@ private slots:
                                   const QStringList &invalidated);
     void onBluezUnregistered();
     void onAgentUnregistered();
+    void onCompanionPaired(const QDBusObjectPath &device);
 
 private:
     void refreshAgent();

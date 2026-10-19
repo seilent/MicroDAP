@@ -32,6 +32,10 @@ QStringList FakeBluezModel::presets()
         QStringLiteral("last"),
         QStringLiteral("headphones"),
         QStringLiteral("search"),
+        QStringLiteral("appidle"),
+        QStringLiteral("appopen"),
+        QStringLiteral("appcode"),
+        QStringLiteral("appoff"),
     };
 }
 
@@ -45,6 +49,9 @@ void FakeBluezModel::clearAll()
     setBattery(-1);
     setPairing(false);
     setPairingRemaining(0);
+    setPairingMode({});
+    setConfirm(false, 0, {});
+    updateReady(true);
     setConnected(false);
     setDeviceName({});
     forgetVolume();
@@ -115,6 +122,30 @@ bool FakeBluezModel::applyPreset(const QString &name)
     if (name == QLatin1StringView("last")) {
         clearAll();
         setLastPhone(QStringLiteral("Pixel 8"));
+        return true;
+    }
+    if (name == QLatin1StringView("appidle")) {
+        clearAll();
+        return true;
+    }
+    if (name == QLatin1StringView("appopen")) {
+        clearAll();
+        setPairingMode(QStringLiteral("companion"));
+        setPairing(true);
+        setPairingRemaining(presetPairingRemaining);
+        return true;
+    }
+    if (name == QLatin1StringView("appcode")) {
+        clearAll();
+        setPairingMode(QStringLiteral("companion"));
+        setPairing(true);
+        setPairingRemaining(presetPairingRemaining);
+        setConfirm(true, 482915, QStringLiteral("Pixel 8"));
+        return true;
+    }
+    if (name == QLatin1StringView("appoff")) {
+        clearAll();
+        updateReady(false);
         return true;
     }
     if (name == QLatin1StringView("pairing")) {
@@ -311,6 +342,7 @@ void FakeBluezModel::startPairing(int timeoutSeconds)
     if (holdWindow(false, timeoutSeconds))
         return;
     m_commands.append(QStringLiteral("startPairing"));
+    updatePairingMode(QStringLiteral("audio"));
     updatePairingRemaining(timeoutSeconds);
     updatePairing(true);
 }
@@ -321,6 +353,46 @@ void FakeBluezModel::stopPairing()
     m_commands.append(QStringLiteral("stopPairing"));
     updatePairing(false);
     updatePairingRemaining(0);
+    updatePairingMode({});
+    updateConfirm(false, 0, {});
+}
+
+void FakeBluezModel::startCompanionPairing(int timeoutSeconds)
+{
+    m_commands.append(QStringLiteral("startCompanionPairing"));
+    updatePairingMode(QStringLiteral("companion"));
+    updatePairingRemaining(timeoutSeconds);
+    updatePairing(true);
+}
+
+void FakeBluezModel::answerConfirm(int passkey, bool yes)
+{
+    m_commands.append(QStringLiteral("answerConfirm %1 %2").arg(passkey).arg(yes ? QStringLiteral("yes") : QStringLiteral("no")));
+    if (passkey == confirmPasskey())
+        updateConfirm(false, 0, {});
+}
+
+void FakeBluezModel::setCompanionSets(const QStringList &known, const QStringList &removing)
+{
+    updateCompanionSets(known, removing);
+}
+
+void FakeBluezModel::setPairingMode(const QString &mode)
+{
+    updatePairingMode(mode);
+}
+
+void FakeBluezModel::setConfirm(bool pending, int passkey, const QString &name)
+{
+    updateConfirm(pending, passkey, name);
+}
+
+void FakeBluezModel::bindCompanion(const QString &device)
+{
+    updatePairing(false);
+    updatePairingRemaining(0);
+    updatePairingMode({});
+    emit companionPaired(device);
 }
 
 void FakeBluezModel::startSearch(int timeoutSeconds)

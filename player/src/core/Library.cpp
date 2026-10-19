@@ -1852,6 +1852,20 @@ int Library::rating(qint64 trackId) const
     return query.value(0).toInt();
 }
 
+QStringList Library::trackArtists(qint64 trackId) const
+{
+    QStringList names;
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT a.name FROM track_artists ta JOIN artists a ON a.id = ta.artist_id "
+                                 "WHERE ta.track_id = ? ORDER BY ta.pos"));
+    query.addBindValue(trackId);
+    if (!query.exec())
+        return names;
+    while (query.next())
+        names.push_back(query.value(0).toString());
+    return names;
+}
+
 QVariantList Library::idColumn(const QString &sql, qint64 bind) const
 {
     QVariantList ids;

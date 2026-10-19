@@ -51,6 +51,10 @@ public:
     bool reportDevice(const QString &device, bool source, bool sink, bool target = true);
     void setHeadsets(const QVariantList &headsets);
     void setDiscovered(const QVariantList &discovered);
+    void setPairingMode(const QString &mode);
+    void setConfirm(bool pending, int passkey, const QString &name);
+    void bindCompanion(const QString &device);
+    void setCompanionSets(const QStringList &known, const QStringList &removing);
 
     void play() override;
     void pause() override;
@@ -68,6 +72,8 @@ public:
     void pairDevice(const QString &path) override;
     void want() override;
     void setReceiverScope(bool held) override;
+    void startCompanionPairing(int timeoutSeconds = defaultPairingTimeout) override;
+    void answerConfirm(int passkey, bool yes) override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
 

@@ -41,6 +41,9 @@ KEEP_BIN = os.environ.get('MICRODAP_KEEP_BIN', '/usr/libexec/microdap/microdap-k
 KEEP_TIMEOUT = 5
 DISCONNECT_TIMEOUT = 10
 ONE_SHOT_TIMEOUT = 2
+RESOLVE_TICKS = 10
+CAPABILITY = 'NoInputNoOutput'
+COMPANION_CAPABILITY = 'DisplayYesNo'
 
 
 def log(message):
@@ -130,6 +133,24 @@ class Adapter:
         except dbus.DBusException as e:
             log(f'set {name} failed: {e.get_dbus_name()}')
 
+    def paired(self):
+        manager = dbus.Interface(self.bus.get_object(BLUEZ, '/', introspect=False), OBJECT_MANAGER)
+        try:
+            objects = manager.GetManagedObjects()
+        except dbus.DBusException as e:
+            log(f'paired list: {e.get_dbus_name()}')
+            return set()
+        return {str(path) for path, interfaces in objects.items()
+                if interfaces.get(DEVICE, {}).get('Paired')}
+
+    def name_of(self, path):
+        try:
+            obj = self.bus.get_object(BLUEZ, path, introspect=False)
+            props = dbus.Interface(obj, PROPERTIES).GetAll(DEVICE)
+        except dbus.DBusException:
+            return ''
+        return str(props.get('Alias') or props.get('Name') or '')
+
     def discovery(self, on):
         try:
             if on:
@@ -156,24 +177,63 @@ class Window(dbus.service.Object):
         self.remaining = 0
         self.saved = None
         self.timer = None
+        self.bonded = set()
+        self.removing = set()
+        self.held = None
+        self.approved = None
+        self.resolve = 0
+        self.manager = None
 
     @property
     def active(self):
         return self.mode is not None
 
     def values(self):
-        pairing = self.mode == 'pairing'
+        pairing = self.mode in ('pairing', 'companion')
         search = self.mode == 'search'
+        held = self.held or {}
         return {
             'PairingActive': dbus.Boolean(pairing),
             'PairingRemaining': dbus.UInt32(self.remaining if pairing else 0),
+            'PairingMode': dbus.String('companion' if self.mode == 'companion' else 'audio' if pairing else ''),
             'SearchActive': dbus.Boolean(search),
             'SearchRemaining': dbus.UInt32(self.remaining if search else 0),
             'Role': dbus.String(self.role),
+            'ConfirmPending': dbus.Boolean(self.held is not None),
+            'ConfirmPasskey': dbus.UInt32(held.get('passkey', 0)),
+            'ConfirmName': dbus.String(held.get('name', '')),
+            'CompanionKnown': dbus.Array(sorted(self.known()), signature='o'),
+            'CompanionRemoving': dbus.Array(sorted(self.removing), signature='o'),
         }
 
+    def known(self):
+        if self.mode != 'companion':
+            return set()
+        return self.bonded | ({self.approved} if self.approved else set())
+
+    def remove(self, path):
+        self.removing.add(path)
+        self.notify('CompanionRemoving')
+
+    def removed(self, path):
+        if path in self.removing:
+            self.removing.discard(path)
+            self.notify('CompanionRemoving')
+
     def names(self, mode):
-        return ('PairingActive', 'PairingRemaining') if mode == 'pairing' else ('SearchActive', 'SearchRemaining')
+        if mode in ('pairing', 'companion'):
+            return ('PairingActive', 'PairingRemaining', 'PairingMode')
+        return ('SearchActive', 'SearchRemaining')
+
+    def capability(self, capability):
+        if self.manager is None:
+            return
+        try:
+            self.manager.UnregisterAgent(dbus.ObjectPath(AGENT_PATH))
+            self.manager.RegisterAgent(dbus.ObjectPath(AGENT_PATH), dbus.String(capability))
+            self.manager.RequestDefaultAgent(dbus.ObjectPath(AGENT_PATH))
+        except dbus.DBusException as e:
+            log(f'agent capability {capability} failed: {e.get_dbus_name()}')
 
     def notify(self, *names):
         values = self.values()
@@ -213,11 +273,9 @@ class Window(dbus.service.Object):
         self.timer = GLib.timeout_add(1000, self.tick)
         self.remaining = timeout
 
-    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
-    def StartPairing(self, timeout):
-        timeout = self.checked(timeout)
-        if self.mode == 'search':
-            self.close('closed: pairing')
+    def discoverable(self, timeout, mode):
+        if self.mode is not None and self.mode != mode:
+            self.close(f'closed: {mode}')
         if self.saved is None:
             self.saved = {name: self.adapter.get(name) for name in SAVED}
         self.adapter.set('PairableTimeout', dbus.UInt32(timeout))
@@ -225,20 +283,81 @@ class Window(dbus.service.Object):
         self.adapter.set('DiscoverableTimeout', dbus.UInt32(timeout))
         self.adapter.set('Discoverable', dbus.Boolean(True))
         self.adapter.set('Alias', dbus.String(socket.gethostname()))
+        fresh = mode == 'companion' and self.mode != 'companion'
+        if fresh:
+            self.bonded = self.adapter.paired()
+            self.approved = None
+            self.capability(COMPANION_CAPABILITY)
         self.start_timer(timeout)
-        self.mode = 'pairing'
-        log(f'pairing window open for {timeout} s')
-        self.notify('PairingActive', 'PairingRemaining')
+        self.mode = mode
+        log(f'{"companion pairing" if mode == "companion" else "pairing"} window open for {timeout} s')
+        self.notify(*self.names(mode), *(('CompanionKnown',) if fresh else ()))
+
+    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
+    def StartPairing(self, timeout):
+        self.discoverable(self.checked(timeout), 'pairing')
+
+    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
+    def StartCompanionPairing(self, timeout):
+        self.discoverable(self.checked(timeout), 'companion')
 
     @dbus.service.method(SERVICE, in_signature='', out_signature='')
     def StopPairing(self):
-        if self.mode == 'pairing':
+        if self.mode in ('pairing', 'companion'):
             self.close('stopped')
+
+    @dbus.service.method(SERVICE, in_signature='ub', out_signature='')
+    def AnswerConfirm(self, passkey, yes):
+        held = self.held
+        if held is None:
+            return
+        if int(passkey) != held['passkey']:
+            log(f'companion answer for {int(passkey):06d} ignored, holding {held["passkey"]:06d}')
+            return
+        self.held = None
+        if yes:
+            self.approved = held['device']
+            self.resolve = RESOLVE_TICKS
+            log(f'companion confirm accepted {held["device"]}')
+            held['ok']()
+            self.notify('CompanionKnown')
+        else:
+            log(f'companion confirm refused {held["device"]}')
+            held['err'](Rejected('confirmation refused'))
+        self.notify('ConfirmPending', 'ConfirmPasskey', 'ConfirmName')
+        if self.remaining <= 0 and self.resolve <= 0:
+            self.close('timed out')
+
+    @dbus.service.signal(SERVICE, signature='o')
+    def CompanionPaired(self, device):
+        pass
+
+    def held_confirm(self, device, passkey, ok, err):
+        if self.held is not None:
+            err(Rejected('a confirmation is open'))
+            return
+        self.held = {'device': device, 'passkey': int(passkey), 'name': self.adapter.name_of(device),
+                     'ok': ok, 'err': err}
+        log(f'companion confirm {int(passkey):06d} from {device}')
+        self.notify('ConfirmPending', 'ConfirmPasskey', 'ConfirmName')
+
+    def cancel_confirm(self):
+        held = self.held
+        if held is None:
+            return
+        self.held = None
+        held['err'](Rejected('cancelled'))
+        self.notify('ConfirmPending', 'ConfirmPasskey', 'ConfirmName')
+
+    def commit(self, path):
+        log(f'companion paired {path}')
+        self.CompanionPaired(dbus.ObjectPath(path))
+        self.close(f'closed: phone app paired {path}')
 
     @dbus.service.method(SERVICE, in_signature='u', out_signature='')
     def StartSearch(self, timeout):
         timeout = self.checked(timeout)
-        if self.mode == 'pairing':
+        if self.mode in ('pairing', 'companion'):
             self.close('closed: search')
         if self.mode is None:
             self.saved = {name: self.adapter.get(name) for name in SAVED}
@@ -267,9 +386,15 @@ class Window(dbus.service.Object):
         self.notify('Role')
 
     def tick(self):
-        self.remaining -= 1
+        if self.resolve > 0:
+            self.resolve -= 1
+        deferred = self.held is not None or self.resolve > 0
         if self.remaining > 0:
-            self.notify(self.names(self.mode)[1])
+            self.remaining -= 1
+            if self.remaining > 0 or deferred:
+                self.notify(self.names(self.mode)[1])
+                return True
+        if deferred:
             return True
         self.timer = None
         self.close('timed out')
@@ -278,16 +403,24 @@ class Window(dbus.service.Object):
     def close(self, reason):
         if not self.active:
             return
+        self.cancel_confirm()
         mode = self.mode
         if self.timer is not None:
             GLib.source_remove(self.timer)
             self.timer = None
         self.mode = None
         self.remaining = 0
+        self.bonded = set()
+        self.approved = None
+        self.resolve = 0
+        if mode == 'companion':
+            self.notify('CompanionKnown')
+        if mode == 'companion':
+            self.capability(CAPABILITY)
         for name, value in self.saved.items():
             self.adapter.set(name, value)
         self.saved = None
-        if mode == 'pairing':
+        if mode in ('pairing', 'companion'):
             self.adapter.set('Discoverable', dbus.Boolean(False))
         else:
             self.adapter.discovery(False)
@@ -349,12 +482,22 @@ class Agent(dbus.service.Object):
     def DisplayPasskey(self, device, passkey, entered):
         raise self.reject('DisplayPasskey', device)
 
-    @dbus.service.method(AGENT, in_signature='ou', out_signature='')
-    def RequestConfirmation(self, device, passkey):
-        self.gate('RequestConfirmation', device)
+    @dbus.service.method(AGENT, in_signature='ou', out_signature='', async_callbacks=('ok', 'err'))
+    def RequestConfirmation(self, device, passkey, ok, err):
+        if self.window.mode == 'companion':
+            self.window.held_confirm(str(device), passkey, ok, err)
+            return
+        try:
+            self.gate('RequestConfirmation', device)
+        except dbus.DBusException as e:
+            err(e)
+            return
+        ok()
 
     @dbus.service.method(AGENT, in_signature='o', out_signature='')
     def RequestAuthorization(self, device):
+        if self.window.mode == 'companion':
+            raise self.reject('RequestAuthorization', device)
         self.gate('RequestAuthorization', device)
 
     @dbus.service.method(AGENT, in_signature='os', out_signature='')
@@ -369,6 +512,8 @@ class Agent(dbus.service.Object):
     @dbus.service.method(AGENT, in_signature='', out_signature='')
     def Cancel(self):
         log('request cancelled')
+        self.window.resolve = 0
+        self.window.cancel_confirm()
 
 
 class Gate:
@@ -386,6 +531,7 @@ class Gate:
         if 'Paired' in changed and not changed['Paired']:
             self.pending.discard(path)
             self.searched.discard(path)
+            self.window.removed(path)
         if changed.get('Paired') and self.window.mode == 'search':
             self.searched.add(path)
         if changed.get('Paired') or (path in self.pending and changed.get('ServicesResolved')):
@@ -416,6 +562,16 @@ class Gate:
         if not props.get('Paired'):
             self.pending.discard(path)
             self.searched.discard(path)
+            return
+        if self.window.mode == 'companion':
+            self.pending.discard(path)
+            if path == self.window.approved:
+                self.window.commit(path)
+            elif path not in self.window.bonded:
+                log(f'removing {path}, window not approved')
+                self.window.remove(path)
+                self.adapter.remove_device(path)
+                self.window.removed(path)
             return
         if not props.get('ServicesResolved'):
             self.pending.add(path)
@@ -461,8 +617,9 @@ def main():
     Agent(system, window)
     Gate(system, adapter, window)
     manager = dbus.Interface(system.get_object(BLUEZ, '/org/bluez', introspect=False), AGENT_MANAGER)
-    manager.RegisterAgent(dbus.ObjectPath(AGENT_PATH), dbus.String('NoInputNoOutput'))
+    manager.RegisterAgent(dbus.ObjectPath(AGENT_PATH), dbus.String(CAPABILITY))
     manager.RequestDefaultAgent(dbus.ObjectPath(AGENT_PATH))
+    window.manager = manager
     adapter.set('Pairable', dbus.Boolean(False))
     name = dbus.service.BusName(SERVICE, session)
     loop = GLib.MainLoop()

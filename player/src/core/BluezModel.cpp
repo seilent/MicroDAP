@@ -523,6 +523,63 @@ void BluezModel::updatePairing(bool pairing)
     emit pairingChanged();
 }
 
+QString BluezModel::pairingMode() const
+{
+    return m_pairingMode;
+}
+
+bool BluezModel::confirmPending() const
+{
+    return m_confirmPending;
+}
+
+int BluezModel::confirmPasskey() const
+{
+    return m_confirmPasskey;
+}
+
+QString BluezModel::confirmName() const
+{
+    return m_confirmName;
+}
+
+void BluezModel::updatePairingMode(const QString &mode)
+{
+    if (m_pairingMode == mode)
+        return;
+    m_pairingMode = mode;
+    emit pairingModeChanged();
+}
+
+void BluezModel::updateConfirm(bool pending, int passkey, const QString &name)
+{
+    if (m_confirmPending == pending && m_confirmPasskey == passkey && m_confirmName == name)
+        return;
+    m_confirmPending = pending;
+    m_confirmPasskey = passkey;
+    m_confirmName = name;
+    emit confirmChanged();
+}
+
+void BluezModel::updateCompanionSets(const QStringList &known, const QStringList &removing)
+{
+    if (m_companionKnown == known && m_companionRemoving == removing)
+        return;
+    m_companionKnown = known;
+    m_companionRemoving = removing;
+    emit companionSetsChanged();
+}
+
+QStringList BluezModel::companionKnown() const
+{
+    return m_companionKnown;
+}
+
+QStringList BluezModel::companionRemoving() const
+{
+    return m_companionRemoving;
+}
+
 void BluezModel::updatePairingRemaining(int seconds)
 {
     const int value = qMax(0, seconds);

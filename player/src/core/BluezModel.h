@@ -40,6 +40,10 @@ class BluezModel : public QObject
     Q_PROPERTY(QVariantList headsets READ headsets NOTIFY headsetsChanged)
     Q_PROPERTY(QVariantList discovered READ discovered NOTIFY discoveredChanged)
     Q_PROPERTY(QString lastHeadset READ lastHeadset NOTIFY lastHeadsetChanged)
+    Q_PROPERTY(QString pairingMode READ pairingMode NOTIFY pairingModeChanged)
+    Q_PROPERTY(bool confirmPending READ confirmPending NOTIFY confirmChanged)
+    Q_PROPERTY(int confirmPasskey READ confirmPasskey NOTIFY confirmChanged)
+    Q_PROPERTY(QString confirmName READ confirmName NOTIFY confirmChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
 
@@ -85,6 +89,12 @@ public:
     QVariantList discovered() const;
     QString lastHeadset() const;
     static QString lastHeadsetPath();
+    QString pairingMode() const;
+    bool confirmPending() const;
+    int confirmPasskey() const;
+    QString confirmName() const;
+    QStringList companionKnown() const;
+    QStringList companionRemoving() const;
     bool active() const;
     void setActive(bool active);
     bool ready() const;
@@ -107,6 +117,8 @@ public:
     Q_INVOKABLE virtual void want();
     Q_INVOKABLE virtual void setReceiverScope(bool held);
     static QString rolePath();
+    Q_INVOKABLE virtual void startCompanionPairing(int timeoutSeconds = defaultPairingTimeout) = 0;
+    Q_INVOKABLE virtual void answerConfirm(int passkey, bool yes) = 0;
     virtual void setShuffle(const QString &shuffle) = 0;
     virtual void setRepeat(const QString &repeat) = 0;
 
@@ -141,6 +153,10 @@ signals:
     void discoveredChanged();
     void lastHeadsetChanged();
     void wrongRole(const QString &device, const QString &pivot);
+    void pairingModeChanged();
+    void confirmChanged();
+    void companionPaired(const QString &device);
+    void companionSetsChanged();
     void activeChanged();
     void readyChanged();
 
@@ -183,6 +199,9 @@ protected:
     virtual int roleDevices(const QString &role) const = 0;
     virtual void dropRole(const QString &role) = 0;
     virtual void applyRole(const QString &role) = 0;
+    void updatePairingMode(const QString &mode);
+    void updateConfirm(bool pending, int passkey, const QString &name);
+    void updateCompanionSets(const QStringList &known, const QStringList &removing);
 
 private:
     bool m_connected = false;
@@ -220,6 +239,12 @@ private:
     QVariantList m_discovered;
     QString m_lastHeadset;
     QTimer m_switchTimer;
+    QString m_pairingMode;
+    bool m_confirmPending = false;
+    int m_confirmPasskey = 0;
+    QString m_confirmName;
+    QStringList m_companionKnown;
+    QStringList m_companionRemoving;
     bool m_active = true;
     bool m_ready = true;
 };

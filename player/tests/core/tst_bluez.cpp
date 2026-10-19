@@ -177,7 +177,7 @@ void BluezTest::commands()
 void BluezTest::presets()
 {
     FakeBluezModel fake;
-    QCOMPARE(FakeBluezModel::presets().size(), 8);
+    QCOMPARE(FakeBluezModel::presets().size(), 12);
     QVERIFY(!fake.applyPreset(QStringLiteral("bogus")));
     QVERIFY(fake.lastPhone().isEmpty());
     QVERIFY(fake.applyPreset(QStringLiteral("last")));
@@ -214,9 +214,21 @@ void BluezTest::presets()
     QVERIFY(!fake.connected());
     QVERIFY(!fake.transportActive());
 
+    QVERIFY(fake.applyPreset(QStringLiteral("appcode")));
+    QVERIFY(fake.pairing());
+    QCOMPARE(fake.pairingMode(), QStringLiteral("companion"));
+    QVERIFY(fake.confirmPending());
+    QCOMPARE(fake.confirmPasskey(), 482915);
+    QCOMPARE(fake.confirmName(), QStringLiteral("Pixel 8"));
+    QVERIFY(fake.applyPreset(QStringLiteral("appoff")));
+    QVERIFY(!fake.ready());
+    QVERIFY(!fake.confirmPending());
+
     QVERIFY(fake.applyPreset(QStringLiteral("off")));
     QVERIFY(!fake.connected());
     QVERIFY(!fake.pairing());
+    QVERIFY(fake.ready());
+    QVERIFY(fake.pairingMode().isEmpty());
     QVERIFY(fake.deviceName().isEmpty());
     QCOMPARE(fake.battery(), -1);
 }

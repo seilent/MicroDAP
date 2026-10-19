@@ -159,8 +159,30 @@ void PlayOrderModel::changed(int first, int last, const QList<int> &roles)
 Queue::Queue(QObject *parent)
     : QAbstractListModel(parent)
     , m_playOrder(new PlayOrderModel(this))
+    , m_rev(QRandomGenerator::global()->generate())
 {
     connect(this, &Queue::countChanged, m_playOrder, &PlayOrderModel::countChanged);
+    auto bump = [this] {
+        ++m_rev;
+        emit revChanged();
+    };
+    connect(this, &QAbstractItemModel::rowsInserted, this, bump);
+    connect(this, &QAbstractItemModel::rowsRemoved, this, bump);
+    connect(this, &QAbstractItemModel::rowsMoved, this, bump);
+    connect(this, &QAbstractItemModel::modelReset, this, bump);
+    connect(this, &QAbstractItemModel::layoutChanged, this, bump);
+    connect(this, &QAbstractItemModel::dataChanged, this,
+            [bump](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
+                if (roles.isEmpty() || roles.contains(TitleRole) || roles.contains(ArtistRole) || roles.contains(AlbumRole)
+                    || roles.contains(DurationRole) || roles.contains(IdRole))
+                    bump();
+            });
+    connect(this, &Queue::orderChanged, this, bump);
+}
+
+quint32 Queue::rev() const
+{
+    return m_rev;
 }
 
 int Queue::rowCount(const QModelIndex &parent) const

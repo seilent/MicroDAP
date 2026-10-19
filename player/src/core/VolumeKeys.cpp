@@ -293,6 +293,17 @@ void PulseSinkVolume::step(int percent)
     m_pendingSet = -1;
 }
 
+SinkVolume::SinkVolume(QObject *parent)
+    : QObject(parent)
+{
+    connect(this, &SinkVolume::levelChanged, this, [this](int percent) { m_level = percent; });
+}
+
+int SinkVolume::level() const
+{
+    return m_level;
+}
+
 void PulseSinkVolume::set(int percent)
 {
     if (!m_mainloop)

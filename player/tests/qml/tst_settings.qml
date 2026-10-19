@@ -74,6 +74,7 @@ TestCase {
         property string clock: "24h"
         property bool batteryPercent: false
         property bool quickplay: true
+        property bool companion: false
         property string bootSession: "steam"
         property var sessionChoices: ["microdap", "microemu", "steam"]
         property bool available: true
@@ -204,6 +205,7 @@ TestCase {
         id: counters
 
         property int pair: 0
+        property int pairApp: 0
         property int closePlayer: 0
         property int eq: 0
     }
@@ -242,6 +244,7 @@ TestCase {
             rgbControl: fakeRgb
             folders: ["/home/micro/Music", "/run/media/micro/SD"]
             onPairPhone: counters.pair++
+            onPairPhoneApp: counters.pairApp++
             onOpenEq: counters.eq++
             onClosePlayerRequested: counters.closePlayer++
         }
@@ -277,7 +280,7 @@ TestCase {
         ["folders", "rescan"],
         ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
         ["screenOff", "suspend", "sleep", "wifi"],
-        ["boot", "about"]
+        ["boot", "phoneApp", "about"]
     ]
     readonly property var overlayKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
@@ -341,6 +344,7 @@ TestCase {
         fakeSettings.clock = "24h"
         fakeSettings.batteryPercent = false
         fakeSettings.quickplay = true
+        fakeSettings.companion = false
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -374,6 +378,7 @@ TestCase {
         fakePower.updateReloads = 0
         fakeBridge.closes = 0
         counters.pair = 0
+        counters.pairApp = 0
         counters.closePlayer = 0
         counters.eq = 0
         fakeEq.activeOutput = "headphones"
@@ -745,7 +750,8 @@ TestCase {
         tc.absent(page, "keepPhone")
         tc.absent(page, "gameMode")
         tc.absent(page, "closePlayer")
-        compare(tc.keyIndex(page, "about"), tc.keyIndex(page, "boot") + 1)
+        compare(tc.keyIndex(page, "phoneApp"), tc.keyIndex(page, "boot") + 1)
+        compare(tc.keyIndex(page, "about"), tc.keyIndex(page, "phoneApp") + 1)
         for (const r of page.rows) {
             verify(r.title !== "keep phone in game mode")
             verify(r.title !== "game mode")
@@ -1407,6 +1413,31 @@ TestCase {
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
         compare(item.valueItem.font.styleName, "Light")
         compare(item.valueItem.font.capitalization, Font.AllUppercase)
+    }
+
+    function test_phone_app_rows() {
+        const page = open()
+        compare(tc.rowOf(page, "phoneApp").title, "phone app")
+        compare(tc.rowOf(page, "phoneApp").value, "off")
+        tc.absent(page, "pairApp")
+        tc.sheetOpen(page, "phoneApp")
+        compare(tc.items(page), JSON.stringify(["off", "on"]))
+        compare(tc.focused(page), "off")
+        verify(router.dispatch("down", false))
+        compare(tc.focused(page), "on")
+        compare(fakeSettings.companion, false)
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.companion, false)
+        tc.sheetOpen(page, "phoneApp")
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.companion, true)
+        compare(tc.rowOf(page, "phoneApp").value, "on")
+        compare(tc.keyIndex(page, "pairApp"), tc.keyIndex(page, "phoneApp") + 1)
+        compare(tc.rowOf(page, "pairApp").title, "pair phone app")
+        tc.focusKey(page, "pairApp")
+        verify(router.dispatch("a", false))
+        compare(counters.pairApp, 1)
     }
 
     function test_max_and_power_on_volume_rows() {
@@ -2774,7 +2805,7 @@ TestCase {
     function test_boot_into_hidden_without_settings_key() {
         const page = open({ settings: null })
         tc.absent(page, "boot")
-        compare(JSON.stringify(tc.allKeys(page)[4]), JSON.stringify(["about"]))
+        compare(JSON.stringify(tc.allKeys(page)[4]), JSON.stringify(["phoneApp", "about"]))
     }
 
     function test_boot_into_overlay() {

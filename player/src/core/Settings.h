@@ -54,6 +54,8 @@ class Settings : public QObject
     Q_PROPERTY(bool batteryPercent READ batteryPercent WRITE setBatteryPercent NOTIFY batteryPercentChanged)
     Q_PROPERTY(bool quickplay READ quickplay WRITE setQuickplay NOTIFY quickplayChanged)
     Q_PROPERTY(QString bootSession READ bootSession WRITE setBootSession NOTIFY bootSessionChanged)
+    Q_PROPERTY(bool companion READ companion WRITE setCompanion NOTIFY companionChanged)
+    Q_PROPERTY(QString companionPhone READ companionPhone WRITE setCompanionPhone NOTIFY companionPhoneChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
 public:
@@ -182,6 +184,10 @@ public:
     QString bootSession() const;
     void setBootSession(const QString &name);
     Q_INVOKABLE QStringList bootSessions() const;
+    bool companion() const;
+    void setCompanion(bool on);
+    QString companionPhone() const;
+    void setCompanionPhone(const QString &address);
 
 signals:
     void outputChanged();
@@ -220,6 +226,8 @@ signals:
     void batteryPercentChanged();
     void quickplayChanged();
     void bootSessionChanged();
+    void companionChanged();
+    void companionPhoneChanged();
     void availableChanged();
     void valueChanged(const QString &key);
     void imported(bool ok);

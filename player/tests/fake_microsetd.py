@@ -51,6 +51,8 @@ KEYS = {
     'microdap.clock': ('s', '24h', {'enum': ['24h', '12h', 'off']}),
     'microdap.battery_percent': ('b', False, {}),
     'microdap.quickplay': ('b', True, {}),
+    'microdap.companion': ('b', False, {}),
+    'microdap.companion_phone': ('s', '', {}),
     'microdap.roots': ('as', [], {}),
     'microdap.accent_hue': ('u', 350, {}),
     'microdap.accent_from_art': ('b', False, {}),

@@ -84,6 +84,11 @@ add_library(microdapcore STATIC
     src/core/Library.h
     src/core/LibraryWatcher.cpp
     src/core/LibraryWatcher.h
+    src/core/LinkProfile.cpp
+    src/core/LinkProfile.h
+    src/core/LinkProto.h
+    src/core/LinkServer.cpp
+    src/core/LinkServer.h
     src/core/Lyrics.cpp
     src/core/Lyrics.h
     src/core/Models.cpp
@@ -142,6 +147,7 @@ add_library(microdapcore STATIC
 target_include_directories(microdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
 target_compile_definitions(microdapcore PRIVATE MICRODAP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(microdapcore PUBLIC
+    flatdap_link
     microdapfiio
     microdaprows
     Qt6::Core
@@ -194,6 +200,7 @@ set(microdap_qml
     qml/MicroDap/components/JumpLetter.qml
     qml/MicroDap/components/Keyboard.qml
     qml/MicroDap/components/LyricsColumn.qml
+    qml/MicroDap/components/PairingPanel.qml
     qml/MicroDap/GlyphPaths.js
     qml/MicroDap/EqFormat.js
     qml/MicroDap/ComponentsShot.qml
@@ -203,6 +210,7 @@ set(microdap_qml
     qml/MicroDap/screens/Home.qml
     qml/MicroDap/screens/Quickplay.qml
     qml/MicroDap/screens/Bluetooth.qml
+    qml/MicroDap/screens/PhoneAppPairing.qml
     qml/MicroDap/screens/SwitchPrompt.qml
     qml/MicroDap/screens/MusicHub.qml
     qml/MicroDap/screens/NowPlaying.qml
@@ -219,6 +227,7 @@ set(microdap_qml
     qml/MicroDap/screens/PowerMenu.qml
     qml/MicroDap/OverlayLayer.qml
     qml/MicroDap/BluetoothShot.qml
+    qml/MicroDap/PhoneAppShot.qml
     qml/MicroDap/PromptShot.qml
     qml/MicroDap/PowerShot.qml
     qml/MicroDap/SaverShot.qml
