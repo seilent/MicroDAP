@@ -43,6 +43,9 @@ TestCase {
         property string hpAmp: "lohifi"
         property int spkGain: 102
         property int volumeStep: 5
+        property string outputSlot: "headphones"
+        property int balance: 0
+        property string crossfeed: "off"
         property string rgb: "system"
         property string btCodec: "auto"
         property var roots: ["/home/micro/Music"]
@@ -260,14 +263,14 @@ TestCase {
 
     readonly property var expectedPivots: ["output", "library", "display", "power", "system"]
     readonly property var expectedKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "toasts"],
         ["screenOff", "suspend", "wifi"],
@@ -297,6 +300,9 @@ TestCase {
         fakeSettings.hpAmp = "lohifi"
         fakeSettings.spkGain = 102
         fakeSettings.volumeStep = 5
+        fakeSettings.outputSlot = "headphones"
+        fakeSettings.balance = 0
+        fakeSettings.crossfeed = "off"
         fakeSettings.rgb = "system"
         fakeSettings.btCodec = "auto"
         fakeSettings.roots = ["/home/micro/Music"]
@@ -674,7 +680,7 @@ TestCase {
         const page = open()
         compare(router.dispatch("up", false), false)
         compare(page.focusIndex, 0)
-        for (let i = 0; i < 13; i++)
+        for (let i = 0; i < tc.keyIndex(page, "pair"); i++)
             verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "pair"))
         compare(router.dispatch("down", false), false)
@@ -939,7 +945,7 @@ TestCase {
 
     function test_value_sheet_drafts_apply_only_on_a() {
         const page = open()
-        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "codec", "level", "rate", "orientation", "scale", "boot"]) {
+        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "codec", "level", "rate", "crossfeed", "orientation", "scale", "boot"]) {
             verify(tc.rowOf(page, key).spec.draft, key)
             const before = String(page.currentOf(key))
             tc.sheetOpen(page, key)
@@ -1115,7 +1121,7 @@ TestCase {
     function test_mixer_rows_order() {
         const page = open()
         const output = tc.keyIndex(page, "output")
-        compare(JSON.stringify(tc.keys(page).slice(output, output + 6)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec"]))
+        compare(JSON.stringify(tc.keys(page).slice(output, output + 7)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "balance", "codec"]))
         compare(tc.rowOf(page, "hpGain").title, "headphone gain")
         compare(tc.rowOf(page, "hpGain").value, "normal")
         compare(tc.rowOf(page, "hpAmp").title, "headphone amp")
@@ -1297,6 +1303,88 @@ TestCase {
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
         compare(item.valueItem.font.styleName, "Light")
         compare(item.valueItem.font.capitalization, Font.AllUppercase)
+    }
+
+    function test_balance_row() {
+        const page = open()
+        const row = tc.rowOf(page, "balance")
+        compare(row.title, "balance")
+        compare(row.value, "center")
+        compare(row.spec.kind, "edit")
+        verify(row.spec.bounded)
+        compare(row.readOnly, false)
+        tc.edit(page, "balance")
+        for (let i = 0; i < 3; i++)
+            verify(router.dispatch("left", false))
+        compare(fakeSettings.balance, -3)
+        compare(tc.rowOf(page, "balance").value, "l 1.5 db")
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(fakeSettings.balance, 0)
+        tc.edit(page, "balance")
+        for (let i = 0; i < 25; i++)
+            verify(router.dispatch("left", false))
+        compare(fakeSettings.balance, -20)
+        compare(tc.rowOf(page, "balance").value, "l 10 db")
+        for (let i = 0; i < 45; i++)
+            verify(router.dispatch("right", false))
+        compare(fakeSettings.balance, 20)
+        compare(tc.rowOf(page, "balance").value, "r 10 db")
+        tc.confirm(page)
+        compare(fakeSettings.balance, 20)
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "balance").value, "r 10 db (not on bit perfect)")
+        compare(tc.rowOf(page, "balance").readOnly, false)
+        tc.edit(page, "balance")
+        verify(router.dispatch("left", false))
+        compare(fakeSettings.balance, 19)
+        tc.confirm(page)
+        fakeSettings.outputSlot = ""
+        compare(tc.rowOf(page, "balance").readOnly, true)
+        tc.focusKey(page, "balance")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+    }
+
+    function test_balance_outside_change_closes_edit() {
+        const page = open()
+        tc.edit(page, "balance")
+        verify(router.dispatch("right", false))
+        compare(fakeSettings.balance, 1)
+        fakeSettings.balance = 6
+        compare(page.editing, false)
+        compare(fakeSettings.balance, 6)
+    }
+
+    function test_crossfeed_row() {
+        const page = open({ eq: fakeEq })
+        compare(tc.keyIndex(page, "crossfeed"), tc.keyIndex(page, "eq") + 1)
+        compare(tc.rowOf(page, "crossfeed").title, "crossfeed")
+        compare(tc.rowOf(page, "crossfeed").value, "off")
+        tc.sheetOpen(page, "crossfeed")
+        compare(tc.items(page), JSON.stringify(["off", "default", "chu moy", "jan meier"]))
+        compare(page.sheet.mark, 0)
+        verify(router.dispatch("up", false))
+        compare(tc.focused(page), "jan meier")
+        compare(fakeSettings.crossfeed, "off")
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.crossfeed, "janMeier")
+        compare(tc.rowOf(page, "crossfeed").value, "jan meier")
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "crossfeed").value, "jan meier (not on bit perfect)")
+        compare(tc.rowOf(page, "crossfeed").readOnly, false)
+        fakeSettings.outputSlot = "speaker"
+        fakeSettings.crossfeed = "off"
+        compare(tc.rowOf(page, "crossfeed").value, "headphones only")
+        compare(tc.rowOf(page, "crossfeed").readOnly, true)
+        tc.focusKey(page, "crossfeed")
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        fakeSettings.outputSlot = "usb"
+        compare(tc.rowOf(page, "crossfeed").readOnly, false)
+        fakeSettings.outputSlot = "bt"
+        compare(tc.rowOf(page, "crossfeed").value, "headphones only")
     }
 
     function useUsb() {
@@ -1702,7 +1790,7 @@ TestCase {
     function test_eq_row() {
         const page = open({ eq: fakeEq })
         verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "replaygain") + 1)
-        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "playThrough") - 1)
+        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "crossfeed") - 1)
         compare(tc.rowOf(page, "eq").title, "eq")
         compare(tc.rowOf(page, "eq").value, "HD 600")
         compare(tc.itemOf(page, "eq").valueItem.font.capitalization, Font.AllUppercase)

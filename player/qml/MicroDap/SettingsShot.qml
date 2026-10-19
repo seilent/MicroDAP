@@ -9,14 +9,16 @@ Item {
     property string fixture: "browse"
 
     readonly property bool levelShot: root.fixture.startsWith("bit-perfect")
+    readonly property bool chainShot: root.fixture.startsWith("balance") || root.fixture.startsWith("crossfeed")
     readonly property bool rateShot: root.fixture.startsWith("sample-rate")
     readonly property bool dacShot: root.fixture.startsWith("eq-dac")
     readonly property bool bootShot: root.fixture.startsWith("boot")
     readonly property bool aboutShot: root.fixture.startsWith("about")
-    readonly property bool usbShot: (root.levelShot || root.rateShot || root.dacShot) && root.fixture !== "bit-perfect-usb-only"
+    readonly property bool usbShot: (root.levelShot || root.rateShot || root.dacShot || root.fixture === "crossfeed-bit-perfect")
+        && root.fixture !== "bit-perfect-usb-only"
     readonly property string levelShown: root.fixture === "bit-perfect-phone" ? "exclusive (phone)"
         : root.fixture === "bit-perfect-unavailable" ? "exclusive (unavailable)"
-        : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" ? "on" : "off"
+        : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" || root.fixture === "crossfeed-bit-perfect" ? "on" : "off"
 
     Rectangle {
         anchors.fill: parent
@@ -24,6 +26,18 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.chainShot) {
+            screen.focusKey(root.fixture.startsWith("balance") ? "balance" : "crossfeed")
+            screen.keepFocusVisible()
+            if (root.fixture === "balance-edit") {
+                screen.activate()
+                screen.step(-1)
+            } else if (root.fixture === "crossfeed-sheet") {
+                screen.activate()
+                screen.sheet.handleAction("down", false)
+            }
+            return
+        }
         if (root.bootShot || root.aboutShot) {
             screen.focusKey(root.bootShot ? "boot" : "about")
             if (root.fixture === "boot-edit") {
@@ -98,6 +112,9 @@ Item {
         property string hpAmp: "lohifi"
         property int spkGain: 102
         property int volumeStep: 5
+        readonly property string outputSlot: root.fixture === "crossfeed-speaker" ? "speaker" : sampleOutput.activeOutput
+        property int balance: root.chainShot ? -7 : 0
+        property string crossfeed: root.chainShot ? "janMeier" : "off"
         property string rgb: "accent"
         property string btCodec: "auto"
         property var roots: ["/home/micro/Music", "/run/media/micro/SD"]
@@ -113,7 +130,7 @@ Item {
         property bool autoRotate: root.fixture === "auto-rotate" || root.fixture === "auto-rotate-below"
         property bool touch: true
         property string outputLevel: root.fixture === "bit-perfect-phone" || root.fixture === "bit-perfect-unavailable" ? "exclusive"
-            : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" ? "bitperfect" : "off"
+            : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" || root.fixture === "crossfeed-bit-perfect" ? "bitperfect" : "off"
         property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
         property string playThrough: root.fixture === "play-through" ? "albums" : "off"
         property string resume: "position"

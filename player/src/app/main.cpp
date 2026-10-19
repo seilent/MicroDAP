@@ -296,6 +296,9 @@ int main(int argc, char *argv[])
     } else {
         eqControl->awaitOutput(outputControl.get());
     }
+    settings.setOutputSlot(eqControl->activeOutput());
+    QObject::connect(eqControl.get(), &microdap::EqControl::activeOutputChanged, &settings,
+                     [&settings, eq = eqControl.get()] { settings.setOutputSlot(eq->activeOutput()); });
     microdap::PlayThrough playThrough(player.queue(), &library, &albums);
     playThrough.setMode(settings.playThrough());
     playThrough.setRoots(settings.roots());

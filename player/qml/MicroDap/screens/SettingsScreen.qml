@@ -60,6 +60,10 @@ Page {
     readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
     readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
     readonly property int volumeStep: page.settings !== null && page.settings.volumeStep !== undefined ? Number(page.settings.volumeStep) : 5
+    readonly property string outputSlot: page.settings !== null && page.settings.outputSlot !== undefined ? String(page.settings.outputSlot) : ""
+    readonly property bool crossfeedSlot: page.outputSlot === "headphones" || page.outputSlot === "usb"
+    readonly property int balance: page.settings !== null && page.settings.balance !== undefined ? Number(page.settings.balance) : 0
+    readonly property string crossfeed: page.settings !== null && page.settings.crossfeed !== undefined ? String(page.settings.crossfeed) : "off"
     readonly property string rgb: page.settings !== null && page.settings.rgb !== undefined ? String(page.settings.rgb) : "system"
     readonly property bool rgbSupported: !page.overlay && page.rgbControl !== null && page.rgbControl.supported === true
     readonly property string rgbValue: page.rgbSupported ? page.rgb : "unsupported"
@@ -89,6 +93,7 @@ Page {
         ? String(page.settings.outputLevel) : "off"
     readonly property string sampleRate: page.settings !== null && page.settings.sampleRate !== undefined ? String(page.settings.sampleRate) : "auto"
     readonly property bool levelEffective: page.outputMode !== null && page.outputMode.effective === true
+    readonly property string chainNote: page.levelEffective ? " (not on bit perfect)" : ""
     readonly property string levelStatus: page.outputMode !== null && page.outputMode.levelStatus !== undefined ? String(page.outputMode.levelStatus) : ""
     readonly property string levelValue: page.overlay ? "dap only"
         : page.outputLevel === "off" ? "off"
@@ -246,6 +251,21 @@ Page {
         return EqFormat.listed(page.eq.profileMap(output)) ? text + " (dac)" : text
     }
 
+    function balanceText(value: int): string {
+        return value === 0 ? "center" : (value < 0 ? "l " : "r ") + Math.abs(value) / 2 + " db"
+    }
+
+    function crossfeedWord(mode: string): string {
+        switch (mode) {
+        case "chuMoy":
+            return "chu moy"
+        case "janMeier":
+            return "jan meier"
+        default:
+            return mode
+        }
+    }
+
     function levelWord(level: string): string {
         return level === "bitperfect" ? "on" : level
     }
@@ -300,6 +320,10 @@ Page {
             return !page.rgbSupported
         case "boot":
             return page.bootReadOnly
+        case "slot":
+            return page.outputSlot === ""
+        case "crossfeed":
+            return !page.crossfeedSlot
         default:
             return false
         }
@@ -330,6 +354,10 @@ Page {
             return page.spkGainText(page.spkGain)
         case "volumeStep":
             return page.volumeStep + "%"
+        case "balance":
+            return page.balanceText(page.balance) + (page.outputSlot === "" ? "" : page.chainNote)
+        case "crossfeed":
+            return !page.crossfeedSlot ? "headphones only" : page.crossfeedWord(page.crossfeed) + page.chainNote
         case "codec":
             return page.codec
         case "level":
@@ -656,7 +684,16 @@ Page {
 
     function step(delta: int): bool {
         const r = page.focusedRow
-        if (r === null || r.key !== "accent")
+        if (r === null)
+            return false
+        if (r.key === "balance") {
+            const spec = r.spec
+            const next = Math.max(spec.min, Math.min(spec.max, page.balance + delta * spec.step))
+            if (next !== page.balance)
+                page.write("balance", next)
+            return true
+        }
+        if (r.key !== "accent")
             return false
         page.write("accentHue", Ui.stepHue(page.accentHue, delta))
         return true
@@ -704,6 +741,8 @@ Page {
             return value + "%"
         case "level":
             return page.levelWord(String(value))
+        case "crossfeed":
+            return page.crossfeedWord(String(value))
         case "orientation":
             return String(value).replace("-", " ")
         case "scale":
@@ -832,6 +871,10 @@ Page {
             return page.spkGain
         case "volumeStep":
             return page.volumeStep
+        case "balance":
+            return page.balance
+        case "crossfeed":
+            return page.crossfeed
         case "codec":
             return page.codec
         case "level":

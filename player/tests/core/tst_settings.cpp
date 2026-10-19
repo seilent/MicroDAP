@@ -70,6 +70,7 @@ private slots:
     void eqKeysThroughDaemon();
     void rotationSubscribe();
     void rowTable();
+    void balanceCrossfeedSlot();
 
 private:
     QString ini(const QString &text);
@@ -656,7 +657,68 @@ void SettingsTest::rowTable()
     QCOMPARE(saverLyrics->pivot, QStringLiteral("display"));
     QCOMPARE(saverLyrics->kind, QStringLiteral("flip"));
     QCOMPARE(saverLyrics->setting, QStringLiteral("saverLyrics"));
+    const SettingsRows::Row *balance = SettingsRows::find(QStringLiteral("balance"));
+    QVERIFY(balance && balance->bounded && !balance->draft);
+    QCOMPARE(balance->kind, QStringLiteral("edit"));
+    QCOMPARE(int(balance->min), -Settings::maxBalance);
+    QCOMPARE(int(balance->max), Settings::maxBalance);
+    const SettingsRows::Row *crossfeed = SettingsRows::find(QStringLiteral("crossfeed"));
+    QVERIFY(crossfeed && crossfeed->draft && !crossfeed->bounded);
+    QCOMPARE(crossfeed->kind, QStringLiteral("sheet"));
+    QCOMPARE(strings(crossfeed->values), Settings::crossfeedModes());
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
+}
+
+void SettingsTest::balanceCrossfeedSlot()
+{
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    Settings settings(&client);
+    QCOMPARE(settings.outputSlot(), QString());
+    settings.setBalance(-4);
+    settings.setCrossfeed(QStringLiteral("default"));
+    QCOMPARE(settings.balance(), 0);
+    QCOMPARE(settings.crossfeed(), QStringLiteral("off"));
+
+    QSignalSpy balance(&settings, &Settings::balanceChanged);
+    QSignalSpy crossfeed(&settings, &Settings::crossfeedChanged);
+    settings.setOutputSlot(QStringLiteral("headphones"));
+    QCOMPARE(balance.count(), 1);
+    QCOMPARE(crossfeed.count(), 1);
+    settings.setBalance(-7);
+    settings.setCrossfeed(QStringLiteral("janMeier"));
+    QCOMPARE(settings.balance(), -7);
+    QCOMPARE(settings.crossfeed(), QStringLiteral("janMeier"));
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.balance.headphones")).toInt(), -7, waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.crossfeed.headphones")).toString(),
+                              QStringLiteral("janMeier"), waitMs);
+
+    settings.setOutputSlot(QStringLiteral("speaker"));
+    QCOMPARE(settings.balance(), 0);
+    QCOMPARE(settings.crossfeed(), QStringLiteral("off"));
+    const int sets = m_set.calls().filter(QStringLiteral("Set ")).size();
+    settings.setCrossfeed(QStringLiteral("default"));
+    settings.setBalance(25);
+    QCOMPARE(settings.balance(), Settings::maxBalance);
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.balance.speaker")).toInt(), Settings::maxBalance, waitMs);
+    QTest::qWait(100);
+    QCOMPARE(m_set.calls().filter(QStringLiteral("Set ")).size(), sets + 1);
+
+    settings.setOutputSlot(QStringLiteral("headphones"));
+    QCOMPARE(settings.balance(), -7);
+    QCOMPARE(settings.crossfeed(), QStringLiteral("janMeier"));
+
+    balance.clear();
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("audio.balance.headphones"), FakeService::variant(4)});
+    QTRY_COMPARE_WITH_TIMEOUT(settings.balance(), 4, waitMs);
+    QCOMPARE(balance.count(), 1);
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("audio.balance.usb"), FakeService::variant(-2)});
+    QTRY_COMPARE_WITH_TIMEOUT(settings.value(QStringLiteral("audio.balance.usb")).toInt(), -2, waitMs);
+    QCOMPARE(settings.balance(), 4);
+    QCOMPARE(balance.count(), 1);
+
+    settings.setOutputSlot(QStringLiteral("hdmi"));
+    QCOMPARE(settings.outputSlot(), QString());
+    QCOMPARE(settings.balance(), 0);
 }
 
 QTEST_GUILESS_MAIN(SettingsTest)

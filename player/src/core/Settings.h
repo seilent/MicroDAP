@@ -34,6 +34,9 @@ class Settings : public QObject
     Q_PROPERTY(QString hpAmp READ hpAmp WRITE setHpAmp NOTIFY hpAmpChanged)
     Q_PROPERTY(int spkGain READ spkGain WRITE setSpkGain NOTIFY spkGainChanged)
     Q_PROPERTY(int volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
+    Q_PROPERTY(QString outputSlot READ outputSlot WRITE setOutputSlot NOTIFY outputSlotChanged)
+    Q_PROPERTY(int balance READ balance WRITE setBalance NOTIFY balanceChanged)
+    Q_PROPERTY(QString crossfeed READ crossfeed WRITE setCrossfeed NOTIFY crossfeedChanged)
     Q_PROPERTY(QString rgb READ rgb WRITE setRgb NOTIFY rgbChanged)
     Q_PROPERTY(QString orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
     Q_PROPERTY(bool autoRotate READ autoRotate WRITE setAutoRotate NOTIFY autoRotateChanged)
@@ -55,6 +58,7 @@ public:
     static constexpr int minSaverSeconds = 10;
     static constexpr int maxSaverSeconds = 300;
     static constexpr int defaultAccentHue = 350;
+    static constexpr int maxBalance = 20;
 
     Settings();
     explicit Settings(MicroSet::Client *client, QObject *parent = nullptr);
@@ -71,6 +75,10 @@ public:
     static QStringList hpAmps();
     static QList<int> spkGains();
     static QList<int> volumeSteps();
+    static QStringList crossfeedModes();
+    static QStringList crossfeedSlots();
+    static QString balanceKey(const QString &slot);
+    static QString crossfeedKey(const QString &slot);
     static QStringList rgbModes();
     static QStringList orientations();
     static QStringList outputLevels();
@@ -125,6 +133,12 @@ public:
     void setSpkGain(int step);
     int volumeStep() const;
     void setVolumeStep(int step);
+    QString outputSlot() const;
+    void setOutputSlot(const QString &slot);
+    int balance() const;
+    void setBalance(int balance);
+    QString crossfeed() const;
+    void setCrossfeed(const QString &mode);
     QString rgb() const;
     void setRgb(const QString &mode);
     QString orientation() const;
@@ -170,6 +184,9 @@ signals:
     void hpAmpChanged();
     void spkGainChanged();
     void volumeStepChanged();
+    void outputSlotChanged();
+    void balanceChanged();
+    void crossfeedChanged();
     void rgbChanged();
     void orientationChanged();
     void autoRotateChanged();
@@ -197,6 +214,7 @@ private:
     std::unique_ptr<MicroSet::Client> m_owned;
     MicroSet::Client *m_client = nullptr;
     QVariantMap m_values;
+    QString m_slot;
     bool m_available = false;
     bool m_importing = false;
 };

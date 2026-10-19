@@ -64,11 +64,15 @@ for slot in ('headphones', 'speaker', 'usb', 'bt'):
     KEYS['audio.eq.%s.on' % slot] = ('b', False, {})
     KEYS['audio.eq.%s.name' % slot] = ('s', '', {})
     KEYS['audio.eq.%s.filters' % slot] = ('as', ['preamp 0'], {})
+    KEYS['audio.balance.%s' % slot] = ('i', 0, {'enum': list(range(-20, 21))})
+for slot in ('headphones', 'usb'):
+    KEYS['audio.crossfeed.%s' % slot] = ('s', 'off', {'enum': ['off', 'default', 'chuMoy', 'janMeier']})
 
 TYPES = {
     's': (dbus.String,),
     'b': (dbus.Boolean,),
     'u': (dbus.UInt32,),
+    'i': (dbus.Int32,),
     'd': (dbus.Double,),
 }
 
@@ -80,6 +84,8 @@ def wrap(sig, value):
         return dbus.Boolean(value)
     if sig == 'u':
         return dbus.UInt32(value)
+    if sig == 'i':
+        return dbus.Int32(value)
     if sig == 'd':
         return dbus.Double(value)
     return dbus.Array([dbus.String(v) for v in value], signature='s')
@@ -90,7 +96,7 @@ def plain(sig, value):
         return [str(v) for v in value]
     if sig == 'b':
         return bool(value)
-    if sig == 'u':
+    if sig in ('u', 'i'):
         return int(value)
     if sig == 'd':
         return float(value)

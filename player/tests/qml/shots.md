@@ -96,6 +96,10 @@
 | album | `art-collapse`, `art-dock`, `art-docked` | `--size 640x960`, docked also `960x640` | art 71 u at 155; art at 150 with the lines at 60 u; docked art at 103 beside the lines, rows from 186 | pending |
 | nowplaying | `clock-24h`, `clock-12h`, `percent`, `percent-low` | `--size 640x960`, `percent` also `960x640` | 19:30, 7:30, 73% left of the glyph, 5% white beside the accent glyph | pending |
 | home | `quickplay-off` | `--size 640x960` and `960x640` | no Quickplay panel, play ring kept | pending |
+| settings | `balance`, `balance-edit` | `--size 640x960` and `960x640` | BALANCE L 3.5 DB after VOLUME STEP; edit mode L 4 DB in the accent | 2026-10-20 |
+| settings | `crossfeed-sheet` | `--size 640x960` and `960x640` | CROSSFEED sheet OFF, DEFAULT, CHU MOY, JAN MEIER marked in the accent | 2026-10-20 |
+| settings | `crossfeed-speaker` | `--size 640x960` and `960x640` | CROSSFEED HEADPHONES ONLY on the speaker, BALANCE editable | 2026-10-20 |
+| settings | `crossfeed-bit-perfect` | `--size 640x960` and `960x640` | BALANCE and CROSSFEED values with `(NOT ON BIT PERFECT)`, clear of the titles | 2026-10-20 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

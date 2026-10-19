@@ -117,10 +117,15 @@ bool eqKey(const QString &key)
     return false;
 }
 
+const QString balancePrefix = QStringLiteral("audio.balance.");
+const QString crossfeedPrefix = QStringLiteral("audio.crossfeed.");
+
 QMetaType::Type typeOf(const QString &key)
 {
     if (const Key *entry = find(key))
         return entry->type;
+    if (key.startsWith(balancePrefix))
+        return QMetaType::Int;
     if (key.endsWith(QLatin1StringView(".on")))
         return QMetaType::Bool;
     if (key.endsWith(QLatin1StringView(".filters")))
@@ -133,6 +138,8 @@ QVariant typed(const QString &key, const QVariant &value)
     switch (typeOf(key)) {
     case QMetaType::UInt:
         return QVariant::fromValue(value.toUInt());
+    case QMetaType::Int:
+        return QVariant::fromValue(value.toInt());
     case QMetaType::Bool:
         return QVariant::fromValue(value.toBool());
     case QMetaType::Double:
@@ -181,7 +188,10 @@ QVariantMap defaults()
         out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
         out.insert(EqFilters::key(slot, QStringLiteral("name")), QString());
         out.insert(EqFilters::key(slot, QStringLiteral("filters")), QStringList{QStringLiteral("preamp 0")});
+        out.insert(Settings::balanceKey(slot), 0);
     }
+    for (const QString &slot : Settings::crossfeedSlots())
+        out.insert(Settings::crossfeedKey(slot), QStringLiteral("off"));
     return out;
 }
 
@@ -313,6 +323,26 @@ QList<int> Settings::spkGains()
 QList<int> Settings::volumeSteps()
 {
     return {2, 5, 10};
+}
+
+QStringList Settings::crossfeedModes()
+{
+    return {QStringLiteral("off"), QStringLiteral("default"), QStringLiteral("chuMoy"), QStringLiteral("janMeier")};
+}
+
+QStringList Settings::crossfeedSlots()
+{
+    return {QStringLiteral("headphones"), QStringLiteral("usb")};
+}
+
+QString Settings::balanceKey(const QString &slot)
+{
+    return balancePrefix + slot;
+}
+
+QString Settings::crossfeedKey(const QString &slot)
+{
+    return crossfeedPrefix + slot;
 }
 
 QStringList Settings::playThroughModes()
@@ -575,6 +605,10 @@ void Settings::notify(const QString &key)
 {
     if (const Key *entry = find(key))
         emit (this->*(entry->notify))();
+    else if (key == balanceKey(m_slot))
+        emit balanceChanged();
+    else if (key == crossfeedKey(m_slot))
+        emit crossfeedChanged();
     emit valueChanged(key);
 }
 
@@ -785,6 +819,48 @@ void Settings::setVolumeStep(int step)
 {
     if (volumeSteps().contains(step))
         store(keyVolumeStep, QVariant::fromValue(uint(step)));
+}
+
+QString Settings::outputSlot() const
+{
+    return m_slot;
+}
+
+void Settings::setOutputSlot(const QString &slot)
+{
+    const QString next = EqControl::outputs().contains(slot) ? slot : QString();
+    if (next == m_slot)
+        return;
+    m_slot = next;
+    emit outputSlotChanged();
+    emit balanceChanged();
+    emit crossfeedChanged();
+}
+
+int Settings::balance() const
+{
+    if (m_slot.isEmpty())
+        return 0;
+    return qBound(-maxBalance, m_values.value(balanceKey(m_slot)).toInt(), maxBalance);
+}
+
+void Settings::setBalance(int balance)
+{
+    if (!m_slot.isEmpty())
+        store(balanceKey(m_slot), qBound(-maxBalance, balance, maxBalance));
+}
+
+QString Settings::crossfeed() const
+{
+    if (!crossfeedSlots().contains(m_slot))
+        return QStringLiteral("off");
+    return pick(m_values.value(crossfeedKey(m_slot)).toString(), crossfeedModes(), QStringLiteral("off"));
+}
+
+void Settings::setCrossfeed(const QString &mode)
+{
+    if (crossfeedSlots().contains(m_slot) && crossfeedModes().contains(mode))
+        store(crossfeedKey(m_slot), mode);
 }
 
 QString Settings::rgb() const

@@ -127,6 +127,9 @@ QList<Row> build()
 
     out.push_back(steps("output", "volumeStep", "volume step", "volumeStep", numbers({2, 5, 10})));
 
+    Row balance = range("output", "balance", "balance", "edit", "balance", -20, 20, 1);
+    out.push_back(readOnly(bounded(balance), "slot"));
+
     Row codec = choice("output", "codec", "bluetooth codec", "btCodec", words({"auto", "aptx", "aac", "ldac", "sbc"}));
     out.push_back(draft(codec, "profile switch"));
 
@@ -142,6 +145,9 @@ QList<Row> build()
     out.push_back(readOnly(draft(replaygain, "can raise the level"), "always"));
 
     out.push_back(action("output", "eq", "eq", "eq"));
+
+    Row crossfeed = choice("output", "crossfeed", "crossfeed", "crossfeed", words({"off", "default", "chuMoy", "janMeier"}));
+    out.push_back(readOnly(draft(crossfeed, "off plays louder than the other values"), "crossfeed"));
     out.push_back(choice("output", "playThrough", "play through", "playThrough", words({"off", "folders", "albums"})));
     out.push_back(choice("output", "resume", "resume", "resume", words({"off", "track", "position"})));
     out.push_back(toggle("output", "autoNowPlaying", "auto now playing", "autoNowPlaying"));
