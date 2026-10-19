@@ -125,6 +125,28 @@ TestCase {
         }
     }
 
+    Component {
+        id: sheetPageComponent
+
+        Page {
+            id: sheetPage
+
+            property alias sheet: longSheet
+
+            function handleAction(name: string, repeat: bool): bool {
+                return longSheet.handleAction(name, repeat)
+            }
+
+            Sheet {
+                id: longSheet
+
+                anchors.fill: parent
+                title: "long"
+                items: ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
+            }
+        }
+    }
+
     PageStack {
         id: pages
 
@@ -409,6 +431,130 @@ TestCase {
         compare(sheet.bar.x, Ui.px(16 - 8))
         verify(sheet.handleAction("b", false))
         compare(sheet.shown, false)
+    }
+
+    function openLongSheet() {
+        pages.clear()
+        pages.animate = false
+        const page = pages.push(sheetPageComponent, {})
+        page.sheet.open()
+        page.sheet.complete()
+        page.sheet.list.forceLayout()
+        return page.sheet
+    }
+
+    function test_sheet_scrolls_long_list() {
+        const s = tc.openLongSheet()
+        verify(s.shownRows < 12)
+        fuzzyCompare(s.panel.height, 2 * s.edge + s.titleHeight + s.shownRows * s.pitch, 1e-6)
+        verify(s.panel.height <= 960)
+        verify(960 - s.panel.height < s.pitch)
+        fuzzyCompare(s.window.height, s.shownRows * s.pitch, 1e-6)
+        for (let i = 0; i < 11; i++)
+            verify(s.handleAction("down", false))
+        compare(s.focusIndex, 11)
+        compare(s.firstRow, 12 - s.shownRows)
+        fuzzyCompare(s.window.contentY, s.firstRow * s.pitch, 1e-6)
+        verify(s.handleAction("down", false))
+        compare(s.focusIndex, 11)
+        for (let i = 0; i < 11; i++)
+            verify(s.handleAction("up", false))
+        compare(s.focusIndex, 0)
+        compare(s.firstRow, 0)
+        fuzzyCompare(s.window.contentY, 0, 1e-6)
+        s.close()
+        s.complete()
+        pages.clear()
+    }
+
+    function test_sheet_scrolls_long_list_landscape() {
+        Ui.setSurface(960, 640)
+        pages.width = 960
+        pages.height = 640
+        const s = tc.openLongSheet()
+        verify(s.shownRows < 12)
+        verify(s.panel.height <= 640)
+        verify(640 - s.panel.height < s.pitch)
+        for (let i = 0; i < 11; i++)
+            s.handleAction("down", false)
+        compare(s.firstRow, 12 - s.shownRows)
+        s.close()
+        s.complete()
+        pages.clear()
+        pages.width = 640
+        pages.height = 960
+        Ui.setSurface(640, 960)
+    }
+
+    function test_sheet_scrolls_by_drag() {
+        const s = tc.openLongSheet()
+        const p = s.window.mapToItem(tc, s.window.width / 2, s.window.height - s.pitch / 2)
+        mousePress(tc, p.x, p.y)
+        const distance = 3 * s.pitch + Ui.px(Ui.touchSlop)
+        const steps = Math.round(distance / Ui.px(1))
+        for (let i = 1; i <= steps; i++)
+            mouseMove(tc, p.x, p.y - distance * i / steps, -1, Qt.LeftButton)
+        wait(150)
+        mouseRelease(tc, p.x, p.y - distance)
+        wait(0)
+        wait(0)
+        compare(s.firstRow, 3)
+        fuzzyCompare(s.window.contentY, 3 * s.pitch, 1e-6)
+        compare(s.focusIndex, s.shownRows - 1)
+        compare(s.shown, true)
+        s.close()
+        s.complete()
+        pages.clear()
+    }
+
+    function test_second_sheet_back_returns_to_first() {
+        const s = tc.openLongSheet()
+        verify(s.handleAction("down", false))
+        compare(s.focusIndex, 1)
+        s.push("second", ["new playlist", "favorites"])
+        compare(s.depth, 1)
+        compare(s.title, "second")
+        compare(s.items.length, 2)
+        compare(s.focusIndex, 0)
+        compare(s.firstRow, 0)
+        compare(s.animating, true)
+        fuzzyCompare(s.progress, 0, 0.2)
+        s.complete()
+        fuzzyCompare(s.progress, 1, 1e-9)
+        verify(s.handleAction("b", false))
+        compare(s.shown, true)
+        compare(s.depth, 0)
+        compare(s.title, "long")
+        compare(s.items.length, 12)
+        compare(s.focusIndex, 1)
+        s.complete()
+        verify(s.handleAction("b", false))
+        compare(s.shown, false)
+        s.complete()
+        pages.clear()
+    }
+
+    function test_second_sheet_own_mark_and_wrap() {
+        const s = tc.openLongSheet()
+        s.mark = 2
+        s.wrap = true
+        verify(s.handleAction("down", false))
+        s.push("second", ["new playlist", "favorites"])
+        compare(s.mark, -1)
+        compare(s.wrap, false)
+        compare(s.barIndex, 0)
+        verify(s.handleAction("up", false))
+        compare(s.focusIndex, 0)
+        s.complete()
+        verify(s.handleAction("b", false))
+        compare(s.mark, 2)
+        compare(s.wrap, true)
+        s.push("second", ["new playlist"])
+        compare(s.depth, 1)
+        s.close()
+        compare(s.depth, 0)
+        s.complete()
+        pages.clear()
     }
 
     function test_sheet_screenoff() {

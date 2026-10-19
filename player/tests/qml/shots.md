@@ -69,6 +69,7 @@
 | power | `power-long` | `--size 640x960` and `960x640` | a long label runs past the right edge at 640x960 (dialog items do not clip) | 2026-10-16 |
 | settings | browse, `pivot-library`, `pivot-display`, `pivot-power`, `pivot-system` | `--size 640x960` and `960x640` | pivot strip in the hub form, no label rows, every pivot's last row | pending |
 | settings | browse | `--overlay --size 640x960` and `960x640` | `system` with CLOSE PLAYER, no ORIENTATION rows in `display` | pending |
+| overlays | browse | `--size 960x640` | the sheet cell shorter than the sheet: panel pinned at the cell top, REMOVE shown with its focus bar | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured
