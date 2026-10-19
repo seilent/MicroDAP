@@ -72,14 +72,18 @@ qint64 bootSeconds()
     return now.tv_sec;
 }
 
-bool handoffPlaying(const QJsonObject &object)
+bool handoffOf(const QJsonObject &object)
 {
     const qint64 savedAt = static_cast<qint64>(object.value(QStringLiteral("savedAt")).toDouble(-1));
     const qint64 age = bootSeconds() - savedAt;
     return object.value(QStringLiteral("handoff")).toBool(false)
-           && object.value(QStringLiteral("status")).toString() == QLatin1String("playing")
            && object.value(QStringLiteral("bootId")).toString() == Keep::bootId() && savedAt >= 0 && age >= 0
            && age < handoffWindowS;
+}
+
+bool handoffPlaying(const QJsonObject &object)
+{
+    return handoffOf(object) && object.value(QStringLiteral("status")).toString() == QLatin1String("playing");
 }
 
 QList<int> parseOrder(const QJsonArray &array)
@@ -511,8 +515,12 @@ bool State::restoreLegacy(const QJsonObject &object)
     if (entries.isEmpty())
         return false;
     applyModes(object);
+    const bool kept = handoffOf(object);
+    if (!kept && m_resume == QLatin1StringView("off"))
+        return false;
     const int index = object.value(QStringLiteral("index")).toInt(0);
-    const qint64 position = static_cast<qint64>(object.value(QStringLiteral("position")).toDouble(0));
+    const qint64 position = kept || m_resume != QLatin1StringView("track")
+        ? static_cast<qint64>(object.value(QStringLiteral("position")).toDouble(0)) : 0;
     restorePlayer(entries, index, position, handoffPlaying(object),
                   parseOrder(object.value(QStringLiteral("order")).toArray()));
     return true;
@@ -550,11 +558,14 @@ bool State::restoreQueue(const QJsonObject &state, bool hasState)
         modes.insert(QStringLiteral("shuffle"), !order.isEmpty());
         applyModes(modes);
     }
+    const bool kept = hasState && handoffOf(state);
+    if (!kept && m_resume == QLatin1StringView("off"))
+        return false;
     const bool match = hasState && state.value(QStringLiteral("queueRev")).toInteger(-1) == rev;
     if (match) {
-        restorePlayer(entries, state.value(QStringLiteral("index")).toInt(0),
-                      static_cast<qint64>(state.value(QStringLiteral("position")).toDouble(0)),
-                      handoffPlaying(state), order);
+        const qint64 position = kept || m_resume != QLatin1StringView("track")
+            ? static_cast<qint64>(state.value(QStringLiteral("position")).toDouble(0)) : 0;
+        restorePlayer(entries, state.value(QStringLiteral("index")).toInt(0), position, handoffPlaying(state), order);
     } else {
         restorePlayer(entries, queue.value(QStringLiteral("index")).toInt(0), 0, false, order);
     }
@@ -598,6 +609,11 @@ bool State::load()
 void State::setRestore(RestorePort *restore)
 {
     m_restore = restore;
+}
+
+void State::setResume(const QString &mode)
+{
+    m_resume = mode;
 }
 
 void State::installSignalHandlers()

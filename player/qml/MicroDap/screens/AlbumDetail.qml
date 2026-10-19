@@ -59,6 +59,7 @@ Page {
 
     signal openQueue()
     signal sheetAction(string action, string kind, int id)
+    signal listPlayed(int count)
 
     list: trackList
     pageId: page.albumId
@@ -114,19 +115,18 @@ Page {
             trackList.refresh()
     }
 
-    function play(start: int): void {
+    function play(start: int): int {
         const startId = start >= 0 && start < page.trackIds.length ? page.trackIds[start] : -1
-        if (page.player !== null && typeof page.player.playSource === "function") {
-            page.player.playSource("album", page.albumId, "play", startId)
-            return
-        }
+        if (page.player !== null && typeof page.player.playSource === "function")
+            return Number(page.player.playSource("album", page.albumId, "play", startId))
         console.info("microdap: play album " + page.albumId + " " + start)
+        return 0
     }
 
     function activate(): void {
         if (page.focusedRow === null)
             return
-        page.play(page.rowIndex)
+        page.listPlayed(page.play(page.rowIndex))
     }
 
     function moveRow(delta: int): bool {

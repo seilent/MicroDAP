@@ -48,6 +48,7 @@ Page {
     signal openAlbum(int id)
     signal openQueue()
     signal sheetAction(string action, string kind, int id)
+    signal listPlayed(int count)
 
     list: page.activeList
     pageId: page.artistId
@@ -107,16 +108,15 @@ Page {
         page.panes[page.shownPivot].refresh()
     }
 
-    function playSource(kind: string, id: int, mode: string, startId: int): void {
-        if (page.player !== null && typeof page.player.playSource === "function") {
-            page.player.playSource(kind, id, mode, startId)
-            return
-        }
+    function playSource(kind: string, id: int, mode: string, startId: int): int {
+        if (page.player !== null && typeof page.player.playSource === "function")
+            return Number(page.player.playSource(kind, id, mode, startId))
         console.info("microdap: " + mode + " " + kind + " " + id)
+        return 0
     }
 
-    function playArtist(mode: string): void {
-        page.playSource("artist", page.artistId, mode, -1)
+    function playArtist(mode: string): int {
+        return page.playSource("artist", page.artistId, mode, -1)
     }
 
     function addToQueue() {
@@ -127,8 +127,8 @@ Page {
         page.playSource("album", albumId, "play", -1)
     }
 
-    function playSong(row: var): void {
-        page.playSource("artist", page.artistId, "play", row.id)
+    function playSong(row: var): int {
+        return page.playSource("artist", page.artistId, "play", row.id)
     }
 
     function ring(index: int): Item {
@@ -140,12 +140,11 @@ Page {
     }
 
     function activateRing(index: int): void {
-        if (index === 0)
-            page.playArtist("play")
-        else if (index === 1)
+        if (index === 1) {
             page.addToQueue()
-        else
-            page.playArtist("shuffle")
+        } else {
+            page.listPlayed(page.playArtist(index === 0 ? "play" : "shuffle"))
+        }
         const item = page.ring(index)
         if (item !== null)
             item.toggled()
@@ -159,10 +158,11 @@ Page {
         const t = page.focusedRow
         if (t === null)
             return
-        if (t.kind === "album")
+        if (t.kind === "album") {
             page.openAlbum(t.id)
-        else
-            page.playSong(t)
+            return
+        }
+        page.listPlayed(page.playSong(t))
     }
 
     function sheetTarget(): var {

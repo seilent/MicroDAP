@@ -62,6 +62,7 @@ Page {
     signal jumpRequested(string letter)
     signal play(string kind, int id)
     signal sheetAction(string action, string kind, int id)
+    signal listPlayed(int count)
 
     list: hub.activeList
 
@@ -404,21 +405,19 @@ Page {
         return hub.player !== null && typeof hub.player.playSource === "function"
     }
 
-    function playSong(row: var): void {
-        if (hub.canPlaySource()) {
-            hub.player.playSource("all", 0, "play", row.id)
-            return
-        }
+    function playSong(row: var): int {
+        if (hub.canPlaySource())
+            return Number(hub.player.playSource("all", 0, "play", row.id))
         hub.play("song", row.id)
+        return 0
     }
 
-    function playFolderSong(row: var): void {
+    function playFolderSong(row: var): int {
         const m = hub.foldersModel
-        if (hub.player !== null && typeof hub.player.playIds === "function" && m !== null && m !== undefined) {
-            hub.player.playIds(m.tracks(m.folder), "play", row.id)
-            return
-        }
+        if (hub.player !== null && typeof hub.player.playIds === "function" && m !== null && m !== undefined)
+            return Number(hub.player.playIds(m.tracks(m.folder), "play", row.id))
         hub.play("song", row.id)
+        return 0
     }
 
     function openFolder(id: int): void {
@@ -446,12 +445,11 @@ Page {
         return m.pathLine(Ui.font(Ui.sectionLabel), hub.width - 2 * Ui.px(Ui.hubEdge))
     }
 
-    function playCollection(kind: string, id: int): void {
-        if (hub.canPlaySource()) {
-            hub.player.playSource(kind, id, "play", -1)
-            return
-        }
+    function playCollection(kind: string, id: int): int {
+        if (hub.canPlaySource())
+            return Number(hub.player.playSource(kind, id, "play", -1))
         hub.play(kind, id)
+        return 0
     }
 
     function activate(): void {
@@ -464,10 +462,7 @@ Page {
             hub.openJumpGrid()
             break
         case "song":
-            if (hub.pivotIndex === 5)
-                hub.playFolderSong(t)
-            else
-                hub.playSong(t)
+            hub.listPlayed(hub.pivotIndex === 5 ? hub.playFolderSong(t) : hub.playSong(t))
             break
         case "folder":
             hub.openFolder(t.id)
@@ -477,7 +472,7 @@ Page {
         case "genre":
         case "playlist":
         case "favorites":
-            hub.playCollection(t.kind, t.id)
+            hub.listPlayed(hub.playCollection(t.kind, t.id))
             break
         case "nowplaying":
             hub.nowPlaying()

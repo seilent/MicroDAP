@@ -33,6 +33,7 @@ Page {
     signal nowPlaying()
     signal play(string kind, int id)
     signal sheetAction(string action, string kind, int id)
+    signal listPlayed(int count)
 
     list: listView
 
@@ -98,16 +99,15 @@ Page {
         countAnim.start()
     }
 
-    function playRow(r: var) {
+    function playRow(r: var): int {
         if (r.kind === "nowplaying") {
             page.nowPlaying()
-            return
+            return 0
         }
-        if (page.player !== null && typeof page.player.playSource === "function") {
-            page.player.playSource(r.kind, r.id, "play", -1)
-            return
-        }
+        if (page.player !== null && typeof page.player.playSource === "function")
+            return Number(page.player.playSource(r.kind, r.id, "play", -1))
         page.play(r.kind, r.id)
+        return 0
     }
 
     function pinLabel(id: int): string {
@@ -161,8 +161,12 @@ Page {
             return sheet.handleAction(name, repeat)
         switch (name) {
         case "a":
-            if (!repeat && page.focusedRow !== null)
-                page.playRow(page.focusedRow)
+            if (!repeat && page.focusedRow !== null) {
+                const r = page.focusedRow
+                const count = page.playRow(r)
+                if (r.kind !== "nowplaying")
+                    page.listPlayed(count)
+            }
             return true
         case "x":
             if (!repeat)

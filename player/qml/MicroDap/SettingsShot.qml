@@ -69,6 +69,13 @@ Item {
                 screen.sheet.handleAction("down", false)
             return
         }
+        if (root.fixture === "play-through" || root.fixture === "play-through-sheet" || root.fixture === "resume-sheet") {
+            screen.focusKey(root.fixture === "resume-sheet" ? "resume" : root.fixture === "play-through" ? "autoNowPlaying" : "playThrough")
+            screen.keepFocusVisible()
+            if (root.fixture !== "play-through")
+                screen.activate()
+            return
+        }
         if (root.fixture.startsWith("pivot-")) {
             screen.switchPivot(screen.pivots.indexOf(root.fixture.substring(6)))
             return
@@ -108,6 +115,9 @@ Item {
         property string outputLevel: root.fixture === "bit-perfect-phone" || root.fixture === "bit-perfect-unavailable" ? "exclusive"
             : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" ? "bitperfect" : "off"
         property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
+        property string playThrough: root.fixture === "play-through" ? "albums" : "off"
+        property string resume: "position"
+        property bool autoNowPlaying: root.fixture === "play-through"
         property string bootSession: root.fixture === "boot-missing" ? "handheld-desktop-session" : "steam"
 
         function bootSessions() {

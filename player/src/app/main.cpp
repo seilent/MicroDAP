@@ -20,6 +20,7 @@
 #include "OutputMode.h"
 #include "OutputWatch.h"
 #include "OverlayBridge.h"
+#include "PlayThrough.h"
 #include "Player.h"
 #include "PowerBridge.h"
 #include "RgbControl.h"
@@ -295,8 +296,17 @@ int main(int argc, char *argv[])
     } else {
         eqControl->awaitOutput(outputControl.get());
     }
+    microdap::PlayThrough playThrough(player.queue(), &library, &albums);
+    playThrough.setMode(settings.playThrough());
+    playThrough.setRoots(settings.roots());
+    QObject::connect(&settings, &microdap::Settings::playThroughChanged, &playThrough,
+                     [&settings, &playThrough] { playThrough.setMode(settings.playThrough()); });
+    QObject::connect(&settings, &microdap::Settings::rootsChanged, &playThrough,
+                     [&settings, &playThrough] { playThrough.setRoots(settings.roots()); });
+    QObject::connect(&player, &microdap::Player::trackStarted, &playThrough, &microdap::PlayThrough::onTrackStarted);
     microdap::State state(&player);
     state.setRestore(outputMode.get());
+    state.setResume(settings.resume());
     state.installSignalHandlers();
     state.load();
     microdap::Mpris mpris(&player, QDBusConnection::sessionBus());

@@ -19,6 +19,32 @@
       "label": "Sample rate",
       "ui": {"order": 1}
     },
+    "microdap.play_through": {
+      "type": "s",
+      "default": "off",
+      "enum": ["off", "folders", "albums"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Play through",
+      "ui": {"order": 2}
+    },
+    "microdap.resume": {
+      "type": "s",
+      "default": "position",
+      "enum": ["off", "track", "position"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Resume",
+      "ui": {"order": 3}
+    },
+    "microdap.auto_now_playing": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Auto now playing",
+      "ui": {"order": 4}
+    },
     "microdap.roots": {
       "type": "as",
       "default": [],

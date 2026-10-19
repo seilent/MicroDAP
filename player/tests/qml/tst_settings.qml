@@ -60,6 +60,9 @@ TestCase {
         property bool touch: true
         property string outputLevel: "off"
         property string sampleRate: "auto"
+        property string playThrough: "off"
+        property string resume: "position"
+        property bool autoNowPlaying: false
         property string bootSession: "steam"
         property var sessionChoices: ["microdap", "microemu", "steam"]
         property bool available: true
@@ -253,14 +256,14 @@ TestCase {
 
     readonly property var expectedPivots: ["output", "library", "display", "power", "system"]
     readonly property var expectedKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "scale", "saver", "toasts"],
         ["screenOff", "suspend", "wifi"],
@@ -307,6 +310,9 @@ TestCase {
         fakeSettings.touch = true
         fakeSettings.outputLevel = "off"
         fakeSettings.sampleRate = "auto"
+        fakeSettings.playThrough = "off"
+        fakeSettings.resume = "position"
+        fakeSettings.autoNowPlaying = false
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -660,7 +666,7 @@ TestCase {
         const page = open()
         compare(router.dispatch("up", false), false)
         compare(page.focusIndex, 0)
-        for (let i = 0; i < 10; i++)
+        for (let i = 0; i < 13; i++)
             verify(router.dispatch("down", false))
         compare(page.focusIndex, tc.keyIndex(page, "pair"))
         compare(router.dispatch("down", false), false)
@@ -702,6 +708,31 @@ TestCase {
         compare(tc.rowItem(page, 0).valueItem.text, "speaker")
         compare(router.dispatch("left", false), false)
         compare(fakeSettings.output, "speaker")
+    }
+
+    function test_play_through_resume_and_auto_now_playing_rows() {
+        const page = open()
+        compare(tc.rowOf(page, "playThrough").value, "off")
+        compare(tc.rowOf(page, "resume").value, "position")
+        compare(tc.rowOf(page, "autoNowPlaying").value, "off")
+        tc.sheetOpen(page, "playThrough")
+        compare(tc.items(page), JSON.stringify(["off", "folders", "albums"]))
+        verify(router.dispatch("down", false))
+        compare(fakeSettings.playThrough, "folders")
+        verify(router.dispatch("a", false))
+        compare(tc.rowOf(page, "playThrough").value, "folders")
+        tc.sheetOpen(page, "resume")
+        compare(tc.items(page), JSON.stringify(["off", "track", "position"]))
+        compare(page.sheet.focusIndex, 2)
+        verify(router.dispatch("down", false))
+        compare(fakeSettings.resume, "off")
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.resume, "position")
+        tc.focusKey(page, "autoNowPlaying")
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.autoNowPlaying, true)
+        compare(tc.rowOf(page, "autoNowPlaying").value, "on")
     }
 
     function test_value_sheet_hold_applies_nothing() {
@@ -1627,7 +1658,7 @@ TestCase {
     function test_eq_row() {
         const page = open({ eq: fakeEq })
         verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "replaygain") + 1)
-        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "pair") - 1)
+        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "playThrough") - 1)
         compare(tc.rowOf(page, "eq").title, "eq")
         compare(tc.rowOf(page, "eq").value, "HD 600")
         compare(tc.itemOf(page, "eq").valueItem.font.capitalization, Font.AllUppercase)

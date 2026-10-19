@@ -136,6 +136,14 @@ void SettingsTest::defaultsWithoutDaemon()
     QVERIFY(settings.touch());
     QCOMPARE(settings.outputLevel(), QStringLiteral("off"));
     QCOMPARE(settings.sampleRate(), QStringLiteral("auto"));
+    QCOMPARE(settings.playThrough(), QStringLiteral("off"));
+    QCOMPARE(settings.resume(), QStringLiteral("position"));
+    QVERIFY(!settings.autoNowPlaying());
+    settings.setPlayThrough(QStringLiteral("genres"));
+    QCOMPARE(settings.playThrough(), QStringLiteral("off"));
+    settings.setResume(QStringLiteral("track"));
+    QCOMPARE(settings.resume(), QStringLiteral("track"));
+    settings.setResume(QStringLiteral("position"));
     QCOMPARE(settings.value(QStringLiteral("audio.eq.bt.filters")).toStringList(), QStringList{QStringLiteral("preamp 0")});
     QCOMPARE(Settings::outputs(), QStringList({QStringLiteral("auto"), QStringLiteral("speaker"), QStringLiteral("headphones"),
                                                QStringLiteral("usb"), QStringLiteral("bt")}));
@@ -627,6 +635,8 @@ void SettingsTest::rowTable()
     QCOMPARE(strings(SettingsRows::find(QStringLiteral("level"))->values), Settings::outputLevels());
     QCOMPARE(strings(SettingsRows::find(QStringLiteral("orientation"))->values), Settings::orientations());
     QCOMPARE(strings(SettingsRows::find(QStringLiteral("rgb"))->values), Settings::rgbModes());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("playThrough"))->values), Settings::playThroughModes());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("resume"))->values), Settings::resumeModes());
     QCOMPARE(ints(SettingsRows::find(QStringLiteral("saver"))->values), Settings::saverSteps());
     QCOMPARE(ints(SettingsRows::find(QStringLiteral("screenOff"))->values), Settings::screenOffSteps());
     QCOMPARE(ints(SettingsRows::find(QStringLiteral("suspend"))->values), Settings::suspendSteps());

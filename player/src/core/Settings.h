@@ -40,6 +40,9 @@ class Settings : public QObject
     Q_PROPERTY(bool touch READ touch WRITE setTouch NOTIFY touchChanged)
     Q_PROPERTY(QString outputLevel READ outputLevel WRITE setOutputLevel NOTIFY outputLevelChanged)
     Q_PROPERTY(QString sampleRate READ sampleRate WRITE setSampleRate NOTIFY sampleRateChanged)
+    Q_PROPERTY(QString playThrough READ playThrough WRITE setPlayThrough NOTIFY playThroughChanged)
+    Q_PROPERTY(QString resume READ resume WRITE setResume NOTIFY resumeChanged)
+    Q_PROPERTY(bool autoNowPlaying READ autoNowPlaying WRITE setAutoNowPlaying NOTIFY autoNowPlayingChanged)
     Q_PROPERTY(QString bootSession READ bootSession WRITE setBootSession NOTIFY bootSessionChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
@@ -69,6 +72,8 @@ public:
     static QStringList orientations();
     static QStringList outputLevels();
     static QStringList sampleRates();
+    static QStringList playThroughModes();
+    static QStringList resumeModes();
     Q_INVOKABLE static QStringList defaultRoots();
     static QList<int> saverSteps();
     static QList<int> screenOffSteps();
@@ -128,6 +133,12 @@ public:
     void setOutputLevel(const QString &level);
     QString sampleRate() const;
     void setSampleRate(const QString &rate);
+    QString playThrough() const;
+    void setPlayThrough(const QString &mode);
+    QString resume() const;
+    void setResume(const QString &mode);
+    bool autoNowPlaying() const;
+    void setAutoNowPlaying(bool on);
     QString bootSession() const;
     void setBootSession(const QString &name);
     Q_INVOKABLE QStringList bootSessions() const;
@@ -155,6 +166,9 @@ signals:
     void touchChanged();
     void outputLevelChanged();
     void sampleRateChanged();
+    void playThroughChanged();
+    void resumeChanged();
+    void autoNowPlayingChanged();
     void bootSessionChanged();
     void availableChanged();
     void valueChanged(const QString &key);

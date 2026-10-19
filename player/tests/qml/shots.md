@@ -86,6 +86,9 @@
 | keyboard | `kb-number-q` | `--size 640x960` and `960x640` | `0` two cells, `.` | pending |
 | keyboard | `kb-number-gain` | `--size 640x960` and `960x640` | `-` `0` `.`, unit DB | pending |
 | keyboard | `kb-refused` | `--size 640x960` and `960x640` | toast GAIN over `-24 to 12 db`, draft kept | pending |
+| settings | `play-through` | `--size 640x960` and `960x640` | PLAY THROUGH ALBUMS, RESUME POSITION, AUTO NOW PLAYING ON after EQ | pending |
+| settings | `play-through-sheet` | `--size 640x960` and `960x640` | OFF FOLDERS ALBUMS, OFF in the accent | pending |
+| settings | `resume-sheet` | `--size 640x960` and `960x640` | OFF TRACK POSITION, POSITION in the accent | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

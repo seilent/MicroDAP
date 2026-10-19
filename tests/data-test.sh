@@ -63,8 +63,9 @@ python3 - "${data}/microset/schema.d/50-microdap.json" <<'PY' || fail "schema ch
 import json, re, sys
 d = json.load(open(sys.argv[1]))
 assert d["owner"] == "microdap", d["owner"]
-want = {"output_level", "sample_rate", "roots", "accent_hue", "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch",
-        "rgb", "overlay_toasts", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
+want = {"output_level", "sample_rate", "play_through", "resume", "auto_now_playing", "roots", "accent_hue",
+        "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch", "rgb", "overlay_toasts",
+        "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
 keys = d["keys"]
 assert {k.split(".", 1)[1] for k in keys} == want, sorted(keys)
 for name, e in keys.items():
@@ -79,6 +80,10 @@ for name, e in keys.items():
     if "min" in e:
         assert e["min"] <= v <= e["max"], name
 assert keys["microdap.rgb"]["enum"] == ["system", "accent", "off"]
+assert keys["microdap.play_through"]["enum"] == ["off", "folders", "albums"]
+assert keys["microdap.resume"]["enum"] == ["off", "track", "position"]
+assert keys["microdap.resume"]["default"] == "position"
+assert keys["microdap.auto_now_playing"]["default"] is False
 PY
 
 for f in $(find "${data}" -type f) "${repo}/CMakeLists.txt"; do

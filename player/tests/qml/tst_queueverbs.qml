@@ -79,6 +79,7 @@ TestCase {
         property var calls: []
 
         signal added(int count)
+        signal trackStarted(int index)
 
         function playSource(kind, id, mode, startId) {
             fakePlayer.calls = fakePlayer.calls.concat([{ kind: kind, id: id, mode: mode, startId: startId }])
@@ -91,11 +92,27 @@ TestCase {
         }
     }
 
+    QtObject {
+        id: fakeSettings
+
+        property string output: "auto"
+        property string btCodec: "auto"
+        property var roots: []
+        property real scale: 1.0
+        property int saverSeconds: 30
+        property bool overlayToasts: false
+        property int screenOffSeconds: 0
+        property int suspendMinutes: 10
+        property bool wifiOffScreenOff: false
+        property bool autoNowPlaying: false
+    }
+
     Main {
         id: main
 
         library: fakeLibrary
         player: fakePlayer
+        settings: fakeSettings
         shotWidth: 640
         shotHeight: 960
     }
@@ -109,6 +126,15 @@ TestCase {
         fakeQueue.shuffle = false
         fakeLibrary.all = [1, 2, 3, 4, 5]
         tc.toast.hide()
+        fakeSettings.autoNowPlaying = false
+        fakePlayer.status = 0
+        fakePlayer.current = {}
+    }
+
+    function home() {
+        while (main.pageStack.depth > 1)
+            main.pageStack.pop()
+        main.pageStack.completeAll()
     }
 
     function last() {
@@ -211,5 +237,52 @@ TestCase {
         compare(tc.last().kind, "album")
         compare(tc.last().id, 12)
         compare(tc.last().mode, "play")
+    }
+
+    function test_auto_now_playing_from_a_list() {
+        fakePlayer.current = { id: 1, title: "Song 1", artist: "Addison Road" }
+        fakePlayer.status = main.statusPlaying
+        main.listPlayed(3)
+        fakePlayer.trackStarted(0)
+        compare(main.topScreen, "home")
+        fakeSettings.autoNowPlaying = true
+        main.listPlayed(3)
+        compare(main.topScreen, "home")
+        fakePlayer.trackStarted(0)
+        main.pageStack.completeAll()
+        compare(main.topScreen, "nowplaying")
+        tc.home()
+    }
+
+    function test_auto_now_playing_only_after_its_play() {
+        fakeSettings.autoNowPlaying = true
+        fakePlayer.current = { id: 1, title: "Song 1", artist: "Addison Road" }
+        main.listPlayed(0)
+        fakePlayer.trackStarted(0)
+        compare(main.topScreen, "home")
+        main.listPlayed(2)
+        fakePlayer.trackStarted(0)
+        main.pageStack.completeAll()
+        compare(main.topScreen, "nowplaying")
+        tc.home()
+        fakePlayer.trackStarted(1)
+        compare(main.topScreen, "home")
+        main.listPlayed(2)
+        main.navigate("music")
+        main.pageStack.completeAll()
+        fakePlayer.trackStarted(0)
+        compare(main.topScreen, "music")
+        tc.home()
+        fakePlayer.trackStarted(0)
+        compare(main.topScreen, "home")
+    }
+
+    function test_auto_now_playing_not_from_a_sheet() {
+        fakeSettings.autoNowPlaying = true
+        fakePlayer.current = { id: 1, title: "Song 1", artist: "Addison Road" }
+        fakePlayer.status = main.statusPlaying
+        main.sheetAction("play", "album", 12)
+        main.playEntry({ kind: "album", id: 12 })
+        compare(main.topScreen, "home")
     }
 }

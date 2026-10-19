@@ -89,6 +89,7 @@ private slots:
     void pauseAndPausedSeekSaved();
     void restorePendingSkipsPauseSave();
     void emptyOrderKeepsListOrder();
+    void resumeModes();
 
 private:
     qint64 savePlaying(const QString &path, bool handoff);
@@ -308,6 +309,64 @@ void StateTest::emptyOrderKeepsListOrder()
         QCOMPARE(player.queue()->order(), QList<int>({0, 1}));
         player.stop();
     }
+}
+
+void StateTest::resumeModes()
+{
+    const QString path = m_dir.path() + QStringLiteral("/resume/state.json");
+    {
+        const QByteArray sink = qgetenv("MICRODAP_AUDIO_SINK");
+        qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+        Player player;
+        qputenv("MICRODAP_AUDIO_SINK", sink);
+        State state(&player, path);
+        player.play(m_entries, 1);
+        player.queue()->setRepeat(Queue::All);
+        QVERIFY(QTest::qWaitFor([&player] { return player.status() == Player::Playing && player.position() >= 500; },
+                                playTimeoutMs));
+        QVERIFY(state.save(false));
+    }
+    QJsonObject saved;
+    QVERIFY(State::read(path, saved));
+    const qint64 position = static_cast<qint64>(saved.value(QStringLiteral("position")).toDouble(-1));
+    QVERIFY(position >= 500);
+
+    {
+        Player player;
+        State state(&player, path);
+        state.setResume(QStringLiteral("off"));
+        QVERIFY(!state.load());
+        QCOMPARE(player.queue()->count(), 0);
+        QCOMPARE(player.queue()->repeat(), Queue::All);
+    }
+    {
+        Player player;
+        State state(&player, path);
+        state.setResume(QStringLiteral("track"));
+        QVERIFY(state.load());
+        QCOMPARE(player.queue()->currentIndex(), 1);
+        QCOMPARE(player.status(), Player::Paused);
+        QCOMPARE(player.position(), 0);
+        QCOMPARE(player.queue()->repeat(), Queue::All);
+    }
+    {
+        Player player;
+        State state(&player, path);
+        state.setResume(QStringLiteral("position"));
+        QVERIFY(state.load());
+        QCOMPARE(player.queue()->currentIndex(), 1);
+        QCOMPARE(player.status(), Player::Paused);
+        QCOMPARE(player.position(), position);
+    }
+
+    const QString kept = m_dir.path() + QStringLiteral("/resume-kept/state.json");
+    QVERIFY(savePlaying(kept, true) >= 500);
+    Player player;
+    State state(&player, kept);
+    state.setResume(QStringLiteral("off"));
+    QVERIFY(state.load());
+    QCOMPARE(player.queue()->count(), 2);
+    QCOMPARE(player.queue()->currentIndex(), 1);
 }
 
 QTEST_GUILESS_MAIN(StateTest)

@@ -142,6 +142,9 @@ QList<Row> build()
     out.push_back(readOnly(draft(replaygain, "can raise the level"), "always"));
 
     out.push_back(action("output", "eq", "eq", "eq"));
+    out.push_back(choice("output", "playThrough", "play through", "playThrough", words({"off", "folders", "albums"})));
+    out.push_back(choice("output", "resume", "resume", "resume", words({"off", "track", "position"})));
+    out.push_back(toggle("output", "autoNowPlaying", "auto now playing", "autoNowPlaying"));
     out.push_back(action("output", "pair", "pair a phone", "pairPhone"));
 
     out.push_back(action("library", "folders", "library folders", "folders"));

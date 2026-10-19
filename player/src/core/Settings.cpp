@@ -53,6 +53,9 @@ const QString keyRgb = QStringLiteral("microdap.rgb");
 const QString keyTouch = QStringLiteral("microdap.touch");
 const QString keyOutputLevel = QStringLiteral("microdap.output_level");
 const QString keySampleRate = QStringLiteral("microdap.sample_rate");
+const QString keyPlayThrough = QStringLiteral("microdap.play_through");
+const QString keyResume = QStringLiteral("microdap.resume");
+const QString keyAutoNowPlaying = QStringLiteral("microdap.auto_now_playing");
 
 constexpr Key keys[] = {
     {"audio.output", QMetaType::QString, &Settings::outputChanged},
@@ -78,6 +81,9 @@ constexpr Key keys[] = {
     {"microdap.touch", QMetaType::Bool, &Settings::touchChanged},
     {"microdap.output_level", QMetaType::QString, &Settings::outputLevelChanged},
     {"microdap.sample_rate", QMetaType::QString, &Settings::sampleRateChanged},
+    {"microdap.play_through", QMetaType::QString, &Settings::playThroughChanged},
+    {"microdap.resume", QMetaType::QString, &Settings::resumeChanged},
+    {"microdap.auto_now_playing", QMetaType::Bool, &Settings::autoNowPlayingChanged},
 };
 
 const Key *find(const QString &key)
@@ -158,6 +164,9 @@ QVariantMap defaults()
         {keyTouch, true},
         {keyOutputLevel, QStringLiteral("off")},
         {keySampleRate, QStringLiteral("auto")},
+        {keyPlayThrough, QStringLiteral("off")},
+        {keyResume, QStringLiteral("position")},
+        {keyAutoNowPlaying, false},
     };
     for (const QString &slot : EqControl::outputs()) {
         out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
@@ -295,6 +304,16 @@ QList<int> Settings::spkGains()
 QList<int> Settings::volumeSteps()
 {
     return {2, 5, 10};
+}
+
+QStringList Settings::playThroughModes()
+{
+    return {QStringLiteral("off"), QStringLiteral("folders"), QStringLiteral("albums")};
+}
+
+QStringList Settings::resumeModes()
+{
+    return {QStringLiteral("off"), QStringLiteral("track"), QStringLiteral("position")};
 }
 
 QStringList Settings::rgbModes()
@@ -794,6 +813,38 @@ bool Settings::saverLyrics() const
 void Settings::setSaverLyrics(bool on)
 {
     store(keySaverLyrics, on);
+}
+
+QString Settings::playThrough() const
+{
+    return pick(m_values.value(keyPlayThrough).toString(), playThroughModes(), QStringLiteral("off"));
+}
+
+void Settings::setPlayThrough(const QString &mode)
+{
+    if (playThroughModes().contains(mode))
+        store(keyPlayThrough, mode);
+}
+
+QString Settings::resume() const
+{
+    return pick(m_values.value(keyResume).toString(), resumeModes(), QStringLiteral("position"));
+}
+
+void Settings::setResume(const QString &mode)
+{
+    if (resumeModes().contains(mode))
+        store(keyResume, mode);
+}
+
+bool Settings::autoNowPlaying() const
+{
+    return m_values.value(keyAutoNowPlaying).toBool();
+}
+
+void Settings::setAutoNowPlaying(bool on)
+{
+    store(keyAutoNowPlaying, on);
 }
 
 bool Settings::touch() const

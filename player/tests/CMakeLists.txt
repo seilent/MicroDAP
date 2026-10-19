@@ -239,6 +239,11 @@ add_test(NAME fiio-cli COMMAND sh -c "${fiio_cli_script}" sh $<TARGET_FILE:micro
          ${CMAKE_CURRENT_SOURCE_DIR}/stub_systemctl.sh)
 microdap_test_env(fiio-cli)
 
+qt_add_executable(tst_playthrough core/tst_playthrough.cpp)
+target_link_libraries(tst_playthrough PRIVATE microdapcore Qt6::Test)
+add_test(NAME playthrough COMMAND tst_playthrough)
+microdap_test_env(playthrough)
+
 qt_add_executable(tst_hubmodels core/tst_hubmodels.cpp)
 target_link_libraries(tst_hubmodels PRIVATE microdapcore Qt6::Test)
 add_test(NAME hubmodels COMMAND tst_hubmodels)
@@ -501,7 +506,8 @@ endforeach()
 foreach(shot IN ITEMS settings:pivot-library settings:pivot-display settings:pivot-power settings:pivot-system
         settings:accent-edit settings:saver-sheet settings:sample-rate-edit settings:touch settings:touch-edit
         settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
-        settings:about-missing power:power-none power:power-long keyboard:browse keyboard:kb-empty keyboard:kb-long
+        settings:about-missing settings:play-through settings:play-through-sheet settings:resume-sheet
+        power:power-none power:power-long keyboard:browse keyboard:kb-empty keyboard:kb-long
         keyboard:kb-petal keyboard:kb-petal-corner keyboard:kb-shift keyboard:kb-symbols keyboard:kb-discard
         keyboard:kb-number-freq keyboard:kb-number-q keyboard:kb-number-gain keyboard:kb-refused)
     string(REPLACE ":" ";" parts ${shot})

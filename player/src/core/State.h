@@ -54,6 +54,7 @@ public:
     void quit(bool handoff = true);
     bool load();
     void setRestore(RestorePort *restore);
+    void setResume(const QString &mode);
     void installSignalHandlers();
 
     Q_INVOKABLE QVariantList stack() const;
@@ -82,6 +83,7 @@ private:
 
     Player *m_player;
     RestorePort *m_restore = nullptr;
+    QString m_resume = QStringLiteral("position");
     QString m_path;
     QString m_queuePath;
     QTimer m_timer;

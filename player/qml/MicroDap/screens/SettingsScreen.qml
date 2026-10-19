@@ -110,6 +110,9 @@ Page {
         : page.dacEqText(page.eqOutput, page.eqRevision)
     readonly property int accentHue: page.settings !== null && page.settings.accentHue !== undefined ? Ui.hueOnGrid(Number(page.settings.accentHue)) : Ui.accentHueDefault
     readonly property bool accentFromArt: page.settings !== null && page.settings.accentFromArt === true
+    readonly property string playThrough: page.settings !== null && page.settings.playThrough !== undefined ? String(page.settings.playThrough) : "off"
+    readonly property string resume: page.settings !== null && page.settings.resume !== undefined ? String(page.settings.resume) : "position"
+    readonly property bool autoNowPlaying: page.settings !== null && page.settings.autoNowPlaying === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
@@ -341,6 +344,12 @@ Page {
             return page.rescanValue
         case "accentArt":
             return page.accentFromArt ? "on" : "off"
+        case "playThrough":
+            return page.playThrough
+        case "resume":
+            return page.resume
+        case "autoNowPlaying":
+            return page.autoNowPlaying ? "on" : "off"
         case "orientation":
             return page.orientationValue
         case "autoRotate":
@@ -821,6 +830,12 @@ Page {
             return page.accentHue
         case "accentArt":
             return page.accentFromArt
+        case "playThrough":
+            return page.playThrough
+        case "resume":
+            return page.resume
+        case "autoNowPlaying":
+            return page.autoNowPlaying
         case "scale":
             return page.savedScale
         case "saver":

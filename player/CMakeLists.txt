@@ -95,6 +95,8 @@ add_library(microdapcore STATIC
     src/core/OverlayBridge.cpp
     src/core/OverlayBridge.h
     src/core/PadSource.h
+    src/core/PlayThrough.cpp
+    src/core/PlayThrough.h
     src/core/Player.cpp
     src/core/Player.h
     src/core/PlaylistStore.cpp

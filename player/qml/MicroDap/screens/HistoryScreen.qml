@@ -32,6 +32,7 @@ Page {
 
     signal play(string kind, int id)
     signal sheetAction(string action, string kind, int id)
+    signal listPlayed(int count)
 
     list: page.activeList
 
@@ -114,12 +115,11 @@ Page {
         return moved
     }
 
-    function playEntry(e: var): void {
-        if (page.player !== null && typeof page.player.playSource === "function" && (e.kind === "song" || e.kind === "album")) {
-            page.player.playSource(e.kind, e.id, "play", -1)
-            return
-        }
+    function playEntry(e: var): int {
+        if (page.player !== null && typeof page.player.playSource === "function" && (e.kind === "song" || e.kind === "album"))
+            return Number(page.player.playSource(e.kind, e.id, "play", -1))
         page.play(e.kind, e.id)
+        return 0
     }
 
     function pinLabel(kind: string, id: int): string {
@@ -249,8 +249,9 @@ Page {
                 page.switchPivot(1)
             return true
         case "a":
-            if (!repeat && page.focusedEntry !== null)
-                page.playEntry(page.focusedEntry)
+            if (!repeat && page.focusedEntry !== null) {
+                page.listPlayed(page.playEntry(page.focusedEntry))
+            }
             return true
         case "x":
             if (!repeat)

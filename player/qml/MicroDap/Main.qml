@@ -109,6 +109,7 @@ Window {
         : !root.sweepSwitched ? 1 - Motion.sineOut(root.sweepOut)
         : Motion.sineOut(root.sweepIn)
     property var lastToastId: null
+    property Item autoNowPage: null
     property string addSource: ""
     readonly property bool hidden: root.overlay && !root.overlayMapped
     readonly property bool touchOn: !root.overlay && !root.screenshot && (root.settings === null || root.settings.touch !== false)
@@ -665,6 +666,12 @@ Window {
             console.info("microdap: shuffle all, empty library")
     }
 
+    function listPlayed(count: int): void {
+        root.autoNowPage = null
+        if (count > 0 && root.settings !== null && root.settings.autoNowPlaying === true)
+            root.autoNowPage = pages.currentItem
+    }
+
     function playEntry(entry: var): void {
         const kind = entry.kind === undefined || entry.kind === null ? "" : String(entry.kind)
         const id = Number(entry.id)
@@ -798,6 +805,13 @@ Window {
             overlays.toast.show("", text)
         }
 
+        function onTrackStarted() {
+            const page = root.autoNowPage
+            root.autoNowPage = null
+            if (page !== null && pages.currentItem === page)
+                root.openNowPlaying()
+        }
+
         function onCurrentChanged() {
             root.trackChangedWhileHidden()
         }
@@ -821,6 +835,10 @@ Window {
 
         function onDepthChanged() {
             root.syncStack()
+        }
+
+        function onCurrentItemChanged() {
+            root.autoNowPage = null
         }
     }
 
@@ -1168,6 +1186,7 @@ Window {
             onNowPlaying: root.openNowPlaying()
             onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onListPlayed: (count) => root.listPlayed(count)
         }
     }
 
@@ -1185,6 +1204,7 @@ Window {
             onNowPlaying: root.openNowPlaying()
             onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onListPlayed: (count) => root.listPlayed(count)
         }
     }
 
@@ -1201,6 +1221,7 @@ Window {
             library: root.library
             onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onListPlayed: (count) => root.listPlayed(count)
         }
     }
 
@@ -1254,6 +1275,7 @@ Window {
             onOpenAlbum: (id) => root.openAlbum(id)
             onOpenQueue: root.openQueue()
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onListPlayed: (count) => root.listPlayed(count)
         }
     }
 
@@ -1270,6 +1292,7 @@ Window {
             bluez: root.bluez
             onOpenQueue: root.openQueue()
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onListPlayed: (count) => root.listPlayed(count)
         }
     }
 
