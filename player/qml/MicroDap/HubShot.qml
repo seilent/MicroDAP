@@ -8,7 +8,7 @@ Item {
     property bool jump: false
     property string fixture: "browse"
 
-    readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists"]
+    readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists", "folders"]
     readonly property var contextArtists: typeof Artists === "undefined" ? null : Artists
     readonly property var contextAlbums: typeof Albums === "undefined" ? null : Albums
     readonly property var contextSongs: typeof Songs === "undefined" ? null : Songs
@@ -18,6 +18,7 @@ Item {
     readonly property var albumsGrid: typeof AlbumsGrid === "undefined" ? null : AlbumsGrid
     readonly property var songsHub: typeof SongsHub === "undefined" ? null : SongsHub
     readonly property var genresHub: typeof GenresHub === "undefined" ? null : GenresHub
+    readonly property var foldersHub: typeof FoldersHub === "undefined" ? null : FoldersHub
 
     function attach(hubModel: var, context: var, sample: var): void {
         if (hubModel !== null && context === null)
@@ -47,6 +48,14 @@ Item {
         }
         if (root.fixture === "touch-scrolled")
             Qt.callLater(root.scrollFixture)
+        if (root.fixture === "folder-open") {
+            for (let depth = 0; depth < 2; depth++) {
+                const entry = hub.focusedEntry()
+                if (entry !== null && entry.kind === "folder")
+                    hub.activate()
+            }
+            hub.completeAll()
+        }
         if (root.fixture === "pressed") {
             const entry = hub.focusedEntry()
             if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
@@ -150,6 +159,7 @@ Item {
         albumsModel: root.albumsGrid !== null ? root.albumsGrid : sampleAlbums
         songsModel: root.songsHub !== null ? root.songsHub : sampleSongs
         genresModel: root.genresHub !== null ? root.genresHub : sampleGenres
+        foldersModel: root.foldersHub
         library: root.contextLibrary
     }
 }

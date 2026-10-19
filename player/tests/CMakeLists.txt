@@ -408,7 +408,7 @@ add_test(NAME screenshot-prompt-landscape
 microdap_test_env(screenshot-prompt-landscape)
 set_property(TEST screenshot-prompt-landscape APPEND PROPERTY ENVIRONMENT "MICRODAP_FONT_DIR=${MICRODAP_TEST_FONT_DIR}")
 
-foreach(pivot IN ITEMS artists albums songs genres playlists)
+foreach(pivot IN ITEMS artists albums songs genres playlists folders)
     add_test(NAME screenshot-hub-${pivot}-portrait
         COMMAND microdap-player --screenshot hub --pivot ${pivot} --size 640x960 --library ${fixtures} --out ${shots}/hub-${pivot}-640x960.png
     )
@@ -422,6 +422,15 @@ foreach(pivot IN ITEMS artists albums songs genres playlists)
     set_tests_properties(screenshot-hub-${pivot}-landscape PROPERTIES FIXTURES_REQUIRED library-fixtures)
     microdap_test_env(screenshot-hub-${pivot}-landscape)
     set_property(TEST screenshot-hub-${pivot}-landscape APPEND PROPERTY ENVIRONMENT "MICRODAP_FONT_DIR=${MICRODAP_TEST_FONT_DIR}")
+endforeach()
+
+foreach(size IN ITEMS 640x960 1920x1080)
+    add_test(NAME screenshot-hub-folders-open-${size}
+        COMMAND microdap-player --screenshot hub --pivot folders --state folder-open --size ${size} --library ${fixtures} --out ${shots}/hub-folders-open-${size}.png
+    )
+    set_tests_properties(screenshot-hub-folders-open-${size} PROPERTIES FIXTURES_REQUIRED library-fixtures)
+    microdap_test_env(screenshot-hub-folders-open-${size})
+    set_property(TEST screenshot-hub-folders-open-${size} APPEND PROPERTY ENVIRONMENT "MICRODAP_FONT_DIR=${MICRODAP_TEST_FONT_DIR}")
 endforeach()
 
 add_test(NAME screenshot-nowplaying-portrait

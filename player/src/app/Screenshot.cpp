@@ -114,6 +114,7 @@ const QStringList &pivots()
         QStringLiteral("songs"),
         QStringLiteral("genres"),
         QStringLiteral("playlists"),
+        QStringLiteral("folders"),
     };
     return names;
 }
@@ -142,6 +143,7 @@ const QStringList &states()
         QStringLiteral("pressed"),
         QStringLiteral("outside-library"),
         QStringLiteral("touch-scrolled"),
+        QStringLiteral("folder-open"),
         QStringLiteral("touch"),
         QStringLiteral("touch-edit"),
         QStringLiteral("bit-perfect"),
@@ -293,6 +295,7 @@ int screenshot(const ScreenshotOptions &options)
     SectionedModel genresHub;
     genresHub.setKind(QStringLiteral("genre"));
     AlbumGridModel albumsGrid;
+    std::unique_ptr<FolderModel> foldersHub;
     if (!options.library.isEmpty()) {
         tempDir = std::make_unique<QTemporaryDir>();
         if (!tempDir->isValid()) {
@@ -323,6 +326,8 @@ int screenshot(const ScreenshotOptions &options)
         songsHub.setSource(songs.get());
         genresHub.setSource(genres.get());
         albumsGrid.setSource(albums.get());
+        foldersHub = std::make_unique<FolderModel>(library.get());
+        foldersHub->setRoots({QDir(options.library).absolutePath()});
     }
 
     EqControl eq(nullptr);
@@ -355,6 +360,8 @@ int screenshot(const ScreenshotOptions &options)
     engine.rootContext()->setContextProperty(QStringLiteral("ArtistsHub"), &artistsHub);
     engine.rootContext()->setContextProperty(QStringLiteral("SongsHub"), &songsHub);
     engine.rootContext()->setContextProperty(QStringLiteral("GenresHub"), &genresHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("FoldersHub"),
+                                             static_cast<QObject *>(foldersHub.get()));
     engine.rootContext()->setContextProperty(QStringLiteral("AlbumsGrid"), &albumsGrid);
     engine.setInitialProperties({
         {QStringLiteral("screenshot"), true},

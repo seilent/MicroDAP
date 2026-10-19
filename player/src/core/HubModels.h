@@ -8,9 +8,16 @@
 #include <QPointer>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 #include <QVariantMap>
 
+#include <functional>
+
+class QFont;
+
 namespace microdap {
+
+class Library;
 
 class HubSource
 {
@@ -191,6 +198,108 @@ private:
     QList<int> m_sourceToCell;
     QHash<qint64, int> m_idToCell;
     QList<QMetaObject::Connection> m_connections;
+};
+
+class FolderModel : public QAbstractListModel
+{
+    Q_OBJECT
+    Q_PROPERTY(QStringList roots READ roots WRITE setRoots NOTIFY rootsChanged)
+    Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int folder READ folder NOTIFY folderChanged)
+
+public:
+    enum Role {
+        KindRole = Qt::UserRole + 1,
+        LetterRole,
+        IdRole,
+        TitleRole,
+        SubtitleRole,
+        ArtPathRole,
+        NumberRole,
+        SourceRowRole,
+    };
+    Q_ENUM(Role)
+
+    using Advance = std::function<qreal(const QString &)>;
+
+    explicit FolderModel(Library *library, QObject *parent = nullptr);
+
+    QStringList roots() const;
+    void setRoots(const QStringList &roots);
+    bool active() const;
+    void setActive(bool active);
+    int count() const;
+    int folder() const;
+
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role) const override;
+    QHash<int, QByteArray> roleNames() const override;
+
+    Q_INVOKABLE QVariantMap get(int row) const;
+    Q_INVOKABLE bool isFocusable(int row) const;
+    Q_INVOKABLE int nearestFocusable(int from, int dir) const;
+    Q_INVOKABLE bool openFolder(int id);
+    Q_INVOKABLE int up();
+    Q_INVOKABLE QVariantList tracks(int id) const;
+    Q_INVOKABLE QString name(int id) const;
+    Q_INVOKABLE QString pathLine(const QFont &font, qreal width) const;
+    QStringList pathParts() const;
+
+    static QString fitPath(const QStringList &parts, const Advance &advance, qreal width);
+    static bool folderLess(const QString &a, const QString &b);
+    static QString rootLabel(const QString &root);
+
+signals:
+    void rootsChanged();
+    void activeChanged();
+    void countChanged();
+    void folderChanged();
+
+private:
+    struct Song
+    {
+        qint64 id = -1;
+        QString file;
+        QString title;
+        QString artist;
+    };
+
+    struct Dir
+    {
+        QString name;
+        QString path;
+        int parent = -1;
+        QList<int> dirs;
+        QList<Song> songs;
+        int total = 0;
+    };
+
+    struct Row
+    {
+        QString kind;
+        qint64 id = -1;
+        QString title;
+        QString subtitle;
+        QString number;
+    };
+
+    void rebuild();
+    void build();
+    void fillRows();
+    void collect(int dir, QVariantList &out) const;
+    Row folderRow(int dir) const;
+    void setOpen(int dir);
+
+    Library *m_library = nullptr;
+    QStringList m_roots;
+    bool m_active = false;
+    bool m_built = false;
+    int m_open = -1;
+    QString m_openPath;
+    QList<Dir> m_dirs;
+    QList<int> m_top;
+    QList<Row> m_rows;
 };
 
 }

@@ -65,10 +65,15 @@ TestCase {
         id: genres
     }
 
+    FakeFolders {
+        id: folders
+    }
+
     QtObject {
         id: fakePlayer
 
         property var calls: []
+        property var idCalls: []
         property QtObject queue: QtObject {
             property int count: 12
         }
@@ -76,6 +81,11 @@ TestCase {
         function playSource(kind, id, mode, startId) {
             fakePlayer.calls = fakePlayer.calls.concat([{ kind: kind, id: id, mode: mode, startId: startId }])
             return 1
+        }
+
+        function playIds(ids, mode, startId) {
+            fakePlayer.idCalls = fakePlayer.idCalls.concat([{ ids: ids, mode: mode, startId: startId }])
+            return ids.length
         }
     }
 
@@ -113,6 +123,7 @@ TestCase {
             albumsModel: albums
             songsModel: songs
             genresModel: genres
+            foldersModel: folders
             onOpen: (kind, id) => counters.opened = counters.opened.concat([{ kind: kind, id: id }])
             onNowPlaying: counters.nowPlaying++
             onJumpRequested: (letter) => {
@@ -172,14 +183,16 @@ TestCase {
         tc.setWindow(640, 960)
         pages.clear()
         pages.animate = false
-        for (const m of [artists, songs, genres, albums])
+        for (const m of [artists, songs, genres, albums, folders])
             m.active = false
+        folders.reset()
         albums.columns = 3
         artists.load(tc.entries("artist", 12, 3), "artist")
         albums.load(tc.albumEntries(19))
         songs.load(tc.entries("song", 30, 3), "song")
         genres.load(tc.entries("genre", 4, 1), "genre")
         fakePlayer.calls = []
+        fakePlayer.idCalls = []
         fakePlayer.queue.count = 12
         fakeLibrary.scanning = false
         fakeLibrary.pinned = []
@@ -207,7 +220,7 @@ TestCase {
     function test_layout_portrait() {
         const page = open()
         compare(Ui.u, 2)
-        compare(JSON.stringify(page.pivots), JSON.stringify(["artists", "albums", "songs", "genres", "playlists"]))
+        compare(JSON.stringify(page.pivots), JSON.stringify(["artists", "albums", "songs", "genres", "playlists", "folders"]))
         compare(page.pivotIndex, 0)
         compare(page.header.text, "music")
         compare(page.artistsPane.y, Ui.px(128))
@@ -324,7 +337,7 @@ TestCase {
     function test_pivot_travel_no_wrap() {
         const page = open()
         tryCompare(page.strip, "laidOut", true, 2000)
-        for (let i = 1; i <= 4; i++) {
+        for (let i = 1; i <= 5; i++) {
             verify(router.dispatch("rb", false))
             compare(page.pivotIndex, i)
             compare(page.shownPivot, i)
@@ -334,8 +347,8 @@ TestCase {
         }
         compare(page.switchPivot(1), false)
         router.dispatch("rb", false)
-        compare(page.pivotIndex, 4)
-        for (let i = 3; i >= 0; i--) {
+        compare(page.pivotIndex, 5)
+        for (let i = 4; i >= 0; i--) {
             router.dispatch("lb", false)
             compare(page.pivotIndex, i)
             fuzzyCompare(page.strip.activeLabelX, Ui.px(20), 0.01)
@@ -736,6 +749,108 @@ TestCase {
         verify(router.dispatch("b", false))
         compare(page.sheet.shown, false)
         compare(pages.depth, 2)
+    }
+
+    function test_folders_open_and_up() {
+        const page = open({ pivotIndex: 5 })
+        compare(folders.active, true)
+        compare(page.alphabetic, false)
+        compare(page.foldersPane.count, 1)
+        compare(page.focusedRow.kind, "folder")
+        compare(page.focusedRow.title, "internal")
+        compare(page.focusedRow.subtitle, "3 songs")
+        const top = tc.rowAt(page.foldersPane, 0)
+        compare(top.rowItem.bold, true)
+        compare(top.rowItem.primaryItem.font.styleName, "Bold")
+        compare(top.rowItem.primaryItem.font.capitalization, Font.AllUppercase)
+        compare(top.pathItem.visible, false)
+
+        router.dispatch("a", false)
+        compare(folders.folder, 1)
+        compare(page.foldersPane.focusIndex, 1)
+        compare(page.focusedRow.title, "a")
+        page.foldersPane.forceLayout()
+        const line = tc.rowAt(page.foldersPane, 0)
+        compare(line.pathLine, true)
+        compare(line.rowItem.visible, false)
+        compare(line.pathItem.visible, true)
+        compare(line.pathItem.text, "internal")
+        compare(line.pathItem.x, Ui.px(Ui.hubEdge))
+        compare(line.pathItem.font.pixelSize, Ui.fontPx(Ui.sectionLabel.size))
+        compare(line.pathItem.font.capitalization, Font.AllUppercase)
+        fuzzyCompare(line.pathItem.color.a, Ui.sectionLabel.alpha, 1 / 255)
+        fuzzyCompare(line.pathItem.y + line.pathItem.baselineOffset, line.height - Ui.px(Ui.settingsLabelBaselineInset), 0.5)
+        compare(line.pathItem.width, 640 - 2 * Ui.px(Ui.hubEdge))
+        compare(folders.lines[folders.lines.length - 1], 640 - 2 * Ui.px(Ui.hubEdge))
+        compare(line.touchKind, "")
+        const song = tc.rowAt(page.foldersPane, 2)
+        compare(song.rowItem.number, "1")
+        compare(song.rowItem.bold, false)
+
+        compare(page.moveRow(-1), false)
+        compare(page.foldersPane.focusIndex, 1)
+
+        router.dispatch("a", false)
+        compare(folders.folder, 2)
+        compare(page.focusedRow.kind, "song")
+        compare(page.focusedRow.title, "Deep")
+
+        verify(router.dispatch("b", false))
+        compare(folders.folder, 1)
+        compare(page.focusedRow.title, "a")
+        compare(pages.depth, 2)
+
+        compare(page.touchPress("header", 0, 0, page.header), "b")
+        verify(page.handleAction("b", false))
+        compare(folders.folder, -1)
+        compare(page.focusIndex, 0)
+        compare(page.focusedRow.title, "internal")
+        compare(pages.depth, 2)
+
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_folders_play_recursive() {
+        const page = open({ pivotIndex: 5, player: fakePlayer })
+        router.dispatch("a", false)
+        router.dispatch("down", false)
+        compare(page.focusedRow.title, "One")
+        router.dispatch("a", false)
+        compare(fakePlayer.calls.length, 0)
+        compare(fakePlayer.idCalls.length, 1)
+        compare(JSON.stringify(fakePlayer.idCalls[0].ids), JSON.stringify([21, 11, 12]))
+        compare(fakePlayer.idCalls[0].mode, "play")
+        compare(fakePlayer.idCalls[0].startId, 11)
+
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "pin to quickplay"]))
+        router.dispatch("a", false)
+        compare(fakePlayer.idCalls.length, 2)
+        compare(fakePlayer.idCalls[1].startId, 11)
+        page.completeAll()
+
+        router.dispatch("up", false)
+        compare(page.focusedRow.kind, "folder")
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle"]))
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, "shuffle")
+        compare(counters.sheetActions[0].kind, "folder")
+        compare(counters.sheetActions[0].id, 2)
+        page.completeAll()
+        router.dispatch("y", false)
+        compare(counters.sheetActions[1].action, "add to queue")
+        compare(counters.sheetActions[1].kind, "folder")
+
+        page.switchPivot(-1)
+        page.switchPivot(1)
+        page.completeAll()
+        compare(folders.folder, 1)
     }
 
     function test_b_pops() {

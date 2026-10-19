@@ -95,6 +95,7 @@ public:
     void play(const QList<QueueEntry> &entries, int start = 0);
     Q_INVOKABLE int playSource(const QString &kind, qint64 id, const QString &mode, qint64 startId = -1);
     Q_INVOKABLE void playTracks(const QVariantList &trackIds, int start = 0);
+    Q_INVOKABLE int playIds(const QVariantList &trackIds, const QString &mode, qint64 startId = -1);
     Q_INVOKABLE int enqueueTracks(const QVariantList &trackIds);
     Q_INVOKABLE int playNextTracks(const QVariantList &trackIds);
     void restore(const QList<QueueEntry> &entries, int index, qint64 positionMs,
@@ -179,6 +180,7 @@ private:
     int addTracks(const QVariantList &trackIds, bool next);
     int addEntries(const QList<QueueEntry> &entries, bool next);
     void playEntries(const QList<QueueEntry> &entries, int start, bool shuffle);
+    int playList(const QList<QueueEntry> &entries, const QString &mode, qint64 startId);
     bool holdForPhone();
     void releaseHold();
     void cancelHold();

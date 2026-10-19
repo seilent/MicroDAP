@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
                                            QStringLiteral("Music directory scanned into a temporary library for --screenshot."),
                                            QStringLiteral("dir"));
     const QCommandLineOption pivotOption(QStringLiteral("pivot"),
-                                         QStringLiteral("Hub pivot for --screenshot hub: artists, albums, songs, genres, playlists."),
+                                         QStringLiteral("Hub pivot for --screenshot hub: artists, albums, songs, genres, playlists, folders."),
                                          QStringLiteral("name"), QStringLiteral("albums"));
     const QCommandLineOption orientationOption(QStringLiteral("orientation"),
                                                QStringLiteral("Orientation for --screenshot: portrait, portrait-flipped, landscape, landscape-flipped."),
@@ -180,6 +180,10 @@ int main(int argc, char *argv[])
     microdap::SectionedModel genresHub;
     genresHub.setKind(QStringLiteral("genre"));
     genresHub.setSource(&genres);
+    microdap::FolderModel foldersHub(&library);
+    foldersHub.setRoots(settings.roots());
+    QObject::connect(&settings, &microdap::Settings::rootsChanged, &foldersHub,
+                     [&settings, &foldersHub] { foldersHub.setRoots(settings.roots()); });
     microdap::AlbumGridModel albumsGrid;
     albumsGrid.setSource(&albums);
     microdap::PinsModel pins(&library);
@@ -447,6 +451,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("ArtistsHub"), &artistsHub);
     engine.rootContext()->setContextProperty(QStringLiteral("SongsHub"), &songsHub);
     engine.rootContext()->setContextProperty(QStringLiteral("GenresHub"), &genresHub);
+    engine.rootContext()->setContextProperty(QStringLiteral("FoldersHub"), &foldersHub);
     engine.rootContext()->setContextProperty(QStringLiteral("AlbumsGrid"), &albumsGrid);
     engine.rootContext()->setContextProperty(QStringLiteral("Playlists"), &playlists);
     engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);

@@ -1,6 +1,15 @@
 #include "HubModels.h"
 
+#include "Library.h"
+#include "Scanner.h"
 #include "SectionKey.h"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QFont>
+#include <QFontMetricsF>
+#include <QSqlQuery>
+#include <QStandardPaths>
 
 #include <algorithm>
 #include <utility>
@@ -691,6 +700,371 @@ int AlbumGridModel::rowOfAlbum(qint64 id) const
 {
     const int cell = m_idToCell.value(id, -1);
     return cell < 0 ? -1 : cell / m_columns;
+}
+
+FolderModel::FolderModel(Library *library, QObject *parent)
+    : QAbstractListModel(parent)
+    , m_library(library)
+{
+    if (library)
+        connect(library, &Library::tracksChanged, this, &FolderModel::rebuild);
+}
+
+QStringList FolderModel::roots() const
+{
+    return m_roots;
+}
+
+void FolderModel::setRoots(const QStringList &roots)
+{
+    if (m_roots == roots)
+        return;
+    m_roots = roots;
+    emit rootsChanged();
+    rebuild();
+}
+
+bool FolderModel::active() const
+{
+    return m_active;
+}
+
+void FolderModel::setActive(bool active)
+{
+    if (m_active == active)
+        return;
+    m_active = active;
+    emit activeChanged();
+    if (m_active && !m_built)
+        rebuild();
+}
+
+int FolderModel::count() const
+{
+    return static_cast<int>(m_rows.size());
+}
+
+int FolderModel::folder() const
+{
+    return m_open;
+}
+
+bool FolderModel::folderLess(const QString &a, const QString &b)
+{
+    const int folded = a.compare(b, Qt::CaseInsensitive);
+    return folded != 0 ? folded < 0 : a < b;
+}
+
+QString FolderModel::rootLabel(const QString &root)
+{
+    const QString path = QDir::cleanPath(root);
+    if (path == QDir::cleanPath(QStandardPaths::writableLocation(QStandardPaths::MusicLocation)))
+        return QStringLiteral("internal");
+    const QString base = QDir::cleanPath(Scanner::mediaBase());
+    if (!path.startsWith(base + QLatin1Char('/')))
+        return QFileInfo(path).fileName();
+    const QStringList parts = path.mid(base.size() + 1).split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    const bool nested = parts.size() >= 3 && !Scanner::isMountPoint(base + QLatin1Char('/') + parts.first());
+    const qsizetype label = nested ? 1 : 0;
+    const QString folder = parts.mid(label + 1).join(QLatin1Char('/'));
+    return folder.isEmpty() ? parts.at(label) : parts.at(label) + QLatin1Char(' ') + folder;
+}
+
+QString FolderModel::fitPath(const QStringList &parts, const Advance &advance, qreal width)
+{
+    if (parts.isEmpty())
+        return {};
+    const QString separator = QStringLiteral(" / ");
+    const QString all = parts.join(separator);
+    if (advance(all) <= width)
+        return all;
+    for (qsizetype from = 1; from < parts.size(); ++from) {
+        const QString line = QStringLiteral("...") + separator + parts.mid(from).join(separator);
+        if (advance(line) <= width)
+            return line;
+    }
+    return parts.last();
+}
+
+void FolderModel::rebuild()
+{
+    if (!m_active) {
+        m_built = false;
+        return;
+    }
+    beginResetModel();
+    build();
+    fillRows();
+    endResetModel();
+    emit countChanged();
+    emit folderChanged();
+}
+
+void FolderModel::build()
+{
+    m_built = true;
+    m_dirs.clear();
+    m_top.clear();
+    QStringList roots;
+    for (const QString &root : std::as_const(m_roots)) {
+        const QString path = QDir::cleanPath(root);
+        if (!path.isEmpty() && !roots.contains(path))
+            roots.append(path);
+    }
+    if (!m_library || !m_library->isOpen() || roots.isEmpty()) {
+        m_open = -1;
+        return;
+    }
+
+    QHash<QString, int> index;
+    const std::function<int(const QString &, const QString &)> ensure = [&](const QString &path,
+                                                                         const QString &root) {
+        if (const auto it = index.constFind(path); it != index.cend())
+            return *it;
+        Dir dir;
+        dir.path = path;
+        if (path == root) {
+            dir.name = rootLabel(root);
+        } else {
+            dir.name = QFileInfo(path).fileName();
+            dir.parent = ensure(QFileInfo(path).path(), root);
+        }
+        const int id = static_cast<int>(m_dirs.size());
+        m_dirs.append(dir);
+        index.insert(path, id);
+        if (dir.parent < 0)
+            m_top.append(id);
+        else
+            m_dirs[dir.parent].dirs.append(id);
+        return id;
+    };
+
+    QSqlQuery query(QStringLiteral("SELECT id, path, title, artist FROM tracks"), m_library->database());
+    while (query.next()) {
+        const QString path = query.value(1).toString();
+        QString root;
+        for (const QString &candidate : std::as_const(roots)) {
+            if (path.startsWith(candidate + QLatin1Char('/')) && candidate.size() > root.size())
+                root = candidate;
+        }
+        if (root.isEmpty())
+            continue;
+        const QFileInfo info(path);
+        const int dir = ensure(info.path(), root);
+        m_dirs[dir].songs.append({query.value(0).toLongLong(), info.fileName(), query.value(2).toString(),
+                                  query.value(3).toString()});
+    }
+
+    for (Dir &dir : m_dirs) {
+        std::sort(dir.dirs.begin(), dir.dirs.end(),
+                  [this](int a, int b) { return folderLess(m_dirs.at(a).name, m_dirs.at(b).name); });
+        std::sort(dir.songs.begin(), dir.songs.end(), [](const Song &a, const Song &b) {
+            if (folderLess(a.file, b.file))
+                return true;
+            return !folderLess(b.file, a.file) && a.id < b.id;
+        });
+        dir.total = static_cast<int>(dir.songs.size());
+    }
+    for (qsizetype i = m_dirs.size() - 1; i >= 0; --i) {
+        if (m_dirs.at(i).parent >= 0)
+            m_dirs[m_dirs.at(i).parent].total += m_dirs.at(i).total;
+    }
+    std::sort(m_top.begin(), m_top.end(), [this, &roots](int a, int b) {
+        return roots.indexOf(m_dirs.at(a).path) < roots.indexOf(m_dirs.at(b).path);
+    });
+
+    m_open = -1;
+    QString path = m_openPath;
+    while (!path.isEmpty()) {
+        if (const auto it = index.constFind(path); it != index.cend()) {
+            m_open = *it;
+            break;
+        }
+        const QString parent = QFileInfo(path).path();
+        if (parent == path)
+            break;
+        path = parent;
+    }
+    m_openPath = m_open < 0 ? QString() : m_dirs.at(m_open).path;
+}
+
+FolderModel::Row FolderModel::folderRow(int dir) const
+{
+    const Dir &d = m_dirs.at(dir);
+    return {QStringLiteral("folder"), dir, d.name,
+            QStringLiteral("%1 %2").arg(d.total).arg(d.total == 1 ? QStringLiteral("song") : QStringLiteral("songs")),
+            QString()};
+}
+
+void FolderModel::fillRows()
+{
+    m_rows.clear();
+    if (m_open < 0) {
+        for (int dir : std::as_const(m_top))
+            m_rows.append(folderRow(dir));
+        return;
+    }
+    const Dir &open = m_dirs.at(m_open);
+    m_rows.append({QStringLiteral("path"), -1, pathParts().join(QStringLiteral(" / ")), QString(), QString()});
+    for (int dir : open.dirs)
+        m_rows.append(folderRow(dir));
+    for (qsizetype i = 0; i < open.songs.size(); ++i) {
+        const Song &song = open.songs.at(i);
+        m_rows.append({QStringLiteral("song"), song.id, song.title, song.artist, QString::number(i + 1)});
+    }
+}
+
+QStringList FolderModel::pathParts() const
+{
+    QStringList parts;
+    for (int dir = m_open; dir >= 0 && dir < m_dirs.size(); dir = m_dirs.at(dir).parent)
+        parts.prepend(m_dirs.at(dir).name);
+    return parts;
+}
+
+void FolderModel::setOpen(int dir)
+{
+    beginResetModel();
+    m_open = dir;
+    m_openPath = dir < 0 ? QString() : m_dirs.at(dir).path;
+    fillRows();
+    endResetModel();
+    emit countChanged();
+    emit folderChanged();
+}
+
+bool FolderModel::openFolder(int id)
+{
+    if (id < 0 || id >= m_dirs.size() || id == m_open)
+        return false;
+    setOpen(id);
+    return true;
+}
+
+int FolderModel::up()
+{
+    if (m_open < 0)
+        return -1;
+    const int left = m_open;
+    setOpen(m_dirs.at(left).parent);
+    for (qsizetype row = 0; row < m_rows.size(); ++row) {
+        if (m_rows.at(row).kind == QLatin1StringView("folder") && m_rows.at(row).id == left)
+            return static_cast<int>(row);
+    }
+    return 0;
+}
+
+void FolderModel::collect(int dir, QVariantList &out) const
+{
+    const Dir &d = m_dirs.at(dir);
+    for (int child : d.dirs)
+        collect(child, out);
+    for (const Song &song : d.songs)
+        out.append(song.id);
+}
+
+QVariantList FolderModel::tracks(int id) const
+{
+    QVariantList out;
+    if (id >= 0 && id < m_dirs.size())
+        collect(id, out);
+    return out;
+}
+
+QString FolderModel::name(int id) const
+{
+    return id >= 0 && id < m_dirs.size() ? m_dirs.at(id).name : QString();
+}
+
+QString FolderModel::pathLine(const QFont &font, qreal width) const
+{
+    QFont measured(font);
+    measured.setCapitalization(QFont::MixedCase);
+    const QFontMetricsF metrics(measured);
+    return fitPath(
+        pathParts(), [&metrics](const QString &text) { return metrics.horizontalAdvance(text.toUpper()); }, width);
+}
+
+int FolderModel::rowCount(const QModelIndex &parent) const
+{
+    return parent.isValid() ? 0 : count();
+}
+
+QVariant FolderModel::data(const QModelIndex &index, int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size())
+        return {};
+    const Row &row = m_rows.at(index.row());
+    switch (role) {
+    case KindRole:
+        return row.kind;
+    case LetterRole:
+    case ArtPathRole:
+        return QString();
+    case IdRole:
+        return row.id;
+    case TitleRole:
+        return row.title;
+    case SubtitleRole:
+        return row.subtitle;
+    case NumberRole:
+        return row.number;
+    case SourceRowRole:
+        return index.row();
+    default:
+        return {};
+    }
+}
+
+QHash<int, QByteArray> FolderModel::roleNames() const
+{
+    return {
+        {KindRole, QByteArrayLiteral("kind")},
+        {LetterRole, QByteArrayLiteral("letter")},
+        {IdRole, QByteArrayLiteral("id")},
+        {TitleRole, QByteArrayLiteral("title")},
+        {SubtitleRole, QByteArrayLiteral("subtitle")},
+        {ArtPathRole, QByteArrayLiteral("artPath")},
+        {NumberRole, QByteArrayLiteral("number")},
+        {SourceRowRole, QByteArrayLiteral("sourceRow")},
+    };
+}
+
+QVariantMap FolderModel::get(int row) const
+{
+    QVariantMap map;
+    if (row < 0 || row >= m_rows.size())
+        return map;
+    const Row &r = m_rows.at(row);
+    map.insert(QStringLiteral("kind"), r.kind);
+    map.insert(QStringLiteral("letter"), QString());
+    map.insert(QStringLiteral("id"), r.id);
+    map.insert(QStringLiteral("title"), r.title);
+    map.insert(QStringLiteral("subtitle"), r.subtitle);
+    map.insert(QStringLiteral("artPath"), QString());
+    map.insert(QStringLiteral("number"), r.number);
+    map.insert(QStringLiteral("sourceRow"), row);
+    return map;
+}
+
+bool FolderModel::isFocusable(int row) const
+{
+    return row >= 0 && row < m_rows.size() && m_rows.at(row).kind != QLatin1StringView("path");
+}
+
+int FolderModel::nearestFocusable(int from, int dir) const
+{
+    const int n = count();
+    const int step = dir >= 0 ? 1 : -1;
+    for (int row = from; row >= 0 && row < n; row += step) {
+        if (isFocusable(row))
+            return row;
+    }
+    for (int row = from - step; row >= 0 && row < n; row -= step) {
+        if (isFocusable(row))
+            return row;
+    }
+    return -1;
 }
 
 }

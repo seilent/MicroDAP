@@ -1,9 +1,16 @@
 #include "HubModels.h"
+#include "Library.h"
+#include "Scanner.h"
 #include "SectionKey.h"
 
 #include <QAbstractListModel>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QScopeGuard>
 #include <QSignalSpy>
+#include <QSqlQuery>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTest>
 
 #include <algorithm>
@@ -241,6 +248,38 @@ qint64 medianBuild(Model &model)
     return runs.at(2) / 1000000;
 }
 
+bool oneLevelMount(const QString &dir)
+{
+    return QDir::cleanPath(dir) == QStringLiteral("/media-test/CARDC");
+}
+
+bool insertTrack(Library &library, qint64 id, const QString &path, const QString &title)
+{
+    QSqlQuery query(library.database());
+    query.prepare(QStringLiteral("INSERT INTO tracks(id, path, mtime, size, title, artist, album_artist, album_id, "
+                                 "added) VALUES(?, ?, 0, 0, ?, 'Band', 'Band', 1, 0)"));
+    query.addBindValue(id);
+    query.addBindValue(path);
+    query.addBindValue(title);
+    return query.exec();
+}
+
+QStringList kinds(const FolderModel &model)
+{
+    QStringList out;
+    for (int row = 0; row < model.count(); ++row)
+        out.append(model.get(row).value(QStringLiteral("kind")).toString());
+    return out;
+}
+
+QStringList titles(const FolderModel &model)
+{
+    QStringList out;
+    for (int row = 0; row < model.count(); ++row)
+        out.append(model.get(row).value(QStringLiteral("title")).toString());
+    return out;
+}
+
 }
 
 class HubModelsTest : public QObject
@@ -248,6 +287,9 @@ class HubModelsTest : public QObject
     Q_OBJECT
 
 private slots:
+    void foldersOrder();
+    void foldersRoots();
+    void foldersPathElision();
     void lazyUntilActive();
     void dividersAndNumbers();
     void matchesJsBuilder();
@@ -278,6 +320,139 @@ private slots:
     void scaleAlbums();
     void scaleLookups();
 };
+
+void HubModelsTest::foldersOrder()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Library library(dir.filePath(QStringLiteral("library.db")), dir.filePath(QStringLiteral("art")));
+    QVERIFY(library.isOpen());
+    QSqlQuery album(library.database());
+    QVERIFY(album.exec(QStringLiteral("INSERT INTO albums(id, title, artist, added) VALUES(1, 'A', 'Band', 0)")));
+    const QString music = QDir::cleanPath(QStandardPaths::writableLocation(QStandardPaths::MusicLocation));
+    QVERIFY(insertTrack(library, 1, music + QStringLiteral("/b/02 Two.flac"), QStringLiteral("Two")));
+    QVERIFY(insertTrack(library, 2, music + QStringLiteral("/B/01 One.flac"), QStringLiteral("One")));
+    QVERIFY(insertTrack(library, 3, music + QStringLiteral("/a/x.flac"), QStringLiteral("X")));
+    QVERIFY(insertTrack(library, 4, music + QStringLiteral("/z.flac"), QStringLiteral("Z")));
+    QVERIFY(insertTrack(library, 5, music + QStringLiteral("/a/sub/y.flac"), QStringLiteral("Y")));
+    QVERIFY(insertTrack(library, 6, music + QStringLiteral("/a/W.flac"), QStringLiteral("W")));
+    QVERIFY(insertTrack(library, 7, QStringLiteral("/elsewhere/q.flac"), QStringLiteral("Q")));
+
+    FolderModel model(&library);
+    model.setRoots({music});
+    QCOMPARE(model.count(), 0);
+    QSignalSpy count(&model, &FolderModel::countChanged);
+    model.setActive(true);
+    QCOMPARE(count.count(), 1);
+    QCOMPARE(model.folder(), -1);
+    QCOMPARE(kinds(model), (QStringList{QStringLiteral("folder")}));
+    QCOMPARE(titles(model), (QStringList{QStringLiteral("internal")}));
+    QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("6 songs"));
+    QVERIFY(model.isFocusable(0));
+    const int internal = model.get(0).value(QStringLiteral("id")).toInt();
+
+    QVERIFY(model.openFolder(internal));
+    QCOMPARE(model.folder(), internal);
+    QCOMPARE(kinds(model), (QStringList{QStringLiteral("path"), QStringLiteral("folder"), QStringLiteral("folder"),
+                                        QStringLiteral("folder"), QStringLiteral("song")}));
+    QCOMPARE(titles(model), (QStringList{QStringLiteral("internal"), QStringLiteral("a"), QStringLiteral("B"),
+                                         QStringLiteral("b"), QStringLiteral("Z")}));
+    QCOMPARE(model.get(1).value(QStringLiteral("subtitle")).toString(), QStringLiteral("3 songs"));
+    QCOMPARE(model.get(2).value(QStringLiteral("subtitle")).toString(), QStringLiteral("1 song"));
+    QCOMPARE(model.get(4).value(QStringLiteral("number")).toString(), QStringLiteral("1"));
+    QCOMPARE(model.get(4).value(QStringLiteral("id")).toLongLong(), 4);
+    QVERIFY(!model.isFocusable(0));
+    QCOMPARE(model.nearestFocusable(0, 1), 1);
+    QCOMPARE(model.nearestFocusable(0, -1), 1);
+    QCOMPARE(model.tracks(internal), (QVariantList{qint64(5), qint64(6), qint64(3), qint64(2), qint64(1), qint64(4)}));
+    QCOMPARE(model.name(internal), QStringLiteral("internal"));
+
+    const int a = model.get(1).value(QStringLiteral("id")).toInt();
+    QVERIFY(model.openFolder(a));
+    QCOMPARE(titles(model), (QStringList{QStringLiteral("internal / a"), QStringLiteral("sub"), QStringLiteral("W"),
+                                         QStringLiteral("X")}));
+    QCOMPARE(model.get(2).value(QStringLiteral("number")).toString(), QStringLiteral("1"));
+    QCOMPARE(model.get(3).value(QStringLiteral("number")).toString(), QStringLiteral("2"));
+    QCOMPARE(model.pathParts(), (QStringList{QStringLiteral("internal"), QStringLiteral("a")}));
+
+    QVERIFY(insertTrack(library, 8, music + QStringLiteral("/a/v.flac"), QStringLiteral("V")));
+    emit library.tracksChanged();
+    QCOMPARE(model.pathParts(), (QStringList{QStringLiteral("internal"), QStringLiteral("a")}));
+    QCOMPARE(model.count(), 5);
+
+    QCOMPARE(model.up(), 1);
+    QCOMPARE(model.folder(), internal);
+    QCOMPARE(model.up(), 0);
+    QCOMPARE(model.folder(), -1);
+    QCOMPARE(model.up(), -1);
+
+    QVERIFY(model.openFolder(a));
+    QSqlQuery drop(library.database());
+    QVERIFY(drop.exec(QStringLiteral("DELETE FROM tracks WHERE path LIKE '%/a/%'")));
+    emit library.tracksChanged();
+    QCOMPARE(model.pathParts(), (QStringList{QStringLiteral("internal")}));
+    QCOMPARE(titles(model), (QStringList{QStringLiteral("internal"), QStringLiteral("B"), QStringLiteral("b"),
+                                         QStringLiteral("Z")}));
+}
+
+void HubModelsTest::foldersRoots()
+{
+    qputenv("MICRODAP_MEDIA_ROOT", "/media-test");
+    Scanner::setMountCheck(oneLevelMount);
+    const auto restore = qScopeGuard([] {
+        Scanner::setMountCheck(nullptr);
+        qunsetenv("MICRODAP_MEDIA_ROOT");
+    });
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    Library library(dir.filePath(QStringLiteral("library.db")), dir.filePath(QStringLiteral("art")));
+    QVERIFY(library.isOpen());
+    QSqlQuery album(library.database());
+    QVERIFY(album.exec(QStringLiteral("INSERT INTO albums(id, title, artist, added) VALUES(1, 'A', 'Band', 0)")));
+    QVERIFY(insertTrack(library, 1, QStringLiteral("/media-test/u/CARDB/Music/Live/1.flac"), QStringLiteral("One")));
+    QVERIFY(insertTrack(library, 2, QStringLiteral("/media-test/u/CARDA/Music/2.flac"), QStringLiteral("Two")));
+    QVERIFY(insertTrack(library, 3, QStringLiteral("/media-test/CARDC/roms/music/3.flac"), QStringLiteral("Three")));
+    QVERIFY(insertTrack(library, 4, QStringLiteral("/data/tunes/4.flac"), QStringLiteral("Four")));
+
+    QCOMPARE(FolderModel::rootLabel(QStringLiteral("/media-test/u/CARDA/Music")), QStringLiteral("CARDA Music"));
+    QCOMPARE(FolderModel::rootLabel(QStringLiteral("/media-test/CARDC/roms/music")),
+             QStringLiteral("CARDC roms/music"));
+    QCOMPARE(FolderModel::rootLabel(QStringLiteral("/data/tunes")), QStringLiteral("tunes"));
+
+    FolderModel model(&library);
+    model.setActive(true);
+    QCOMPARE(model.count(), 0);
+    model.setRoots({QStringLiteral("/media-test/u/CARDA/Music"), QStringLiteral("/media-test/u/CARDB/Music/"),
+                    QStringLiteral("/media-test/CARDC/roms/music"), QStringLiteral("/media-test/u/CARDD/Music"),
+                    QStringLiteral("/data/tunes")});
+    QCOMPARE(titles(model), (QStringList{QStringLiteral("CARDA Music"), QStringLiteral("CARDB Music"),
+                                         QStringLiteral("CARDC roms/music"), QStringLiteral("tunes")}));
+    QVERIFY(model.openFolder(model.get(1).value(QStringLiteral("id")).toInt()));
+    QCOMPARE(titles(model), (QStringList{QStringLiteral("CARDB Music"), QStringLiteral("Live")}));
+    QVERIFY(model.openFolder(model.get(1).value(QStringLiteral("id")).toInt()));
+    QCOMPARE(model.pathParts(), (QStringList{QStringLiteral("CARDB Music"), QStringLiteral("Live")}));
+    QCOMPARE(model.tracks(model.folder()), (QVariantList{qint64(1)}));
+}
+
+void HubModelsTest::foldersPathElision()
+{
+    const FolderModel::Advance advance = [](const QString &text) { return qreal(text.size()); };
+    const QStringList parts{QStringLiteral("CARDA Music"), QStringLiteral("Live"), QStringLiteral("Encore Sessions"),
+                            QStringLiteral("Bonus")};
+    QCOMPARE(FolderModel::fitPath(parts, advance, 100), QStringLiteral("CARDA Music / Live / Encore Sessions / Bonus"));
+    QCOMPARE(FolderModel::fitPath(parts, advance, 44), QStringLiteral("CARDA Music / Live / Encore Sessions / Bonus"));
+    QCOMPARE(FolderModel::fitPath(parts, advance, 43), QStringLiteral("... / Live / Encore Sessions / Bonus"));
+    QCOMPARE(FolderModel::fitPath(parts, advance, 30), QStringLiteral("... / Encore Sessions / Bonus"));
+    QCOMPARE(FolderModel::fitPath(parts, advance, 11), QStringLiteral("... / Bonus"));
+    QCOMPARE(FolderModel::fitPath(parts, advance, 10), QStringLiteral("Bonus"));
+    QCOMPARE(FolderModel::fitPath(parts, advance, 2), QStringLiteral("Bonus"));
+    QCOMPARE(FolderModel::fitPath({QStringLiteral("internal")}, advance, 2), QStringLiteral("internal"));
+    QCOMPARE(FolderModel::fitPath({}, advance, 100), QString());
+    QVERIFY(FolderModel::folderLess(QStringLiteral("B"), QStringLiteral("b")));
+    QVERIFY(!FolderModel::folderLess(QStringLiteral("b"), QStringLiteral("B")));
+    QVERIFY(FolderModel::folderLess(QStringLiteral("a"), QStringLiteral("B")));
+    QVERIFY(FolderModel::folderLess(QStringLiteral("B"), QStringLiteral("c")));
+}
 
 void HubModelsTest::lazyUntilActive()
 {

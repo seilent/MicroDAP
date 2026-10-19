@@ -75,6 +75,16 @@ QVariantMap padFormat(GstPad *pad)
     return map;
 }
 
+bool knownMode(const QString &mode)
+{
+    for (const char *known : {"play", "add", "next", "shuffle"}) {
+        if (mode == QLatin1String(known))
+            return true;
+    }
+    qWarning() << "microdap player: unknown source mode" << mode;
+    return false;
+}
+
 int remapMoved(int r, int start, int end, int row)
 {
     const int n = end - start + 1;
@@ -876,18 +886,25 @@ void Player::playEntries(const QList<QueueEntry> &entries, int start, bool shuff
 
 int Player::playSource(const QString &kind, qint64 id, const QString &mode, qint64 startId)
 {
-    if (!m_library)
+    if (!m_library || !knownMode(mode))
         return 0;
+    return playList(kind == QLatin1String("song") ? m_library->queueEntries({QVariant(id)})
+                                                   : m_library->entriesFor(kind, id),
+                    mode, startId);
+}
+
+int Player::playIds(const QVariantList &trackIds, const QString &mode, qint64 startId)
+{
+    if (!m_library || !knownMode(mode))
+        return 0;
+    return playList(m_library->queueEntries(trackIds), mode, startId);
+}
+
+int Player::playList(const QList<QueueEntry> &entries, const QString &mode, qint64 startId)
+{
     const bool add = mode == QLatin1String("add");
     const bool next = mode == QLatin1String("next");
     const bool shuffle = mode == QLatin1String("shuffle");
-    if (!add && !next && !shuffle && mode != QLatin1String("play")) {
-        qWarning() << "microdap player: unknown source mode" << mode;
-        return 0;
-    }
-    const QList<QueueEntry> entries = kind == QLatin1String("song")
-                                          ? m_library->queueEntries({QVariant(id)})
-                                          : m_library->entriesFor(kind, id);
     if (entries.isEmpty())
         return 0;
     if (add || next)

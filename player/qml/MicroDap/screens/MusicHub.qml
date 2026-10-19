@@ -9,6 +9,7 @@ Page {
     property var songsModel: null
     property var genresModel: null
     property var playlistsModel: null
+    property var foldersModel: null
     property QtObject player: null
     property QtObject library: null
     property bool animated: true
@@ -23,16 +24,18 @@ Page {
 
     readonly property bool live: hub.animated && !hub.screenOff
     readonly property bool arriving: !hub.arrived && hub.live && hub.stackAnimates
-    readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists"]
+    readonly property var pivots: ["artists", "albums", "songs", "genres", "playlists", "folders"]
     readonly property bool scanning: hub.library !== null && hub.library.scanning === true
     readonly property int queueCount: hub.player !== null && hub.player.queue !== undefined && hub.player.queue !== null
         ? hub.player.queue.count : 0
-    readonly property bool alphabetic: hub.pivotIndex !== 4
+    readonly property bool alphabetic: hub.pivotIndex < 4
+    readonly property bool inFolder: hub.pivotIndex === 5 && hub.foldersModel !== null && hub.foldersModel !== undefined
+        && hub.foldersModel.folder >= 0
     readonly property bool grid: hub.pivotIndex === 1
     readonly property real cellPitch: Ui.tileS + Ui.gutter
     readonly property real gridRowPitch: Ui.tileCellH + Ui.gutter
     readonly property int cols: Ui.gridCols
-    readonly property var panes: [artistsPane, albumsPane, songsPane, genresPane, playlistsPane]
+    readonly property var panes: [artistsPane, albumsPane, songsPane, genresPane, playlistsPane, foldersPane]
     readonly property FocusList activeList: hub.panes[hub.pivotIndex]
     readonly property int rowIndex: hub.activeList.focusIndex
     readonly property var focusedCell: hub.grid && hub.focusedRow !== null && hub.focusedRow[hub.gridCol] !== undefined
@@ -51,6 +54,7 @@ Page {
     property alias songsPane: songsPane
     property alias genresPane: genresPane
     property alias playlistsPane: playlistsPane
+    property alias foldersPane: foldersPane
 
     signal open(string kind, int id)
     signal nowPlaying()
@@ -138,8 +142,10 @@ Page {
             return hub.songsModel
         case 3:
             return hub.genresModel
-        default:
+        case 4:
             return playlistsList
+        default:
+            return hub.foldersModel
         }
     }
 
@@ -403,6 +409,40 @@ Page {
         hub.play("song", row.id)
     }
 
+    function playFolderSong(row: var): void {
+        const m = hub.foldersModel
+        if (hub.player !== null && typeof hub.player.playIds === "function" && m !== null && m !== undefined) {
+            hub.player.playIds(m.tracks(m.folder), "play", row.id)
+            return
+        }
+        hub.play("song", row.id)
+    }
+
+    function openFolder(id: int): void {
+        const m = hub.foldersModel
+        if (m === null || m === undefined || !m.openFolder(id))
+            return
+        const target = hub.nearestFocusable(5, 0, 1)
+        foldersPane.snapTo(target < 0 ? 0 : target)
+        hub.syncFocus()
+    }
+
+    function folderUp(): bool {
+        if (!hub.inFolder)
+            return false
+        const row = hub.foldersModel.up()
+        foldersPane.snapTo(Math.max(0, row))
+        hub.syncFocus()
+        return true
+    }
+
+    function fitPathLine(title: string): string {
+        const m = hub.foldersModel
+        if (title === "" || m === null || m === undefined || typeof m.pathLine !== "function")
+            return title
+        return m.pathLine(Ui.font(Ui.sectionLabel), hub.width - 2 * Ui.px(Ui.hubEdge))
+    }
+
     function playCollection(kind: string, id: int): void {
         if (hub.canPlaySource()) {
             hub.player.playSource(kind, id, "play", -1)
@@ -421,7 +461,15 @@ Page {
             hub.openJumpGrid()
             break
         case "song":
-            hub.playSong(t)
+            if (hub.pivotIndex === 5)
+                hub.playFolderSong(t)
+            else
+                hub.playSong(t)
+            break
+        case "folder":
+            hub.openFolder(t.id)
+            break
+        case "path":
             break
         case "genre":
         case "playlist":
@@ -438,7 +486,8 @@ Page {
 
     function openSheet(): bool {
         const t = hub.focusedEntry()
-        if (t === null || t === undefined || t.kind === "letter" || t.kind === "divider" || t.kind === "nowplaying")
+        if (t === null || t === undefined || t.kind === "letter" || t.kind === "divider" || t.kind === "nowplaying"
+                || t.kind === "path")
             return false
         hub.sheetRow = t
         sheet.title = t.title
@@ -456,6 +505,8 @@ Page {
     function sheetItemsFor(kind: string, id: int): var {
         if (kind === "genre")
             return ["play", "add to queue"]
+        if (kind === "folder")
+            return ["play", "play next", "add to queue", "shuffle"]
         if (kind === "song")
             return ["play", "play next", "add to queue", hub.pinLabel(kind, id)]
         return ["play", "play next", "add to queue", "shuffle", hub.pinLabel(kind, id)]
@@ -466,7 +517,9 @@ Page {
         if (t === null)
             return
         const action = sheet.items[index]
-        if (action === "play" && t.kind === "song")
+        if (action === "play" && t.kind === "song" && hub.pivotIndex === 5)
+            hub.playFolderSong(t)
+        else if (action === "play" && t.kind === "song")
             hub.playSong(t)
         else if (action === "play" && (t.kind === "genre" || t.kind === "playlist"))
             hub.playCollection(t.kind, t.id)
@@ -476,7 +529,8 @@ Page {
 
     function queueAction(): bool {
         const t = hub.focusedEntry()
-        if (t === null || t === undefined || t.kind === "letter" || t.kind === "divider" || t.kind === "nowplaying")
+        if (t === null || t === undefined || t.kind === "letter" || t.kind === "divider" || t.kind === "nowplaying"
+                || t.kind === "path")
             return false
         hub.sheetAction("add to queue", t.kind, t.id)
         return true
@@ -579,6 +633,8 @@ Page {
     }
 
     function back(): bool {
+        if (hub.folderUp())
+            return true
         if (hub.stack === null || hub.stack.depth < 2)
             return false
         hub.stack.pop()
@@ -713,6 +769,10 @@ Page {
         if (d.ready)
             hub.rebind(3)
     }
+    onFoldersModelChanged: {
+        if (d.ready)
+            hub.rebind(5)
+    }
     onPlaylistsModelChanged: {
         if (!d.ready)
             return
@@ -826,6 +886,11 @@ Page {
     ModelWatch {
         model: genresPane.bound ? hub.genresModel : null
         pivot: 3
+    }
+
+    ModelWatch {
+        model: foldersPane.bound ? hub.foldersModel : null
+        pivot: 5
     }
 
     Connections {
@@ -987,23 +1052,25 @@ Page {
         required property string subtitle
         required property string number
         readonly property bool divider: row.kind === "divider"
+        readonly property bool pathLine: row.kind === "path"
         readonly property bool isFocused: row.pane !== null && hub.pivotIndex === row.pane.pivot && row.pane.focusIndex === row.index
         readonly property Item rowItem: listRow
         readonly property Item dividerItem: dividerText
-        readonly property string touchKind: row.divider ? "divider" : "row"
+        readonly property Item pathItem: pathText
+        readonly property string touchKind: row.pathLine ? "" : row.divider ? "divider" : "row"
         readonly property int touchIndex: row.index
 
         ListRow {
             id: listRow
 
-            visible: !row.divider
+            visible: !row.divider && !row.pathLine
             width: row.width
             number: row.kind === "song" ? row.number : ""
-            bold: row.kind === "genre" || row.kind === "playlist" || row.kind === "nowplaying"
+            bold: row.kind === "genre" || row.kind === "playlist" || row.kind === "nowplaying" || row.kind === "folder"
             countLine: row.kind === "artist"
             ring: row.kind === "playlist" || row.kind === "nowplaying"
             ringGlyph: "play"
-            primary: row.divider ? "" : row.title
+            primary: row.divider || row.pathLine ? "" : row.title
             secondary: row.divider ? "" : row.subtitle
             focused: row.isFocused
             pressed: row.isFocused && hub.pressed
@@ -1020,6 +1087,19 @@ Page {
             text: row.divider ? row.letter : ""
             color: Ui.white(Ui.letterGlyph.alpha)
             font: Ui.font(Ui.letterGlyph)
+        }
+
+        Text {
+            id: pathText
+
+            visible: row.pathLine
+            x: Ui.px(Ui.hubEdge)
+            y: row.height - Ui.px(Ui.settingsLabelBaselineInset) - pathText.baselineOffset
+            width: row.width - 2 * Ui.px(Ui.hubEdge)
+            text: row.pathLine ? hub.fitPathLine(row.title) : ""
+            color: Ui.white(Ui.sectionLabel.alpha)
+            font: Ui.font(Ui.sectionLabel)
+            clip: true
         }
     }
 
@@ -1140,6 +1220,14 @@ Page {
             pivot: 4
             bound: true
             source: playlistsList
+            delegate: HubRow {}
+        }
+
+        Pane {
+            id: foldersPane
+
+            pivot: 5
+            source: hub.foldersModel
             delegate: HubRow {}
         }
 

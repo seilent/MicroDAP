@@ -20,6 +20,8 @@
 | settings | browse | `--size 640x960` | AUTO ROTATE reads OFF | 2026-10-09 |
 | hub | `pressed` | `--pivot songs` and `--pivot albums`, `--size 640x960` and `960x640` | focus on the first song row or album cell, F3 scale inside the slot, a pressed tile's caption not clipped | pending |
 | hub | `touch-scrolled` | `--pivot artists`, `--size 640x960` and `960x640` | focus row fully inside `[CONTENT_TOP, H - ROW_HEIGHT]` | pending |
+| hub | folders | `--pivot folders --library <dir>`, `--size 640x960` and `960x640` | sixth pivot label, one root row in the GENRES form, focus bar | pending |
+| hub | `folder-open` | `--pivot folders --library <dir>`, `--size 640x960` and `960x640` | path line in the settings label form under the strip, album folder songs numbered from 1 in the SONGS form, long path elided behind `...` | pending |
 | album | `pressed` | `--size 640x960` and `960x640` | focused track row at F3 scale | pending |
 | queue | `touch-scrolled` | `--size 640x960` and `960x640` | focus row fully inside `[CONTENT_TOP, H - ROW_HEIGHT]` | pending |
 | home | `pressed` | `--size 640x960` and `960x640` | focused menu item at F3 scale | pending |

@@ -23,6 +23,7 @@ Window {
     readonly property var albumsGrid: typeof AlbumsGrid === "undefined" ? null : AlbumsGrid
     readonly property var songsHub: typeof SongsHub === "undefined" ? null : SongsHub
     readonly property var genresHub: typeof GenresHub === "undefined" ? null : GenresHub
+    readonly property var foldersHub: typeof FoldersHub === "undefined" ? null : FoldersHub
     readonly property var genres: typeof Genres === "undefined" ? null : Genres
     readonly property var pins: typeof Pins === "undefined" ? null : Pins
     readonly property var playlists: typeof Playlists === "undefined" ? null : Playlists
@@ -595,6 +596,12 @@ Window {
             console.info("microdap: " + mode + " " + kind + " " + id)
             return 0
         }
+        if (kind === "folder") {
+            if (root.foldersHub === null || typeof root.player.playIds !== "function")
+                return 0
+            const played = Number(root.player.playIds(root.foldersHub.tracks(id), mode, startId))
+            return isNaN(played) ? 0 : played
+        }
         const n = Number(root.player.playSource(kind, id, mode, startId))
         return isNaN(n) ? 0 : n
     }
@@ -630,6 +637,8 @@ Window {
             return root.infoField("playlistInfo", id, "name")
         case "genre":
             return root.modelTitle(root.genres, id)
+        case "folder":
+            return root.foldersHub === null ? "" : root.str(root.foldersHub.name(id))
         case "song": {
             const rows = root.callLibrary("trackRows", [id])
             return rows === undefined || rows === null || rows.length === 0 ? "" : root.str(rows[0].title)
@@ -1129,6 +1138,7 @@ Window {
             songsModel: root.songsHub
             genresModel: root.genresHub
             playlistsModel: root.playlists
+            foldersModel: root.foldersHub
             player: root.player
             library: root.library
             onOpen: (kind, id) => root.openEntry(kind, id)
