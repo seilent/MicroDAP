@@ -1,10 +1,23 @@
 #include "BluezModel.h"
 
+#include <QDir>
+
 namespace microdap {
 
 BluezModel::BluezModel(QObject *parent)
     : QObject(parent)
 {
+}
+
+QString BluezModel::lastPhonePath()
+{
+    const QString state = qEnvironmentVariable("XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
+    return state + QStringLiteral("/microdap/last-phone");
+}
+
+QString BluezModel::lastPhone() const
+{
+    return m_lastPhone;
 }
 
 int BluezModel::volumeFromTransport(int raw)
@@ -147,6 +160,16 @@ void BluezModel::updateDeviceName(const QString &name)
         return;
     m_deviceName = name;
     emit deviceNameChanged();
+    if (!name.isEmpty())
+        updateLastPhone(name);
+}
+
+void BluezModel::updateLastPhone(const QString &name)
+{
+    if (m_lastPhone == name)
+        return;
+    m_lastPhone = name;
+    emit lastPhoneChanged();
 }
 
 void BluezModel::updateTransportActive(bool active)

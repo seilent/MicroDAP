@@ -22,6 +22,7 @@ public:
     void setConnected(bool connected);
     void setReady(bool ready);
     void setDeviceName(const QString &name);
+    void setLastPhone(const QString &name);
     void setTransportActive(bool active);
     void setTransportState(const QString &state);
     void setTrack(const QString &title, const QString &artist, const QString &album,

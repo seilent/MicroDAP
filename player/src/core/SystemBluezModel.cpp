@@ -6,6 +6,10 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusVariant>
 #include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
 
 namespace microdap {
 
@@ -95,6 +99,17 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     , m_agentWatcher(agentService(), session, QDBusServiceWatcher::WatchForOwnerChange)
 {
     registerMetaTypes();
+    QFile last(lastPhonePath());
+    if (last.open(QIODevice::ReadOnly))
+        updateLastPhone(QString::fromUtf8(last.read(1024)).trimmed());
+    connect(this, &BluezModel::lastPhoneChanged, this, [this] {
+        const QString path = lastPhonePath();
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(lastPhone().toUtf8() + '\n') < 0
+            || !file.commit())
+            qWarning() << "microdap bluez: cannot write" << path;
+    });
 
     m_positionTimer.setInterval(positionPollMs);
     connect(&m_positionTimer, &QTimer::timeout, this, &SystemBluezModel::pollPosition);

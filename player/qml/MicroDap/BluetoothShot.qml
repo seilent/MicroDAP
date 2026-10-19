@@ -37,14 +37,29 @@ Item {
         bluez: root.contextBluez
         eq: root.eqShot ? sampleEq : null
         pivotIndex: root.eqShot ? 2 : root.pairingPreset ? 1 : 0
+        onToast: (first, second) => toast.show(first, second)
 
         Component.onCompleted: {
             screen.completeAll()
+            if (root.fixture === "pairing-pulse")
+                screen.pulseHolder.scale = screen.pulsePeak
             if (root.fixture === "bt-eq-band") {
                 screen.eqPage.headphonesPane.openBand = 0
                 screen.eqPage.focusIndex = screen.eqPage.indexOfKey("band0:gain")
                 Qt.callLater(() => screen.eqPage.activePane.ensureVisible(screen.eqPage.focusIndex, 0))
             }
+            if (root.fixture === "guard-toast") {
+                screen.guardedBack()
+                toast.complete()
+            }
         }
+    }
+
+    Toast {
+        id: toast
+
+        x: 0
+        y: 0
+        width: root.width
     }
 }

@@ -692,6 +692,11 @@ void SystemBluezTest::deviceLifecycle()
     QTRY_VERIFY_WITH_TIMEOUT(!m_model->connected(), busTimeoutMs);
     QCOMPARE(m_model->transportState(), QStringLiteral("none"));
     QCOMPARE(m_model->deviceName(), QString());
+    QCOMPARE(m_model->lastPhone(), QStringLiteral("Pixel 9"));
+    QFile last(BluezModel::lastPhonePath());
+    QVERIFY(last.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(last.readAll()), QStringLiteral("Pixel 9\n"));
+    last.close();
     QCOMPARE(m_model->battery(), -1);
     QVERIFY(m_model->devicePath().isEmpty());
 
@@ -716,6 +721,10 @@ void SystemBluezTest::deviceLifecycle()
     QTRY_VERIFY_WITH_TIMEOUT(m_model->connected(), busTimeoutMs);
     QCOMPARE(m_model->devicePath(), secondDevicePath());
     QCOMPARE(m_model->deviceName(), QStringLiteral("Second Phone"));
+    QCOMPARE(m_model->lastPhone(), QStringLiteral("Second Phone"));
+    QVERIFY(last.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(last.readAll()), QStringLiteral("Second Phone\n"));
+    last.close();
     QCOMPARE(m_model->battery(), -1);
 
     QVariantMap transportProps;

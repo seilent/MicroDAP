@@ -22,6 +22,7 @@ QStringList FakeBluezModel::presets()
         QStringLiteral("connected"),
         QStringLiteral("active"),
         QStringLiteral("pairing"),
+        QStringLiteral("last"),
     };
 }
 
@@ -65,6 +66,11 @@ bool FakeBluezModel::applyPreset(const QString &name)
         setTransportState(QStringLiteral("active"));
         return true;
     }
+    if (name == QLatin1StringView("last")) {
+        clearAll();
+        setLastPhone(QStringLiteral("Pixel 8"));
+        return true;
+    }
     if (name == QLatin1StringView("pairing")) {
         clearAll();
         setPairing(true);
@@ -97,6 +103,11 @@ void FakeBluezModel::setReady(bool ready)
 void FakeBluezModel::setDeviceName(const QString &name)
 {
     updateDeviceName(name);
+}
+
+void FakeBluezModel::setLastPhone(const QString &name)
+{
+    updateLastPhone(name);
 }
 
 void FakeBluezModel::setTransportActive(bool active)

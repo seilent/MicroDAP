@@ -172,8 +172,13 @@ void BluezTest::commands()
 void BluezTest::presets()
 {
     FakeBluezModel fake;
-    QCOMPARE(FakeBluezModel::presets().size(), 4);
+    QCOMPARE(FakeBluezModel::presets().size(), 5);
     QVERIFY(!fake.applyPreset(QStringLiteral("bogus")));
+    QVERIFY(fake.lastPhone().isEmpty());
+    QVERIFY(fake.applyPreset(QStringLiteral("last")));
+    QVERIFY(!fake.connected());
+    QCOMPARE(fake.lastPhone(), QStringLiteral("Pixel 8"));
+    QVERIFY(fake.applyPreset(QStringLiteral("off")));
 
     QVERIFY(fake.applyPreset(QStringLiteral("connected")));
     QVERIFY(fake.connected());

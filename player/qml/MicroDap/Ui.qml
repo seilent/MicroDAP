@@ -364,6 +364,7 @@ QtObject {
     readonly property int seekTickMs: 250
     readonly property int seekTickStepMs: 1000
     readonly property int seekEndMarginMs: 1000
+    readonly property int modeGuardHoldMs: 2000
 
     function npRingCenter(index: int): real {
         const span = ui.landscape ? ui.canvasW - ui.npColumnRight - ui.edge : ui.canvasW

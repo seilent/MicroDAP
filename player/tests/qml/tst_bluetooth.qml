@@ -42,6 +42,7 @@ TestCase {
 
         property bool connected: false
         property string deviceName: ""
+        property string lastPhone: ""
         property bool transportActive: false
         property string title: ""
         property string artist: ""
@@ -55,6 +56,7 @@ TestCase {
         function reset() {
             fake.connected = false
             fake.deviceName = ""
+            fake.lastPhone = ""
             fake.transportActive = false
             fake.title = ""
             fake.artist = ""
@@ -141,6 +143,7 @@ TestCase {
         id: counters
 
         property int nowPlayingOpens: 0
+        property var toasts: []
     }
 
     Component {
@@ -155,6 +158,7 @@ TestCase {
         Bluetooth {
             bluez: fake
             onOpenNowPlaying: counters.nowPlayingOpens++
+            onToast: (first, second) => counters.toasts = counters.toasts.concat([first + "/" + second])
         }
     }
 
@@ -166,6 +170,7 @@ TestCase {
         fake.reset()
         fakeEq.reset()
         counters.nowPlayingOpens = 0
+        counters.toasts = []
     }
 
     function open(properties) {
@@ -349,6 +354,10 @@ TestCase {
         page.switchPivot(1)
         compare(eq.focusIndex, 0)
         verify(router.dispatch("b", false))
+        compare(pages.depth, 2)
+        compare(JSON.stringify(counters.toasts), JSON.stringify(["bluetooth/hold b 2 s to leave"]))
+        fake.connected = false
+        verify(router.dispatch("b", false))
         compare(pages.depth, 1)
     }
 
@@ -414,7 +423,7 @@ TestCase {
         fuzzyCompare(page.hintText.color.a, 0.6, 1 / 255)
         compare(page.hintText.horizontalAlignment, Text.AlignHCenter)
         compare(page.hintText.lineHeight, Ui.px(11))
-        fuzzyCompare(page.hintText.y + page.hintText.baselineOffset, Ui.px(tc.contentTop + 90 + 32 + 16), 0.5)
+        fuzzyCompare(page.hintText.y + page.hintText.baselineOffset, Ui.px(tc.contentTop + 90 + 32 * 1.4 + 16), 0.5)
         fuzzyCompare(page.hintText.x, Ui.px(20), 0.01)
         compare(page.hintText.width, Ui.px(tc.canvasW - 40))
         compare(page.dapModeText.visible, false)
@@ -498,6 +507,82 @@ TestCase {
         compare(page.pivotIndex, 1)
         verify(router.dispatch("b", false))
         compare(pages.depth, 1)
+    }
+
+    function test_guard_only_while_connected() {
+        fake.connect()
+        const page = open()
+        compare(page.guarded, true)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 2)
+        compare(JSON.stringify(counters.toasts), JSON.stringify(["bluetooth/hold b 2 s to leave"]))
+        fake.connected = false
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_guard_hold_leaves_in_every_state() {
+        fake.connect()
+        let page = open()
+        router.press("b")
+        verify(router.dispatch("b", false))
+        compare(page.guardTimer.running, true)
+        compare(page.guardTimer.interval, 2000)
+        wait(1000)
+        router.release("b")
+        compare(page.guardTimer.running, false)
+        compare(pages.depth, 2)
+        router.press("b")
+        tryCompare(pages, "depth", 1, 3000)
+        router.release("b")
+        pages.clear()
+        page = open()
+        page.switchPivot(1)
+        verify(router.dispatch("a", false))
+        compare(fake.pairing, true)
+        router.press("b")
+        tryCompare(pages, "depth", 1, 3000)
+        router.release("b")
+        compare(fake.pairing, false)
+        fake.connected = false
+        pages.clear()
+        page = open()
+        router.press("b")
+        page.guardTimer.triggered()
+        router.release("b")
+        compare(pages.depth, 1)
+    }
+
+    function test_guard_header_touch() {
+        fake.connect()
+        const page = open()
+        const label = page.header.children[0]
+        tc.tapAt(label, Ui.px(10), label.height / 2)
+        compare(pages.depth, 2)
+        compare(JSON.stringify(counters.toasts), JSON.stringify(["bluetooth/hold b 2 s to leave"]))
+        const at = label.mapToItem(tc, Ui.px(10), label.height / 2)
+        mousePress(label, Ui.px(10), label.height / 2)
+        compare(page.guardTimer.running, true)
+        tryCompare(pages, "depth", 1, 3000)
+        mouseRelease(tc, at.x, at.y)
+        wait(0)
+    }
+
+    function test_last_phone() {
+        fake.lastPhone = "Pixel 8"
+        const page = open()
+        compare(page.connected, false)
+        compare(page.nameText.text, "Pixel 8")
+        compare(page.stateText.text, "disconnected")
+        compare(page.focusBar.visible, true)
+        verify(router.dispatch("a", false))
+        compare(fake.calls, [])
+        compare(JSON.stringify(counters.toasts), JSON.stringify(["/connect from your phone"]))
+        fake.lastPhone = ""
+        compare(page.nameText.text, "")
+        compare(page.focusBar.visible, false)
+        verify(router.dispatch("a", false))
+        compare(counters.toasts.length, 1)
     }
 
     function test_b_on_phone_pops() {

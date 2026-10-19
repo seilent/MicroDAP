@@ -27,6 +27,9 @@ Page {
     readonly property int pairingRemaining: page.bluez !== null && page.bluez.pairingRemaining !== undefined ? page.bluez.pairingRemaining : 0
     readonly property int battery: page.bluez !== null && page.bluez.battery !== undefined ? page.bluez.battery : -1
     readonly property string deviceName: page.bluez !== null && page.bluez.deviceName !== undefined ? page.bluez.deviceName : ""
+    readonly property string lastPhone: page.bluez !== null && page.bluez.lastPhone !== undefined ? String(page.bluez.lastPhone) : ""
+    readonly property string shownPhone: page.connected ? page.deviceName : page.lastPhone
+    readonly property bool guarded: page.connected
     readonly property string status: page.bluez !== null && page.bluez.status !== undefined ? page.bluez.status : ""
     readonly property string trackTitle: page.bluez !== null && page.bluez.title !== undefined ? page.bluez.title : ""
     readonly property string trackArtist: page.bluez !== null && page.bluez.artist !== undefined ? page.bluez.artist : ""
@@ -42,7 +45,9 @@ Page {
     readonly property real nameBlockHeight: page.stateBaseline - page.nameBlockTop
     readonly property real rowTop: Ui.contentTop + 60
     readonly property real ringCenterY: Ui.contentTop + 90
-    readonly property real hintBaseline: page.ringCenterY + Ui.backRing / 2 + Ui.qpHintDrop
+    readonly property real pulsePeak: Math.max.apply(null, Motion.pulse.map((k) => k[1]))
+    readonly property real hintBaseline: page.ringCenterY + Ui.backRing / 2 * page.pulsePeak
+        + Ui.qpHintDrop
     readonly property bool switching: pivotAnim.running
     readonly property bool stateSwapping: stateSwap.running
     readonly property bool pulsing: pulse.running
@@ -62,6 +67,7 @@ Page {
     property alias pulseHolder: pulseHolder
     property alias hintText: hintText
     property alias eqPage: eqPage
+    property alias guardTimer: guardTimer
 
     signal openNowPlaying()
     signal toast(string first, string second)
@@ -149,7 +155,8 @@ Page {
         case "pivot":
             return "tap"
         case "header":
-            return "b"
+            guardTimer.restart()
+            return ""
         default:
             return ""
         }
@@ -171,7 +178,49 @@ Page {
         }
         if (eqPage.handleAction(name, repeat))
             return true
-        return name === "b" && !repeat ? page.back() : false
+        return name === "b" && !repeat ? page.guardedBack() : false
+    }
+
+    function guardedBack(): bool {
+        if (!page.guarded)
+            return page.back()
+        page.toast("bluetooth", "hold b 2 s to leave")
+        return true
+    }
+
+    function leave(): void {
+        guardTimer.stop()
+        if (page.pairing)
+            page.call("stopPairing")
+        page.back()
+    }
+
+    function press(name: string) {
+        if (name === "a")
+            page.pressed = true
+        if (name === "b")
+            guardTimer.restart()
+    }
+
+    function release(name: string) {
+        if (name === "a")
+            page.pressed = false
+        if (name === "b")
+            guardTimer.stop()
+    }
+
+    function touchMove(kind: string, index: int, dx: real, dy: real, hit: Item): void {
+    }
+
+    function touchLift(kind: string, index: int, dx: real, dy: real, hit: Item): void {
+        if (kind !== "header" || !guardTimer.running)
+            return
+        guardTimer.stop()
+        page.handleAction("b", false)
+    }
+
+    function touchCancel(kind: string, index: int, hit: Item): void {
+        guardTimer.stop()
     }
 
     function handleAction(name: string, repeat: bool): bool {
@@ -200,6 +249,8 @@ Page {
             }
             if (page.connected)
                 page.togglePlayPause()
+            else if (page.lastPhone !== "")
+                page.toast("", "connect from your phone")
             return true
         case "start":
             if (repeat)
@@ -216,7 +267,7 @@ Page {
                 page.call("stopPairing")
                 return true
             }
-            return page.back()
+            return page.guardedBack()
         default:
             return false
         }
@@ -262,6 +313,14 @@ Page {
         property bool internal: false
     }
 
+    Timer {
+        id: guardTimer
+
+        interval: Ui.modeGuardHoldMs
+        repeat: false
+        onTriggered: page.leave()
+    }
+
     PageSurface {
         anchors.fill: parent
     }
@@ -279,7 +338,7 @@ Page {
             x: Ui.px(Ui.hubEdge)
             y: Ui.px(page.nameBaseline) - nameText.baselineOffset
             width: page.width - 2 * Ui.px(Ui.hubEdge)
-            text: page.deviceName
+            text: page.shownPhone
             color: Ui.white(Ui.npArtist.alpha)
             font: Ui.font(Ui.npArtist)
             clip: true
@@ -321,7 +380,7 @@ Page {
         FocusBar {
             id: focusBar
 
-            visible: page.connected
+            visible: page.shownPhone !== ""
             rowY: page.transportActive ? transportRow.y : Ui.px(page.nameBlockTop)
             rowHeight: page.transportActive ? transportRow.height : Ui.px(page.nameBlockHeight)
             opacity: page.focusOpacity
@@ -384,6 +443,9 @@ Page {
             height: pairingRing.height
             visible: !page.overlay
             transformOrigin: Item.Center
+            layer.enabled: pulseHolder.scale !== 1
+            layer.smooth: true
+            layer.textureSize: Qt.size(Math.ceil(pulseHolder.width * page.pulsePeak), Math.ceil(pulseHolder.height * page.pulsePeak))
 
             Ring {
                 id: pairingRing
@@ -435,6 +497,7 @@ Page {
     CroppedHeader {
         id: header
 
+        trackTouch: true
         text: "bluetooth"
         shift: strip.headerShift
         animated: page.live

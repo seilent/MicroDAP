@@ -7,6 +7,7 @@ Item {
     property string text: ""
     property real shift: 0
     property bool animated: true
+    property bool trackTouch: false
 
     readonly property real xHeightBottom: Ui.headerXHeightBottom
     readonly property real baselineY: Ui.px(root.xHeightBottom)
@@ -21,6 +22,7 @@ Item {
         id: label
 
         readonly property string touchKind: "header"
+        readonly property bool touchTrack: root.trackTouch
 
         x: Ui.px(Ui.hubEdge + root.shift)
         y: root.baselineY - label.baselineOffset
