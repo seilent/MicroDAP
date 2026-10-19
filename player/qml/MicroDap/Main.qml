@@ -14,7 +14,7 @@ Window {
     property string shotOrientation: "portrait"
     property string shotState: "browse"
 
-    readonly property var bluez: typeof BluezModel === "undefined" ? null : BluezModel
+    property var bluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property var historyRecent: typeof HistoryRecent === "undefined" ? null : HistoryRecent
     readonly property var historyNew: typeof HistoryNew === "undefined" ? null : HistoryNew
     readonly property var quickplayRecent: typeof QuickplayRecent === "undefined" ? null : QuickplayRecent
@@ -77,6 +77,8 @@ Window {
         ? root.player.current : ({})
     readonly property bool hasTrack: root.current.id !== undefined && root.current.id !== null
     readonly property bool phoneActive: root.bluez !== null && root.bluez.transportActive === true
+    readonly property bool phonePlaying: root.phoneActive && root.bluez.status === "playing"
+    readonly property bool overlayOpen: keyboard.shown || root.overlayIn(pages.currentItem)
     readonly property int saverSeconds: root.settings !== null && root.settings.saverSeconds !== undefined ? Number(root.settings.saverSeconds) : 0
     readonly property int screenOffSeconds: root.settings !== null && root.settings.screenOffSeconds !== undefined ? Number(root.settings.screenOffSeconds) : 0
     readonly property bool overlayToasts: root.settings !== null && root.settings.overlayToasts === true
@@ -117,9 +119,9 @@ Window {
     readonly property bool off: root.powerScreenOff || root.hidden
     readonly property bool lyricsHold: root.playing && pages.currentItem !== null
         && pages.currentItem.objectName === "nowplaying" && pages.currentItem.lyricsShown === true
-    readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && root.playing
+    readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && (root.playing || root.phonePlaying)
         && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown && !root.lyricsHold
-        && !keyboard.shown
+        && !root.overlayOpen
     readonly property bool screenOffArmed: !root.overlay && !root.off && !root.screenshot && root.power !== null
         && root.screenOffSeconds > 0 && !root.switching && !root.lyricsHold
     property alias rotor: rotor
@@ -797,6 +799,22 @@ Window {
             console.info("microdap: play " + kind + " " + id)
     }
 
+    function overlayIn(page: Item): bool {
+        if (page === null || page === undefined)
+            return false
+        for (const name of ["sheet", "deleteDialog"]) {
+            const item = page[name]
+            if (item !== undefined && item !== null && (item.shown === true || item.animating === true))
+                return true
+        }
+        return page.eqPage !== undefined && page.eqPage !== null && root.overlayIn(page.eqPage)
+    }
+
+    function phoneField(name: string): string {
+        const v = root.bluez === null ? undefined : root.bluez[name]
+        return v === undefined || v === null ? "" : String(v)
+    }
+
     function closeSheets() {
         const top = pages.currentItem
         if (top === null || top.sheet === undefined || top.sheet === null)
@@ -1091,11 +1109,12 @@ Window {
             anchors.fill: parent
             screenOff: root.off
             clockMode: root.settings !== null && root.settings.clock !== undefined ? String(root.settings.clock) : "24h"
-            title: root.field("title")
-            artist: root.field("artist")
-            album: root.field("album")
-            artPath: root.field("artPath")
-            lyricsOn: root.saverLyrics
+            phone: root.phoneActive
+            title: root.phoneActive ? root.phoneField("title") : root.field("title")
+            artist: root.phoneActive ? root.phoneField("artist") : root.field("artist")
+            album: root.phoneActive ? (root.phoneField("deviceName") === "" ? "" : "from " + root.phoneField("deviceName")) : root.field("album")
+            artPath: root.phoneActive ? "" : root.field("artPath")
+            lyricsOn: root.saverLyrics && !root.phoneActive
             lyrics: root.lyrics
             player: root.player
         }
@@ -1495,7 +1514,9 @@ Window {
 
     Component {
         id: saverShotComponent
-        SaverShot {}
+        SaverShot {
+            fixture: root.shotState
+        }
     }
 
     Component {

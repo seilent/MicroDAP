@@ -49,6 +49,18 @@ TestCase {
     }
 
     QtObject {
+        id: fakeBluez
+
+        property bool connected: true
+        property bool transportActive: true
+        property string deviceName: "Pixel 8"
+        property string title: "Phone Song"
+        property string artist: "Phone Artist"
+        property string album: "Phone Album"
+        property string status: "playing"
+    }
+
+    QtObject {
         id: fakeSettings
 
         property string output: "auto"
@@ -397,6 +409,65 @@ TestCase {
         main.switchPrompt.close()
         main.switchPrompt.complete()
         kb.complete()
+    }
+
+    function test_saver_waits_for_overlays() {
+        compare(main.saverArmed, true)
+        main.openNowPlaying()
+        main.pageStack.completeAll()
+        const np = main.pageStack.currentItem
+        np.sheet.showLines("Song", ["flac"], 0)
+        np.sheet.complete()
+        compare(main.overlayOpen, true)
+        compare(main.saverArmed, false)
+        compare(main.saverTimer.running, false)
+        np.sheet.close()
+        np.sheet.complete()
+        compare(main.saverArmed, true)
+        main.keyboard.open({ title: "name", kind: "text" })
+        compare(main.saverArmed, false)
+        main.keyboard.close()
+        main.keyboard.complete()
+        compare(main.saverArmed, true)
+        main.pageStack.pop()
+        main.pageStack.completeAll()
+    }
+
+    function test_saver_phone_source() {
+        fakePlayer.status = 2
+        compare(main.saverArmed, false)
+        fakeSettings.saverLyrics = true
+        fakeLyrics.lines = [{ ms: 0, text: "Local line" }]
+        fakeLyrics.changed()
+        main.bluez = fakeBluez
+        compare(main.saverArmed, true)
+        saver.show()
+        saver.land()
+        compare(saver.phone, true)
+        compare(saver.title, "Phone Song")
+        compare(saver.artist, "Phone Artist")
+        compare(saver.album, "from Pixel 8")
+        fakeBluez.deviceName = ""
+        compare(saver.album, "")
+        compare(saver.albumItem.text, "")
+        fakeBluez.deviceName = "Pixel 8"
+        compare(saver.phoneGlyph.visible, true)
+        fuzzyCompare(saver.phoneGlyph.width, Ui.px(64 / 168 * 56), 0.01)
+        verify(Qt.colorEqual(saver.artItem.color, "transparent"))
+        compare(saver.shownLyric, "")
+        fakeBluez.status = "paused"
+        saver.hide()
+        saver.land()
+        compare(main.saverArmed, false)
+        fakeBluez.status = "playing"
+        fakeBluez.transportActive = false
+        compare(saver.phone, false)
+        compare(saver.title, "Sticking With You")
+        compare(saver.phoneGlyph.visible, false)
+        main.bluez = null
+        fakeBluez.transportActive = true
+        fakePlayer.status = 1
+        fakeSettings.saverLyrics = false
     }
 
     function test_not_armed_when_paused() {

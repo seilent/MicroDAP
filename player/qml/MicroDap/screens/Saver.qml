@@ -11,6 +11,7 @@ Item {
     property string artist: ""
     property string album: ""
     property string artPath: ""
+    property bool phone: false
     property string fixedClock: ""
     property real progress: 0
     property real drift: Motion.saverDriftFrom
@@ -36,6 +37,7 @@ Item {
     readonly property real lyricBaseline: Ui.px(Ui.saverLyricBaseline)
     property alias clockItem: clockItem
     property alias artItem: artItem
+    property alias phoneGlyph: phoneGlyph
     property alias titleItem: titleItem
     property alias artistItem: artistItem
     property alias albumItem: albumItem
@@ -211,12 +213,22 @@ Item {
         y: saver.artY
         width: Ui.px(Ui.saverArt)
         height: Ui.px(Ui.saverArt)
-        color: Ui.tile
+        color: saver.phone ? "transparent" : Ui.tile
+
+        Glyph {
+            id: phoneGlyph
+
+            anchors.centerIn: parent
+            visible: saver.phone
+            name: "bluetooth"
+            size: Ui.npBtGlyph / Ui.npArt * Ui.saverArt
+            color: Ui.textFull
+        }
 
         Image {
             anchors.fill: parent
             source: saver.artUrl
-            visible: saver.artUrl !== ""
+            visible: !saver.phone && saver.artUrl !== ""
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             cache: true

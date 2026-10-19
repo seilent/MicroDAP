@@ -5,15 +5,18 @@ Item {
     id: root
 
     property bool dim: false
+    property string fixture: "browse"
+    readonly property bool phone: root.fixture === "phone-active"
 
     Saver {
         id: saver
 
         anchors.fill: parent
         fixedClock: "7:13"
-        title: "Sticking With You"
-        artist: "Addison Road"
-        album: "Addison Road"
+        phone: root.phone
+        title: root.phone ? "Track Four" : "Sticking With You"
+        artist: root.phone ? "Phone Artist" : "Addison Road"
+        album: root.phone ? "from Pixel 8" : "Addison Road"
         Component.onCompleted: {
             saver.show()
             saver.dimmed = root.dim
