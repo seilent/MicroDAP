@@ -154,6 +154,8 @@ const QStringList &states()
         QStringLiteral("sample-rate-edit"),
         QStringLiteral("sample-rate-unsupported"),
         QStringLiteral("sample-rate-locked"),
+        QStringLiteral("accent-edit"),
+        QStringLiteral("saver-sheet"),
         QStringLiteral("pivot-library"),
         QStringLiteral("pivot-display"),
         QStringLiteral("pivot-power"),

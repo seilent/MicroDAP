@@ -499,6 +499,7 @@ foreach(screen IN ITEMS artist album settings playlists history eq power saver s
 endforeach()
 
 foreach(shot IN ITEMS settings:pivot-library settings:pivot-display settings:pivot-power settings:pivot-system
+        settings:accent-edit settings:saver-sheet settings:sample-rate-edit settings:touch settings:touch-edit
         settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
         settings:about-missing power:power-none power:power-long)
     string(REPLACE ":" ";" parts ${shot})

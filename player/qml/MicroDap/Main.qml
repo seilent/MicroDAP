@@ -44,7 +44,7 @@ Window {
     readonly property bool autoFollow: root.autoRotate && root.sensor !== null && root.sensor.supported === true
     readonly property bool sensorWanted: root.autoRotate && Ui.orientationActive && !root.off
     readonly property bool settingsEditing: pages.currentItem !== null && pages.currentItem.objectName === "settings"
-        && pages.currentItem.editing === true
+        && (pages.currentItem.editing === true || pages.currentItem.valueOpen === true)
     property int sensorTurn: -1
     property int pinnedTurn: -1
     property string pinnedRaw: ""

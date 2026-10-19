@@ -27,12 +27,6 @@ Page {
     property bool editing: false
     property string editKey: ""
     property var editOriginal: null
-    property string orientationDraft: ""
-    property string levelDraft: "off"
-    property string rateDraft: "auto"
-    property bool autoRotateDraft: false
-    property bool touchDraft: true
-    property string bootDraft: ""
     property var bootChoices: []
     property int eqRevision: 0
     property var folders: []
@@ -74,15 +68,15 @@ Page {
         ? String(page.settings.orientation) : "portrait"
     readonly property bool autoRotate: page.settings !== null && page.settings.autoRotate === true
     readonly property bool touchEnabled: page.settings === null || page.settings.touch !== false
-    readonly property string touchValue: (page.editing && page.editKey === "touch" ? page.touchDraft : page.touchEnabled) ? "on" : "off"
+    readonly property string touchValue: page.touchEnabled ? "on" : "off"
     readonly property bool sensorSupported: !page.overlay && page.sensor !== null && page.sensor.supported === true
     readonly property bool autoFollowing: page.autoRotate && page.sensorSupported && Ui.orientationActive
     readonly property string effectiveOrientation: page.orientations[[0, 2, Ui.landscapeTurn, (Ui.landscapeTurn + 2) % 4].indexOf(Ui.turn)]
     readonly property string orientationValue: !Ui.orientationActive ? "external display"
         : (page.autoFollowing ? page.effectiveOrientation
-        : page.editing && page.editKey === "orientation" ? page.orientationDraft : page.orientation).replace("-", " ")
+        : page.orientation).replace("-", " ")
     readonly property string autoRotateValue: !page.sensorSupported ? "unsupported"
-        : (page.editing && page.editKey === "autoRotate" ? page.autoRotateDraft : page.autoRotate) ? "on" : "off"
+        : page.autoRotate ? "on" : "off"
     readonly property real savedScale: page.settings !== null && page.settings.scale !== undefined ? Number(page.settings.scale) : 1.0
     readonly property bool jackKnown: page.outputControl !== null && page.outputControl.jackPresent !== undefined
     readonly property bool jackPresent: !page.jackKnown || page.outputControl.jackPresent === true
@@ -97,7 +91,6 @@ Page {
     readonly property bool levelEffective: page.outputMode !== null && page.outputMode.effective === true
     readonly property string levelStatus: page.outputMode !== null && page.outputMode.levelStatus !== undefined ? String(page.outputMode.levelStatus) : ""
     readonly property string levelValue: page.overlay ? "dap only"
-        : page.editing && page.editKey === "level" ? page.levelWord(page.levelDraft)
         : page.outputLevel === "off" ? "off"
         : !page.usbActive ? "usb only"
         : page.levelStatus !== "" ? page.levelStatus : page.levelWord(page.outputLevel)
@@ -107,7 +100,7 @@ Page {
     readonly property bool rateReadOnly: page.overlay || (page.outputMode !== null && page.outputMode.rateReadOnly === true)
     readonly property string rateValue: page.overlay ? "dap only"
         : page.rateReadOnly ? page.autoText(true)
-        : page.rateText(page.editing && page.editKey === "rate" ? page.rateDraft : page.sampleRate)
+        : page.rateText(page.sampleRate)
     readonly property bool hasEq: page.eq !== null && page.eq !== undefined
     readonly property string eqOutput: page.hasEq && page.eq.activeOutput !== undefined ? String(page.eq.activeOutput) : ""
     readonly property string dacStatus: page.overlay || page.dacEq === null ? "" : String(page.dacEq.status)
@@ -124,7 +117,7 @@ Page {
     readonly property bool hasBoot: page.settings !== null && page.settings.bootSession !== undefined
     readonly property string bootSession: page.hasBoot ? String(page.settings.bootSession) : ""
     readonly property bool bootReadOnly: page.bootChoices.length === 0
-    readonly property string bootValue: page.bootText(page.editing && page.editKey === "boot" ? page.bootDraft : page.bootSession)
+    readonly property string bootValue: page.bootText(page.bootSession)
     readonly property bool scanning: page.library !== null && page.library.scanning === true
     readonly property int songCount: page.library !== null && page.library.songCount !== undefined ? Number(page.library.songCount) : 0
     readonly property string rescanValue: page.scanning ? "scanning" : page.songCount + (page.songCount === 1 ? " song" : " songs")
@@ -142,6 +135,9 @@ Page {
     readonly property real focusHeight: page.focusedRow === null ? 0 : page.rowHeightOf(page.focusedRow)
     readonly property bool scrolling: scrollAnim.running
     readonly property bool switching: pivotAnim.running
+    readonly property bool valueOpen: d.valueKey !== ""
+    readonly property var watchedValue: page.watchOf(page.valueOpen, d.valueKey, page.editing, page.editKey)
+    readonly property string valueItems: page.valueOpen ? JSON.stringify(page.valueWords(d.valueKey, page.sheetValues(d.valueKey))) : ""
     property alias header: header
     property alias strip: strip
     property alias flick: flick
@@ -457,6 +453,7 @@ Page {
         const pivot = page.pivotOfKey(key)
         if (pivot >= 0 && pivot !== page.pivotIndex) {
             page.cancelEdit()
+            page.closeSheet()
             d.internal = true
             page.pivotIndex = pivot
             d.internal = false
@@ -508,8 +505,7 @@ Page {
             return false
         page.landPivot()
         page.cancelEdit()
-        if (sheet.shown)
-            sheet.close()
+        page.closeSheet()
         const dir = target > page.pivotIndex ? 1 : -1
         d.internal = true
         page.pivotIndex = target
@@ -639,87 +635,163 @@ Page {
 
     function step(delta: int): bool {
         const r = page.focusedRow
-        if (r === null)
+        if (r === null || r.key !== "accent")
             return false
-        switch (r.key) {
+        page.write("accentHue", Ui.stepHue(page.accentHue, delta))
+        return true
+    }
+
+    function write(setting: string, value: var): void {
+        d.ours = d.ours.concat([value])
+        if (setting === "scale")
+            page.applyScale(Number(value))
+        else
+            page.set(setting, value)
+    }
+
+    function valueList(key: string): var {
+        switch (key) {
         case "output":
-            page.set("output", page.cycle(page.outputs, page.output, delta))
-            return true
-        case "hpGain":
-            if (page.usbActive)
-                return false
-            page.set("hpGain", page.cycle(page.hpGains, page.hpGain, delta))
-            return true
-        case "hpAmp":
-            if (page.usbActive)
-                return false
-            page.set("hpAmp", page.cycle(page.hpAmps, page.hpAmp, delta))
-            return true
-        case "spkGain":
-            page.set("spkGain", page.cycle(page.spkGainSteps, page.spkGain, delta))
-            return true
-        case "volumeStep":
-            page.set("volumeStep", page.cycle(page.volumeSteps, page.volumeStep, delta))
-            return true
-        case "rgb":
-            if (!page.rgbSupported)
-                return false
-            page.set("rgb", page.cycle(page.rgbModes, page.rgb, delta))
-            return true
-        case "codec":
-            page.set("btCodec", page.cycle(page.codecs, page.codec, delta))
-            return true
-        case "toasts":
-            page.set("overlayToasts", !page.overlayToasts)
-            return true
-        case "accent":
-            page.set("accentHue", Ui.stepHue(page.accentHue, delta))
-            return true
-        case "accentArt":
-            page.set("accentFromArt", !page.accentFromArt)
-            return true
-        case "scale":
-            page.applyScale(page.cycle(page.scaleSteps, Math.round(Ui.userScale * 10) / 10, delta))
-            return true
-        case "saver":
-            page.set("saverSeconds", page.cycle(page.saverSteps, page.saverSeconds, delta))
-            return true
-        case "screenOff":
-            page.set("screenOffSeconds", page.cycle(page.screenOffSteps, page.screenOffSeconds, delta))
-            return true
-        case "suspend":
-            page.set("suspendMinutes", page.cycle(page.suspendSteps, page.suspendMinutes, delta))
-            return true
-        case "wifi":
-            page.set("wifiOffScreenOff", !page.wifiOffScreenOff)
-            return true
-        case "level":
-            if (page.overlay)
-                return false
-            page.levelDraft = page.cycle(page.levels, page.levelDraft, delta)
-            return true
+            return page.outputs
         case "rate":
-            if (page.rateReadOnly)
-                return false
-            page.rateDraft = page.cycle(page.rateChoices, page.rateDraft, delta)
-            return true
-        case "orientation":
-            page.orientationDraft = page.cycle(page.orientations, page.orientationDraft, delta)
-            return true
-        case "autoRotate":
-            page.autoRotateDraft = !page.autoRotateDraft
-            return true
-        case "touch":
-            page.touchDraft = !page.touchDraft
-            return true
+            return page.rateChoices
+        case "scale":
+            return page.scaleSteps
         case "boot":
-            if (page.bootReadOnly)
-                return false
-            page.bootDraft = page.cycle(page.bootChoices, page.bootDraft, delta)
-            return true
+            return page.bootChoices
         default:
-            return false
+            return page.valuesOf(key)
         }
+    }
+
+    function sheetValues(key: string): var {
+        const list = page.valueList(key)
+        const numbers = list.filter((v) => v !== "auto" && !isNaN(Number(v)))
+        const words = list.filter((v) => v === "auto")
+        if (numbers.length === 0 || numbers.length + words.length !== list.length)
+            return list.slice()
+        return numbers.slice().sort((a, b) => Number(b) - Number(a)).concat(words)
+    }
+
+    function wordOf(key: string, value: var): string {
+        switch (key) {
+        case "output":
+            return value === "headphones" && !page.jackPresent ? "no jack" : String(value)
+        case "spkGain":
+            return page.spkGainText(Number(value))
+        case "volumeStep":
+            return value + "%"
+        case "level":
+            return page.levelWord(String(value))
+        case "orientation":
+            return String(value).replace("-", " ")
+        case "scale":
+            return Number(value).toFixed(1)
+        case "saver":
+            return page.minutes(Number(value))
+        case "screenOff":
+            return page.offOr(Math.round(Number(value) / 60), "min")
+        case "suspend":
+            return page.offOr(Number(value), "min")
+        default:
+            return String(value)
+        }
+    }
+
+    function valueWords(key: string, values: var): var {
+        return values.map((v) => page.wordOf(key, v))
+    }
+
+    function liveOf(key: string): var {
+        return key === "scale" ? Math.round(Ui.userScale * 10) / 10 : page.currentOf(key)
+    }
+
+    function openValue(key: string): void {
+        const spec = page.tableRow(key)
+        if (key === "boot")
+            page.refreshBootChoices()
+        const values = page.sheetValues(key)
+        if (spec === null || values.length === 0)
+            return
+        const live = page.liveOf(key)
+        const mark = values.findIndex((v) => String(v) === String(live))
+        const near = mark >= 0 ? mark : values.findIndex((v) => String(v) === String(page.cycle(values, live, 0)))
+        d.valueValues = values
+        d.valueDraft = spec.draft
+        d.valueOriginal = page.currentOf(key)
+        d.ours = [d.valueOriginal]
+        d.valueItems = JSON.stringify(page.valueWords(key, values))
+        d.valueKey = key
+        d.riseKept = ""
+        sheet.title = spec.title
+        sheet.items = page.valueWords(key, values)
+        sheet.open()
+        sheet.mark = mark
+        sheet.wrap = !spec.bounded
+        sheet.focusIndex = Math.max(0, near)
+    }
+
+    function endValue(): void {
+        d.valueKey = ""
+        d.riseKept = ""
+        d.valueValues = []
+        d.ours = []
+        if (sheet.shown)
+            sheet.close()
+    }
+
+    function previewValue(index: int): void {
+        if (!page.valueOpen || d.valueDraft || index < 0 || index >= d.valueValues.length)
+            return
+        page.write(page.settingOf(d.valueKey), d.valueValues[index])
+    }
+
+    function acceptValue(index: int): void {
+        const key = d.valueKey
+        const value = d.valueValues[index]
+        const draft = d.valueDraft
+        page.endValue()
+        if (value === undefined)
+            return
+        if (draft || String(page.liveOf(key)) !== String(value))
+            page.write(page.settingOf(key), value)
+        d.ours = []
+    }
+
+    function cancelValue(): void {
+        if (!page.valueOpen)
+            return
+        const key = d.valueKey
+        const original = d.valueOriginal
+        const draft = d.valueDraft
+        page.endValue()
+        if (!draft && String(page.currentOf(key)) !== String(original))
+            page.write(page.settingOf(key), original)
+        d.ours = []
+    }
+
+    function dismissValue(): void {
+        if (!page.valueOpen)
+            return
+        if (d.valueDraft)
+            page.cancelValue()
+        else
+            page.endValue()
+    }
+
+    function closeSheet(): void {
+        if (page.valueOpen)
+            page.cancelValue()
+        else if (sheet.shown)
+            sheet.close()
+    }
+
+    function watchOf(open: bool, valueKey: string, editing: bool, editKey: string): var {
+        return open ? page.currentOf(valueKey) : editing ? page.currentOf(editKey) : undefined
+    }
+
+    function flip(key: string): void {
+        page.set(page.settingOf(key), !page.currentOf(key))
     }
 
     function settingOf(key: string): string {
@@ -777,18 +849,8 @@ Page {
     }
 
     function beginEdit(key: string): void {
-        if (key === "boot") {
-            page.refreshBootChoices()
-            if (page.bootReadOnly)
-                return
-        }
         page.editOriginal = page.currentOf(key)
-        page.orientationDraft = page.orientation
-        page.levelDraft = page.outputLevel
-        page.rateDraft = page.sampleRate
-        page.autoRotateDraft = page.autoRotate
-        page.touchDraft = page.touchEnabled
-        page.bootDraft = page.bootSession
+        d.ours = [page.editOriginal]
         page.editKey = key
         page.editing = true
     }
@@ -797,6 +859,7 @@ Page {
         page.editing = false
         page.editKey = ""
         page.editOriginal = null
+        d.ours = []
     }
 
     function cancelEdit(): void {
@@ -804,43 +867,14 @@ Page {
             return
         const key = page.editKey
         const original = page.editOriginal
-        if (key === "scale")
-            page.applyScale(Number(original))
-        else if (["orientation", "autoRotate", "touch", "level", "rate", "boot"].indexOf(key) < 0)
+        page.confirmEdit()
+        if (String(page.currentOf(key)) !== String(original))
             page.set(page.settingOf(key), original)
-        page.confirmEdit()
-    }
-
-    function applyEdit(): void {
-        const key = page.editKey
-        const draft = page.orientationDraft
-        const autoDraft = page.autoRotateDraft
-        const touchDraft = page.touchDraft
-        const levelDraft = page.levelDraft
-        const rateDraft = page.rateDraft
-        const bootDraft = page.bootDraft
-        page.confirmEdit()
-        if (key === "orientation")
-            page.set("orientation", draft)
-        else if (key === "level")
-            page.set("outputLevel", levelDraft)
-        else if (key === "rate")
-            page.set("sampleRate", rateDraft)
-        else if (key === "autoRotate")
-            page.set("autoRotate", autoDraft)
-        else if (key === "touch")
-            page.set("touch", touchDraft)
-        else if (key === "boot")
-            page.set("bootSession", bootDraft)
     }
 
     function revertOrConfirmForRotation(): void {
-        if (!page.editing)
-            return
-        if (page.editKey === "orientation" || page.editKey === "autoRotate")
-            page.cancelEdit()
-        else
-            page.confirmEdit()
+        page.dismissValue()
+        page.confirmEdit()
     }
 
     function handleEdit(name: string, repeat: bool): bool {
@@ -853,7 +887,7 @@ Page {
             return true
         case "a":
             if (!repeat)
-                page.applyEdit()
+                page.confirmEdit()
             return true
         case "b":
             if (!repeat)
@@ -900,10 +934,21 @@ Page {
         default:
             break
         }
-        if (page.settingOf(r.key) !== "") {
+        switch (r.spec === undefined ? "" : r.spec.kind) {
+        case "sheet":
+            if (!r.readOnly)
+                page.openValue(r.key)
+            return true
+        case "flip":
+            if (!r.readOnly)
+                page.flip(r.key)
+            return true
+        case "edit":
             if (!r.readOnly)
                 page.beginEdit(r.key)
             return true
+        default:
+            break
         }
         switch (r.key) {
         case "pair":
@@ -918,6 +963,7 @@ Page {
             page.refreshFrom(page.focusIndex + 1)
             return true
         case "closePlayer":
+            page.endValue()
             sheet.title = "close player"
             sheet.items = ["close player"]
             sheet.open()
@@ -992,8 +1038,7 @@ Page {
     function touchTap(kind: string, index: int, hit: Item) {
         if (kind === "pivot") {
             page.cancelEdit()
-            if (sheet.shown)
-                sheet.close()
+            page.closeSheet()
             if (index !== page.pivotIndex)
                 page.switchPivot(index - page.pivotIndex)
             return
@@ -1002,7 +1047,19 @@ Page {
             page.ensureVisible(Motion.scroll)
     }
 
+    function holdRise(name: string, repeat: bool): bool {
+        if (repeat)
+            return true
+        if (name === "b" || name === "back" || name === "start")
+            d.riseKept = name
+        else if ((name === "up" || name === "down") && d.riseKept === "")
+            d.riseKept = name
+        return true
+    }
+
     function handleAction(name: string, repeat: bool): bool {
+        if (sheet.shown && page.valueOpen && sheet.animating)
+            return page.holdRise(name, repeat)
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
         if (name === "lb" || name === "rb") {
@@ -1041,21 +1098,40 @@ Page {
         const r = page.rows[page.focusIndex]
         if (page.editing && (r === undefined || r === null || r.key !== page.editKey))
             page.confirmEdit()
+        if (page.valueOpen) {
+            const at = page.indexOfKey(d.valueKey)
+            if (at < 0 || page.rows[at].readOnly)
+                page.cancelValue()
+        }
     }
 
-    onRateReadOnlyChanged: {
-        if (page.rateReadOnly && page.editing && page.editKey === "rate")
+    onWatchedValueChanged: {
+        const value = page.watchedValue
+        if (d.ours.some((v) => String(v) === String(value)))
+            return
+        if (page.valueOpen)
+            page.endValue()
+        else if (page.editing)
             page.confirmEdit()
+    }
+
+    onValueItemsChanged: {
+        if (page.valueOpen && page.valueItems !== d.valueItems)
+            page.cancelValue()
     }
 
     onActiveChanged: {
-        if (!page.active)
+        if (!page.active) {
+            page.dismissValue()
             page.confirmEdit()
+        }
     }
 
     onScreenOffChanged: {
-        if (page.screenOff)
+        if (page.screenOff) {
+            page.dismissValue()
             page.confirmEdit()
+        }
     }
 
     onEntered: (first, kind) => {
@@ -1092,6 +1168,13 @@ Page {
         id: d
 
         property int pendingFrom: -1
+        property string valueKey: ""
+        property string riseKept: ""
+        property var valueValues: []
+        property var valueOriginal: null
+        property bool valueDraft: false
+        property string valueItems: ""
+        property var ours: []
         property bool internal: false
         property bool ready: false
         property var spots: ({})
@@ -1368,10 +1451,25 @@ Page {
         id: sheet
 
         anchors.fill: parent
-        screenOff: !page.live
+        screenOff: page.screenOff
+        animated: page.live
         onAccepted: (index) => {
+            if (page.valueOpen) {
+                page.acceptValue(index)
+                return
+            }
             sheet.close()
             page.closePlayer()
+        }
+        onRejected: page.cancelValue()
+        onFocusMoved: (index) => page.previewValue(index)
+        onAnimatingChanged: {
+            if (sheet.animating || d.riseKept === "")
+                return
+            const kept = d.riseKept
+            d.riseKept = ""
+            if (sheet.shown && page.valueOpen)
+                sheet.handleAction(kept, false)
         }
     }
 

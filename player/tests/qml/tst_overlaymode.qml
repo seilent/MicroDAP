@@ -386,7 +386,7 @@ TestCase {
         compare(fakeBridge.closes, 1)
     }
 
-    function test_settings_edit_mode() {
+    function test_settings_flip_row() {
         overlayMain.overlayMapped = true
         overlayMain.overlayFade = 1
         overlayMain.navigate("settings")
@@ -394,15 +394,14 @@ TestCase {
         const page = overlayMain.pageStack.currentItem
         page.focusKey("toasts")
         verify(overlayMain.router.dispatch("a", false))
-        compare(page.editing, true)
-        verify(overlayMain.router.dispatch("right", false))
-        compare(fakeSettings.overlayToasts, true)
-        verify(overlayMain.router.dispatch("b", false))
         compare(page.editing, false)
+        compare(page.valueOpen, false)
+        compare(fakeSettings.overlayToasts, true)
+        verify(overlayMain.router.dispatch("a", false))
         compare(fakeSettings.overlayToasts, false)
         compare(overlayMain.pageStack.depth, 2)
         verify(overlayMain.router.dispatch("a", false))
-        verify(overlayMain.router.dispatch("right", false))
+        compare(overlayMain.router.dispatch("right", false), false)
         overlayMain.overlayMapped = false
         compare(page.editing, false)
         compare(fakeSettings.overlayToasts, true)

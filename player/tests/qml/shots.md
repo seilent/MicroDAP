@@ -70,6 +70,10 @@
 | settings | browse, `pivot-library`, `pivot-display`, `pivot-power`, `pivot-system` | `--size 640x960` and `960x640` | pivot strip in the hub form, no label rows, every pivot's last row | pending |
 | settings | browse | `--overlay --size 640x960` and `960x640` | `system` with CLOSE PLAYER, no ORIENTATION rows in `display` | pending |
 | overlays | browse | `--size 960x640` | the sheet cell shorter than the sheet: panel pinned at the cell top, REMOVE shown with its focus bar | pending |
+| settings | `sample-rate-edit` | `--size 640x960` and `960x640` | value sheet of 9 rates high to low, AUTO last in the accent, focus 48000 | pending |
+| settings | `saver-sheet` | `--size 640x960` and `960x640` | live row: 15 S previewed under the focus, the accent mark kept on 30 S | pending |
+| settings | `touch`, `touch-edit` | `--size 640x960` and `960x640` | TOUCH ON, then OFF after one A, no sheet | pending |
+| settings | `accent-edit` | `--size 640x960` and `960x640` | ACCENT edit mode, swatch on hue 0 | pending |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

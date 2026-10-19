@@ -6,9 +6,12 @@ Item {
 
     property bool shown: false
     property bool screenOff: false
+    property bool animated: !root.screenOff
     property string title: ""
     property var items: []
     property int focusIndex: 0
+    property int mark: -1
+    property bool wrap: false
     property int firstRow: 0
     property real barIndex: 0
     property real progress: 0
@@ -34,6 +37,7 @@ Item {
 
     signal accepted(int index)
     signal rejected()
+    signal focusMoved(int index)
 
     visible: (root.shown || root.progress > 0) && !root.screenOff
 
@@ -127,11 +131,13 @@ Item {
                             x: root.edge
                             anchors.verticalCenter: parent.verticalCenter
                             text: row.modelData
-                            color: Ui.white(row.isFocused ? Ui.dialogItem.alpha : Ui.dialogItem.alphaDim)
+                            color: row.index === root.mark
+                            ? Qt.alpha(Ui.accent, row.isFocused ? Ui.dialogItem.alpha : Ui.dialogItem.alphaDim)
+                            : Ui.white(row.isFocused ? Ui.dialogItem.alpha : Ui.dialogItem.alphaDim)
                             font: Ui.font(Ui.dialogItem)
 
                             Behavior on color {
-                                enabled: !root.screenOff
+                                enabled: root.animated
                                 ColorAnimation {
                                     duration: Motion.focusAlpha
                                 }
@@ -173,7 +179,7 @@ Item {
 
     function animateTo(value: real) {
         progressAnim.stop()
-        if (root.screenOff || value === root.progress) {
+        if (!root.animated || value === root.progress) {
             root.progress = value
             return
         }
@@ -184,6 +190,8 @@ Item {
 
     function open() {
         root.stack = []
+        root.mark = -1
+        root.wrap = false
         root.focusIndex = 0
         root.firstRow = 0
         root.shown = true
@@ -256,10 +264,18 @@ Item {
             progressAnim.complete()
     }
 
-    function moveFocus(delta: int): bool {
-        if (root.items.length === 0)
+    function moveFocus(delta: int, repeat: bool): bool {
+        const n = root.items.length
+        if (n === 0)
             return false
-        root.focusIndex = Math.max(0, Math.min(root.items.length - 1, root.focusIndex + delta))
+        let to = root.focusIndex + delta
+        if (to < 0 || to >= n)
+            to = root.wrap && !repeat && n > 1 ? (to + n) % n : Math.max(0, Math.min(n - 1, to))
+        if (to === root.focusIndex)
+            return true
+        root.focusIndex = to
+        if (!repeat)
+            root.focusMoved(to)
         return true
     }
 
@@ -268,9 +284,9 @@ Item {
             return false
         switch (name) {
         case "up":
-            return root.moveFocus(-1)
+            return root.moveFocus(-1, repeat)
         case "down":
-            return root.moveFocus(1)
+            return root.moveFocus(1, repeat)
         case "a":
             if (!repeat)
                 root.accepted(root.focusIndex)
@@ -288,8 +304,8 @@ Item {
         }
     }
 
-    onScreenOffChanged: {
-        if (root.screenOff)
+    onAnimatedChanged: {
+        if (!root.animated)
             root.complete()
     }
 
@@ -304,7 +320,7 @@ Item {
 
     function moveBar(): void {
         barAnim.stop()
-        if (root.screenOff || !root.shown || root.animating) {
+        if (!root.animated || !root.shown || root.animating) {
             root.barIndex = root.focusIndex
             return
         }

@@ -28,7 +28,7 @@ Item {
             screen.focusKey(root.bootShot ? "boot" : "about")
             if (root.fixture === "boot-edit") {
                 screen.activate()
-                screen.step(1)
+                screen.sheet.handleAction("down", false)
             } else if (root.aboutShot) {
                 screen.activate()
                 screen.focusKey("update")
@@ -41,27 +41,32 @@ Item {
             if (root.fixture === "bit-perfect-edit" || root.fixture === "sample-rate-edit") {
                 screen.activate()
                 for (let i = 0; i < (root.levelShot ? 1 : 7); i++)
-                    screen.step(1)
+                    screen.sheet.handleAction("down", false)
             }
             screen.keepFocusVisible()
             return
         }
         if (root.fixture === "touch" || root.fixture === "touch-edit") {
             screen.focusKey("touch")
-            if (root.fixture === "touch-edit") {
+            if (root.fixture === "touch-edit")
                 screen.activate()
-                screen.step(1)
-            }
             screen.keepFocusVisible()
             return
         }
         if (root.fixture.startsWith("auto-rotate")) {
             screen.focusKey(root.fixture === "auto-rotate-below" ? "saver" : "autoRotate")
-            if (root.fixture === "auto-rotate-edit") {
+            if (root.fixture === "auto-rotate-edit")
                 screen.activate()
-                screen.step(1)
-            }
             screen.keepFocusVisible()
+            return
+        }
+        if (root.fixture === "accent-edit" || root.fixture === "saver-sheet") {
+            screen.focusKey(root.fixture === "accent-edit" ? "accent" : "saver")
+            screen.activate()
+            if (root.fixture === "accent-edit")
+                screen.step(1)
+            else
+                screen.sheet.handleAction("down", false)
             return
         }
         if (root.fixture.startsWith("pivot-")) {
@@ -73,7 +78,7 @@ Item {
         if (root.fixture === "orientation-edit" || root.fixture === "orientation-edit-end") {
             screen.activate()
             for (let i = 0; i < (root.fixture === "orientation-edit" ? 1 : 3); i++)
-                screen.step(1)
+                screen.sheet.handleAction("down", false)
         }
         screen.keepFocusVisible()
     }
