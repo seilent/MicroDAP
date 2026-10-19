@@ -38,6 +38,9 @@ QVariantMap QueueEntry::toMap() const
         {QStringLiteral("discNo"), discNo},
         {QStringLiteral("trackNo"), trackNo},
         {QStringLiteral("sampleRate"), sampleRate},
+        {QStringLiteral("cueIndex"), cueIndex},
+        {QStringLiteral("startFrame"), startFrame},
+        {QStringLiteral("endFrame"), endFrame},
     };
 }
 
@@ -59,6 +62,9 @@ QueueEntry QueueEntry::fromMap(const QVariantMap &map)
     entry.discNo = map.value(QStringLiteral("discNo")).toInt();
     entry.trackNo = map.value(QStringLiteral("trackNo")).toInt();
     entry.sampleRate = map.value(QStringLiteral("sampleRate")).toInt();
+    entry.cueIndex = map.value(QStringLiteral("cueIndex")).toInt();
+    entry.startFrame = map.value(QStringLiteral("startFrame")).toInt();
+    entry.endFrame = map.value(QStringLiteral("endFrame")).toInt();
     return entry;
 }
 

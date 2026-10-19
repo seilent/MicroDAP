@@ -153,6 +153,7 @@ private slots:
     void playlistRowEdits();
     void playlistFileUrlEdits();
     void favoritesMove();
+    void favoritesCue();
 };
 
 namespace {
@@ -992,6 +993,40 @@ void PlaylistsTest::favoritesMove()
     QCOMPARE(titles(again), titles(favorites));
     QCOMPARE(favorites.move(0, -1), QString());
     QCOMPARE(favorites.trackIds(), (QVariantList{two, single, one}));
+}
+
+void PlaylistsTest::favoritesCue()
+{
+    Rig rig;
+    const QString image = rig.cardTrack(0);
+    QVERIFY(writeBytes(QFileInfo(image).path() + QStringLiteral("/01 One.cue"),
+                       QByteArrayLiteral("FILE \"01 One.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+                                         "  TRACK 02 AUDIO\n    INDEX 01 00:00:40\n  TRACK 03 AUDIO\n"
+                                         "    INDEX 01 00:01:00\n")));
+    const QByteArray start = "#EXTM3U\n../Music/Album One/01 One.flac\n#FLATDAP-CUE:03\n../Music/Album One/01 One.flac\n";
+    QVERIFY(writeBytes(rig.cardFile(), start));
+    QVERIFY(rig.scan());
+    const auto cueId = [&rig, &image](int cue) {
+        return scalar(rig.library->database(), QStringLiteral("SELECT id FROM tracks WHERE path = ? AND cue_index = ?"),
+                      {image, cue})
+            .toLongLong();
+    };
+    QVERIFY(cueId(1) > 0 && cueId(2) > 0 && cueId(3) > 0);
+    Favorites favorites(rig.library.get());
+    QCOMPARE(favorites.trackIds(), QVariantList({cueId(1), cueId(3)}));
+    QVERIFY(!favorites.contains(cueId(2)));
+
+    favorites.toggle(cueId(2));
+    QCOMPARE(readBytes(rig.cardFile()),
+             QByteArray("#EXTM3U\n#FLATDAP-CUE:2\n../Music/Album One/01 One.flac\n") + start.mid(8));
+    QVERIFY(favorites.contains(cueId(2)));
+    QCOMPARE(favorites.entries().first().cueIndex, 2);
+    favorites.toggle(cueId(1));
+    QCOMPARE(readBytes(rig.cardFile()), QByteArray("#EXTM3U\n#FLATDAP-CUE:2\n../Music/Album One/01 One.flac\n"
+                                                   "#FLATDAP-CUE:03\n../Music/Album One/01 One.flac\n"));
+    favorites.toggle(cueId(3));
+    QCOMPARE(readBytes(rig.cardFile()), QByteArray("#EXTM3U\n#FLATDAP-CUE:2\n../Music/Album One/01 One.flac\n"));
+    QCOMPARE(favorites.trackIds(), QVariantList({cueId(2)}));
 }
 
 QTEST_GUILESS_MAIN(PlaylistsTest)

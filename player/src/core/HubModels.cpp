@@ -829,7 +829,7 @@ void FolderModel::build()
         return id;
     };
 
-    QSqlQuery query(QStringLiteral("SELECT id, path, title, artist FROM tracks"), m_library->database());
+    QSqlQuery query(QStringLiteral("SELECT id, path, title, artist, cue_index FROM tracks"), m_library->database());
     while (query.next()) {
         const QString path = query.value(1).toString();
         QString root;
@@ -842,7 +842,7 @@ void FolderModel::build()
         const QFileInfo info(path);
         const int dir = ensure(info.path(), root);
         m_dirs[dir].songs.append({query.value(0).toLongLong(), info.fileName(), query.value(2).toString(),
-                                  query.value(3).toString()});
+                                  query.value(3).toString(), query.value(4).toInt()});
     }
 
     for (Dir &dir : m_dirs) {
@@ -851,7 +851,9 @@ void FolderModel::build()
         std::sort(dir.songs.begin(), dir.songs.end(), [](const Song &a, const Song &b) {
             if (folderLess(a.file, b.file))
                 return true;
-            return !folderLess(b.file, a.file) && a.id < b.id;
+            if (folderLess(b.file, a.file))
+                return false;
+            return a.cue != b.cue ? a.cue < b.cue : a.id < b.id;
         });
         dir.total = static_cast<int>(dir.songs.size());
     }

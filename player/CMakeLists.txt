@@ -52,6 +52,8 @@ add_library(microdapcore STATIC
     src/core/BluezModel.h
     src/core/Crossfade.cpp
     src/core/Crossfade.h
+    src/core/Cue.cpp
+    src/core/Cue.h
     src/core/DacEq.cpp
     src/core/DacEq.h
     src/core/DbusPad.cpp

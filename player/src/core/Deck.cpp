@@ -82,7 +82,12 @@ Deck::Deck(PlayerPort::OutputChain chain, bool dsd)
         gst_pad_add_probe(sink, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Deck::gainProbe, this, nullptr);
         gst_object_unref(sink);
     }
+    gst_segment_init(&m_segment, GST_FORMAT_TIME);
     GstPad *src = gst_element_get_static_pad(m_cueProbe, "src");
+    gst_pad_add_probe(src,
+                      static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_EVENT_FLUSH
+                                                   | GST_PAD_PROBE_TYPE_BUFFER),
+                      &Deck::markProbe, this, nullptr);
     GstPad *ghost = gst_ghost_pad_new("src", src);
     gst_pad_add_probe(ghost, GST_PAD_PROBE_TYPE_EVENT_FLUSH, &Deck::flushProbe, nullptr, nullptr);
     gst_element_add_pad(m_bin, ghost);
@@ -122,7 +127,7 @@ void Deck::setGain(Gain gain)
     m_gain = std::move(gain);
 }
 
-bool Deck::start(const QueueEntry &entry)
+bool Deck::start(const QueueEntry &entry, const QList<Mark> &marks)
 {
     QList<Item> items;
     {
@@ -135,16 +140,48 @@ bool Deck::start(const QueueEntry &entry)
     {
         QMutexLocker gainLock(&m_gainLock);
         m_starts.clear();
+        m_marks.clear();
+        m_current.clear();
+        m_rearm.reset();
+        m_stream.clear();
+        m_armed = false;
         m_playing.reset();
     }
     QMutexLocker lock(&m_lock);
-    m_open = append(entry);
+    m_open = append(entry, marks);
     if (!m_open && m_bin) {
         GError *err = g_error_new_literal(GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_NOT_FOUND, "bad path");
         gst_element_post_message(m_bin, gst_message_new_error(GST_OBJECT(m_bin), err, nullptr));
         g_error_free(err);
     }
     return m_open;
+}
+
+void Deck::setMarks(const QList<Mark> &marks, bool atFlush)
+{
+    QMutexLocker lock(&m_gainLock);
+    ++m_markGeneration;
+    if (atFlush) {
+        m_rearm = marks;
+        return;
+    }
+    m_rearm.reset();
+    m_current = marks;
+    m_armed = !m_current.isEmpty();
+}
+
+void Deck::settleMarks()
+{
+    QMutexLocker lock(&m_gainLock);
+    if (!m_rearm)
+        return;
+    m_current = *std::exchange(m_rearm, std::nullopt);
+    m_armed = !m_current.isEmpty();
+}
+
+int Deck::markGeneration() const
+{
+    return m_markGeneration;
 }
 
 void Deck::close()
@@ -226,9 +263,82 @@ GstPadProbeReturn Deck::itemProbe(GstPad *, GstPadProbeInfo *info, gpointer data
     if (id.isEmpty())
         return GST_PAD_PROBE_OK;
     auto *start = static_cast<Start *>(data);
-    QMutexLocker lock(&start->deck->m_gainLock);
-    if (!std::exchange(start->seen, true))
-        start->deck->m_starts[id].append(start->entry);
+    Deck *self = start->deck;
+    QMutexLocker lock(&self->m_gainLock);
+    if (std::exchange(start->seen, true))
+        return GST_PAD_PROBE_OK;
+    if (self->m_volume)
+        self->m_starts[id].append(start->entry);
+    if (!start->marks.isEmpty())
+        self->m_marks[id].append(start->marks);
+    return GST_PAD_PROBE_OK;
+}
+
+GstPadProbeReturn Deck::markProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    auto *self = static_cast<Deck *>(data);
+    if (GST_PAD_PROBE_INFO_TYPE(info) & (GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_EVENT_FLUSH)) {
+        GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+        if (GST_EVENT_TYPE(event) == GST_EVENT_FLUSH_STOP) {
+            QMutexLocker lock(&self->m_gainLock);
+            if (self->m_rearm) {
+                self->m_current = *std::exchange(self->m_rearm, std::nullopt);
+                self->m_armed = !self->m_current.isEmpty();
+            }
+            return GST_PAD_PROBE_OK;
+        }
+        if (GST_EVENT_TYPE(event) == GST_EVENT_SEGMENT) {
+            const GstSegment *segment = nullptr;
+            gst_event_parse_segment(event, &segment);
+            QMutexLocker lock(&self->m_gainLock);
+            gst_segment_copy_into(segment, &self->m_segment);
+            return GST_PAD_PROBE_OK;
+        }
+        const QString id = streamOf(info);
+        if (id.isEmpty())
+            return GST_PAD_PROBE_OK;
+        QMutexLocker lock(&self->m_gainLock);
+        const auto it = self->m_marks.find(id);
+        if (it != self->m_marks.end()) {
+            self->m_current = it->takeFirst();
+            if (it->isEmpty())
+                self->m_marks.erase(it);
+        } else if (id != self->m_stream) {
+            self->m_current.clear();
+        }
+        self->m_stream = id;
+        self->m_armed = !self->m_current.isEmpty();
+        return GST_PAD_PROBE_OK;
+    }
+    GstBuffer *buffer = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (!self->m_armed || !buffer || !GST_BUFFER_PTS_IS_VALID(buffer))
+        return GST_PAD_PROBE_OK;
+    QList<GstClockTime> passed;
+    int generation = 0;
+    {
+        QMutexLocker lock(&self->m_gainLock);
+        if (self->m_rearm)
+            return GST_PAD_PROBE_OK;
+        const guint64 begin = gst_segment_to_stream_time(&self->m_segment, GST_FORMAT_TIME, GST_BUFFER_PTS(buffer));
+        if (begin == guint64(-1))
+            return GST_PAD_PROBE_OK;
+        const guint64 end = begin + (GST_BUFFER_DURATION_IS_VALID(buffer) ? GST_BUFFER_DURATION(buffer) : 0);
+        while (!self->m_current.isEmpty() && end > self->m_current.constFirst().at) {
+            const Mark mark = self->m_current.takeFirst();
+            if (self->m_volume) {
+                self->m_playing = mark.entry;
+                self->applyGain(mark.entry);
+            }
+            passed.append(mark.at);
+        }
+        self->m_armed = !self->m_current.isEmpty();
+        generation = self->m_markGeneration;
+    }
+    for (const GstClockTime at : std::as_const(passed)) {
+        GstStructure *structure = gst_structure_new(cueMark, "at", G_TYPE_UINT64, guint64(at), "generation", G_TYPE_INT,
+                                                    generation, nullptr);
+        gst_element_post_message(self->m_bin, gst_message_new_element(GST_OBJECT(self->m_bin), structure));
+    }
     return GST_PAD_PROBE_OK;
 }
 
@@ -249,7 +359,7 @@ GstPadProbeReturn Deck::gainProbe(GstPad *, GstPadProbeInfo *info, gpointer data
     return GST_PAD_PROBE_OK;
 }
 
-bool Deck::append(const QueueEntry &entry)
+bool Deck::append(const QueueEntry &entry, const QList<Mark> &marks)
 {
     if (!m_bin)
         return false;
@@ -273,8 +383,8 @@ bool Deck::append(const QueueEntry &entry)
     g_signal_connect_data(decoder, "pad-added", G_CALLBACK(&Deck::padAdded), gst_object_ref(pad),
                           [](gpointer data, GClosure *) { gst_object_unref(data); }, GConnectFlags(0));
     g_signal_connect(decoder, "drained", G_CALLBACK(&Deck::drained), this);
-    if (m_volume)
-        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Deck::itemProbe, new Start{this, entry},
+    if (m_volume || !marks.isEmpty())
+        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Deck::itemProbe, new Start{this, entry, marks},
                           [](gpointer data) { delete static_cast<Start *>(data); });
     gst_bin_add(GST_BIN(m_bin), decoder);
     m_items.append({decoder, pad});
@@ -297,9 +407,9 @@ void Deck::drained(GstElement *decoder, gpointer data)
     QMutexLocker lock(&self->m_lock);
     if (!self->m_open || !self->m_next || self->m_items.isEmpty() || self->m_items.constLast().decoder != decoder)
         return;
-    const QueueEntry next = self->m_next();
-    if (!next.path.isEmpty())
-        self->append(next);
+    const Track next = self->m_next();
+    if (!next.entry.path.isEmpty())
+        self->append(next.entry, next.marks);
 }
 
 void Deck::activePad(GObject *, GParamSpec *, gpointer data)

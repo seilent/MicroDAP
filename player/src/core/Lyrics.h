@@ -30,6 +30,16 @@ struct LyricsText
     bool empty() const { return lines.isEmpty() && plain.isEmpty(); }
 };
 
+struct LyricsTrack
+{
+    QString path;
+    qint64 beginMs = 0;
+    qint64 endMs = 0;
+    bool cue = false;
+
+    QString key() const;
+};
+
 class Lyrics : public QObject
 {
     Q_OBJECT
@@ -56,6 +66,8 @@ public:
     static LyricsText readFile(const QString &path, LyricsText::Source source);
     static LyricsText pick(const QList<LyricsText> &sources);
     static LyricsText load(const QString &audio, const QString &storeFile = {});
+    static LyricsText load(const LyricsTrack &track, const QString &storeFile = {});
+    static LyricsText span(const LyricsText &text, qint64 beginMs, qint64 endMs);
     static int lineAt(const QList<LyricLine> &lines, qint64 ms);
 
     bool pending() const;
@@ -65,6 +77,7 @@ public:
     Q_INVOKABLE int lineAt(qint64 ms) const;
 
     void setTracks(const QString &current, const QString &next);
+    void setTracks(const LyricsTrack &current, const LyricsTrack &next);
     void refresh();
     void waitForDone();
 
@@ -72,12 +85,14 @@ signals:
     void changed();
 
 private:
-    void request(const QString &path);
+    void request(const LyricsTrack &track);
     void loaded(const QString &path, int generation, const LyricsText &text);
     bool publish();
 
     QString m_current;
     QString m_next;
+    LyricsTrack m_currentTrack;
+    LyricsTrack m_nextTrack;
     QString m_shown;
     LyricsText m_text;
     QHash<QString, LyricsText> m_cache;

@@ -28,6 +28,9 @@ struct QueueEntry
     int discNo = 0;
     int trackNo = 0;
     int sampleRate = 0;
+    int cueIndex = 0;
+    int startFrame = 0;
+    int endFrame = 0;
 
     QVariantMap toMap() const;
     static QueueEntry fromMap(const QVariantMap &map);

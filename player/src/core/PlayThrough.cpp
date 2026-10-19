@@ -104,9 +104,15 @@ void PlayThrough::onTrackStarted()
 QList<QueueEntry> PlayThrough::nextFolder(const QString &path) const
 {
     const QString dir = QFileInfo(path).path();
-    QHash<QString, QList<std::pair<QString, qint64>>> songs;
+    struct Song
+    {
+        QString file;
+        int cue = 0;
+        qint64 id = -1;
+    };
+    QHash<QString, QList<Song>> songs;
     QSqlQuery query(m_library->database());
-    query.prepare(QStringLiteral("SELECT id, path FROM tracks WHERE path >= ? AND path < ?"));
+    query.prepare(QStringLiteral("SELECT id, path, cue_index FROM tracks WHERE path >= ? AND path < ?"));
     for (const QString &root : m_roots) {
         query.bindValue(0, root + QLatin1Char('/'));
         query.bindValue(1, root + QLatin1Char('0'));
@@ -115,17 +121,23 @@ QList<QueueEntry> PlayThrough::nextFolder(const QString &path) const
         while (query.next()) {
             const QString path = query.value(1).toString();
             const qsizetype slash = path.lastIndexOf(QLatin1Char('/'));
-            songs[path.left(slash)].append({path.mid(slash + 1), query.value(0).toLongLong()});
+            songs[path.left(slash)].append({path.mid(slash + 1), query.value(2).toInt(), query.value(0).toLongLong()});
         }
     }
     const QString next = nextDir(songs.keys(), m_roots, dir);
     if (next.isEmpty())
         return {};
-    QList<std::pair<QString, qint64>> files = songs.value(next);
-    std::sort(files.begin(), files.end(), [](const auto &a, const auto &b) { return FolderModel::folderLess(a.first, b.first); });
+    QList<Song> files = songs.value(next);
+    std::sort(files.begin(), files.end(), [](const Song &a, const Song &b) {
+        if (FolderModel::folderLess(a.file, b.file))
+            return true;
+        if (FolderModel::folderLess(b.file, a.file))
+            return false;
+        return a.cue != b.cue ? a.cue < b.cue : a.id < b.id;
+    });
     QVariantList ids;
-    for (const auto &file : std::as_const(files))
-        ids.append(file.second);
+    for (const Song &file : std::as_const(files))
+        ids.append(file.id);
     return m_library->queueEntries(ids);
 }
 

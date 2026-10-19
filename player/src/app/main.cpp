@@ -195,8 +195,14 @@ int main(int argc, char *argv[])
     microdap::Player player(&library);
     microdap::Lyrics lyrics;
     const auto lyricsTracks = [queue = player.queue(), &lyrics] {
-        lyrics.setTracks(queue->get(queue->currentIndex()).value(QStringLiteral("path")).toString(),
-                         queue->get(queue->nextIndex()).value(QStringLiteral("path")).toString());
+        const auto track = [queue](int row) {
+            if (row < 0 || row >= queue->count())
+                return microdap::LyricsTrack{};
+            const microdap::QueueEntry entry = queue->entry(row);
+            return microdap::LyricsTrack{entry.path, microdap::cueFrameMs(entry.startFrame),
+                                         entry.endFrame ? microdap::cueFrameMs(entry.endFrame) : 0, entry.cueIndex > 0};
+        };
+        lyrics.setTracks(track(queue->currentIndex()), track(queue->nextIndex()));
     };
     for (const auto signal : {&microdap::Queue::indexChanged, &microdap::Queue::countChanged,
                               &microdap::Queue::orderChanged, &microdap::Queue::repeatChanged,

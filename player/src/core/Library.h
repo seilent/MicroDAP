@@ -73,7 +73,8 @@ public:
     Q_INVOKABLE QVariantList trackRows(const QVariantList &trackIds) const;
     QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
     QList<QueueEntry> entriesFor(const QString &kind, qint64 id) const;
-    QHash<QString, QueueEntry> entriesByPath(const QStringList &paths) const;
+    using CueKey = std::pair<QString, int>;
+    QHash<CueKey, QueueEntry> entriesByPath(const QList<CueKey> &keys) const;
     Q_INVOKABLE bool pin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;
@@ -86,7 +87,13 @@ public:
     QHash<QString, qint64> favoriteStamps(const QString &medium) const;
     bool keepFavoriteStamps(const QString &medium, const QSet<QString> &keys);
 
-    QList<qint64> tailTracks(const QString &dir, const QStringList &tails) const;
+    struct EntryRef
+    {
+        QString path;
+        int cue = 0;
+        QString tail;
+    };
+    QList<QList<qint64>> resolveRefs(const QList<EntryRef> &refs, const QString &dir, bool fold, bool all) const;
 
     PlaylistStore &playlistStore();
     PlaylistStore::Edit editPlaylist(const QString &path, const PlaylistStore::Change &change);
@@ -101,7 +108,7 @@ public:
     Q_INVOKABLE QVariantMap createPlaylist(const QVariantList &trackIds);
     Q_INVOKABLE QString deletePlaylist(qint64 playlistId);
     Q_INVOKABLE QString editPlaylistRow(qint64 playlistId, int row, qint64 trackId, const QString &verb);
-    QList<qint64> resolveDoc(const M3u &doc, const QString &dir) const;
+    QList<QList<qint64>> resolveDoc(const M3u &doc, const QString &dir) const;
     QString newPlaylistPath() const;
     static bool onAbsentCard(const QString &path);
 
@@ -126,12 +133,16 @@ signals:
     void scanned(int added, int updated, int removed, bool ok);
 
 private:
+    class PathIndex;
+
     void open();
     bool migrate(int to, std::span<const char *const> statements);
     int minReader() const;
     void setScanning(bool scanning);
     int count(const QString &table) const;
     bool applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed);
+    QList<QList<qint64>> resolveWith(PathIndex &index, const QList<EntryRef> &refs, const QString &dir, bool fold,
+                                     bool all) const;
     QString playlistRoot(const QString &dir) const;
     int removePlaylists(const QStringList &sources);
     QString appendTracks(const QString &path, const QString &name, const QVariantList &trackIds);
@@ -145,6 +156,8 @@ private:
     bool linkArtists(qint64 trackId, const QStringList &names, QHash<QString, qint64> &artists);
     QVariantList idColumn(const QString &sql, qint64 bind) const;
     bool removeTrack(const QString &path);
+    bool applyFile(const QList<TrackInfo> &tracks, qint64 now, QHash<QString, qint64> &albums,
+                   QHash<QString, qint64> &artists);
     bool prune(bool albumsAndArtists);
     int prunePins();
     void pruneArt();

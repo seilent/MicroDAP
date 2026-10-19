@@ -209,6 +209,13 @@ private slots:
     void crossfadeStalePlan();
     void crossfadeOffsetAfterJoin();
     void crossfadeErrorWhileMixing();
+    void cueRange();
+    void cueContinuation();
+    void cueNextFile();
+    void cueSeekPrevious();
+    void cueCrossfadeGapless();
+    void cueStateRestore();
+    void cueQueueEdit();
     void dsdRoutes();
     void dsdBoundary();
     void deckMissing();
@@ -603,6 +610,125 @@ GstElement *pipelineChild(Player &player, const char *name)
     GstElement *child = gst_bin_get_by_name(GST_BIN(top), name);
     gst_object_unref(top);
     return child;
+}
+
+constexpr int rampRate = 44100;
+constexpr int rampSeconds = 12;
+constexpr int cueTwo = 230;
+constexpr int cueThree = 530;
+
+bool encodeRamp(const QString &path)
+{
+    const QString wav = path + QStringLiteral(".wav");
+    {
+        QFile file(wav);
+        if (!file.open(QIODevice::WriteOnly))
+            return false;
+        const quint32 frames = rampRate * rampSeconds;
+        const quint32 bytes = frames * 4;
+        QByteArray data;
+        data.reserve(qsizetype(bytes) + 44);
+        const auto u32 = [&data](quint32 v) { data.append(reinterpret_cast<const char *>(&v), 4); };
+        const auto u16 = [&data](quint16 v) { data.append(reinterpret_cast<const char *>(&v), 2); };
+        data.append("RIFF");
+        u32(36 + bytes);
+        data.append("WAVEfmt ");
+        u32(16);
+        u16(1);
+        u16(2);
+        u32(rampRate);
+        u32(rampRate * 4);
+        u16(4);
+        u16(16);
+        data.append("data");
+        u32(bytes);
+        for (quint32 n = 0; n < frames; ++n) {
+            u16(quint16(n & 0x7fff));
+            u16(quint16(n >> 15));
+        }
+        if (file.write(data) != data.size())
+            return false;
+    }
+    const QString description = QStringLiteral("filesrc location=\"%1\" ! wavparse ! audioconvert ! flacenc ! filesink "
+                                               "location=\"%2\"")
+                                    .arg(wav, path);
+    GError *error = nullptr;
+    GstElement *pipeline = gst_parse_launch(description.toUtf8().constData(), &error);
+    g_clear_error(&error);
+    if (!pipeline)
+        return false;
+    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstBus *bus = gst_element_get_bus(pipeline);
+    GstMessage *message = gst_bus_timed_pop_filtered(
+        bus, 30 * GST_SECOND, static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+    const bool ok = message && GST_MESSAGE_TYPE(message) == GST_MESSAGE_EOS;
+    if (message)
+        gst_message_unref(message);
+    gst_object_unref(bus);
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_object_unref(pipeline);
+    QFile::remove(wav);
+    return ok;
+}
+
+QueueEntry cueEntry(const QString &path, qint64 id, int cue, int start, int end)
+{
+    QueueEntry entry;
+    entry.id = id;
+    entry.path = path;
+    entry.title = QStringLiteral("cue %1").arg(cue);
+    entry.cueIndex = cue;
+    entry.startFrame = start;
+    entry.endFrame = end;
+    const qint64 begin = qint64(start) * 1000 / 75;
+    entry.durationMs = end ? qint64(end) * 1000 / 75 - begin : rampSeconds * 1000 - begin;
+    return entry;
+}
+
+QList<QueueEntry> imageEntries(const QString &path)
+{
+    return {cueEntry(path, 101, 1, 0, cueTwo), cueEntry(path, 102, 2, cueTwo, cueThree),
+            cueEntry(path, 103, 3, cueThree, 0)};
+}
+
+struct Ramp
+{
+    std::mutex lock;
+    std::vector<qint64> samples;
+};
+
+std::jthread pullRamp(GstElement *sink, Ramp &ramp)
+{
+    return std::jthread([sink, &ramp](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            GstSample *sample = nullptr;
+            g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(100 * GST_MSECOND), &sample);
+            if (!sample)
+                continue;
+            GstBuffer *buffer = gst_sample_get_buffer(sample);
+            GstMapInfo map;
+            if (gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+                const auto *f = reinterpret_cast<const float *>(map.data);
+                std::lock_guard guard(ramp.lock);
+                for (gsize i = 0; i + 1 < map.size / sizeof(float); i += 2) {
+                    const qint64 l = qRound(f[i] * 32768.0f);
+                    const qint64 r = qRound(f[i + 1] * 32768.0f);
+                    ramp.samples.push_back(r << 15 | (l & 0x7fff));
+                }
+                gst_buffer_unmap(buffer, &map);
+            }
+            gst_sample_unref(sample);
+        }
+    });
+}
+
+qint64 firstBreak(const std::vector<qint64> &samples, qint64 first)
+{
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        if (samples[i] != first + qint64(i))
+            return qint64(i);
+    }
+    return -1;
 }
 }
 
@@ -3225,6 +3351,211 @@ void PlayerTest::crossfadeErrorWhileMixing()
     QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
     QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
     QCOMPARE(errors.count(), 0);
+}
+
+void PlayerTest::cueRange()
+{
+    const QString image = m_dir.path() + QStringLiteral("/range.flac");
+    QVERIFY(encodeRamp(image));
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-ramp sync=false"));
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-ramp");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    Ramp ramp;
+    std::jthread puller = pullRamp(sink, ramp);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    const QueueEntry two = imageEntries(image).at(1);
+    player->play({two}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    QTest::qWait(200);
+    puller.request_stop();
+    puller.join();
+    QCOMPARE(startedIndexes(started), QList<int>({0}));
+    QCOMPARE(errors.count(), 0);
+    std::lock_guard guard(ramp.lock);
+    QCOMPARE(qint64(ramp.samples.size()), qint64(cueThree - cueTwo) * 588);
+    QCOMPARE(ramp.samples.front(), qint64(cueTwo) * 588);
+    QCOMPARE(firstBreak(ramp.samples, qint64(cueTwo) * 588), qint64(-1));
+}
+
+void PlayerTest::cueContinuation()
+{
+    const QString image = m_dir.path() + QStringLiteral("/run.flac");
+    QVERIFY(encodeRamp(image));
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-ramp sync=false"));
+    FakePolicy policy;
+    player->setPolicy(&policy);
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-ramp");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    Ramp ramp;
+    std::jthread puller = pullRamp(sink, ramp);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    QList<qint64> durations;
+    connect(player.get(), &Player::trackStarted, this, [&] { durations.append(player->duration()); });
+    player->play(imageEntries(image), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    QTest::qWait(200);
+    puller.request_stop();
+    puller.join();
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2}));
+    QCOMPARE(durations, QList<qint64>({imageEntries(image).at(0).durationMs, imageEntries(image).at(1).durationMs,
+                                       imageEntries(image).at(2).durationMs}));
+    QCOMPARE(policy.admitted.size(), 1);
+    QCOMPARE(errors.count(), 0);
+    std::lock_guard guard(ramp.lock);
+    QCOMPARE(qint64(ramp.samples.size()), qint64(rampRate) * rampSeconds);
+    QCOMPARE(firstBreak(ramp.samples, 0), qint64(-1));
+}
+
+void PlayerTest::cueNextFile()
+{
+    const QString image = m_dir.path() + QStringLiteral("/next.flac");
+    const QString other = m_dir.path() + QStringLiteral("/next-other.flac");
+    QVERIFY(encodeRamp(image));
+    QVERIFY(encodeRamp(other));
+    const QueueEntry after = sineEntry(other, 9, rampSeconds);
+    struct Case
+    {
+        QueueEntry first;
+        qint64 from;
+        qint64 frames;
+    };
+    const QList<QueueEntry> tracks = imageEntries(image);
+    const QList<Case> cases{{tracks.at(2), qint64(cueThree) * 588, qint64(rampRate) * rampSeconds - qint64(cueThree) * 588},
+                            {tracks.at(0), 0, qint64(cueTwo) * 588}};
+    for (const Case &c : cases) {
+        auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-ramp sync=false"));
+        FakePolicy policy;
+        player->setPolicy(&policy);
+        GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-ramp");
+        QVERIFY(sink);
+        std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+        Ramp ramp;
+        std::jthread puller = pullRamp(sink, ramp);
+        QSignalSpy started(player.get(), &Player::trackStarted);
+        QSignalSpy eos(player.get(), &Player::endOfStream);
+        player->play({c.first, after}, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+        QTest::qWait(200);
+        puller.request_stop();
+        puller.join();
+        QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+        QCOMPARE(policy.admitted.size(), 1);
+        std::lock_guard guard(ramp.lock);
+        QCOMPARE(qint64(ramp.samples.size()), c.frames + qint64(rampRate) * rampSeconds);
+        QCOMPARE(firstBreak(ramp.samples, c.from), c.frames);
+        const std::vector<qint64> tail(ramp.samples.begin() + c.frames, ramp.samples.end());
+        QCOMPARE(firstBreak(tail, 0), qint64(-1));
+    }
+}
+
+void PlayerTest::cueSeekPrevious()
+{
+    const QString image = m_dir.path() + QStringLiteral("/seek.flac");
+    QVERIFY(encodeRamp(image));
+    auto player = syncPlayer();
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    player->play(imageEntries(image), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() > 100, playTimeoutMs);
+    QVERIFY(player->position() < 1000);
+    QCOMPARE(player->duration(), imageEntries(image).at(1).durationMs);
+    player->seek(3000);
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() >= 3050, playTimeoutMs);
+    QVERIFY(player->position() < 3800);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    player->previous();
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() > 50 && player->position() < 1000, playTimeoutMs);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QCOMPARE(started.count(), 1);
+    player->previous();
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(player->queue()->currentIndex(), 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() > 50, playTimeoutMs);
+    QVERIFY(player->position() < 1000);
+    player->seek(10000);
+    QTRY_COMPARE_WITH_TIMEOUT(player->queue()->currentIndex(), 1, playTimeoutMs);
+    QCOMPARE(startedIndexes(started), QList<int>({1, 0, 1}));
+    player->stop();
+}
+
+void PlayerTest::cueCrossfadeGapless()
+{
+    const QString image = m_dir.path() + QStringLiteral("/xfade.flac");
+    QVERIFY(encodeRamp(image));
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-ramp sync=false"));
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-ramp");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    Ramp ramp;
+    std::jthread puller = pullRamp(sink, ramp);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    player->play(imageEntries(image), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    QTest::qWait(200);
+    puller.request_stop();
+    puller.join();
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2}));
+    QCOMPARE(watch.added.load(), 0);
+    std::lock_guard guard(ramp.lock);
+    QCOMPARE(qint64(ramp.samples.size()), qint64(rampRate) * rampSeconds);
+    QCOMPARE(firstBreak(ramp.samples, 0), qint64(-1));
+}
+
+void PlayerTest::cueStateRestore()
+{
+    const QString image = m_dir.path() + QStringLiteral("/state.flac");
+    QVERIFY(encodeRamp(image));
+    const QString path = m_dir.path() + QStringLiteral("/cuestate/state.json");
+    {
+        Player player;
+        State state(&player, path);
+        player.restore(imageEntries(image), 1, 0);
+        QVERIFY(state.saveNow());
+        player.stop();
+    }
+    const QJsonObject queue = readJson(State::queuePathFor(path));
+    QCOMPARE(queue.value(QStringLiteral("cues")).toArray(), QJsonArray({1, 2, 3}));
+    Player player;
+    State state(&player, path);
+    QVERIFY(state.load());
+    QCOMPARE(player.queue()->count(), 3);
+    QCOMPARE(player.queue()->currentIndex(), 1);
+    QCOMPARE(player.queue()->entry(1).path, image);
+    player.stop();
+}
+
+void PlayerTest::cueQueueEdit()
+{
+    const QString image = m_dir.path() + QStringLiteral("/edit.flac");
+    const QString other = m_dir.path() + QStringLiteral("/edit-other.flac");
+    QVERIFY(encodeRamp(image));
+    QVERIFY(encodeSine(other, 1));
+    auto player = syncPlayer();
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy errors(player.get(), &Player::error);
+    player->play(imageEntries(image), 0);
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() > 300, playTimeoutMs);
+    player->queue()->playNext({sineEntry(other, 9, 1)});
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QCOMPARE(player->queue()->entry(1).path, other);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 3, playTimeoutMs);
+    QCOMPARE(player->queue()->currentIndex(), 2);
+    QCOMPARE(player->queue()->entry(2).cueIndex, 2);
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() > 100, playTimeoutMs);
+    QVERIFY(player->position() < 1500);
+    QCOMPARE(errors.count(), 0);
+    player->stop();
 }
 
 void PlayerTest::dsdRoutes()

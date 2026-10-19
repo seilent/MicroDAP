@@ -424,8 +424,8 @@ QueueEntry Mpris::entryForPath(const QString &path) const
 {
     Library *library = m_player->library();
     if (library && library->isOpen()) {
-        const QHash<QString, QueueEntry> found = library->entriesByPath({path});
-        if (const auto hit = found.constFind(path); hit != found.cend()) {
+        const QHash<Library::CueKey, QueueEntry> found = library->entriesByPath({{path, 0}});
+        if (const auto hit = found.constFind({path, 0}); hit != found.cend()) {
             QueueEntry entry = *hit;
             if (entry.title.isEmpty())
                 entry.title = QFileInfo(path).completeBaseName();

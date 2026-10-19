@@ -30,8 +30,8 @@ player turned it off (`~/.local/state/microdap/wifi-off`). `microdap-radio.servi
 
 ## Library
 
-`~/.local/share/microdap/library.db`, schema 7. A newer schema opens when its `meta` row `min_reader` is 7 or lower.
-Players older than schema 6 close a schema 6 or 7 database and show an empty library; the file stays as is.
+`~/.local/share/microdap/library.db`, schema 8. A newer schema opens when its `meta` row `min_reader` is 8 or lower.
+Schema 8 has `min_reader` 8: a player at schema 7 or older closes it and shows an empty library; the file stays as is.
 
 ## Build and test
 

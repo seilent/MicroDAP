@@ -19,7 +19,19 @@ namespace microdap {
 class Deck
 {
 public:
-    using Next = std::function<QueueEntry()>;
+    struct Mark
+    {
+        GstClockTime at = GST_CLOCK_TIME_NONE;
+        QueueEntry entry;
+    };
+
+    struct Track
+    {
+        QueueEntry entry;
+        QList<Mark> marks;
+    };
+
+    using Next = std::function<Track()>;
     using Gain = std::function<double(const QueueEntry &)>;
 
     Deck(PlayerPort::OutputChain chain, bool dsd);
@@ -32,10 +44,14 @@ public:
     static constexpr const char *dsdRefused = "dsd128 and up not supported";
     static constexpr const char *dsdAccepted = "microdap-dsd-accepted";
     static constexpr const char *switched = "microdap-deck-switched";
+    static constexpr const char *cueMark = "microdap-cue-mark";
 
     void setNext(Next next);
     void setGain(Gain gain);
-    bool start(const QueueEntry &entry);
+    bool start(const QueueEntry &entry, const QList<Mark> &marks = {});
+    void setMarks(const QList<Mark> &marks, bool atFlush);
+    void settleMarks();
+    int markGeneration() const;
     void regain();
     void close();
     void reopen();
@@ -54,7 +70,7 @@ private:
         GstPad *pad = nullptr;
     };
 
-    bool append(const QueueEntry &entry);
+    bool append(const QueueEntry &entry, const QList<Mark> &marks);
     void drop(const Item &item);
     static void padAdded(GstElement *decoder, GstPad *pad, gpointer data);
     static void drained(GstElement *decoder, gpointer data);
@@ -64,12 +80,14 @@ private:
     {
         Deck *deck = nullptr;
         QueueEntry entry;
+        QList<Mark> marks;
         bool seen = false;
     };
 
     static QString streamOf(GstPadProbeInfo *info);
     static GstPadProbeReturn itemProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static GstPadProbeReturn gainProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    static GstPadProbeReturn markProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static GstPadProbeReturn flushProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     void applyGain(const QueueEntry &entry);
     void accept();
@@ -90,6 +108,13 @@ private:
     Next m_next;
     QMutex m_gainLock;
     QHash<QString, QList<QueueEntry>> m_starts;
+    QHash<QString, QList<QList<Mark>>> m_marks;
+    QList<Mark> m_current;
+    std::optional<QList<Mark>> m_rearm;
+    QString m_stream;
+    GstSegment m_segment;
+    std::atomic<bool> m_armed{false};
+    std::atomic<int> m_markGeneration{0};
     std::optional<QueueEntry> m_playing;
     Gain m_gain;
 };

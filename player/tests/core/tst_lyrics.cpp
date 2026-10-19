@@ -100,6 +100,7 @@ private slots:
     void storeSlot();
     void tracks();
     void refresh();
+    void cueSpan();
 
 private:
     QString flac(const QString &name);
@@ -398,6 +399,41 @@ void LyricsTest::refresh()
     QCOMPARE(lyrics.plain(), QStringList{QStringLiteral("old")});
     QTRY_COMPARE_WITH_TIMEOUT(int(lyrics.lines().size()), 1, loadTimeoutMs);
     QVERIFY(lyrics.plain().isEmpty());
+}
+
+void LyricsTest::cueSpan()
+{
+    const LyricsText all = Lyrics::parse(QStringLiteral("[00:01.00]one\n[00:04.00]four\n[00:05.00]five\n"
+                                                        "[00:09.00]nine\n"));
+    QCOMPARE(linesOf(Lyrics::span(all, 0, 4500)), QStringLiteral("1000 one|4000 four"));
+    QCOMPARE(linesOf(Lyrics::span(all, 4500, 9000)), QStringLiteral("0 four|500 five"));
+    QCOMPARE(linesOf(Lyrics::span(all, 5000, 9000)), QStringLiteral("0 five"));
+    QCOMPARE(linesOf(Lyrics::span(all, 6000, 0)), QStringLiteral("0 five|3000 nine"));
+    QVERIFY(Lyrics::span(all, 0, 500).empty());
+    QCOMPARE(Lyrics::span(all, 0, 500).source, LyricsText::None);
+    const LyricsText plain = Lyrics::parse(QStringLiteral("just words\n"));
+    QCOMPARE(Lyrics::span(plain, 1000, 2000).plain, QStringList{QStringLiteral("just words")});
+
+    const QString audio = flac(QStringLiteral("image.flac"));
+    QVERIFY(!audio.isEmpty());
+    QVERIFY(xiphLyrics(audio, "LYRICS", {QStringLiteral("[00:00.50]tag line")}));
+    QVERIFY(writeBytes(m_dir->filePath(QStringLiteral("image.lrc")), QByteArrayLiteral("[00:01.00]a\n[00:03.00]b\n")));
+    QCOMPARE(linesOf(Lyrics::load(LyricsTrack{audio, 2000, 0, true})), QStringLiteral("0 a|1000 b"));
+    QCOMPARE(linesOf(Lyrics::load(LyricsTrack{audio, 0, 0, false})), QStringLiteral("1000 a|3000 b"));
+    QVERIFY(QFile::remove(m_dir->filePath(QStringLiteral("image.lrc"))));
+    QVERIFY(Lyrics::load(LyricsTrack{audio, 2000, 0, true}).empty());
+    QCOMPARE(linesOf(Lyrics::load(LyricsTrack{audio, 0, 0, false})), QStringLiteral("500 tag line"));
+
+    QVERIFY(writeBytes(m_dir->filePath(QStringLiteral("image.lrc")), QByteArrayLiteral("[00:01.00]a\n[00:03.00]b\n")));
+    Lyrics lyrics;
+    QSignalSpy changed(&lyrics, &Lyrics::changed);
+    lyrics.setTracks(LyricsTrack{audio, 0, 2000, true}, LyricsTrack{audio, 2000, 0, true});
+    QTRY_VERIFY(!lyrics.pending());
+    QCOMPARE(linesOf(lyrics.current()), QStringLiteral("1000 a"));
+    lyrics.setTracks(LyricsTrack{audio, 2000, 0, true}, LyricsTrack{});
+    QTRY_VERIFY(!lyrics.pending());
+    QCOMPARE(linesOf(lyrics.current()), QStringLiteral("0 a|1000 b"));
+    lyrics.waitForDone();
 }
 
 QTEST_GUILESS_MAIN(LyricsTest)

@@ -47,6 +47,7 @@ public:
     static qsizetype unit(const M3u &doc, qsizetype i);
     static qsizetype insert(M3u &doc, qsizetype before, const QString &path, const QString &dir, int cue = 0);
     static void erase(M3u &doc, qsizetype i);
+    static void split(M3u &doc, qsizetype i, const QList<int> &cues);
     static int remove(M3u &doc, const QString &path);
     static void swap(M3u &doc, qsizetype a, qsizetype b);
     static QString playlistsDir(const QString &root);

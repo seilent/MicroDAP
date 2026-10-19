@@ -214,6 +214,39 @@ qsizetype PlaylistStore::insert(M3u &doc, qsizetype before, const QString &path,
     return at;
 }
 
+void PlaylistStore::split(M3u &doc, qsizetype i, const QList<int> &cues)
+{
+    const QByteArray text = doc.items.at(i).text;
+    QList<QByteArray> lines;
+    for (qsizetype a = 0; a < text.size();) {
+        qsizetype b = text.indexOf('\n', a);
+        b = b < 0 ? text.size() : b + 1;
+        lines.append(text.mid(a, b - a));
+        a = b;
+    }
+    if (lines.isEmpty() || cues.isEmpty())
+        return;
+    QByteArray keep;
+    for (qsizetype k = 0; k + 1 < lines.size(); ++k) {
+        const QByteArray line = trim(lines.at(k));
+        if (!extinf(line) && !cueOf(line))
+            keep += lines.at(k);
+    }
+    QList<M3uItem> out;
+    for (qsizetype k = 0; k < cues.size(); ++k) {
+        M3uItem item = doc.items.at(i);
+        QByteArray path = lines.constLast();
+        if (k + 1 < cues.size() && !path.endsWith('\n'))
+            path += doc.eol;
+        item.text = (k ? QByteArray() : keep) + cueDirective + QByteArray::number(cues.at(k)) + doc.eol + path;
+        item.cue = cues.at(k);
+        out.append(item);
+    }
+    doc.items.remove(i);
+    for (qsizetype k = 0; k < out.size(); ++k)
+        doc.items.insert(i + k, out.at(k));
+}
+
 void PlaylistStore::erase(M3u &doc, qsizetype i)
 {
     const qsizetype from = unit(doc, i);

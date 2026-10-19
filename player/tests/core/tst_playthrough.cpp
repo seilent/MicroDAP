@@ -38,6 +38,7 @@ private slots:
     void appendsNextFolder();
     void appendsNextAlbum();
     void folderBudget();
+    void cueOrder();
 
 private:
     static bool fill(Library &library, const QList<std::pair<QString, QString>> &tracks);
@@ -209,6 +210,32 @@ void PlayThroughTest::folderBudget()
     QCOMPARE(queue.count(), 20);
     qInfo("play through folders, 8400 tracks: %lld ms", ms);
     QVERIFY2(ms < 250, qPrintable(QString::number(ms)));
+}
+
+void PlayThroughTest::cueOrder()
+{
+    QTemporaryDir dir;
+    Library library(dir.filePath(QStringLiteral("library.db")));
+    QVERIFY(fill(library, {{QStringLiteral("/m/F1/a.flac"), QStringLiteral("Alpha")}}));
+    QSqlDatabase db = library.database();
+    QSqlQuery insert(db);
+    QVERIFY(insert.prepare(QStringLiteral("INSERT INTO tracks(path, mtime, size, title, artist, album_artist, album_id, "
+                                          "added, cue_index) VALUES ('/m/F2/image.flac', 0, 0, ?, 'A', 'A', 1, 0, ?)")));
+    for (const int cue : {3, 1, 2}) {
+        insert.bindValue(0, QStringLiteral("track %1").arg(cue));
+        insert.bindValue(1, cue);
+        QVERIFY(insert.exec());
+    }
+    AlbumsModel albums(&library);
+    Queue queue;
+    PlayThrough through(&queue, &library, &albums);
+    through.setRoots({QStringLiteral("/m")});
+    through.setMode(QStringLiteral("folders"));
+    queue.set(entriesOf(library, {1}), 0);
+    through.onTrackStarted();
+    QCOMPARE(queue.count(), 4);
+    for (int i = 1; i <= 3; ++i)
+        QCOMPARE(queue.entry(i).cueIndex, i);
 }
 
 QTEST_GUILESS_MAIN(PlayThroughTest)

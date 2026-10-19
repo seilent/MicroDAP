@@ -5,6 +5,7 @@
 #include "Settings.h"
 
 #include <taglib/flacfile.h>
+#include <taglib/flacproperties.h>
 #include <taglib/flacpicture.h>
 #include <taglib/tbytevector.h>
 #include <taglib/tpropertymap.h>
@@ -377,6 +378,106 @@ qint64 playlistId(const QSqlDatabase &db, const QString &name)
     return scalar(db, QStringLiteral("SELECT id FROM playlists WHERE name = ?"), {name}).toLongLong();
 }
 
+
+const char *const imageSheet =
+    "REM GENRE Ambient\r\n"
+    "REM DATE 1999\r\n"
+    "REM REPLAYGAIN_ALBUM_GAIN -7.50 dB\r\n"
+    "PERFORMER \"Sheet Artist\"\r\n"
+    "TITLE \"Sheet Album\"\r\n"
+    "FILE \"image.wav\" WAVE\r\n"
+    "  TRACK 01 AUDIO\r\n"
+    "    TITLE \"One\"\r\n"
+    "    PERFORMER \"Guest, Other\"\r\n"
+    "    REM REPLAYGAIN_TRACK_GAIN -3.00 dB\r\n"
+    "    INDEX 01 00:00:00\r\n"
+    "  TRACK 02 AUDIO\r\n"
+    "    TITLE \"Two\"\r\n"
+    "    INDEX 00 00:00:30\r\n"
+    "    INDEX 01 00:00:40\r\n"
+    "  TRACK 03 AUDIO\r\n"
+    "    INDEX 01 00:01:00\r\n";
+
+struct CueRow
+{
+    qint64 id = -1;
+    int cue = 0;
+    QString title;
+    QString artist;
+    int start = 0;
+    int end = 0;
+    qint64 duration = 0;
+};
+
+QList<CueRow> cueRows(const QSqlDatabase &db, const QString &path)
+{
+    QList<CueRow> rows;
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("SELECT id, cue_index, title, artist, start_frame, end_frame, duration_ms FROM tracks "
+                                 "WHERE path = ? ORDER BY cue_index"));
+    query.addBindValue(path);
+    if (!query.exec())
+        return rows;
+    while (query.next())
+        rows.append({query.value(0).toLongLong(), query.value(1).toInt(), query.value(2).toString(),
+                     query.value(3).toString(), query.value(4).toInt(), query.value(5).toInt(),
+                     query.value(6).toLongLong()});
+    return rows;
+}
+
+bool rescanned(Library &library, const QStringList &roots)
+{
+    QSignalSpy spy(&library, &Library::scanned);
+    library.rescan(roots);
+    return spy.wait(scanTimeoutMs) && spy.constFirst().at(3).toBool();
+}
+
+QByteArray cueBlock(const QList<std::pair<int, quint64>> &tracks)
+{
+    QByteArray block(396, '\0');
+    block[395] = char(tracks.size() + 1);
+    const auto be64 = [](quint64 v) {
+        QByteArray out(8, '\0');
+        for (int i = 7; i >= 0; --i, v >>= 8)
+            out[i] = char(v & 0xff);
+        return out;
+    };
+    for (const auto &[number, offset] : tracks) {
+        QByteArray track = be64(offset);
+        track += char(number);
+        track += QByteArray(12, '\0');
+        track += char(0);
+        track += QByteArray(13, '\0');
+        track += char(1);
+        block += track;
+        block += be64(0) + char(1) + QByteArray(3, '\0');
+    }
+    QByteArray leadOut = be64(88200);
+    leadOut += char(170);
+    leadOut += QByteArray(27, '\0');
+    block += leadOut;
+    return block;
+}
+
+bool insertBlock(const QString &path, int type, const QByteArray &body)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    QByteArray data = file.readAll();
+    file.close();
+    if (!data.startsWith("fLaC") || data.size() < 42)
+        return false;
+    const bool last = quint8(data.at(4)) & 0x80;
+    data[4] = char(quint8(data.at(4)) & 0x7f);
+    QByteArray header(4, '\0');
+    header[0] = char((last ? 0x80 : 0) | type);
+    header[1] = char((body.size() >> 16) & 0xff);
+    header[2] = char((body.size() >> 8) & 0xff);
+    header[3] = char(body.size() & 0xff);
+    data.insert(42, header + body);
+    return writeBytes(path, data);
+}
 }
 
 class LibraryTest : public QObject
@@ -447,6 +548,11 @@ private slots:
     void trackInfo();
     void migrateFrom6();
     void playlistFallback();
+    void migrateFrom7();
+    void cueSheets();
+    void cueRekey();
+    void cueEmbedded();
+    void cuePlaylists();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -514,10 +620,10 @@ void LibraryTest::initTestCase()
     m_library = std::make_unique<Library>(m_dir.path() + QStringLiteral("/library.db"),
                                           m_dir.path() + QStringLiteral("/art"));
     QVERIFY(m_library->isOpen());
-    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 7);
+    QCOMPARE(scalar(m_library->database(), QStringLiteral("PRAGMA user_version")).toInt(), 8);
     QCOMPARE(scalar(m_library->database(), QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'"))
                  .toInt(),
-             5);
+             8);
     QCOMPARE(scalar(m_library->database(),
                     QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' "
                                    "AND name = 'playlist_items_track'"))
@@ -844,7 +950,7 @@ void LibraryTest::migrate()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE mtime = -1")).toInt(), 8);
 
@@ -1508,7 +1614,7 @@ void LibraryTest::migrateFrom2()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE name = 'Old'")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items "
                                        "WHERE playlist_id NOT IN (SELECT id FROM playlists)"))
@@ -1965,7 +2071,7 @@ void LibraryTest::migrateFrom3()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pins WHERE kind = 'playlist' AND pos = 99")).toInt(), 0);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items")).toInt(), 0);
@@ -2003,7 +2109,7 @@ void LibraryTest::migrateFrom4()
     Library library(path, m_dir.path() + QStringLiteral("/art"));
     QVERIFY(library.isOpen());
     const QSqlDatabase db = library.database();
-    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
+    QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), playlists);
     QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists WHERE mtime = -1 AND size = -1")).toInt(),
              playlists);
@@ -2573,8 +2679,8 @@ void LibraryTest::migrateFrom5()
         Library library(path, m_dir.path() + QStringLiteral("/art5"));
         QVERIFY(library.isOpen());
         const QSqlDatabase db = library.database();
-        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
-        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 5);
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 8);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM pragma_table_info('tracks') WHERE name IN "
                                            "('rg_track_gain', 'rg_album_gain', 'rg_track_peak', 'rg_album_peak', "
                                            "'art_path', 'has_lyrics', 'rating')"))
@@ -2601,7 +2707,7 @@ void LibraryTest::migrateFrom5()
 
     Library again(path, m_dir.path() + QStringLiteral("/art5"));
     QVERIFY(again.isOpen());
-    QCOMPARE(scalar(again.database(), QStringLiteral("PRAGMA user_version")).toInt(), 7);
+    QCOMPARE(scalar(again.database(), QStringLiteral("PRAGMA user_version")).toInt(), 8);
     QCOMPARE(scalar(again.database(), QStringLiteral("SELECT COUNT(*) FROM history")).toInt(), 3);
 }
 
@@ -2641,7 +2747,7 @@ void LibraryTest::migrateFailureRollsBack()
         Library library(orphan, m_dir.path() + QStringLiteral("/art5"));
         QVERIFY(library.isOpen());
         const QSqlDatabase db = library.database();
-        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = 99")).toInt(), 0);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlist_items WHERE playlist_id = 99")).toInt(), 0);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM track_artists WHERE track_id = 99")).toInt(), 0);
@@ -2682,17 +2788,17 @@ void LibraryTest::newerReader()
 {
     const QString path = m_dir.path() + QStringLiteral("/newer.db");
     QVERIFY(QFile::copy(m_library->dbPath(), path));
-    QVERIFY(setPragma(path, {QStringLiteral("PRAGMA user_version = 8")}));
+    QVERIFY(setPragma(path, {QStringLiteral("PRAGMA user_version = 9")}));
     const int songs = m_library->songCount();
     QVERIFY(songs > 0);
     {
         Library library(path, m_dir.path() + QStringLiteral("/art"));
         QVERIFY(library.isOpen());
-        QCOMPARE(scalar(library.database(), QStringLiteral("PRAGMA user_version")).toInt(), 8);
+        QCOMPARE(scalar(library.database(), QStringLiteral("PRAGMA user_version")).toInt(), 9);
         QCOMPARE(library.songCount(), songs);
     }
 
-    QVERIFY(setPragma(path, {QStringLiteral("UPDATE meta SET value = 8 WHERE key = 'min_reader'")}));
+    QVERIFY(setPragma(path, {QStringLiteral("UPDATE meta SET value = 9 WHERE key = 'min_reader'")}));
     const QByteArray hash = fileHash(path);
     QVERIFY(!hash.isEmpty());
     {
@@ -2824,8 +2930,8 @@ void LibraryTest::migrateFrom6()
         Library library(path, m_dir.path() + QStringLiteral("/art"));
         QVERIFY(library.isOpen());
         const QSqlDatabase db = library.database();
-        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 7);
-        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 5);
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 8);
         QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'favorite_seq'")).toInt(), 0);
         QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM favorite_order")).toInt(), 0);
         QVERIFY(library.stampFavorites(QStringLiteral("internal"), {{QStringLiteral("../a.flac"), 0},
@@ -2844,7 +2950,278 @@ void LibraryTest::migrateFrom6()
         QVERIFY(library.dropFavoriteStamp(QStringLiteral("CARD"), QStringLiteral("../c.flac"), 2));
         QVERIFY(library.favoriteStamps(QStringLiteral("CARD")).isEmpty());
     }
-    QCOMPARE(dumpVersion5(path), before);
+    QHash<QString, QStringList> reread = before;
+    for (QString &row : reread[QStringLiteral("tracks")]) {
+        QStringList values = row.split(QLatin1Char('|'));
+        if (values.at(1).endsWith(QStringLiteral(".flac"), Qt::CaseInsensitive))
+            values[2] = QStringLiteral("-1");
+        row = values.join(QLatin1Char('|'));
+    }
+    QCOMPARE(dumpVersion5(path), reread);
+}
+
+void LibraryTest::migrateFrom7()
+{
+    const QString path = m_dir.path() + QStringLiteral("/migrate7.db");
+    QVERIFY(makeVersion5(path, {QStringLiteral("ALTER TABLE tracks ADD COLUMN rg_track_gain REAL"),
+                                QStringLiteral("ALTER TABLE tracks ADD COLUMN rg_album_gain REAL"),
+                                QStringLiteral("ALTER TABLE tracks ADD COLUMN rg_track_peak REAL"),
+                                QStringLiteral("ALTER TABLE tracks ADD COLUMN rg_album_peak REAL"),
+                                QStringLiteral("ALTER TABLE tracks ADD COLUMN art_path TEXT"),
+                                QStringLiteral("ALTER TABLE tracks ADD COLUMN has_lyrics INTEGER NOT NULL DEFAULT 0"),
+                                QStringLiteral("UPDATE tracks SET rg_track_gain = -4.5, art_path = '/art/x.png', "
+                                               "has_lyrics = 1 WHERE id = 2"),
+                                QStringLiteral("CREATE TABLE meta(key TEXT PRIMARY KEY, value NOT NULL)"),
+                                QStringLiteral("INSERT INTO meta(key, value) VALUES('min_reader', 5)"),
+                                QStringLiteral("INSERT INTO meta(key, value) VALUES('favorite_seq', 3)"),
+                                QStringLiteral("CREATE TABLE favorite_order(medium TEXT NOT NULL, rel_path TEXT NOT "
+                                               "NULL, cue_index INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL, "
+                                               "PRIMARY KEY(medium, rel_path, cue_index))"),
+                                QStringLiteral("INSERT INTO favorite_order VALUES('internal', '../old/1.flac', 0, 3)"),
+                                QStringLiteral("PRAGMA user_version = 7")}));
+    const QHash<QString, QStringList> before = dumpVersion5(path);
+    {
+        Library library(path, m_dir.path() + QStringLiteral("/art7"));
+        QVERIFY(library.isOpen());
+        const QSqlDatabase db = library.database();
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA user_version")).toInt(), 8);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")).toInt(), 8);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT value FROM meta WHERE key = 'favorite_seq'")).toInt(), 3);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM favorite_order")).toInt(), 1);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks WHERE cue_index = 0 AND start_frame = 0 "
+                                           "AND end_frame = 0 AND sheet_mtime = 0 AND sheet_size = 0"))
+                     .toInt(),
+                 2);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT rg_track_gain FROM tracks WHERE id = 2")).toDouble(), -4.5);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT art_path FROM tracks WHERE id = 2")).toString(),
+                 QStringLiteral("/art/x.png"));
+        QCOMPARE(scalar(db, QStringLiteral("SELECT has_lyrics FROM tracks WHERE id = 2")).toInt(), 1);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN "
+                                           "('tracks_album', 'tracks_artist', 'tracks_genre')"))
+                     .toInt(),
+                 3);
+        QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE name = 'tracks_new'")).toInt(), 0);
+        QSqlQuery dup(db);
+        QVERIFY(!dup.exec(QStringLiteral("INSERT INTO tracks(path, mtime, size, title, artist, album_artist, album_id, "
+                                         "added, cue_index) VALUES('/old/1.flac', 1, 1, 'x', 'x', 'x', 1, 1, 0)")));
+        QVERIFY(dup.exec(QStringLiteral("INSERT INTO tracks(path, mtime, size, title, artist, album_artist, album_id, "
+                                        "added, cue_index) VALUES('/old/1.flac', 1, 1, 'x', 'x', 'x', 1, 1, 2)")));
+        QVERIFY(dup.exec(QStringLiteral("DELETE FROM tracks WHERE cue_index = 2")));
+        QCOMPARE(scalar(db, QStringLiteral("PRAGMA foreign_keys")).toInt(), 1);
+    }
+    const QHash<QString, QStringList> after = dumpVersion5(path);
+    for (const char *table : version5Tables)
+        QCOMPARE(after.value(QString::fromLatin1(table)), before.value(QString::fromLatin1(table)));
+    QStringList tracks = before.value(QStringLiteral("tracks"));
+    for (QString &row : tracks) {
+        QStringList values = row.split(QLatin1Char('|'));
+        values[2] = QStringLiteral("-1");
+        row = values.join(QLatin1Char('|'));
+    }
+    QCOMPARE(after.value(QStringLiteral("tracks")), tracks);
+}
+
+void LibraryTest::cueSheets()
+{
+    const QString music = m_dir.path() + QStringLiteral("/cue-sheets");
+    const QString dir = music + QStringLiteral("/Image");
+    QVERIFY(QDir().mkpath(dir));
+    const QString image = dir + QStringLiteral("/image.flac");
+    QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/01 One.flac"), image));
+    QVERIFY(writeBytes(dir + QStringLiteral("/image.cue"), QByteArray(imageSheet)));
+    const QString other = music + QStringLiteral("/Two");
+    QVERIFY(QDir().mkpath(other));
+    QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/02 Two.flac"), other + QStringLiteral("/a.flac")));
+    QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/03 Three.flac"), other + QStringLiteral("/b.flac")));
+    QVERIFY(writeBytes(other + QStringLiteral("/a.cue"),
+                       QByteArrayLiteral("FILE \"a.flac\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n"
+                                         "FILE \"b.flac\" WAVE\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n")));
+
+    Library library(m_dir.path() + QStringLiteral("/cue-sheets.db"), m_dir.path() + QStringLiteral("/cue-art"));
+    QVERIFY(rescanned(library, {music}));
+    const QSqlDatabase db = library.database();
+    QCOMPARE(cueRows(db, other + QStringLiteral("/a.flac")).size(), 1);
+    QCOMPARE(cueRows(db, other + QStringLiteral("/a.flac")).first().cue, 0);
+    const QList<CueRow> rows = cueRows(db, image);
+    QCOMPARE(rows.size(), 3);
+    const qint64 file = TagLib::FLAC::File(QFile::encodeName(image).constData()).audioProperties()->lengthInMilliseconds();
+    QVERIFY(file > 1500);
+    QCOMPARE(rows.at(0).cue, 1);
+    QCOMPARE(rows.at(0).title, QStringLiteral("One"));
+    QCOMPARE(rows.at(0).artist, QStringLiteral("Guest, Other"));
+    QCOMPARE(rows.at(0).start, 0);
+    QCOMPARE(rows.at(0).end, 40);
+    QCOMPARE(rows.at(0).duration, qint64(533));
+    QCOMPARE(rows.at(1).title, QStringLiteral("Two"));
+    QCOMPARE(rows.at(1).artist, QStringLiteral("Sheet Artist"));
+    QCOMPARE(rows.at(1).start, 40);
+    QCOMPARE(rows.at(1).end, 75);
+    QCOMPARE(rows.at(1).duration, qint64(1000 - 533));
+    QCOMPARE(rows.at(2).title, QStringLiteral("track 03"));
+    QCOMPARE(rows.at(2).end, 0);
+    QCOMPARE(rows.at(2).duration, file - 1000);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM tracks t JOIN albums a ON a.id = t.album_id WHERE "
+                                       "t.path = ? AND a.title = 'Sheet Album' AND a.artist = 'Sheet Artist' AND "
+                                       "t.album_artist = 'Sheet Artist' AND t.genre = 'Ambient' AND t.year = 1999 "
+                                       "AND t.rg_album_gain = -7.5"),
+                    {image})
+                 .toInt(),
+             3);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT rg_track_gain FROM tracks WHERE id = ?"), {rows.at(0).id}).toDouble(),
+             -3.0);
+    QVERIFY(scalar(db, QStringLiteral("SELECT rg_track_gain FROM tracks WHERE id = ?"), {rows.at(1).id}).isNull());
+    QCOMPARE(scalar(db, QStringLiteral("SELECT track_no FROM tracks WHERE id = ?"), {rows.at(2).id}).toInt(), 3);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM artists WHERE name IN ('Guest', 'Other')")).toInt(), 2);
+
+    const QHash<Library::CueKey, QueueEntry> byPath = library.entriesByPath({{image, 2}, {image, 0}, {image, 7}});
+    QCOMPARE(byPath.value({image, 2}).id, rows.at(1).id);
+    QCOMPARE(byPath.value({image, 2}).startFrame, 40);
+    QCOMPARE(byPath.value({image, 0}).id, rows.at(0).id);
+    QVERIFY(!byPath.contains({image, 7}));
+
+    const qint64 size = QFileInfo(image).size();
+    const QStringList info = library.trackInfo(rows.at(1).id).value(QStringLiteral("lines")).toStringList();
+    QVERIFY(info.contains(QStringLiteral("%1 kbps").arg(qRound64(double(size) * 8.0 / double(file)))));
+
+    QByteArray edited(imageSheet);
+    edited.replace("TITLE \"Two\"", "TITLE \"Deux, Again\"");
+    QVERIFY(writeBytes(dir + QStringLiteral("/image.cue"), edited));
+    QVERIFY(bumpMtime(dir + QStringLiteral("/image.cue"), 5));
+    QVERIFY(rescanned(library, {music}));
+    const QList<CueRow> again = cueRows(db, image);
+    QCOMPARE(again.size(), 3);
+    QCOMPARE(again.at(1).title, QStringLiteral("Deux, Again"));
+    for (int i = 0; i < 3; ++i)
+        QCOMPARE(again.at(i).id, rows.at(i).id);
+
+    QByteArray two(imageSheet);
+    two.truncate(two.indexOf("  TRACK 03"));
+    QVERIFY(writeBytes(dir + QStringLiteral("/image.cue"), two));
+    QVERIFY(bumpMtime(dir + QStringLiteral("/image.cue"), 10));
+    QVERIFY(rescanned(library, {music}));
+    const QList<CueRow> shorter = cueRows(db, image);
+    QCOMPARE(shorter.size(), 2);
+    QCOMPARE(shorter.at(1).id, rows.at(1).id);
+    QCOMPARE(shorter.at(1).end, 0);
+    QCOMPARE(shorter.at(1).duration, file - 533);
+}
+
+void LibraryTest::cueRekey()
+{
+    const QString music = m_dir.path() + QStringLiteral("/cue-rekey");
+    QVERIFY(QDir().mkpath(music));
+    const QString image = music + QStringLiteral("/image.flac");
+    QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/01 One.flac"), image));
+    QVERIFY(writeBytes(music + QStringLiteral("/mix.m3u8"), QByteArrayLiteral("image.flac\n")));
+    Library library(m_dir.path() + QStringLiteral("/cue-rekey.db"), m_dir.path() + QStringLiteral("/cue-art"));
+    QVERIFY(rescanned(library, {music}));
+    const QSqlDatabase db = library.database();
+    const QList<CueRow> plain = cueRows(db, image);
+    QCOMPARE(plain.size(), 1);
+    QCOMPARE(plain.first().cue, 0);
+    const qint64 id = plain.first().id;
+    library.addHistory(id);
+    library.setRating(id, 1);
+    QVERIFY(library.pin(QStringLiteral("song"), id));
+    const qint64 mix = playlistId(db, QStringLiteral("mix"));
+    QCOMPARE(idsOf(library.playlistTracks(mix)), QList<qint64>({id}));
+
+    QVERIFY(writeBytes(music + QStringLiteral("/image.cue"), QByteArray(imageSheet)));
+    QVERIFY(rescanned(library, {music}));
+    const QList<CueRow> cued = cueRows(db, image);
+    QCOMPARE(cued.size(), 3);
+    QCOMPARE(cued.at(0).id, id);
+    QCOMPARE(cued.at(0).cue, 1);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = ?"), {id}).toInt(), 1);
+    QCOMPARE(library.rating(id), 1);
+    QVERIFY(library.isPinned(QStringLiteral("song"), id));
+    QCOMPARE(idsOf(library.playlistTracks(mix)), QList<qint64>({id, cued.at(1).id, cued.at(2).id}));
+
+    QVERIFY(QFile::remove(music + QStringLiteral("/image.cue")));
+    QVERIFY(rescanned(library, {music}));
+    const QList<CueRow> back = cueRows(db, image);
+    QCOMPARE(back.size(), 1);
+    QCOMPARE(back.first().id, id);
+    QCOMPARE(back.first().cue, 0);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM history WHERE track_id = ?"), {id}).toInt(), 1);
+    QCOMPARE(library.rating(id), 1);
+    QVERIFY(library.isPinned(QStringLiteral("song"), id));
+    QCOMPARE(idsOf(library.playlistTracks(mix)), QList<qint64>({id}));
+}
+
+void LibraryTest::cueEmbedded()
+{
+    const QString music = m_dir.path() + QStringLiteral("/cue-embedded");
+    QVERIFY(QDir().mkpath(music));
+    const QString tagged = music + QStringLiteral("/tagged.flac");
+    const QString block = music + QStringLiteral("/block.flac");
+    const QString single = music + QStringLiteral("/single.flac");
+    for (const QString &path : {tagged, block, single})
+        QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/01 One.flac"), path));
+    QVERIFY(retag(tagged, "CUESHEET", {QString::fromLatin1(imageSheet)}));
+    QVERIFY(insertBlock(block, 5, cueBlock({{1, 0}, {2, 44100}})));
+    QVERIFY(retag(single, "CUESHEET", {QStringLiteral("FILE \"x.wav\" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n")}));
+    Library library(m_dir.path() + QStringLiteral("/cue-embedded.db"), m_dir.path() + QStringLiteral("/cue-art"));
+    QVERIFY(rescanned(library, {music}));
+    const QSqlDatabase db = library.database();
+    const QList<CueRow> fromTag = cueRows(db, tagged);
+    QCOMPARE(fromTag.size(), 3);
+    QCOMPARE(fromTag.at(1).title, QStringLiteral("Two"));
+    QCOMPARE(fromTag.at(1).start, 40);
+    const QList<CueRow> fromBlock = cueRows(db, block);
+    QCOMPARE(fromBlock.size(), 2);
+    QCOMPARE(fromBlock.at(0).title, QStringLiteral("track 01"));
+    QCOMPARE(fromBlock.at(1).start, 75);
+    QCOMPARE(fromBlock.at(0).end, 75);
+    QCOMPARE(fromBlock.at(1).artist, fromBlock.at(0).artist);
+    const QList<CueRow> one = cueRows(db, single);
+    QCOMPARE(one.size(), 1);
+    QCOMPARE(one.first().cue, 0);
+    QCOMPARE(one.first().title, QStringLiteral("One"));
+}
+
+void LibraryTest::cuePlaylists()
+{
+    const QString music = m_dir.path() + QStringLiteral("/cue-lists");
+    QVERIFY(QDir().mkpath(music));
+    const QString image = music + QStringLiteral("/image.flac");
+    QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/01 One.flac"), image));
+    QVERIFY(QFile::copy(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One/02 Two.flac"), music + QStringLiteral("/plain.flac")));
+    QVERIFY(writeBytes(music + QStringLiteral("/image.cue"), QByteArray(imageSheet)));
+    QVERIFY(writeBytes(music + QStringLiteral("/cues.m3u8"),
+                       QByteArrayLiteral("#EXTM3U\n#FLATDAP-CUE:02\n#EXTINF:1,Two\nimage.flac\nimage.flac\n"
+                                         "#FLATDAP-CUE:09\nimage.flac\n#FLATDAP-CUE:01\n\nplain.flac\n"
+                                         "#FLATDAP-CUE:03\nplain.flac\n")));
+    Library library(m_dir.path() + QStringLiteral("/cue-lists.db"), m_dir.path() + QStringLiteral("/cue-art"));
+    QVERIFY(rescanned(library, {music}));
+    const QSqlDatabase db = library.database();
+    const QList<CueRow> rows = cueRows(db, image);
+    QCOMPARE(rows.size(), 3);
+    const qint64 plain = trackId(db, music + QStringLiteral("/plain.flac"));
+    const qint64 list = playlistId(db, QStringLiteral("cues"));
+    QCOMPARE(idsOf(library.playlistTracks(list)),
+             QList<qint64>({rows.at(1).id, rows.at(0).id, rows.at(1).id, rows.at(2).id, plain, plain}));
+    QCOMPARE(library.playlistInfo(list).value(QStringLiteral("skipped")).toInt(), 1);
+
+    const QString edits = music + QStringLiteral("/edits.m3u8");
+    QVERIFY(writeBytes(edits, QByteArrayLiteral("#EXTM3U\n#EXTINF:9,Image\nimage.flac\nplain.flac\n")));
+    QVERIFY(rescanned(library, {music}));
+    const qint64 editsId = playlistId(db, QStringLiteral("edits"));
+    QCOMPARE(idsOf(library.playlistTracks(editsId)), QList<qint64>({rows.at(0).id, rows.at(1).id, rows.at(2).id, plain}));
+    QCOMPARE(library.editPlaylistRow(editsId, 1, rows.at(1).id, QStringLiteral("remove")), QString());
+    QFile file(edits);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), QByteArrayLiteral("#EXTM3U\n#FLATDAP-CUE:1\nimage.flac\n#FLATDAP-CUE:3\nimage.flac\n"
+                                               "plain.flac\n"));
+    file.close();
+    QCOMPARE(idsOf(library.playlistTracks(editsId)), QList<qint64>({rows.at(0).id, rows.at(2).id, plain}));
+    QCOMPARE(library.editPlaylistRow(editsId, 2, plain, QStringLiteral("move up")), QString());
+    QCOMPARE(idsOf(library.playlistTracks(editsId)), QList<qint64>({rows.at(0).id, plain, rows.at(2).id}));
+    QCOMPARE(library.addToPlaylist(editsId, {rows.at(1).id}), QString());
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QVERIFY(file.readAll().endsWith("#FLATDAP-CUE:2\nimage.flac\n"));
+    file.close();
+    QCOMPARE(idsOf(library.playlistTracks(editsId)), QList<qint64>({rows.at(0).id, plain, rows.at(2).id, rows.at(1).id}));
 }
 
 void LibraryTest::trackInfo()

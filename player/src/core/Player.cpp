@@ -2,6 +2,7 @@
 
 #include "BluezModel.h"
 #include "Crossfade.h"
+#include "Cue.h"
 #include "Deck.h"
 #include "Favorites.h"
 #include "Library.h"
@@ -205,8 +206,14 @@ qint64 Player::position() const
         return m_position;
     gint64 position = 0;
     if (queryPosition(position))
-        return position / GST_MSECOND;
+        return std::max<qint64>(0, position / GST_MSECOND - rangeStartMs());
     return m_position;
+}
+
+qint64 Player::rangeStartMs() const
+{
+    const QueueEntry current = m_queue->entry(m_queue->currentIndex());
+    return current.cueIndex > 0 ? cueFrameMs(current.startFrame) : 0;
 }
 
 qint64 Player::duration() const
@@ -679,7 +686,31 @@ int Player::nextRow(const Chain &chain) const
                          chain.repeat, false);
 }
 
-QueueEntry Player::nextEntry()
+Player::Run Player::runFrom(const Chain &chain, int row) const
+{
+    Run run;
+    if (row < 0 || row >= chain.entries.size() || chain.entries.at(row).cueIndex <= 0)
+        return run;
+    Chain walk = chain;
+    walk.last = row;
+    const QueueEntry *at = &chain.entries.at(row);
+    while (at->endFrame > 0) {
+        const int next = nextRow(walk);
+        const QueueEntry *following = next >= 0 && next < chain.entries.size() ? &chain.entries.at(next) : nullptr;
+        if (!following || next == row || run.rows.contains(next) || following->path != at->path
+            || following->cueIndex <= 0 || following->startFrame != at->endFrame) {
+            run.stop = cueStopNs(at->endFrame);
+            break;
+        }
+        run.rows.append(next);
+        run.marks.append({cueStartNs(following->startFrame), *following});
+        walk.last = next;
+        at = following;
+    }
+    return run;
+}
+
+Deck::Track Player::nextEntry()
 {
     QMutexLocker lock(&m_chainMutex);
     Chain &chain = m_chain;
@@ -687,14 +718,38 @@ QueueEntry Player::nextEntry()
     if (next < 0 || next >= chain.entries.size())
         return {};
     const QueueEntry &entry = chain.entries.at(next);
-    if (chain.last >= 0 && chain.last < chain.entries.size()
-        && isDsd(entry.path) != isDsd(chain.entries.at(chain.last).path)) {
+    const Run run = runFrom(chain, next);
+    if ((chain.last >= 0 && chain.last < chain.entries.size()
+         && isDsd(entry.path) != isDsd(chain.entries.at(chain.last).path))
+        || entry.startFrame > 0 || GST_CLOCK_TIME_IS_VALID(run.stop)) {
         chain.held = true;
         return {};
     }
-    chain.last = next;
     chain.pending.append(next);
-    return entry;
+    chain.pending.append(run.rows);
+    chain.last = run.rows.isEmpty() ? next : run.rows.constLast();
+    return {entry, run.marks};
+}
+
+qsizetype Player::pendingRun(const Chain &chain, int current, qsizetype &from) const
+{
+    from = !chain.pending.isEmpty() && chain.pending.first() == current ? 1 : 0;
+    if (current < 0 || current >= chain.entries.size())
+        return 0;
+    const QueueEntry *at = &chain.entries.at(current);
+    qsizetype n = 0;
+    for (qsizetype i = from; i < chain.pending.size(); ++i) {
+        const int row = chain.pending.at(i);
+        if (row < 0 || row >= chain.entries.size())
+            break;
+        const QueueEntry &next = chain.entries.at(row);
+        if (at->cueIndex <= 0 || next.path != at->path || next.cueIndex <= 0 || at->endFrame <= 0
+            || next.startFrame != at->endFrame)
+            break;
+        ++n;
+        at = &next;
+    }
+    return n;
 }
 
 void Player::syncChain()
@@ -709,8 +764,22 @@ void Player::syncChain()
         m_chain.slot.swap(slot);
         m_chain.shuffle = m_queue->shuffle();
         m_chain.repeat = m_queue->repeat();
+        const int current = m_queue->currentIndex();
+        qsizetype from = 0;
+        const qsizetype run = pendingRun(m_chain, current, from);
+        if (run > 0) {
+            const Run fresh = runFrom(m_chain, current);
+            qsizetype keep = 0;
+            while (keep < run && keep < fresh.rows.size() && fresh.rows.at(keep) == m_chain.pending.at(from + keep))
+                ++keep;
+            if (keep < run) {
+                m_chain.pending.resize(from + keep);
+                m_chain.last = m_chain.pending.isEmpty() ? current : m_chain.pending.constLast();
+                m_chain.stale = true;
+            }
+        }
         if (m_chain.pending.isEmpty())
-            m_chain.last = m_queue->currentIndex();
+            m_chain.last = current;
     }
     if (!m_crossfade || m_fadeSwapped || !m_fadeAdded)
         return;
@@ -915,22 +984,30 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
     m_listenStarted = m_sameListen;
     m_outputErrorSent = false;
     m_queue->setCurrentIndex(index);
+    Run run;
     {
         QMutexLocker lock(&m_chainMutex);
         m_chain.last = index;
         m_chain.pending = {index};
+        run = runFrom(m_chain, index);
+        m_chain.pending.append(run.rows);
+        if (!run.rows.isEmpty())
+            m_chain.last = run.rows.constLast();
     }
+    const bool cue = pending.entry.cueIndex > 0;
+    m_cueStop = run.stop;
+    m_firstStart = true;
     GstState target = pending.target;
     if (guard && target == GST_STATE_PLAYING && holdForPhone())
         target = GST_STATE_PAUSED;
     m_historyCounted = true;
     setPosition(0);
-    m_deck->start(pending.entry);
-    m_playAfterSeek = target == GST_STATE_PLAYING && pending.positionMs > 0;
+    m_deck->start(pending.entry, run.marks);
+    m_playAfterSeek = target == GST_STATE_PLAYING && (pending.positionMs > 0 || cue);
     gst_element_set_state(m_pipeline, m_playAfterSeek ? GST_STATE_PAUSED : target);
     setStatus(target == GST_STATE_PLAYING ? Playing : Paused);
     emit currentChanged();
-    if (pending.positionMs > 0) {
+    if (pending.positionMs > 0 || cue) {
         m_pendingSeek = pending.positionMs;
         setPosition(pending.positionMs);
     }
@@ -1161,8 +1238,31 @@ bool Player::doSeek(qint64 ms)
     }
     m_fadeOffset = GST_CLOCK_TIME_NONE;
     m_replanFade = true;
-    const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT);
-    const bool ok = gst_element_seek_simple(m_pipeline, GST_FORMAT_TIME, flags, ms * GST_MSECOND);
+    const QueueEntry current = m_queue->entry(m_queue->currentIndex());
+    bool ok = false;
+    if (current.cueIndex > 0) {
+        QList<Deck::Mark> marks;
+        {
+            QMutexLocker lock(&m_chainMutex);
+            qsizetype from = 0;
+            const qsizetype run = pendingRun(m_chain, m_queue->currentIndex(), from);
+            for (qsizetype i = from; i < from + run; ++i) {
+                const QueueEntry &next = m_chain.entries.at(m_chain.pending.at(i));
+                marks.append({cueStartNs(next.startFrame), next});
+            }
+        }
+        if (m_deck)
+            m_deck->setMarks(marks, true);
+        const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE);
+        ok = gst_element_seek(m_pipeline, 1.0, GST_FORMAT_TIME, flags, GST_SEEK_TYPE_SET,
+                              cueStartNs(current.startFrame) + GstClockTime(ms) * GST_MSECOND,
+                              GST_CLOCK_TIME_IS_VALID(m_cueStop) ? GST_SEEK_TYPE_SET : GST_SEEK_TYPE_NONE, m_cueStop);
+        if (!ok && m_deck)
+            m_deck->setMarks(marks, false);
+    } else {
+        const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT);
+        ok = gst_element_seek_simple(m_pipeline, GST_FORMAT_TIME, flags, ms * GST_MSECOND);
+    }
     if (!ok)
         qWarning() << "microdap player: seek failed" << ms;
     setPosition(ms);
@@ -1173,7 +1273,10 @@ void Player::seek(qint64 ms)
 {
     if (!m_pipeline || m_status == Stopped)
         return;
-    const qint64 target = qMax<qint64>(0, ms);
+    qint64 target = qMax<qint64>(0, ms);
+    const QueueEntry current = m_queue->entry(m_queue->currentIndex());
+    if (current.cueIndex > 0 && current.durationMs > 0)
+        target = qMin(target, current.durationMs - 1);
     if (m_pending) {
         m_pending->positionMs = target;
         setPosition(target);
@@ -1208,7 +1311,8 @@ void Player::setCrossfade(int ms)
 void Player::planFade()
 {
     if (m_crossfade || m_crossfadeMs <= 0 || m_builtChain != OutputChain::Pw || m_dsd || !m_deck
-        || !m_deck->element() || m_status == Stopped || !Crossfade::available())
+        || !m_deck->element() || m_status == Stopped || !Crossfade::available()
+        || m_queue->entry(m_queue->currentIndex()).cueIndex > 0)
         return;
     GstPad *src = gst_element_get_static_pad(m_deck->element(), "src");
     gint64 duration = -1;
@@ -1238,7 +1342,8 @@ void Player::prepareFade()
     const QueueEntry from = m_queue->entry(current);
     const QueueEntry to = row >= 0 && row < m_queue->count() ? m_queue->entry(row) : QueueEntry();
     const int rate = m_sourceFormat.value(QStringLiteral("rate")).toInt();
-    const bool fits = row >= 0 && row != current && !to.path.isEmpty() && !isDsd(to.path)
+    const bool fits = row >= 0 && row != current && !to.path.isEmpty() && !isDsd(to.path) && to.cueIndex <= 0
+                      && from.cueIndex <= 0
                       && (to.sampleRate <= 0 || rate <= 0 || to.sampleRate == rate)
                       && lengthMs == m_crossfadeMs && !albumContinues(from, to)
                       && crossfadeFits(std::max(m_duration, from.durationMs), to.durationMs, lengthMs);
@@ -1393,7 +1498,11 @@ void Player::updateDuration()
         return;
     gint64 duration = 0;
     bool known = false;
-    if (m_fadeSwapped && m_deck) {
+    const QueueEntry current = m_queue->entry(m_queue->currentIndex());
+    if (current.cueIndex > 0) {
+        known = true;
+        duration = current.durationMs * GST_MSECOND;
+    } else if (m_fadeSwapped && m_deck) {
         GstPad *src = gst_element_get_static_pad(m_deck->element(), "src");
         known = gst_pad_query_duration(src, GST_FORMAT_TIME, &duration);
         gst_object_unref(src);
@@ -1415,7 +1524,7 @@ void Player::pollPosition()
         return;
     gint64 position = 0;
     if (queryPosition(position))
-        setPosition(position / GST_MSECOND);
+        setPosition(std::max<qint64>(0, position / GST_MSECOND - rangeStartMs()));
 }
 
 bool Player::queryPosition(gint64 &position) const
@@ -1437,8 +1546,20 @@ bool Player::queryPosition(gint64 &position) const
     return true;
 }
 
-void Player::handleStreamStart()
+void Player::handleCueMark(GstMessage *message)
 {
+    gint generation = -1;
+    gst_structure_get_int(gst_message_get_structure(message), "generation", &generation);
+    if (!m_deck || GST_MESSAGE_SRC(message) != GST_OBJECT_CAST(m_deck->element())
+        || generation != m_deck->markGeneration())
+        return;
+    handleStreamStart(true);
+}
+
+void Player::handleStreamStart(bool mark)
+{
+    if (!mark && !std::exchange(m_firstStart, false))
+        m_cueStop = GST_CLOCK_TIME_NONE;
     const bool fadeStart = m_crossfade && m_fadeAdded && !m_fadeSwapped && m_crossfade->mixing();
     if (fadeStart) {
         std::swap(m_deck, m_fade);
@@ -1507,6 +1628,8 @@ void Player::handleEos()
 void Player::handleAsyncDone()
 {
     m_prerolled = true;
+    if (m_deck)
+        m_deck->settleMarks();
     bool seeking = false;
     if (m_pendingSeek >= 0) {
         const qint64 target = m_pendingSeek;
@@ -1623,6 +1746,8 @@ void Player::pollBus()
                 handleStreamStart();
             break;
         case GST_MESSAGE_ELEMENT:
+            if (gst_message_has_name(message, Deck::cueMark))
+                handleCueMark(message);
             if (gst_message_has_name(message, Deck::switched)) {
                 if (m_deck && GST_MESSAGE_SRC(message) == GST_OBJECT_CAST(m_deck->element()))
                     m_deck->reap();

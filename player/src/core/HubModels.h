@@ -263,6 +263,7 @@ private:
         QString file;
         QString title;
         QString artist;
+        int cue = 0;
     };
 
     struct Dir

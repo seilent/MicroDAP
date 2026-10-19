@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Deck.h"
 #include "OutputPorts.h"
 #include "Queue.h"
 #include "ReplayGain.h"
@@ -24,7 +25,6 @@ namespace microdap {
 
 class BluezModel;
 class Crossfade;
-class Deck;
 class Favorites;
 class Library;
 class OutputPolicy;
@@ -160,8 +160,19 @@ private:
         QString target;
     };
 
-    QueueEntry nextEntry();
+    struct Run
+    {
+        QList<int> rows;
+        QList<Deck::Mark> marks;
+        GstClockTime stop = GST_CLOCK_TIME_NONE;
+    };
+
+    Deck::Track nextEntry();
     int nextRow(const Chain &chain) const;
+    Run runFrom(const Chain &chain, int row) const;
+    qsizetype pendingRun(const Chain &chain, int current, qsizetype &from) const;
+    void handleCueMark(GstMessage *message);
+    qint64 rangeStartMs() const;
     void planFade();
     void prepareFade();
     bool dropFade(bool idle = false);
@@ -182,7 +193,7 @@ private:
     void setFormats(const QVariantMap &source, const QVariantMap &sink);
     void pollBus();
     void pollPosition();
-    void handleStreamStart();
+    void handleStreamStart(bool mark = false);
     void handleEos();
     void handleError(GstMessage *message);
     void skipBroken(const QString &text);
@@ -270,6 +281,8 @@ private:
     bool m_fadeSwapped = false;
     bool m_replanFade = false;
     GstClockTime m_fadeOffset = GST_CLOCK_TIME_NONE;
+    GstClockTime m_cueStop = GST_CLOCK_TIME_NONE;
+    bool m_firstStart = false;
     bool m_skipStart = false;
 };
 

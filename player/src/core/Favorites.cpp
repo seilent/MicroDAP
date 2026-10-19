@@ -153,36 +153,39 @@ void Favorites::migrate(Medium &medium)
     const QString marker = migratedKey + medium.id;
     if (medium.failed || !m_library->isOpen() || !m_library->metaValue(marker).isEmpty())
         return;
-    QStringList rated;
+    QList<std::pair<QString, int>> rated;
     QSet<QString> ratedKeys;
     QSqlQuery query(m_library->database());
-    if (!query.exec(QStringLiteral("SELECT t.path FROM tracks t LEFT JOIN (SELECT track_id, MAX(played_at) AS last "
-                                   "FROM history GROUP BY track_id) h ON h.track_id = t.id WHERE t.rating = 1 "
-                                   "ORDER BY h.last, t.added, t.id")))
+    if (!query.exec(QStringLiteral("SELECT t.path, t.cue_index FROM tracks t LEFT JOIN (SELECT track_id, "
+                                   "MAX(played_at) AS last FROM history GROUP BY track_id) h ON h.track_id = t.id "
+                                   "WHERE t.rating = 1 ORDER BY h.last, t.added, t.id")))
         return;
     const QString base = basePrefix();
     while (query.next()) {
         const QString path = query.value(0).toString();
+        const int cue = query.value(1).toInt();
         const bool here = medium.card ? path.startsWith(medium.root + QLatin1Char('/')) : !path.startsWith(base);
-        if (!here || ratedKeys.contains(key(medium, path)))
+        const QString ratedKey = Library::favoriteKey(key(medium, path), cue);
+        if (!here || ratedKeys.contains(ratedKey))
             continue;
-        ratedKeys.insert(key(medium, path));
-        rated.append(path);
+        ratedKeys.insert(ratedKey);
+        rated.append({path, cue});
     }
     query.finish();
 
-    const auto present = [this, &medium](const M3u &doc, const QString &path) {
-        return std::any_of(doc.items.cbegin(), doc.items.cend(), [this, &medium, &path](const M3uItem &item) {
-            return item.entry && sameTrack(medium, item.path, path);
+    const auto present = [this, &medium](const M3u &doc, const std::pair<QString, int> &track) {
+        return std::any_of(doc.items.cbegin(), doc.items.cend(), [this, &medium, &track](const M3uItem &item) {
+            return item.entry && item.cue == track.second && sameTrack(medium, item.path, track.first);
         });
     };
-    const bool missing = std::any_of(rated.cbegin(), rated.cend(),
-                                     [&present, &medium](const QString &path) { return !present(medium.doc, path); });
+    const bool missing = std::any_of(rated.cbegin(), rated.cend(), [&present, &medium](const auto &track) {
+        return !present(medium.doc, track);
+    });
     if (missing) {
         const PlaylistStore::Edit result = m_library->playlistStore().edit(medium.file, [&](M3u &doc) {
-            for (const QString &path : std::as_const(rated)) {
-                if (!present(doc, path))
-                    PlaylistStore::insert(doc, 0, path, medium.dir);
+            for (const auto &track : std::as_const(rated)) {
+                if (!present(doc, track))
+                    PlaylistStore::insert(doc, 0, track.first, medium.dir, track.second);
             }
             return true;
         });
@@ -193,9 +196,9 @@ void Favorites::migrate(Medium &medium)
         readMedium(medium);
         if (medium.failed)
             return;
-        for (const QString &path : std::as_const(rated)) {
-            if (!present(medium.doc, path)) {
-                qWarning() << "microdap favorites: migration read back without" << path;
+        for (const auto &track : std::as_const(rated)) {
+            if (!present(medium.doc, track)) {
+                qWarning() << "microdap favorites: migration read back without" << track.first;
                 return;
             }
         }
@@ -203,10 +206,10 @@ void Favorites::migrate(Medium &medium)
 
     const QHash<QString, qint64> stamps = m_library->favoriteStamps(medium.id);
     QList<std::pair<QString, int>> fresh;
-    for (const QString &path : std::as_const(rated)) {
-        const QString rel = key(medium, path);
-        if (!stamps.contains(Library::favoriteKey(rel, 0)))
-            fresh.append({rel, 0});
+    for (const auto &track : std::as_const(rated)) {
+        const QString rel = key(medium, track.first);
+        if (!stamps.contains(Library::favoriteKey(rel, track.second)))
+            fresh.append({rel, track.second});
     }
     if (!m_library->stampFavorites(medium.id, fresh))
         return;
@@ -241,43 +244,18 @@ void Favorites::reload()
 
 QList<qint64> Favorites::resolve(const Medium &medium, const M3u &doc) const
 {
-    QHash<QString, qint64> exact;
-    {
-        QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks"), m_library->database());
-        while (query.next())
-            exact.insert(query.value(1).toString(), query.value(0).toLongLong());
+    QList<Library::EntryRef> refs;
+    refs.reserve(doc.items.size());
+    for (const M3uItem &item : doc.items) {
+        if (item.entry && !item.path.isEmpty())
+            refs.append({item.path, item.cue, entryTail(item)});
+        else
+            refs.append(Library::EntryRef{});
     }
-    QHash<QString, QList<qint64>> folded;
-    QList<qint64> ids(doc.items.size(), -1);
-    QList<qsizetype> missed;
-    QStringList tails;
-    for (qsizetype i = 0; i < doc.items.size(); ++i) {
-        const M3uItem &item = doc.items.at(i);
-        if (!item.entry || item.path.isEmpty())
-            continue;
-        ids[i] = exact.value(item.path, -1);
-        if (ids.at(i) < 0 && medium.card) {
-            if (folded.isEmpty()) {
-                for (auto it = exact.cbegin(); it != exact.cend(); ++it)
-                    folded[it.key().toCaseFolded()].append(it.value());
-            }
-            const QList<qint64> hits = folded.value(item.path.toCaseFolded());
-            if (hits.size() == 1)
-                ids[i] = hits.first();
-        }
-        if (ids.at(i) < 0) {
-            const QString tail = entryTail(item);
-            if (!tail.isEmpty()) {
-                missed.append(i);
-                tails.append(tail);
-            }
-        }
-    }
-    if (!missed.isEmpty()) {
-        const QList<qint64> found = m_library->tailTracks(medium.dir, tails);
-        for (qsizetype k = 0; k < missed.size(); ++k)
-            ids[missed.at(k)] = found.at(k);
-    }
+    QList<qint64> ids;
+    ids.reserve(refs.size());
+    for (const QList<qint64> &rows : m_library->resolveRefs(refs, medium.dir, medium.card, false))
+        ids.append(rows.isEmpty() ? -1 : rows.first());
     return ids;
 }
 
@@ -458,21 +436,22 @@ QString Favorites::add(const QVariantList &trackIds)
         QList<std::pair<QString, int>> stamps;
         const PlaylistStore::Edit result = m_library->playlistStore().edit(medium->file, [&](M3u &doc) {
             const QList<qint64> resolved = resolve(*medium, doc);
-            QList<QString> present;
+            QList<std::pair<QString, int>> present;
             for (qsizetype i = 0; i < doc.items.size(); ++i) {
                 if (doc.items.at(i).entry)
-                    present.append(doc.items.at(i).path);
+                    present.append({doc.items.at(i).path, doc.items.at(i).cue});
             }
             for (qsizetype k = entries.size() - 1; k >= 0; --k) {
                 const QueueEntry &entry = entries.at(k);
                 const bool had = resolved.contains(entry.id)
-                    || std::any_of(present.cbegin(), present.cend(),
-                                   [&](const QString &p) { return sameTrack(*medium, p, entry.path); });
+                    || std::any_of(present.cbegin(), present.cend(), [&](const auto &p) {
+                           return p.second == entry.cueIndex && sameTrack(*medium, p.first, entry.path);
+                       });
                 if (had)
                     continue;
-                PlaylistStore::insert(doc, 0, entry.path, medium->dir);
-                present.append(entry.path);
-                stamps.append({key(*medium, entry.path), 0});
+                PlaylistStore::insert(doc, 0, entry.path, medium->dir, entry.cueIndex);
+                present.append({entry.path, entry.cueIndex});
+                stamps.append({key(*medium, entry.path), entry.cueIndex});
             }
             return !stamps.isEmpty();
         });
@@ -503,6 +482,7 @@ void Favorites::toggle(qint64 trackId)
     if (found.isEmpty())
         return;
     const QString path = found.first().path;
+    const int cue = found.first().cueIndex;
     Medium *medium = mediumOf(path);
     if (!medium) {
         emit notice(QStringLiteral("card not available"));
@@ -518,7 +498,8 @@ void Favorites::toggle(qint64 trackId)
         const QList<qint64> resolved = resolve(*medium, doc);
         for (qsizetype i = doc.items.size() - 1; i >= 0; --i) {
             if (doc.items.at(i).entry
-                && (resolved.at(i) == trackId || sameTrack(*medium, doc.items.at(i).path, path))) {
+                && (resolved.at(i) == trackId
+                    || (doc.items.at(i).cue == cue && sameTrack(*medium, doc.items.at(i).path, path)))) {
                 const qsizetype from = PlaylistStore::unit(doc, i);
                 PlaylistStore::erase(doc, i);
                 i = from;
@@ -526,7 +507,7 @@ void Favorites::toggle(qint64 trackId)
             }
         }
         if (!had)
-            PlaylistStore::insert(doc, 0, path, medium->dir);
+            PlaylistStore::insert(doc, 0, path, medium->dir, cue);
         return true;
     });
     if (result == PlaylistStore::Edit::Unreadable) {
@@ -540,7 +521,7 @@ void Favorites::toggle(qint64 trackId)
         return;
     }
     if (!had)
-        m_library->stampFavorites(medium->id, {{key(*medium, path), 0}});
+        m_library->stampFavorites(medium->id, {{key(*medium, path), cue}});
     readMedium(*medium);
     rebuild();
     emit notice(had ? QStringLiteral("removed from favorites") : QStringLiteral("added to favorites"));

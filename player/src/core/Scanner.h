@@ -1,6 +1,9 @@
 #pragma once
 
+#include "Cue.h"
+
 #include <QByteArray>
+#include <QFileInfo>
 #include <QHash>
 #include <QList>
 #include <QString>
@@ -10,7 +13,6 @@
 #include <optional>
 
 class QDir;
-class QFileInfo;
 
 namespace microdap {
 
@@ -18,6 +20,10 @@ struct FileStamp
 {
     qint64 mtime = 0;
     qint64 size = 0;
+    qint64 sheetMtime = 0;
+    qint64 sheetSize = 0;
+
+    bool operator==(const FileStamp &) const = default;
 };
 
 struct TrackInfo
@@ -44,6 +50,11 @@ struct TrackInfo
     std::optional<double> trackPeak;
     std::optional<double> albumPeak;
     bool hasLyrics = false;
+    int cueIndex = 0;
+    int startFrame = 0;
+    int endFrame = 0;
+    qint64 sheetMtime = 0;
+    qint64 sheetSize = 0;
 };
 
 struct PlaylistFile
@@ -52,6 +63,7 @@ struct PlaylistFile
     QString name;
     QStringList entries;
     QStringList tails;
+    QList<int> cues;
     qint64 mtime = -1;
     qint64 size = -1;
     bool readable = true;
@@ -101,7 +113,14 @@ private:
     bool onAbsentMedia(const QString &path);
     bool mounted(const QString &dir);
 
-    TrackInfo read(const QFileInfo &info, const FileStamp &stamp);
+    struct Sheet
+    {
+        FileStamp stamp;
+        CueSheet cue;
+    };
+
+    QHash<QString, Sheet> sheets(const QFileInfoList &entries);
+    QList<TrackInfo> read(const QFileInfo &info, const FileStamp &stamp, const Sheet *sheet);
     QString resolveArt(const QString &trackArt, const QString &key, const QDir &dir);
     QString writeArt(const QByteArray &data, const QString &mime);
     QString folderArt(const QDir &dir);

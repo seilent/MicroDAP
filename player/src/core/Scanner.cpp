@@ -22,6 +22,7 @@
 #include <taglib/wavproperties.h>
 
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -123,42 +124,27 @@ int bitDepthOf(const TagLib::AudioProperties *audio)
     return 0;
 }
 
-constexpr double gainLimitDb = 51;
 constexpr double r128Offset = 5;
 
-std::optional<double> leadingDecimal(TagLib::PropertyMap &map, const char *key)
+std::optional<double> mapDecimal(TagLib::PropertyMap &map, const char *key)
 {
     if (!map.contains(key) || map[key].isEmpty())
         return std::nullopt;
-    static const QRegularExpression pattern(QStringLiteral("^[+-]?([0-9]+([.,][0-9]*)?|[.,][0-9]+)"));
-    const QRegularExpressionMatch match = pattern.match(fromTag(map[key].front()));
-    if (!match.hasMatch())
-        return std::nullopt;
-    bool ok = false;
-    const double value = match.captured(0).replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&ok);
-    return ok ? std::optional<double>(value) : std::nullopt;
-}
-
-std::optional<double> gainOf(std::optional<double> db)
-{
-    if (!db || *db < -gainLimitDb || *db > gainLimitDb)
-        return std::nullopt;
-    return db;
+    return leadingDecimal(fromTag(map[key].front()));
 }
 
 std::optional<double> gainOf(TagLib::PropertyMap &map, const char *replayGain, const char *r128, bool opus)
 {
     if (opus) {
-        if (const std::optional<double> q78 = leadingDecimal(map, r128))
-            return gainOf(*q78 / 256 + r128Offset);
+        if (const std::optional<double> q78 = mapDecimal(map, r128))
+            return microdap::gainOf(*q78 / 256 + r128Offset);
     }
-    return gainOf(leadingDecimal(map, replayGain));
+    return microdap::gainOf(mapDecimal(map, replayGain));
 }
 
 std::optional<double> peakOf(TagLib::PropertyMap &map, const char *key)
 {
-    const std::optional<double> peak = leadingDecimal(map, key);
-    return peak && *peak > 0 ? peak : std::nullopt;
+    return microdap::peakOf(mapDecimal(map, key));
 }
 
 bool hasLyricsTag(TagLib::PropertyMap &map)
@@ -315,12 +301,21 @@ PlaylistFile Scanner::readPlaylist(const QString &path)
     const QString text = decodePlaylist(file.readAll(), utf8Only);
     const QString folder = info.absolutePath();
     const QStringList lines = text.split(QLatin1Char('\n'));
+    int cue = 0;
     for (const QString &raw : lines) {
         const QString line = raw.trimmed();
-        if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
+        if (line.isEmpty()) {
+            cue = 0;
             continue;
+        }
+        if (line.startsWith(QLatin1Char('#'))) {
+            if (const int directive = PlaylistStore::cueOf(line.toUtf8()))
+                cue = directive;
+            continue;
+        }
         playlist.tails.append(playlistTail(line));
         playlist.entries.append(PlaylistStore::entryPath(line.toUtf8(), folder));
+        playlist.cues.append(std::exchange(cue, 0));
     }
     return playlist;
 }
@@ -400,6 +395,7 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
     QSet<QString> walked;
     QStringList present;
     QStringList absent;
+    bool newRows = false;
     const auto takePlaylist = [&](const QFileInfo &info) {
         const QString path = info.absoluteFilePath();
         if (seenPlaylists.contains(path) || isFavoritesFile(path))
@@ -435,6 +431,7 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
 
             const QFileInfoList entries = QDir(dirPath).entryInfoList(
                 QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+            const QHash<QString, Sheet> dirSheets = sheets(entries);
             for (const QFileInfo &info : entries) {
                 if (cancelled(cancel))
                     return ScanResult();
@@ -452,18 +449,24 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
                     continue;
                 seen.insert(path);
 
-                const FileStamp stamp = stampOf(info);
+                FileStamp stamp = stampOf(info);
+                const auto sheet = dirSheets.constFind(info.fileName());
+                if (sheet != dirSheets.cend()) {
+                    stamp.sheetMtime = sheet->stamp.mtime;
+                    stamp.sheetSize = sheet->stamp.size;
+                }
                 const auto known = snapshot.constFind(path);
-                const bool unchanged = known != snapshot.cend() && known->mtime == stamp.mtime
-                                       && known->size == stamp.size;
-                if (unchanged)
+                if (known != snapshot.cend() && *known == stamp)
                     continue;
 
-                TrackInfo track = read(info, stamp);
+                QList<TrackInfo> tracks = read(info, stamp, sheet != dirSheets.cend() ? &*sheet : nullptr);
+                if (tracks.constFirst().cueIndex > 0
+                    || (known != snapshot.cend() && (known->sheetMtime || known->sheetSize)))
+                    newRows = true;
                 if (known == snapshot.cend())
-                    result.added.append(std::move(track));
+                    result.added.append(std::move(tracks));
                 else
-                    result.updated.append(std::move(track));
+                    result.updated.append(std::move(tracks));
             }
         }
 
@@ -499,7 +502,7 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
         if (!seenPlaylists.contains(it.key()) && removable(it.key(), present, absent))
             result.removedPlaylists.append(it.key());
     }
-    if (!result.added.isEmpty()) {
+    if (!result.added.isEmpty() || newRows) {
         for (const QString &source : std::as_const(result.keptPlaylists)) {
             if (cancelled(cancel))
                 return ScanResult();
@@ -511,17 +514,78 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
     return result;
 }
 
-TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
+QHash<QString, Scanner::Sheet> Scanner::sheets(const QFileInfoList &entries)
+{
+    QStringList files;
+    QList<QFileInfo> cues;
+    for (const QFileInfo &info : entries) {
+        if (!info.isFile())
+            continue;
+        if (info.suffix().compare(QLatin1StringView("cue"), Qt::CaseInsensitive) == 0)
+            cues.append(info);
+        else if (info.isReadable() && isAudioFile(info.fileName()))
+            files.append(info.fileName());
+    }
+    QHash<QString, Sheet> out;
+    if (files.isEmpty())
+        return out;
+    const auto stem = [](const QString &name) {
+        const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
+        return dot <= 0 ? name : name.left(dot);
+    };
+    const auto pick = [&files](const auto &match) -> QString {
+        for (const QString &file : std::as_const(files)) {
+            if (match(file))
+                return file;
+        }
+        return {};
+    };
+    for (const QFileInfo &info : std::as_const(cues)) {
+        QFile file(info.absoluteFilePath());
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        Sheet sheet;
+        sheet.stamp = stampOf(info);
+        if (!parseCue(file.read(cueCap + 3), sheet.cue))
+            continue;
+        if (sheet.cue.files > 1) {
+            qWarning().noquote() << QStringLiteral("microdap: scan: %1 names %2 files, not used")
+                                        .arg(info.absoluteFilePath())
+                                        .arg(sheet.cue.files);
+            continue;
+        }
+        QString want = sheet.cue.file;
+        want = want.mid(qMax(want.lastIndexOf(QLatin1Char('/')), want.lastIndexOf(QLatin1Char('\\'))) + 1);
+        QString target;
+        if (!want.isEmpty()) {
+            target = pick([&want](const QString &n) { return n == want; });
+            if (target.isEmpty())
+                target = pick([&want](const QString &n) { return n.compare(want, Qt::CaseInsensitive) == 0; });
+            if (target.isEmpty())
+                target = pick([&](const QString &n) { return stem(n).compare(stem(want), Qt::CaseInsensitive) == 0; });
+        }
+        if (target.isEmpty())
+            target = pick([&](const QString &n) { return stem(n).compare(stem(info.fileName()), Qt::CaseInsensitive) == 0; });
+        if (!target.isEmpty() && !out.contains(target))
+            out.insert(target, std::move(sheet));
+    }
+    return out;
+}
+
+QList<TrackInfo> Scanner::read(const QFileInfo &info, const FileStamp &stamp, const Sheet *sheet)
 {
     TrackInfo track;
     track.path = info.absoluteFilePath();
     track.mtime = stamp.mtime;
     track.size = stamp.size;
+    track.sheetMtime = stamp.sheetMtime;
+    track.sheetSize = stamp.sheetSize;
 
     const QByteArray name = QFile::encodeName(track.path);
     TagLib::FileRef ref(name.constData(), true, TagLib::AudioProperties::Average);
     const TagLib::Tag *tag = ref.isNull() ? nullptr : ref.tag();
     TagLib::StringList artistValues;
+    QString cueText;
     if (!ref.isNull()) {
         if (tag) {
             track.title = fromTag(tag->title());
@@ -545,6 +609,8 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
                 track.albumArtist = fromTag(map["ALBUMARTIST"].front());
             if (map.contains("DISCNUMBER") && !map["DISCNUMBER"].isEmpty())
                 track.discNo = leadingInt(fromTag(map["DISCNUMBER"].front()));
+            if (!sheet && map.contains("CUESHEET") && !map["CUESHEET"].isEmpty())
+                cueText = QString::fromUtf8(map["CUESHEET"].front().toCString(true));
             const bool opus = dynamic_cast<TagLib::Ogg::Opus::File *>(file) != nullptr;
             track.trackGain = gainOf(map, "REPLAYGAIN_TRACK_GAIN", "R128_TRACK_GAIN", opus);
             track.albumGain = gainOf(map, "REPLAYGAIN_ALBUM_GAIN", "R128_ALBUM_GAIN", opus);
@@ -556,6 +622,7 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
         }
     }
 
+    const QString albumArtistTag = track.albumArtist;
     track.artists = splitArtists(artistValues, track.albumArtist);
     if (track.artists.isEmpty() && tag)
         track.artists = splitArtists(TagLib::StringList(tag->artist()), track.albumArtist);
@@ -572,8 +639,75 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
 
     if (!track.hasLyrics)
         track.hasLyrics = listing(info.dir()).contains((info.completeBaseName() + QStringLiteral(".lrc")).toLower());
-    track.artPath = resolveArt(track.trackArtPath, albumKey(track.album, track.albumArtist), info.dir());
-    return track;
+
+    CueSheet cs;
+    bool cued = false;
+    if (sheet) {
+        cs = sheet->cue;
+        cued = true;
+    } else if (!cueText.isEmpty()) {
+        cued = parseCue(cueText.toUtf8(), cs) && cs.files <= 1;
+    }
+    if (!cued && info.suffix().compare(QLatin1StringView("flac"), Qt::CaseInsensitive) == 0)
+        cued = parseCueBlock(flacCueBlock(track.path), track.sampleRate, cs);
+    if (cued && !sheet && cs.tracks.size() == 1 && cs.tracks.first().startFrame == 0 && cs.tracks.first().endFrame == 0)
+        cued = false;
+    if (cued && track.durationMs > 0) {
+        const qint64 duration = track.durationMs;
+        cs.tracks.removeIf([duration](const CueTrack &k) { return cueFrameMs(k.startFrame) >= duration; });
+        if (!cs.tracks.isEmpty() && cueFrameMs(cs.tracks.constLast().endFrame) > duration)
+            cs.tracks.last().endFrame = 0;
+        cued = !cs.tracks.isEmpty();
+    }
+    if (!cued) {
+        track.artPath = resolveArt(track.trackArtPath, albumKey(track.album, track.albumArtist), info.dir());
+        return {track};
+    }
+
+    const QString albumTag = !cs.performer.isEmpty() ? cs.performer : albumArtistTag;
+    TrackInfo image = track;
+    if (!cs.performer.isEmpty())
+        image.albumArtist = cs.performer;
+    if (!cs.title.isEmpty())
+        image.album = cs.title;
+    if (!cs.genre.isEmpty())
+        image.genre = cs.genre;
+    if (cs.disc)
+        image.discNo = cs.disc;
+    if (cs.year)
+        image.year = cs.year;
+    if (cs.albumGain) {
+        image.albumGain = cs.albumGain;
+        image.albumPeak = cs.albumPeak;
+    }
+    image.artPath = resolveArt(track.trackArtPath, albumKey(image.album, image.albumArtist), info.dir());
+    const auto names = [&](const QString &text) {
+        return splitArtists(TagLib::StringList(TagLib::String(text.toUtf8().constData(), TagLib::String::UTF8)),
+                            albumTag);
+    };
+    QList<TrackInfo> out;
+    for (const CueTrack &k : std::as_const(cs.tracks)) {
+        TrackInfo c = image;
+        c.artists = !k.performer.isEmpty() ? names(k.performer)
+                    : !cs.performer.isEmpty() ? names(cs.performer)
+                    : !albumArtistTag.isEmpty() ? QStringList{albumArtistTag}
+                                                : track.artists;
+        if (c.artists.isEmpty())
+            c.artists = track.artists;
+        c.artist = c.artists.join(QStringLiteral(", "));
+        c.title = !k.title.isEmpty() ? k.title : QStringLiteral("track %1").arg(k.number, 2, 10, QLatin1Char('0'));
+        c.trackNo = k.number;
+        c.cueIndex = k.number;
+        c.startFrame = k.startFrame;
+        c.endFrame = k.endFrame;
+        const qint64 begin = cueFrameMs(k.startFrame);
+        c.durationMs = k.endFrame ? int(cueFrameMs(k.endFrame) - begin)
+                                  : track.durationMs > begin ? int(track.durationMs - begin) : 0;
+        c.trackGain = k.gain;
+        c.trackPeak = k.peak;
+        out.append(std::move(c));
+    }
+    return out;
 }
 
 QString Scanner::resolveArt(const QString &trackArt, const QString &key, const QDir &dir)

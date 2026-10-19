@@ -305,9 +305,11 @@ bool State::writeQueue(const QueueSnapshot &job)
 {
     QJsonArray ids;
     QJsonArray paths;
+    QJsonArray cues;
     for (const QueueEntry &entry : job.entries) {
         ids.append(entry.id);
         paths.append(entry.path);
+        cues.append(entry.cueIndex);
     }
     QJsonArray order;
     for (int row : job.order)
@@ -317,6 +319,7 @@ bool State::writeQueue(const QueueSnapshot &job)
     object.insert(QStringLiteral("index"), job.index);
     object.insert(QStringLiteral("ids"), ids);
     object.insert(QStringLiteral("paths"), paths);
+    object.insert(QStringLiteral("cues"), cues);
     object.insert(QStringLiteral("order"), order);
     return write(job.path, object);
 }
@@ -417,7 +420,8 @@ void State::applyModes(const QJsonObject &state)
     queue->setRepeat(static_cast<Queue::Repeat>(qBound(0, repeat, 2)));
 }
 
-QList<QueueEntry> State::resolveEntries(const QList<qint64> &ids, const QStringList &paths) const
+QList<QueueEntry> State::resolveEntries(const QList<qint64> &ids, const QStringList &paths,
+                                       const QList<int> &cues) const
 {
     const qsizetype n = paths.size();
     QList<QueueEntry> entries(n);
@@ -435,22 +439,22 @@ QList<QueueEntry> State::resolveEntries(const QList<qint64> &ids, const QStringL
         QHash<qint64, QueueEntry> byId;
         for (const QueueEntry &entry : library->queueEntries(unique))
             byId.insert(entry.id, entry);
-        QStringList missing;
+        QList<Library::CueKey> missing;
         for (qsizetype i = 0; i < n; ++i) {
             const auto it = byId.constFind(ids.value(i));
-            if (it != byId.constEnd() && it->path == paths.at(i)) {
+            if (it != byId.constEnd() && it->path == paths.at(i) && it->cueIndex == cues.value(i)) {
                 entries[i] = *it;
                 found[i] = true;
             } else {
-                missing.append(paths.at(i));
+                missing.append({paths.at(i), cues.value(i)});
             }
         }
         if (!missing.isEmpty()) {
-            const QHash<QString, QueueEntry> byPath = library->entriesByPath(missing);
+            const QHash<Library::CueKey, QueueEntry> byPath = library->entriesByPath(missing);
             for (qsizetype i = 0; i < n; ++i) {
                 if (found.at(i))
                     continue;
-                const auto it = byPath.constFind(paths.at(i));
+                const auto it = byPath.constFind({paths.at(i), cues.value(i)});
                 if (it == byPath.constEnd())
                     continue;
                 entries[i] = *it;
@@ -502,18 +506,22 @@ bool State::restoreQueue(const QJsonObject &state, bool hasState)
     }
     const QJsonArray pathValues = queue.value(QStringLiteral("paths")).toArray();
     const QJsonArray idValues = queue.value(QStringLiteral("ids")).toArray();
+    const QJsonArray cueValues = queue.value(QStringLiteral("cues")).toArray();
     QStringList paths;
     QList<qint64> ids;
+    QList<int> cues;
     paths.reserve(pathValues.size());
     ids.reserve(pathValues.size());
+    cues.reserve(pathValues.size());
     for (qsizetype i = 0; i < pathValues.size(); ++i) {
         paths.append(pathValues.at(i).toString());
         ids.append(idValues.at(i).toInteger(0));
+        cues.append(cueValues.at(i).toInt(0));
     }
     if (paths.isEmpty())
         return false;
     const QList<int> order = parseOrder(queue.value(QStringLiteral("order")).toArray());
-    const QList<QueueEntry> entries = resolveEntries(ids, paths);
+    const QList<QueueEntry> entries = resolveEntries(ids, paths, cues);
     if (hasState) {
         applyModes(state);
     } else {

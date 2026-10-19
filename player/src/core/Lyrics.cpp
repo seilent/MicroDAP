@@ -354,6 +354,36 @@ LyricsText Lyrics::load(const QString &audio, const QString &storeFile)
     return pick(found);
 }
 
+QString LyricsTrack::key() const
+{
+    return cue ? path + QStringLiteral("\n%1\n%2").arg(beginMs).arg(endMs) : path;
+}
+
+LyricsText Lyrics::load(const LyricsTrack &track, const QString &storeFile)
+{
+    if (!track.cue)
+        return load(track.path, storeFile);
+    return span(readBeside(track.path), track.beginMs, track.endMs);
+}
+
+LyricsText Lyrics::span(const LyricsText &text, qint64 beginMs, qint64 endMs)
+{
+    if (!text.timed())
+        return text;
+    LyricsText out;
+    out.source = text.source;
+    for (const LyricLine &line : text.lines) {
+        if (line.ms >= beginMs && (endMs <= 0 || line.ms < endMs))
+            out.lines.append({line.ms - beginMs, line.text});
+    }
+    const int carry = lineAt(text.lines, beginMs);
+    if (carry >= 0 && text.lines.at(carry).ms < beginMs && (out.lines.isEmpty() || out.lines.constFirst().ms > 0))
+        out.lines.prepend({0, text.lines.at(carry).text});
+    if (out.lines.isEmpty())
+        out.source = LyricsText::None;
+    return out;
+}
+
 int Lyrics::lineAt(const QList<LyricLine> &lines, qint64 ms)
 {
     const auto it = std::upper_bound(lines.cbegin(), lines.cend(), ms,
@@ -392,11 +422,18 @@ int Lyrics::lineAt(qint64 ms) const
 
 void Lyrics::setTracks(const QString &current, const QString &next)
 {
-    const bool moved = current != m_current;
-    m_current = current;
-    m_next = next;
+    setTracks(LyricsTrack{current}, LyricsTrack{next});
+}
+
+void Lyrics::setTracks(const LyricsTrack &current, const LyricsTrack &next)
+{
+    const bool moved = current.key() != m_current;
+    m_current = current.key();
+    m_next = next.key();
+    m_currentTrack = current;
+    m_nextTrack = next;
     for (auto it = m_cache.begin(); it != m_cache.end();) {
-        if (it.key() == current || it.key() == next)
+        if (it.key() == m_current || it.key() == m_next)
             ++it;
         else
             it = m_cache.erase(it);
@@ -411,8 +448,8 @@ void Lyrics::refresh()
 {
     m_cache.clear();
     m_pending.clear();
-    request(m_current);
-    request(m_next);
+    request(m_currentTrack);
+    request(m_nextTrack);
 }
 
 void Lyrics::waitForDone()
@@ -420,14 +457,15 @@ void Lyrics::waitForDone()
     m_pool.waitForDone();
 }
 
-void Lyrics::request(const QString &path)
+void Lyrics::request(const LyricsTrack &track)
 {
-    if (path.isEmpty() || m_cache.contains(path) || m_pending.contains(path))
+    const QString path = track.key();
+    if (track.path.isEmpty() || m_cache.contains(path) || m_pending.contains(path))
         return;
     const int generation = ++m_generation;
     m_pending.insert(path, generation);
-    m_pool.start([this, path, generation] {
-        const LyricsText text = load(path);
+    m_pool.start([this, track, path, generation] {
+        const LyricsText text = load(track);
         QMetaObject::invokeMethod(
             this, [this, path, generation, text] { loaded(path, generation, text); }, Qt::QueuedConnection);
     });

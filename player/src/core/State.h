@@ -79,7 +79,7 @@ private:
     void applyModes(const QJsonObject &state);
     void restorePlayer(const QList<QueueEntry> &entries, int index, qint64 positionMs, bool playing,
                        const QList<int> &order);
-    QList<QueueEntry> resolveEntries(const QList<qint64> &ids, const QStringList &paths) const;
+    QList<QueueEntry> resolveEntries(const QList<qint64> &ids, const QStringList &paths, const QList<int> &cues) const;
 
     Player *m_player;
     RestorePort *m_restore = nullptr;
