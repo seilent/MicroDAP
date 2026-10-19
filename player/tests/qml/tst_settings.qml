@@ -1894,6 +1894,15 @@ TestCase {
         compare(fakeSettings.saverSeconds, 60)
     }
 
+    function test_scale_steps_from_the_table() {
+        const page = open()
+        const r = page.tableRow("scale")
+        fuzzyCompare(r.min, Ui.sMin, 1e-9)
+        fuzzyCompare(r.step, Ui.sStep, 1e-9)
+        compare(page.scaleSteps[0], Math.round(r.min * 10) / 10)
+        compare(page.scaleSteps[page.scaleSteps.length - 1], Math.round(Math.min(r.max, Ui.sMax) * 10) / 10)
+    }
+
     function test_scale_kept_in_landscape() {
         fakeSettings.scale = 1.1
         const m = tc.openInMain()

@@ -40,27 +40,21 @@ Page {
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property bool usbPresent: page.outputControl !== null && page.outputControl.usbPresent === true
     readonly property bool usbActive: page.outputControl !== null && page.outputControl.activeOutput === "usb"
-    readonly property var outputs: page.usbPresent ? ["auto", "speaker", "headphones", "usb"] : ["auto", "speaker", "headphones"]
-    readonly property var codecs: ["auto", "aptx", "aac", "ldac", "sbc"]
-    readonly property var hpGains: ["low", "normal", "high"]
-    readonly property var hpAmps: ["lohifi", "ulp", "hifi"]
-    readonly property var spkGainSteps: [84, 90, 96, 99, 102, 105, 108]
-    readonly property var volumeSteps: [2, 5, 10]
-    readonly property var rgbModes: ["accent", "off", "system"]
-    readonly property var saverSteps: [10, 15, 30, 60, 120, 300]
-    readonly property var screenOffSteps: [0, 60, 120, 300, 600, 1800]
-    readonly property var suspendSteps: [0, 5, 10, 30, 60]
+    readonly property var table: Env.settingsRows
+    readonly property var outputs: page.usbPresent ? page.valuesOf("output") : page.valuesOf("output").filter((v) => v !== "usb")
+    readonly property var codecs: page.valuesOf("codec")
+    readonly property var hpGains: page.valuesOf("hpGain")
+    readonly property var hpAmps: page.valuesOf("hpAmp")
+    readonly property var spkGainSteps: page.valuesOf("spkGain")
+    readonly property var volumeSteps: page.valuesOf("volumeStep")
+    readonly property var rgbModes: page.valuesOf("rgb")
+    readonly property var saverSteps: page.valuesOf("saver")
+    readonly property var screenOffSteps: page.valuesOf("screenOff")
+    readonly property var suspendSteps: page.valuesOf("suspend")
     readonly property var scaleSteps: page.buildScaleSteps()
-    readonly property var orientations: ["portrait", "portrait-flipped", "landscape", "landscape-flipped"]
-    readonly property var levels: ["off", "bitperfect", "exclusive"]
-    readonly property var builtInRates: [44100, 48000, 88200, 96000, 176400, 192000]
-    readonly property var editKeys: ({
-        output: "output", hpGain: "hpGain", hpAmp: "hpAmp", spkGain: "spkGain", volumeStep: "volumeStep",
-        codec: "btCodec", level: "outputLevel", rate: "sampleRate", accent: "accentHue", accentArt: "accentFromArt",
-        scale: "scale", saver: "saverSeconds", rgb: "rgb", toasts: "overlayToasts", screenOff: "screenOffSeconds",
-        suspend: "suspendMinutes", wifi: "wifiOffScreenOff", orientation: "orientation", autoRotate: "autoRotate", touch: "touch",
-        boot: "bootSession"
-    })
+    readonly property var orientations: page.valuesOf("orientation")
+    readonly property var levels: page.valuesOf("level")
+    readonly property var builtInRates: page.valuesOf("rate").slice(1).map((r) => Number(r))
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
     readonly property string codec: page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto"
@@ -180,8 +174,9 @@ Page {
     }
 
     function buildScaleSteps(): var {
+        const r = page.tableRow("scale")
         const out = []
-        for (let s = Ui.sMin; s <= Ui.sMax + 1e-6; s += Ui.sStep)
+        for (let s = r.min; s <= Math.min(r.max, Ui.sMax) + 1e-6; s += r.step)
             out.push(Math.round(s * 10) / 10)
         return out
     }
@@ -256,12 +251,123 @@ Page {
         return page.rateChoices.indexOf(rate) >= 0 ? rate : rate + " (not supported)"
     }
 
+    function tableRow(key: string): var {
+        for (const r of page.table) {
+            if (r.key === key)
+                return r
+        }
+        return null
+    }
+
+    function valuesOf(key: string): var {
+        const r = page.tableRow(key)
+        return r === null ? [] : r.values
+    }
+
     function label(title: string): var {
         return { kind: "label", key: "label-" + title, title: title, value: "", readOnly: true }
     }
 
-    function row(key: string, title: string, value: string, readOnly: bool): var {
-        return { kind: "row", key: key, title: title, value: value, readOnly: readOnly }
+    function ruleOn(rule: string): bool {
+        switch (rule) {
+        case "always":
+            return true
+        case "usbActive":
+            return page.usbActive
+        case "overlay":
+            return page.overlay
+        case "rate":
+            return page.rateReadOnly
+        case "orientation":
+            return !Ui.orientationActive || page.autoFollowing
+        case "sensor":
+            return !page.sensorSupported
+        case "rgb":
+            return !page.rgbSupported
+        case "boot":
+            return page.bootReadOnly
+        default:
+            return false
+        }
+    }
+
+    function shownOn(rule: string): bool {
+        switch (rule) {
+        case "dap":
+            return !page.overlay
+        case "overlay":
+            return page.overlay
+        case "boot":
+            return page.hasBoot
+        default:
+            return true
+        }
+    }
+
+    function valueOf(key: string): string {
+        switch (key) {
+        case "output":
+            return page.outputValue
+        case "hpGain":
+            return page.hpGainValue
+        case "hpAmp":
+            return page.hpAmpValue
+        case "spkGain":
+            return page.spkGainText(page.spkGain)
+        case "volumeStep":
+            return page.volumeStep + "%"
+        case "codec":
+            return page.codec
+        case "level":
+            return page.levelValue
+        case "rate":
+            return page.rateValue
+        case "replaygain":
+            return "off"
+        case "eq":
+            return page.eqValue
+        case "pair":
+            return page.overlay ? "pair in dap mode" : ""
+        case "folders":
+            return page.roots.length + " on"
+        case "rescan":
+            return page.rescanValue
+        case "accentArt":
+            return page.accentFromArt ? "on" : "off"
+        case "orientation":
+            return page.orientationValue
+        case "autoRotate":
+            return page.autoRotateValue
+        case "touch":
+            return page.touchValue
+        case "scale":
+            return Ui.userScale.toFixed(1)
+        case "saver":
+            return page.minutes(page.saverSeconds)
+        case "rgb":
+            return page.rgbValue
+        case "toasts":
+            return page.overlayToasts ? "on" : "off"
+        case "screenOff":
+            return page.offOr(Math.round(page.screenOffSeconds / 60), "min")
+        case "suspend":
+            return page.offOr(page.suspendMinutes, "min")
+        case "wifi":
+            return page.wifiOffScreenOff ? "off" : "keep"
+        case "boot":
+            return page.bootValue
+        case "about":
+            return page.version
+        default:
+            return ""
+        }
+    }
+
+    function row(spec: var): var {
+        return {
+            kind: "row", key: spec.key, title: spec.title, value: page.valueOf(spec.key),
+            readOnly: spec.kind === "action" || page.ruleOn(spec.readOnly), spec: spec
+        }
     }
 
     function info(key: string, title: string, value: string): var {
@@ -270,58 +376,30 @@ Page {
 
     function buildRows(): var {
         const out = []
-        out.push(page.label("output"))
-        out.push(page.row("output", "output", page.outputValue, false))
-        out.push(page.row("hpGain", "headphone gain", page.hpGainValue, page.usbActive))
-        out.push(page.row("hpAmp", "headphone amp", page.hpAmpValue, page.usbActive))
-        out.push(page.row("spkGain", "speaker digital gain", page.spkGainText(page.spkGain), false))
-        out.push(page.row("volumeStep", "volume step", page.volumeStep + "%", false))
-        out.push(page.row("codec", "bluetooth codec", page.codec, false))
-        out.push(page.row("level", "bit perfect", page.levelValue, page.overlay))
-        out.push(page.row("rate", "sample rate", page.rateValue, page.rateReadOnly))
-        out.push(page.row("replaygain", "replaygain", "off", true))
-        out.push(page.row("eq", "eq", page.eqValue, true))
-        out.push(page.row("pair", "pair a phone", page.overlay ? "pair in dap mode" : "", true))
-        out.push(page.label("library"))
-        out.push(page.row("folders", "library folders", page.roots.length + " on", true))
-        if (page.foldersOpen) {
-            for (const f of page.folders)
-                out.push({ kind: "sub", key: "root:" + f, title: f, value: page.roots.indexOf(f) >= 0 ? "on" : "off", readOnly: true, path: f })
-        }
-        out.push(page.row("rescan", "rescan library", page.rescanValue, true))
-        out.push(page.label("display"))
-        out.push(page.row("accent", "accent", "", false))
-        out.push(page.row("accentArt", "accent from art", page.accentFromArt ? "on" : "off", false))
-        if (!page.overlay)
-            out.push(page.row("orientation", "orientation", page.orientationValue, !Ui.orientationActive || page.autoFollowing))
-        if (!page.overlay)
-            out.push(page.row("autoRotate", "auto rotate", page.autoRotateValue, !page.sensorSupported))
-        if (!page.overlay)
-            out.push(page.row("touch", "touch", page.touchValue, false))
-        out.push(page.row("scale", "scale", Ui.userScale.toFixed(1), false))
-        out.push(page.row("saver", "saver", page.minutes(page.saverSeconds), false))
-        if (!page.overlay)
-            out.push(page.row("rgb", "rgb", page.rgbValue, !page.rgbSupported))
-        out.push(page.row("toasts", "toasts in game", page.overlayToasts ? "on" : "off", false))
-        out.push(page.label("power"))
-        out.push(page.row("screenOff", "screen off after", page.offOr(Math.round(page.screenOffSeconds / 60), "min"), false))
-        out.push(page.row("suspend", "suspend after", page.offOr(page.suspendMinutes, "min"), false))
-        out.push(page.row("wifi", "wi-fi when off", page.wifiOffScreenOff ? "off" : "keep", false))
-        if (page.hasBoot)
-            out.push(page.row("boot", "boot into", page.bootValue, page.bootReadOnly))
-        if (page.overlay)
-            out.push(page.row("closePlayer", "close player", "", true))
-        out.push(page.row("about", "about", page.version, true))
-        if (page.aboutOpen) {
-            if (page.imageVersion !== "")
-                out.push(page.info("image", "image", page.imageVersion))
-            if (page.hasUpdate)
-                out.push(page.info("update", "system update", page.updateValue))
-            const track = page.trackLine()
-            if (track !== "")
-                out.push(page.info("track", "track", track))
-            if (page.pcmFormat !== "")
-                out.push(page.info("pcm", "output", page.pcmFormat))
+        let pivot = ""
+        for (const spec of page.table) {
+            if (!page.shownOn(spec.shown))
+                continue
+            if (spec.pivot !== pivot) {
+                pivot = spec.pivot
+                out.push(page.label(pivot))
+            }
+            out.push(page.row(spec))
+            if (spec.key === "folders" && page.foldersOpen) {
+                for (const f of page.folders)
+                    out.push({ kind: "sub", key: "root:" + f, title: f, value: page.roots.indexOf(f) >= 0 ? "on" : "off", readOnly: true, path: f })
+            }
+            if (spec.key === "about" && page.aboutOpen) {
+                if (page.imageVersion !== "")
+                    out.push(page.info("image", "image", page.imageVersion))
+                if (page.hasUpdate)
+                    out.push(page.info("update", "system update", page.updateValue))
+                const track = page.trackLine()
+                if (track !== "")
+                    out.push(page.info("track", "track", track))
+                if (page.pcmFormat !== "")
+                    out.push(page.info("pcm", "output", page.pcmFormat))
+            }
         }
         return out
     }
@@ -558,8 +636,8 @@ Page {
     }
 
     function settingOf(key: string): string {
-        const s = page.editKeys[key]
-        return s === undefined ? "" : s
+        const r = page.tableRow(key)
+        return r === null ? "" : r.setting
     }
 
     function currentOf(key: string): var {

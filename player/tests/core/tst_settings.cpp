@@ -2,12 +2,14 @@
 #include "FakeService.h"
 #include "Rotation.h"
 #include "Settings.h"
+#include "SettingsRows.h"
 
 #include <microset/client.h>
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -67,6 +69,7 @@ private slots:
     void bootSessions();
     void eqKeysThroughDaemon();
     void rotationSubscribe();
+    void rowTable();
 
 private:
     QString ini(const QString &text);
@@ -565,6 +568,76 @@ void SettingsTest::rotationSubscribe()
     Rotation none(nullptr);
     none.setWanted(true);
     QCOMPARE(none.turn(), -1);
+}
+
+void SettingsTest::rowTable()
+{
+    const auto strings = [](const QVariantList &values) {
+        QStringList out;
+        for (const QVariant &v : values)
+            out.push_back(v.toString());
+        return out;
+    };
+    const auto ints = [](const QVariantList &values) {
+        QList<int> out;
+        for (const QVariant &v : values)
+            out.push_back(v.toInt());
+        return out;
+    };
+    QSet<QString> keys;
+    for (const SettingsRows::Row &row : SettingsRows::all()) {
+        QVERIFY2(!keys.contains(row.key), qPrintable(row.key));
+        keys.insert(row.key);
+        QVERIFY2(SettingsRows::pivots().contains(row.pivot), qPrintable(row.key));
+        QVERIFY2(SettingsRows::types().contains(row.type), qPrintable(row.key));
+        QVERIFY2(SettingsRows::kinds().contains(row.kind), qPrintable(row.key));
+        QVERIFY2(!row.title.isEmpty(), qPrintable(row.key));
+        QVERIFY2(!row.draft || !row.reason.isEmpty(), qPrintable(row.key));
+        if (row.type == QLatin1StringView("choice") || row.type == QLatin1StringView("steps")
+            || row.type == QLatin1StringView("range") || row.type == QLatin1StringView("toggle")) {
+            const QByteArray name = row.setting.toLatin1();
+            QVERIFY2(!name.isEmpty() && (Settings::staticMetaObject.indexOfProperty(name.constData()) >= 0
+                                         || EqControl::staticMetaObject.indexOfProperty(name.constData()) >= 0),
+                     qPrintable(row.key));
+        }
+        if (row.type == QLatin1StringView("toggle"))
+            QCOMPARE(row.kind, QStringLiteral("flip"));
+        if (row.kind == QLatin1StringView("action")) {
+            QCOMPARE(row.type, QStringLiteral("action"));
+            QVERIFY2(!row.action.isEmpty(), qPrintable(row.key));
+            QVERIFY2(row.setting.isEmpty(), qPrintable(row.key));
+        }
+    }
+    for (const char *key : {"rescan", "pair", "about", "closePlayer", "folders", "eq"}) {
+        const SettingsRows::Row *row = SettingsRows::find(QString::fromLatin1(key));
+        QVERIFY2(row, key);
+        QCOMPARE(row->kind, QStringLiteral("action"));
+        QVERIFY(!row->action.isEmpty());
+        QVERIFY(row->setting.isEmpty());
+    }
+    for (const char *key : {"hpGain", "hpAmp", "spkGain"}) {
+        const SettingsRows::Row *row = SettingsRows::find(QString::fromLatin1(key));
+        QVERIFY2(row && row->bounded && row->draft, key);
+    }
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("hpGain"))->values), Settings::hpGains());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("hpAmp"))->values), Settings::hpAmps());
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("spkGain"))->values), Settings::spkGains());
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("volumeStep"))->values), Settings::volumeSteps());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("codec"))->values), Settings::codecs());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("level"))->values), Settings::outputLevels());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("orientation"))->values), Settings::orientations());
+    QCOMPARE(strings(SettingsRows::find(QStringLiteral("rgb"))->values), Settings::rgbModes());
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("saver"))->values), Settings::saverSteps());
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("screenOff"))->values), Settings::screenOffSteps());
+    QCOMPARE(ints(SettingsRows::find(QStringLiteral("suspend"))->values), Settings::suspendSteps());
+    for (const QString &v : strings(SettingsRows::find(QStringLiteral("output"))->values))
+        QVERIFY2(Settings::outputs().contains(v), qPrintable(v));
+    for (const QString &v : strings(SettingsRows::find(QStringLiteral("rate"))->values))
+        QVERIFY2(Settings::sampleRates().contains(v), qPrintable(v));
+    const SettingsRows::Row *scale = SettingsRows::find(QStringLiteral("scale"));
+    QVERIFY(near(scale->min, Settings::minScale));
+    QVERIFY(near(scale->max, Settings::maxScale));
+    QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
 }
 
 QTEST_GUILESS_MAIN(SettingsTest)

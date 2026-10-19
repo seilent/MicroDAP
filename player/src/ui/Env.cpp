@@ -1,5 +1,7 @@
 #include "Env.h"
 
+#include "SettingsRows.h"
+
 #include <QCoreApplication>
 
 namespace microdap {
@@ -33,6 +35,11 @@ int Env::landscapeTurn() const
 bool Env::rotateMotion() const
 {
     return qEnvironmentVariable("MICRODAP_ROTATE_MOTION") != QLatin1StringView("0");
+}
+
+QVariantList Env::settingsRows() const
+{
+    return SettingsRows::maps();
 }
 
 }

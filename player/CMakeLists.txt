@@ -30,6 +30,14 @@ set_target_properties(microdap-fiio PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC O
 target_link_libraries(microdap-fiio PRIVATE microdapfiio)
 install(TARGETS microdap-fiio RUNTIME DESTINATION libexec/microdap)
 
+add_library(microdaprows STATIC
+    src/core/SettingsRows.cpp
+    src/core/SettingsRows.h
+)
+set_target_properties(microdaprows PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(microdaprows PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+target_link_libraries(microdaprows PUBLIC Qt6::Core)
+
 add_library(microdapcore STATIC
     src/core/AccentControl.cpp
     src/core/AccentControl.h
@@ -124,6 +132,7 @@ target_include_directories(microdapcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/c
 target_compile_definitions(microdapcore PRIVATE MICRODAP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(microdapcore PUBLIC
     microdapfiio
+    microdaprows
     Qt6::Core
     Qt6::Gui
     Qt6::DBus
@@ -225,7 +234,7 @@ qt_add_qml_module(microdapui
         src/ui/Env.h
 )
 target_include_directories(microdapui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/ui)
-target_link_libraries(microdapui PUBLIC Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
+target_link_libraries(microdapui PUBLIC microdaprows Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)
 
 qt_add_executable(microdap-player
     src/app/main.cpp

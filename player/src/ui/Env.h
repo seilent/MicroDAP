@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QQmlEngine>
 #include <QString>
+#include <QVariantList>
 
 namespace microdap {
 
@@ -15,6 +16,7 @@ class Env : public QObject
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(int landscapeTurn READ landscapeTurn CONSTANT)
     Q_PROPERTY(bool rotateMotion READ rotateMotion CONSTANT)
+    Q_PROPERTY(QVariantList settingsRows READ settingsRows CONSTANT)
 
 public:
     explicit Env(QObject *parent = nullptr);
@@ -24,6 +26,7 @@ public:
     QString version() const;
     int landscapeTurn() const;
     bool rotateMotion() const;
+    QVariantList settingsRows() const;
 };
 
 }
