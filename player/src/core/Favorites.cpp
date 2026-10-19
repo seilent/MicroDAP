@@ -281,9 +281,9 @@ QList<qint64> Favorites::resolve(const Medium &medium, const M3u &doc) const
     return ids;
 }
 
-void Favorites::rebuild()
+QList<Favorites::Slot> Favorites::ordered() const
 {
-    QList<qint64> ids;
+    QList<Slot> all;
     QList<qint64> seqs;
     for (const Medium &medium : std::as_const(m_media)) {
         if (medium.failed)
@@ -294,23 +294,118 @@ void Favorites::rebuild()
             if (resolved.at(i) < 0)
                 continue;
             const M3uItem &item = medium.doc.items.at(i);
-            ids.append(resolved.at(i));
-            seqs.append(stamps.value(Library::favoriteKey(key(medium, item.path), item.cue), -1));
+            const QString k = key(medium, item.path);
+            all.append({resolved.at(i), medium.id, k, item.path, item.cue, i});
+            seqs.append(stamps.value(Library::favoriteKey(k, item.cue), -1));
         }
     }
-    QList<qint64> ordered;
-    QSet<qint64> set;
+    QList<Slot> out;
+    QSet<qint64> seen;
     for (qsizetype i : order(seqs)) {
-        if (!set.contains(ids.at(i))) {
-            set.insert(ids.at(i));
-            ordered.append(ids.at(i));
+        if (!seen.contains(all.at(i).id)) {
+            seen.insert(all.at(i).id);
+            out.append(all.at(i));
         }
     }
-    if (ordered == m_ids)
+    return out;
+}
+
+Favorites::Medium *Favorites::find(const QString &id)
+{
+    for (Medium &medium : m_media) {
+        if (medium.id == id)
+            return &medium;
+    }
+    return nullptr;
+}
+
+void Favorites::rebuild()
+{
+    QList<qint64> ids;
+    QSet<qint64> set;
+    for (const Slot &slot : ordered()) {
+        ids.append(slot.id);
+        set.insert(slot.id);
+    }
+    if (ids == m_ids)
         return;
-    m_ids = std::move(ordered);
+    m_ids = std::move(ids);
     m_set = std::move(set);
     emit changed();
+}
+
+QVariantList Favorites::trackIds() const
+{
+    QVariantList out;
+    out.reserve(m_ids.size());
+    for (qint64 id : m_ids)
+        out.append(id);
+    return out;
+}
+
+QString Favorites::move(int row, int delta)
+{
+    QList<Slot> list = ordered();
+    const int to = row + delta;
+    if (row < 0 || row >= list.size() || to < 0 || to >= list.size() || delta == 0)
+        return {};
+    for (const int at : {row, to}) {
+        Medium *medium = find(list.at(at).medium);
+        if (!medium)
+            return QStringLiteral("card not available");
+        const QString refused = ready(*medium);
+        if (!refused.isEmpty())
+            return refused;
+    }
+    const Slot a = list.at(row);
+    const Slot b = list.at(to);
+    if (a.medium == b.medium) {
+        Medium *medium = find(a.medium);
+        bool stale = false;
+        const PlaylistStore::Edit result = m_library->playlistStore().edit(medium->file, [&](M3u &doc) {
+            const auto same = [&](const Slot &slot) {
+                if (slot.index < 0 || slot.index >= doc.items.size())
+                    return false;
+                const M3uItem &item = doc.items.at(slot.index);
+                return item.entry && item.cue == slot.cue && key(*medium, item.path) == slot.key;
+            };
+            if (!same(a) || !same(b)) {
+                stale = true;
+                return false;
+            }
+            PlaylistStore::swap(doc, a.index, b.index);
+            return true;
+        });
+        if (result == PlaylistStore::Edit::Unreadable) {
+            medium->failed = true;
+            rebuild();
+            return QStringLiteral("favorites not readable");
+        }
+        if (result == PlaylistStore::Edit::Unwritten)
+            return QStringLiteral("card not available");
+        readMedium(*medium);
+        if (stale) {
+            rebuild();
+            return QStringLiteral("favorites not readable");
+        }
+    }
+    list.swapItemsAt(row, to);
+    bool stamped = true;
+    for (qsizetype end = list.size(); end > 0;) {
+        const QString medium = list.at(end - 1).medium;
+        QList<std::pair<QString, int>> run;
+        while (end > 0 && list.at(end - 1).medium == medium) {
+            run.append({list.at(end - 1).key, list.at(end - 1).cue});
+            --end;
+        }
+        stamped = m_library->stampFavorites(medium, run) && stamped;
+    }
+    rebuild();
+    if (!stamped) {
+        qWarning() << "microdap favorites: move order not stored";
+        return QStringLiteral("favorites not readable");
+    }
+    return {};
 }
 
 QString Favorites::ready(Medium &medium)

@@ -202,6 +202,7 @@ set(microdap_qml
     qml/MicroDap/screens/SettingsScreen.qml
     qml/MicroDap/screens/JumpGrid.qml
     qml/MicroDap/screens/PlaylistsScreen.qml
+    qml/MicroDap/screens/PlaylistView.qml
     qml/MicroDap/screens/HistoryScreen.qml
     qml/MicroDap/screens/EqScreen.qml
     qml/MicroDap/screens/Saver.qml

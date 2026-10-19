@@ -90,10 +90,13 @@ int PlaylistStore::cueOf(const QByteArray &line)
 
 QString PlaylistStore::entryPath(QByteArray line, const QString &dir)
 {
-    if (line.size() > 7 && fold(line.left(7)) == "file://") {
-        line = line.mid(7);
-        if (line.startsWith("localhost"))
-            line = line.mid(9);
+    if (line.size() > 5 && fold(line.left(5)) == "file:") {
+        line = line.mid(5);
+        if (line.startsWith("//")) {
+            line = line.mid(2);
+            if (fold(line.left(9)) == "localhost")
+                line = line.mid(9);
+        }
         line = QByteArray::fromPercentEncoding(line);
     }
     line.replace('\\', '/');

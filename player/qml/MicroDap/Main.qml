@@ -476,6 +476,10 @@ Window {
         pages.push(albumComponent, { albumId: id })
     }
 
+    function openPlaylistView(kind: string, id: int): void {
+        pages.push(playlistViewComponent, { kind: kind === "favorites" ? "favorites" : "playlist", playlistId: kind === "favorites" ? 0 : id })
+    }
+
     function openEntry(kind: string, id: int): void {
         if (kind === "album")
             root.openAlbum(id)
@@ -511,6 +515,16 @@ Window {
             if (!root.hasInfo("albumInfo", id, "title"))
                 return false
             root.openAlbum(id)
+            return true
+        case "playlistview":
+            if (!root.hasInfo("playlistInfo", id, "name"))
+                return false
+            root.openPlaylistView("playlist", id)
+            return true
+        case "favoritesview":
+            if (root.favorites === null)
+                return false
+            root.openPlaylistView("favorites", 0)
             return true
         case "nowplaying":
             if (!root.hasTrack && !root.phoneActive)
@@ -585,6 +599,9 @@ Window {
             return
         case "delete playlist":
             root.deletePlaylist(id)
+            return
+        case "open playlist":
+            root.openPlaylistView(kind, id)
             return
         default:
             console.info("microdap: " + action + " " + kind + " " + id)
@@ -1375,6 +1392,26 @@ Window {
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
             onPlaylistPicked: (index) => root.pickPlaylist(index)
             onListPlayed: (count) => root.listPlayed(count)
+        }
+    }
+
+    Component {
+        id: playlistViewComponent
+
+        PlaylistView {
+            animated: !root.hidden
+            screenOff: root.off
+            library: root.library
+            favorites: root.favorites
+            player: root.player
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onListPlayed: (count) => root.listPlayed(count)
+            onRefused: (text, name) => {
+                if (text === "playlist not readable")
+                    overlays.toast.show(text, name)
+                else
+                    overlays.toast.show("", text)
+            }
         }
     }
 

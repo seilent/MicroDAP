@@ -128,8 +128,8 @@ Page {
             return false
         page.sheetRow = r
         sheet.title = r.title
-        sheet.items = r.kind === "favorites" ? ["play", "play next", "add to queue", "shuffle"]
-            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id)].concat(page.playlistVerbs(r.id))
+        sheet.items = r.kind === "favorites" ? ["play", "play next", "add to queue", "shuffle", "open playlist"]
+            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id), "open playlist"].concat(page.playlistVerbs(r.id))
         sheet.open()
         return true
     }

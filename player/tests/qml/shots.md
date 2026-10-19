@@ -98,6 +98,7 @@
 | home | `quickplay-off` | `--size 640x960` and `960x640` | no Quickplay panel, play ring kept | pending |
 | hub | `playlist-pick` | `--pivot albums` and `--pivot songs`, `--size 640x960` and `960x640` | second sheet titled with the target: NEW PLAYLIST, FAVORITES, the playlists | 2026-10-20 |
 | playlists | `playlist-sheet`, `playlist-delete` | `--size 640x960` and `960x640` | DELETE PLAYLIST last on a `.m3u8` row; T13 `delete playlist?` with KEEP PLAYLIST focused, the page bar faded | 2026-10-20 |
+| playlists | `view`, `view-sheet`, `view-long`, `view-empty` | `--size 640x960` and `960x640` | playlist view: name header, `N SONGS` at the queue count slot, numbered rows, playing row in the accent; REMOVE, MOVE UP, MOVE DOWN; a long name cropped; no rows | 2026-10-20 |
 | settings | `max-volume`, `max-volume-sheet`, `power-on-sheet` | `--size 640x960` and `960x640` | MAX VOLUME 70 after VOLUME STEP; sheet 100 to 50, 70 marked; POWER ON VOLUME 100 to 10 then LAST, 40 marked | 2026-10-20 |
 | settings | `balance`, `balance-edit` | `--size 640x960` and `960x640` | BALANCE L 3.5 DB after VOLUME STEP; edit mode L 4 DB in the accent | 2026-10-20 |
 | settings | `crossfeed-sheet` | `--size 640x960` and `960x640` | CROSSFEED sheet OFF, DEFAULT, CHU MOY, JAN MEIER marked in the accent | 2026-10-20 |

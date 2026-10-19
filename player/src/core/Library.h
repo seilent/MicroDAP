@@ -95,6 +95,8 @@ public:
     Q_INVOKABLE QString addToPlaylist(qint64 playlistId, const QVariantList &trackIds);
     Q_INVOKABLE QVariantMap createPlaylist(const QVariantList &trackIds);
     Q_INVOKABLE QString deletePlaylist(qint64 playlistId);
+    Q_INVOKABLE QString editPlaylistRow(qint64 playlistId, int row, qint64 trackId, const QString &verb);
+    QList<qint64> resolveDoc(const M3u &doc, const QString &dir) const;
     QString newPlaylistPath() const;
     static bool onAbsentCard(const QString &path);
 

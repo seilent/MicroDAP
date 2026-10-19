@@ -524,11 +524,11 @@ Page {
         if (kind === "folder")
             return ["play", "play next", "add to queue", "shuffle", "add to playlist"]
         if (kind === "favorites")
-            return ["play", "play next", "add to queue", "shuffle"]
+            return ["play", "play next", "add to queue", "shuffle", "open playlist"]
         if (kind === "song")
             return ["play", "play next", "add to queue", "add to playlist", hub.pinLabel(kind, id)]
         if (kind === "playlist")
-            return ["play", "play next", "add to queue", "shuffle", hub.pinLabel(kind, id)].concat(hub.playlistVerbs(id))
+            return ["play", "play next", "add to queue", "shuffle", hub.pinLabel(kind, id), "open playlist"].concat(hub.playlistVerbs(id))
         return ["play", "play next", "add to queue", "shuffle", "add to playlist", hub.pinLabel(kind, id)]
     }
 

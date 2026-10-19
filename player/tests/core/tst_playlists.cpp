@@ -150,6 +150,9 @@ private slots:
     void playlistCreate();
     void playlistAppendDelete();
     void playlistCardAbsent();
+    void playlistRowEdits();
+    void playlistFileUrlEdits();
+    void favoritesMove();
 };
 
 namespace {
@@ -261,6 +264,8 @@ void PlaylistsTest::roundTrip()
     QCOMPARE(PlaylistStore::relative(QStringLiteral("/r/ a.flac"), QStringLiteral("/r")), QStringLiteral("./ a.flac"));
     QCOMPARE(PlaylistStore::entryPath("file:///r/f%20g.flac", QStringLiteral("/x")), QStringLiteral("/r/f g.flac"));
     QCOMPARE(PlaylistStore::entryPath("file://localhost/r/h.flac", QStringLiteral("/x")), QStringLiteral("/r/h.flac"));
+    QCOMPARE(PlaylistStore::entryPath("file:/r/i%20j.flac", QStringLiteral("/x")), QStringLiteral("/r/i j.flac"));
+    QCOMPARE(PlaylistStore::entryPath("FILE:///r/k.flac", QStringLiteral("/x")), QStringLiteral("/r/k.flac"));
     QCOMPARE(PlaylistStore::entryPath("sub\\c.flac", QStringLiteral("/r")), QStringLiteral("/r/sub/c.flac"));
 
     const QByteArray crlf = "\xEF\xBB\xBF#EXTM3U\r\n#EXTINF:10,A\r\na.flac\r\n# c\r\n#EXTINF:20,B\r\nb.flac\r\n"
@@ -893,6 +898,100 @@ void PlaylistsTest::playlistCardAbsent()
     QCOMPARE(rig.library->addToPlaylist(id, {two}), QString());
     QCOMPARE(readBytes(file),
              QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n../Music/Album One/02 Two.flac\n"));
+}
+
+void PlaylistsTest::playlistRowEdits()
+{
+    Rig rig;
+    const QString file = rig.card + QStringLiteral("/Playlists/Edit.m3u8");
+    const QByteArray original = "#EXTM3U\n#EXTINF:1,One\n../Music/Album One/01 One.flac\n../Music/Gone/x.flac\n"
+                                "# note\n../Music/Album One/02 Two.flac\n../Music/Album One/03 Three.flac\n";
+    QVERIFY(writeBytes(file, original));
+    QVERIFY(rig.scan());
+    const qint64 id = scalar(rig.library->database(), QStringLiteral("SELECT id FROM playlists WHERE name = 'Edit'")).toLongLong();
+    QVERIFY(id > 0);
+    const qint64 one = rig.id(rig.cardTrack(0));
+    const qint64 two = rig.id(rig.cardTrack(1));
+    const qint64 three = rig.id(rig.cardTrack(2));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{one, two, three}));
+
+    QCOMPARE(rig.library->editPlaylistRow(id, 1, two, QStringLiteral("move up")), QString());
+    QCOMPARE(readBytes(file), QByteArray("#EXTM3U\n../Music/Album One/02 Two.flac\n../Music/Gone/x.flac\n# note\n"
+                                         "#EXTINF:1,One\n../Music/Album One/01 One.flac\n../Music/Album One/03 Three.flac\n"));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{two, one, three}));
+
+    QCOMPARE(rig.library->editPlaylistRow(id, 2, three, QStringLiteral("move down")), QString());
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{two, one, three}));
+
+    QCOMPARE(rig.library->editPlaylistRow(id, 1, one, QStringLiteral("remove")), QString());
+    QCOMPARE(readBytes(file), QByteArray("#EXTM3U\n../Music/Album One/02 Two.flac\n../Music/Gone/x.flac\n# note\n"
+                                         "../Music/Album One/03 Three.flac\n"));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{two, three}));
+
+    fakeMount.clear();
+    QCOMPARE(rig.library->editPlaylistRow(id, 0, two, QStringLiteral("remove")), QStringLiteral("card not available"));
+    fakeMount = rig.card;
+
+    const QByteArray outside = "#EXTM3U\n../Music/Album One/01 One.flac\n../Music/Album One/02 Two.flac\n"
+                               "../Music/Gone/x.flac\n# note\n../Music/Album One/03 Three.flac\n";
+    QVERIFY(writeBytes(file, outside));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{two, three}));
+    QCOMPARE(rig.library->editPlaylistRow(id, 0, two, QStringLiteral("remove")), QStringLiteral("playlist not readable"));
+    QCOMPARE(rig.library->editPlaylistRow(id, 1, three, QStringLiteral("move up")), QStringLiteral("playlist not readable"));
+    QCOMPARE(readBytes(file), outside);
+    QCOMPARE(rig.library->editPlaylistRow(id, 1, two, QStringLiteral("remove")), QString());
+    QCOMPARE(readBytes(file), QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n../Music/Gone/x.flac\n# note\n"
+                                         "../Music/Album One/03 Three.flac\n"));
+}
+
+void PlaylistsTest::playlistFileUrlEdits()
+{
+    Rig rig;
+    const QString file = rig.card + QStringLiteral("/Playlists/Urls.m3u8");
+    const QString one = rig.cardTrack(0);
+    const QByteArray original = "#EXTM3U\nfile:" + one.toUtf8() + "\n../Music/Album One/02 Two.flac\n"
+                                "../Music/Album One/03 Three.flac\n";
+    QVERIFY(writeBytes(file, original));
+    QVERIFY(rig.scan());
+    const qint64 id = scalar(rig.library->database(), QStringLiteral("SELECT id FROM playlists WHERE name = 'Urls'")).toLongLong();
+    QVERIFY(id > 0);
+    const qint64 a = rig.id(one);
+    const qint64 b = rig.id(rig.cardTrack(1));
+    const qint64 c = rig.id(rig.cardTrack(2));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{a, b, c}));
+    QCOMPARE(rig.library->editPlaylistRow(id, 2, c, QStringLiteral("move up")), QString());
+    QCOMPARE(readBytes(file), QByteArray("#EXTM3U\nfile:" + one.toUtf8() + "\n../Music/Album One/03 Three.flac\n"
+                                         "../Music/Album One/02 Two.flac\n"));
+    QCOMPARE(rig.library->editPlaylistRow(id, 2, b, QStringLiteral("remove")), QString());
+    QCOMPARE(readBytes(file), QByteArray("#EXTM3U\nfile:" + one.toUtf8() + "\n../Music/Album One/03 Three.flac\n"));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{a, c}));
+}
+
+void PlaylistsTest::favoritesMove()
+{
+    Rig rig;
+    QVERIFY(rig.scan());
+    Favorites favorites(rig.library.get());
+    const qint64 one = rig.id(rig.cardTrack(0));
+    const qint64 two = rig.id(rig.cardTrack(1));
+    const qint64 single = rig.id(rig.single());
+    QCOMPARE(favorites.add({one, two, single}), QString());
+    QCOMPARE(titles(favorites),
+             (QStringList{QStringLiteral("01 One.flac"), QStringLiteral("02 Two.flac"), QStringLiteral("01 Single.mp3")}));
+    QCOMPARE(favorites.move(0, 1), QString());
+    QCOMPARE(titles(favorites),
+             (QStringList{QStringLiteral("02 Two.flac"), QStringLiteral("01 One.flac"), QStringLiteral("01 Single.mp3")}));
+    QCOMPARE(readBytes(rig.cardFile()),
+             QByteArray("#EXTM3U\n../Music/Album One/02 Two.flac\n../Music/Album One/01 One.flac\n"));
+    QCOMPARE(favorites.move(2, -1), QString());
+    QCOMPARE(titles(favorites),
+             (QStringList{QStringLiteral("02 Two.flac"), QStringLiteral("01 Single.mp3"), QStringLiteral("01 One.flac")}));
+    QCOMPARE(readBytes(rig.cardFile()),
+             QByteArray("#EXTM3U\n../Music/Album One/02 Two.flac\n../Music/Album One/01 One.flac\n"));
+    Favorites again(rig.library.get());
+    QCOMPARE(titles(again), titles(favorites));
+    QCOMPARE(favorites.move(0, -1), QString());
+    QCOMPARE(favorites.trackIds(), (QVariantList{two, single, one}));
 }
 
 QTEST_GUILESS_MAIN(PlaylistsTest)

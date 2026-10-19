@@ -34,6 +34,8 @@ public:
     QString fileFor(const QString &medium) const;
     Q_INVOKABLE void toggle(qint64 trackId);
     Q_INVOKABLE QString add(const QVariantList &trackIds);
+    Q_INVOKABLE QVariantList trackIds() const;
+    Q_INVOKABLE QString move(int row, int delta);
 
 public slots:
     void reload();
@@ -43,6 +45,16 @@ signals:
     void notice(const QString &text);
 
 private:
+    struct Slot
+    {
+        qint64 id = -1;
+        QString medium;
+        QString key;
+        QString path;
+        int cue = 0;
+        qsizetype index = -1;
+    };
+
     struct Medium
     {
         QString id;
@@ -62,6 +74,8 @@ private:
     void migrate(Medium &medium);
     QList<qint64> resolve(const Medium &medium, const M3u &doc) const;
     void rebuild();
+    QList<Slot> ordered() const;
+    Medium *find(const QString &id);
 
     Library *m_library;
     QList<Medium> m_media;

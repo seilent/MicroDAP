@@ -635,7 +635,7 @@ TestCase {
         compare(fakePlayer.calls[0].kind, "playlist")
         compare(fakePlayer.calls[0].id, 5)
         verify(router.dispatch("x", false))
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay", "open playlist"]))
     }
 
     function test_grid_last_row_col_clamp() {

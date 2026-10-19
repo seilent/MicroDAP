@@ -74,6 +74,87 @@ TestCase {
         function editable(id) {
             return id === 1
         }
+
+        property var lists: ({ 1: [11, 12, 13], 2: [21] })
+        property var edits: []
+        property string refuse: ""
+
+        signal playlistsChanged()
+
+        function playlistInfo(id) {
+            return id === 1 ? { id: 1, name: "Morning", count: 3, source: "/m/Morning.m3u8" }
+                : id === 2 ? { id: 2, name: "Night Drive", count: 1, source: "/m/Night Drive.m3u" } : {}
+        }
+
+        function playlistTracks(id) {
+            return fakeLibrary.lists[id] === undefined ? [] : fakeLibrary.lists[id]
+        }
+
+        function trackRows(ids) {
+            return ids.map((i) => ({ id: i, title: "Song " + i, artist: "Artist " + i }))
+        }
+
+        function editPlaylistRow(id, row, trackId, verb) {
+            fakeLibrary.edits = fakeLibrary.edits.concat([{ id: id, row: row, trackId: trackId, verb: verb }])
+            if (fakeLibrary.refuse !== "")
+                return fakeLibrary.refuse
+            const list = fakeLibrary.lists[id].slice()
+            if (verb === "remove")
+                list.splice(row, 1)
+            else {
+                const to = row + (verb === "move up" ? -1 : 1)
+                const t = list[row]
+                list[row] = list[to]
+                list[to] = t
+            }
+            const next = Object.assign({}, fakeLibrary.lists)
+            next[id] = list
+            fakeLibrary.lists = next
+            return ""
+        }
+    }
+
+    QtObject {
+        id: fakeFavorites
+
+        property int count: fakeFavorites.ids.length
+        property var ids: [31, 32]
+        property var calls: []
+
+        signal changed()
+
+        function trackIds() {
+            return fakeFavorites.ids
+        }
+
+        function toggle(id) {
+            fakeFavorites.calls = fakeFavorites.calls.concat(["toggle " + id])
+            fakeFavorites.ids = fakeFavorites.ids.filter((x) => x !== id)
+            fakeFavorites.changed()
+        }
+
+        function move(row, delta) {
+            fakeFavorites.calls = fakeFavorites.calls.concat(["move " + row + " " + delta])
+            const list = fakeFavorites.ids.slice()
+            const t = list[row]
+            list[row] = list[row + delta]
+            list[row + delta] = t
+            fakeFavorites.ids = list
+            fakeFavorites.changed()
+            return ""
+        }
+    }
+
+    QtObject {
+        id: viewPlayer
+
+        property var current: ({ id: 12 })
+        property var calls: []
+
+        function playSource(kind, id, mode, startId) {
+            viewPlayer.calls = viewPlayer.calls.concat([{ kind: kind, id: id, mode: mode, startId: startId }])
+            return 3
+        }
     }
 
     QtObject {
@@ -83,6 +164,7 @@ TestCase {
         property var played: []
         property var sheetActions: []
         property var navigated: []
+        property var refused: []
     }
 
     Component {
@@ -93,6 +175,19 @@ TestCase {
             onNowPlaying: counters.nowPlaying++
             onPlay: (kind, id) => counters.played = counters.played.concat([{ kind: kind, id: id }])
             onSheetAction: (action, kind, id) => counters.sheetActions = counters.sheetActions.concat([{ action: action, kind: kind, id: id }])
+        }
+    }
+
+    Component {
+        id: viewComponent
+
+        PlaylistView {
+            library: fakeLibrary
+            favorites: fakeFavorites
+            player: viewPlayer
+            onSheetAction: (action, kind, id) => counters.sheetActions = counters.sheetActions.concat([{ action: action, kind: kind, id: id }])
+            onRefused: (text, name) => counters.refused = counters.refused.concat([text + " " + name])
+            onListPlayed: (count) => counters.played = counters.played.concat([{ kind: "list", id: count }])
         }
     }
 
@@ -153,6 +248,13 @@ TestCase {
         counters.played = []
         counters.sheetActions = []
         counters.navigated = []
+        counters.refused = []
+        fakeLibrary.lists = ({ 1: [11, 12, 13], 2: [21] })
+        fakeLibrary.edits = []
+        fakeLibrary.refuse = ""
+        fakeFavorites.ids = [31, 32]
+        fakeFavorites.calls = []
+        viewPlayer.calls = []
     }
 
     function open(component, properties) {
@@ -239,7 +341,7 @@ TestCase {
         router.dispatch("x", false)
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "Morning")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay", "delete playlist"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay", "open playlist", "delete playlist"]))
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
@@ -251,7 +353,7 @@ TestCase {
         compare(counters.sheetActions[0].id, 1)
         router.dispatch("down", false)
         router.dispatch("x", false)
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "unpin from quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "unpin from quickplay", "open playlist"]))
         router.dispatch("a", false)
         compare(fakePlayer.calls.length, 1)
         router.dispatch("y", false)
@@ -289,6 +391,128 @@ TestCase {
         compare(page.sheet.items.indexOf("delete playlist"), -1)
         router.dispatch("b", false)
         compare(page.sheet.shown, false)
+    }
+
+    function test_playlist_view_rows() {
+        const page = open(viewComponent, { kind: "playlist", playlistId: 1 })
+        compare(page.header.text, "Morning")
+        compare(page.objectName, "playlistview")
+        compare(page.pageId, 1)
+        compare(page.rows.length, 3)
+        compare(page.countItem.text, "3 songs")
+        compare(page.countItem.x, Ui.px(Ui.hubEdge))
+        fuzzyCompare(page.countItem.y + page.countItem.baselineOffset, Ui.px(Ui.queueCountBaseline), 0.5)
+        compare(page.listView.y, Ui.px(Ui.queueRowsTop))
+        const first = tc.rowAt(page.listView, 0)
+        compare(first.rowItem.number, "1")
+        compare(first.rowItem.primary, "Song 11")
+        compare(first.rowItem.secondary, "Artist 11")
+        compare(first.rowItem.playing, false)
+        compare(tc.rowAt(page.listView, 1).rowItem.playing, true)
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("a", false))
+        compare(viewPlayer.calls.length, 1)
+        compare(viewPlayer.calls[0].kind, "playlist")
+        compare(viewPlayer.calls[0].id, 1)
+        compare(viewPlayer.calls[0].mode, "play")
+        compare(viewPlayer.calls[0].startId, 12)
+        compare(counters.played[0].id, 3)
+        verify(router.dispatch("y", false))
+        compare(counters.sheetActions[0].action, "add to queue")
+        compare(counters.sheetActions[0].kind, "song")
+        compare(counters.sheetActions[0].id, 12)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_playlist_view_edits() {
+        const page = open(viewComponent, { kind: "playlist", playlistId: 1 })
+        verify(router.dispatch("x", false))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "move down"]))
+        verify(router.dispatch("b", false))
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "move up", "move down"]))
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(fakeLibrary.edits[0].verb, "move up")
+        compare(fakeLibrary.edits[0].row, 1)
+        compare(fakeLibrary.edits[0].trackId, 12)
+        compare(page.rows[0].id, 12)
+        compare(page.rowIndex, 0)
+        router.dispatch("x", false)
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(fakeLibrary.edits[1].verb, "move down")
+        compare(page.rows[1].id, 12)
+        compare(page.rowIndex, 1)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "move up"]))
+        router.dispatch("a", false)
+        compare(fakeLibrary.edits[2].verb, "remove")
+        compare(page.rows.length, 2)
+        compare(page.countItem.text, "2 songs")
+        compare(page.rowIndex, 1)
+        fakeLibrary.refuse = "card not available"
+        router.dispatch("x", false)
+        router.dispatch("a", false)
+        compare(counters.refused[0], "card not available Morning")
+        compare(page.rows.length, 2)
+    }
+
+    function test_playlist_view_m3u_read_only() {
+        const page = open(viewComponent, { kind: "playlist", playlistId: 2 })
+        compare(page.editable, false)
+        compare(page.rows.length, 1)
+        compare(page.countItem.text, "1 song")
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+    }
+
+    function test_playlist_view_favorites() {
+        const page = open(viewComponent, { kind: "favorites", playlistId: 0 })
+        compare(page.header.text, "favorites")
+        compare(page.objectName, "favoritesview")
+        compare(page.rows.length, 2)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["remove", "move up"]))
+        router.dispatch("down", false)
+        router.dispatch("a", false)
+        compare(fakeFavorites.calls[0], "move 1 -1")
+        compare(page.rows[0].id, 32)
+        compare(page.rowIndex, 0)
+        router.dispatch("x", false)
+        router.dispatch("a", false)
+        compare(fakeFavorites.calls[1], "toggle 32")
+        compare(page.rows.length, 1)
+        router.dispatch("a", false)
+        compare(viewPlayer.calls[0].kind, "favorites")
+        compare(viewPlayer.calls[0].startId, 31)
+    }
+
+    function test_playlist_view_empty() {
+        fakeLibrary.lists = ({ 1: [] })
+        const page = open(viewComponent, { kind: "playlist", playlistId: 1 })
+        compare(page.rows.length, 0)
+        compare(page.countItem.text, "0 songs")
+        compare(page.focusBar.visible, false)
+        verify(router.dispatch("a", false))
+        compare(viewPlayer.calls.length, 0)
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+    }
+
+    function test_playlists_open_playlist_verb() {
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary, favorites: fakeFavorites })
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(page.sheet.items[page.sheet.items.length - 1], "open playlist")
+        page.sheet.focusIndex = page.sheet.items.length - 1
+        router.dispatch("a", false)
+        compare(counters.sheetActions[0].action, "open playlist")
+        compare(counters.sheetActions[0].kind, "favorites")
     }
 
     function test_playlists_model_changes_and_b() {

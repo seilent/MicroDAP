@@ -1321,6 +1321,90 @@ QVariantMap Library::createPlaylist(const QVariantList &trackIds)
     return out;
 }
 
+QList<qint64> Library::resolveDoc(const M3u &doc, const QString &dir) const
+{
+    QHash<QString, qint64> exact;
+    {
+        QSqlQuery query(QStringLiteral("SELECT id, path FROM tracks"), m_db);
+        while (query.next())
+            exact.insert(query.value(1).toString(), query.value(0).toLongLong());
+    }
+    QHash<QString, QList<qint64>> folded;
+    QList<qint64> ids(doc.items.size(), -1);
+    QList<qsizetype> missed;
+    QStringList tails;
+    for (qsizetype i = 0; i < doc.items.size(); ++i) {
+        const M3uItem &item = doc.items.at(i);
+        if (!item.entry || item.path.isEmpty())
+            continue;
+        ids[i] = exact.value(item.path, -1);
+        if (ids.at(i) >= 0)
+            continue;
+        if (folded.isEmpty()) {
+            for (auto it = exact.cbegin(); it != exact.cend(); ++it)
+                folded[it.key().toCaseFolded()].append(it.value());
+        }
+        const QList<qint64> hits = folded.value(item.path.toCaseFolded());
+        if (hits.size() == 1) {
+            ids[i] = hits.first();
+            continue;
+        }
+        const QByteArray text = item.text.trimmed();
+        const QString tail = Scanner::playlistTail(QString::fromUtf8(text.mid(text.lastIndexOf('\n') + 1)).trimmed());
+        if (!tail.isEmpty()) {
+            missed.append(i);
+            tails.append(tail);
+        }
+    }
+    if (!missed.isEmpty()) {
+        const QList<qint64> found = tailTracks(dir, tails);
+        for (qsizetype k = 0; k < missed.size(); ++k)
+            ids[missed.at(k)] = found.at(k);
+    }
+    return ids;
+}
+
+QString Library::editPlaylistRow(qint64 playlistId, int row, qint64 trackId, const QString &verb)
+{
+    const QVariantMap info = playlistInfo(playlistId);
+    const QString source = info.value(QStringLiteral("source")).toString();
+    if (source.isEmpty() || !editable(playlistId))
+        return QStringLiteral("playlist not readable");
+    if (onAbsentCard(source))
+        return QStringLiteral("card not available");
+    const QString dir = QFileInfo(source).absolutePath();
+    const int delta = verb == QLatin1StringView("move up") ? -1 : verb == QLatin1StringView("move down") ? 1 : 0;
+    if (delta == 0 && verb != QLatin1StringView("remove"))
+        return {};
+    bool stale = false;
+    const PlaylistStore::Edit result = editPlaylist(source, [&](M3u &doc) {
+        const QList<qint64> ids = resolveDoc(doc, dir);
+        QList<qsizetype> rows;
+        for (qsizetype i = 0; i < ids.size(); ++i) {
+            if (ids.at(i) >= 0)
+                rows.append(i);
+        }
+        if (row < 0 || row >= rows.size() || ids.at(rows.at(row)) != trackId) {
+            stale = true;
+            return false;
+        }
+        if (delta == 0) {
+            PlaylistStore::erase(doc, rows.at(row));
+            return true;
+        }
+        const int to = row + delta;
+        if (to < 0 || to >= rows.size())
+            return false;
+        PlaylistStore::swap(doc, rows.at(row), rows.at(to));
+        return true;
+    });
+    if (result == PlaylistStore::Edit::Unreadable || stale)
+        return QStringLiteral("playlist not readable");
+    if (result == PlaylistStore::Edit::Unwritten)
+        return QStringLiteral("card not available");
+    return {};
+}
+
 QString Library::deletePlaylist(qint64 playlistId)
 {
     const QVariantMap info = playlistInfo(playlistId);

@@ -31,7 +31,6 @@
 #include <QStorageInfo>
 #include <QStringDecoder>
 #include <QTimeZone>
-#include <QUrl>
 
 #include <algorithm>
 #include <optional>
@@ -320,18 +319,8 @@ PlaylistFile Scanner::readPlaylist(const QString &path)
         const QString line = raw.trimmed();
         if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
             continue;
-        QString entry = line;
-        if (entry.startsWith(QLatin1StringView("file:"), Qt::CaseInsensitive))
-            entry = QUrl(entry).toLocalFile();
-        entry.replace(QLatin1Char('\\'), QLatin1Char('/'));
         playlist.tails.append(playlistTail(line));
-        if (entry.isEmpty()) {
-            playlist.entries.append(QString());
-            continue;
-        }
-        if (!QDir::isAbsolutePath(entry))
-            entry = folder + QLatin1Char('/') + entry;
-        playlist.entries.append(QDir::cleanPath(entry));
+        playlist.entries.append(PlaylistStore::entryPath(line.toUtf8(), folder));
     }
     return playlist;
 }
