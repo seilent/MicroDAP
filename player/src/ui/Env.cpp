@@ -5,6 +5,7 @@
 
 #include <QCoreApplication>
 #include <QFontMetricsF>
+#include <QTextLayout>
 
 namespace microdap {
 
@@ -48,6 +49,24 @@ QString Env::fitPath(const QStringList &parts, const QFont &font, qreal width) c
 {
     const QFontMetricsF metrics(font);
     return fitPathParts(parts, [&metrics](const QString &text) { return metrics.horizontalAdvance(text); }, width);
+}
+
+QStringList Env::wrapLines(const QString &text, const QFont &font, qreal width) const
+{
+    QStringList out;
+    if (text.isEmpty())
+        return out;
+    QTextLayout layout(text, font);
+    QTextOption option;
+    option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    layout.setTextOption(option);
+    layout.beginLayout();
+    for (QTextLine line = layout.createLine(); line.isValid(); line = layout.createLine()) {
+        line.setLineWidth(width);
+        out.append(text.mid(line.textStart(), line.textLength()).trimmed());
+    }
+    layout.endLayout();
+    return out;
 }
 
 }

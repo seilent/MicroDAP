@@ -191,6 +191,7 @@ set(microdap_qml
     qml/MicroDap/components/VolumeOverlay.qml
     qml/MicroDap/components/JumpLetter.qml
     qml/MicroDap/components/Keyboard.qml
+    qml/MicroDap/components/LyricsColumn.qml
     qml/MicroDap/GlyphPaths.js
     qml/MicroDap/EqFormat.js
     qml/MicroDap/ComponentsShot.qml

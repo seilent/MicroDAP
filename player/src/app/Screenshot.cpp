@@ -228,6 +228,13 @@ const QStringList &states()
         QStringLiteral("kb-number-q"),
         QStringLiteral("kb-number-gain"),
         QStringLiteral("kb-refused"),
+        QStringLiteral("lyrics-short"),
+        QStringLiteral("lyrics-long"),
+        QStringLiteral("lyrics-cjk"),
+        QStringLiteral("lyrics-before"),
+        QStringLiteral("lyrics-none"),
+        QStringLiteral("lyrics-plain"),
+        QStringLiteral("lyrics-pending"),
     };
     return names;
 }
@@ -287,7 +294,8 @@ int screenshot(const ScreenshotOptions &options)
         return 2;
     }
     const QString state = options.state.isEmpty() ? QStringLiteral("browse") : options.state;
-    if (!states().contains(state)) {
+    static const QRegularExpression slide(QStringLiteral("^lyricslide-(short|long)-[0-9]{1,3}$"));
+    if (!states().contains(state) && !slide.match(state).hasMatch()) {
         fail(QStringLiteral("unknown state %1, expected one of %2")
                  .arg(state, states().join(QLatin1Char(' '))));
         return 2;

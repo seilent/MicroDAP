@@ -30,6 +30,7 @@ public:
     bool rotateMotion() const;
     QVariantList settingsRows() const;
     Q_INVOKABLE QString fitPath(const QStringList &parts, const QFont &font, qreal width) const;
+    Q_INVOKABLE QStringList wrapLines(const QString &text, const QFont &font, qreal width) const;
 };
 
 }

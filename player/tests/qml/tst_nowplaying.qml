@@ -227,6 +227,23 @@ TestCase {
     }
 
     QtObject {
+        id: fakeLyrics
+
+        property bool pending: false
+        property var lines: []
+        property var plain: []
+
+        signal changed()
+
+        function set(lines, plain) {
+            fakeLyrics.pending = false
+            fakeLyrics.lines = lines
+            fakeLyrics.plain = plain === undefined ? [] : plain
+            fakeLyrics.changed()
+        }
+    }
+
+    QtObject {
         id: counters
 
         property int queueOpens: 0
@@ -247,6 +264,7 @@ TestCase {
             player: fakePlayer
             bluez: fakeBluez
             status: fakeStatus
+            lyrics: fakeLyrics
             onOpenQueue: counters.queueOpens++
             onTrackInfo: (id) => counters.infos = counters.infos.concat([id])
         }
@@ -280,6 +298,28 @@ TestCase {
         fakeStatus.batteryPresent = true
         counters.queueOpens = 0
         counters.infos = []
+        fakeLyrics.set([], [])
+    }
+
+    function sampleLines() {
+        return [
+            { ms: 0, text: "First line" },
+            { ms: 4000, text: "Second line" },
+            { ms: 9000, text: "Third line" },
+            { ms: 13000, text: "Fourth line" },
+            { ms: 17000, text: "Fifth line" }
+        ]
+    }
+
+    function columnTexts(page) {
+        const out = []
+        const rep = page.lyricsColumn.drawRepeater
+        for (let i = 0; i < rep.count; i++) {
+            const d = rep.itemAt(i).modelData
+            const b = d.fb !== null ? d.fb : d.fa
+            out.push((b.big ? "*" : "") + b.texts.join(" "))
+        }
+        return out
     }
 
     function open(properties) {
@@ -1011,6 +1051,258 @@ TestCase {
         compare(page.ringIndex, 0)
         compare(page.focusRow, 0)
         compare(fakePlayer.calls, [])
+    }
+
+    function test_lyrics_y_toggles() {
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        compare(page.hasLyrics, true)
+        compare(page.lyricsShown, false)
+        verify(router.dispatch("y", false))
+        compare(page.lyricsMode, true)
+        compare(page.lyricsShown, true)
+        compare(counters.queueOpens, 0)
+        compare(page.artistItem.visible, false)
+        compare(page.titleItem.visible, false)
+        compare(page.artItem.visible, false)
+        compare(page.progressItem.visible, false)
+        compare(page.nextRepeater.count, 0)
+        compare(page.lyricsShade, 1)
+        verify(Qt.colorEqual(page.lyricsShadeItem.color, Ui.scrimSheet))
+        compare(page.lyricsColumn.to, 1)
+        compare(tc.columnTexts(page), ["First line", "*Second line", "Third line", "Fourth line", "Fifth line"])
+        const cur = page.lyricsColumn.drawRepeater.itemAt(1)
+        const curText = cur.children[1].children[0]
+        compare(curText.font.pixelSize, Ui.fontPx(26))
+        compare(curText.font.styleName, "Light")
+        fuzzyCompare(cur.y + curText.y + curText.baselineOffset, Ui.px(117 + 18 + (31.2 + 0.7 * 26) / 2), 0.01)
+        const up = page.lyricsColumn.drawRepeater.itemAt(2)
+        const upText = up.children[1].children[0]
+        compare(upText.font.pixelSize, Ui.fontPx(13))
+        fuzzyCompare(up.opacity * up.children[1].opacity, 0.6, 1e-6)
+        fuzzyCompare(up.y + upText.y + upText.baselineOffset, Ui.px(117 + 18 + 31.2 + (18 + 0.7 * 13) / 2), 0.01)
+        fuzzyCompare(page.lyricsColumn.drawRepeater.itemAt(0).children[1].opacity, 0.4, 1e-6)
+        verify(router.dispatch("back", false))
+        compare(counters.queueOpens, 1)
+        verify(router.dispatch("y", false))
+        compare(page.lyricsShown, false)
+        compare(page.lyricsShade, 0)
+        compare(page.titleItem.visible, true)
+    }
+
+    function test_lyrics_y_without_lyrics_opens_queue() {
+        const page = open()
+        compare(page.hasLyrics, false)
+        verify(router.dispatch("y", false))
+        compare(page.lyricsMode, false)
+        compare(counters.queueOpens, 1)
+        fakeLyrics.pending = true
+        fakeLyrics.lines = tc.sampleLines()
+        fakeLyrics.changed()
+        compare(page.hasLyrics, false)
+        verify(router.dispatch("y", false))
+        compare(page.lyricsMode, false)
+        compare(counters.queueOpens, 2)
+    }
+
+    function test_lyrics_b_leaves_then_closes() {
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        verify(router.dispatch("y", false))
+        compare(page.lyricsShown, true)
+        verify(router.dispatch("b", false))
+        compare(page.lyricsShown, false)
+        compare(pages.depth, 2)
+        verify(router.dispatch("b", false))
+        compare(pages.depth, 1)
+    }
+
+    function test_lyrics_touch_art_enters_column_leaves() {
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        tc.tapAt(page.artItem)
+        compare(page.lyricsShown, true)
+        compare(fakePlayer.calls, [])
+        tc.tapAt(page.lyricsColumn.drawRepeater.itemAt(1))
+        compare(page.lyricsShown, false)
+        compare(counters.queueOpens, 0)
+        compare(pages.depth, 2)
+    }
+
+    function test_lyrics_fade_and_toggle_ignored() {
+        fakeLyrics.set(tc.sampleLines())
+        const page = open({ animated: true })
+        page.completeAll()
+        verify(router.dispatch("y", false))
+        compare(page.lyricsFadeAnimation.running, true)
+        compare(page.lyricsMode, true)
+        compare(page.lyricsShown, false)
+        verify(router.dispatch("y", false))
+        compare(page.lyricsMode, true)
+        tryCompare(page, "lyricsShown", true, 1000)
+        tryCompare(page, "lyricsToggling", false, 1000)
+        compare(page.contentOpacity, 1)
+        compare(page.lyricsShade, 1)
+    }
+
+    function test_lyrics_slide_duration() {
+        const lines = [
+            { ms: 0, text: "Zero" },
+            { ms: 4000, text: "One" },
+            { ms: 4200, text: "Two" },
+            { ms: 9000, text: "Three" },
+            { ms: 9050, text: "Four" },
+            { ms: 20000, text: "Five" }
+        ]
+        fakeLyrics.set(lines)
+        fakePlayer.position = 1000
+        const page = open({ animated: true })
+        page.completeAll()
+        verify(router.dispatch("y", false))
+        page.completeAll()
+        compare(page.lyricsShown, true)
+        compare(page.lyricsColumn.to, 0)
+        fakePlayer.position = 4000
+        compare(page.lyricsColumn.to, 1)
+        compare(page.lyricsSlideAnimation.running, true)
+        compare(page.lyricsSlideAnimation.duration, 200)
+        compare(page.lyricsColumn.from, 0)
+        page.lyricsSlideAnimation.complete()
+        fakePlayer.position = 4250
+        compare(page.lyricsColumn.to, 2)
+        compare(page.lyricsSlideAnimation.running, true)
+        compare(page.lyricsSlideAnimation.duration, 300)
+        fuzzyCompare(page.lyricsSlideAnimation.from, 50 / 350, 1e-6)
+        page.lyricsSlideAnimation.complete()
+        fakePlayer.position = 9000
+        compare(page.lyricsColumn.to, 3)
+        compare(page.lyricsSlideAnimation.running, false)
+        fakePlayer.position = 9100
+        compare(page.lyricsColumn.to, 4)
+        compare(page.lyricsSlideAnimation.running, true)
+        compare(page.lyricsSlideAnimation.duration, 350 - 50)
+        page.lyricsSlideAnimation.complete()
+        fakePlayer.position = 16000
+        compare(page.lyricsColumn.to, 4)
+        fakePlayer.position = 20300
+        compare(page.lyricsColumn.to, 5)
+        compare(page.lyricsSlideAnimation.running, false)
+    }
+
+    function test_lyrics_due_timer_and_no_step_back() {
+        fakeLyrics.set(tc.sampleLines())
+        fakePlayer.position = 3900
+        const page = open({ animated: true })
+        page.completeAll()
+        verify(router.dispatch("y", false))
+        page.completeAll()
+        compare(page.lyricsColumn.to, 0)
+        compare(page.lyricsDueTimer.running, true)
+        compare(page.lyricsDueTimer.interval, 100)
+        tryCompare(page.lyricsColumn, "to", 1, 1000)
+        compare(page.lyricsSlideAnimation.running, true)
+        compare(page.lyricsSlideAnimation.duration, 350)
+        fakePlayer.position = 3990
+        compare(page.lyricsColumn.to, 1)
+        fakePlayer.position = 1000
+        compare(page.lyricsColumn.to, 0)
+        fakePlayer.status = 2
+        compare(page.lyricsDueTimer.running, false)
+    }
+
+    function test_lyrics_slide_frames() {
+        fakeLyrics.set(tc.sampleLines())
+        fakePlayer.position = 4000
+        const page = open()
+        verify(router.dispatch("y", false))
+        const column = page.lyricsColumn
+        column.from = 1
+        column.to = 2
+        column.p = 0
+        const start = column.frame.map((e) => [e.d.fa === null ? null : e.d.fa.line, e.d.fb === null ? null : e.d.fb.line, e.top])
+        compare(JSON.stringify(start.filter((e) => e[0] === 2)), JSON.stringify([[2, 2, Ui.npTextTop + 18 + 31.2]]))
+        column.p = 1
+        const end = column.frame.filter((e) => e.d.fb !== null && e.d.fb.line === 2)
+        fuzzyCompare(end[0].top, Ui.npTextTop + 18, 1e-6)
+        compare(end[0].an, 1)
+        column.p = 0.25
+        const mid = column.frame.filter((e) => e.d.fb !== null && e.d.fb.line === 1)[0]
+        compare(mid.swap, true)
+        fuzzyCompare(mid.ao, 0.5, 1e-6)
+        compare(mid.an, 0)
+        column.p = 0.75
+        const late = column.frame.filter((e) => e.d.fb !== null && e.d.fb.line === 1)[0]
+        compare(late.ao, 0)
+        fuzzyCompare(late.an, 0.4 * 0.5, 1e-6)
+        const zero = column.frame.filter((e) => e.d.fa !== null && e.d.fa.line === 0)[0]
+        compare(zero.d.kind, "pair")
+        compare(zero.d.fb.alpha, 0)
+        fuzzyCompare(zero.top, Motion.lerp(Ui.npTextTop, Ui.npTextTop - 18, 0.75), 1e-6)
+        fuzzyCompare(zero.an, 0.4 * 0.25, 1e-6)
+        compare(column.frame.filter((e) => e.d.kind === "out").length, 0)
+    }
+
+    function test_lyrics_layouts() {
+        fakeLyrics.set([{ ms: 8000, text: "Later" }, { ms: 9000, text: "Again" }])
+        const page = open()
+        verify(router.dispatch("y", false))
+        compare(page.lyricsColumn.to, -1)
+        compare(tc.columnTexts(page), ["Later", "Again"])
+        fakeLyrics.set([], ["Plain one", "", "Plain two"])
+        compare(page.lyricsColumn.plainShown, true)
+        compare(page.lyricsColumn.plainRepeater.count, 3)
+        fuzzyCompare(page.lyricsColumn.plainView.height, Ui.px(Math.floor((416 - 117) / 24) * 24), 0.01)
+        const first = page.lyricsColumn.plainRepeater.itemAt(0)
+        fuzzyCompare(first.y + first.baselineOffset, Ui.px(12 + 7), 0.6)
+        compare(first.font.capitalization, Font.MixedCase)
+        compare(first.font.pixelSize, Ui.fontPx(20))
+        fakeLyrics.set([], [])
+        compare(page.lyricsShown, true)
+        compare(tc.columnTexts(page), ["*" + page.shown.title, page.nextTitles[0]])
+        fakeLyrics.pending = true
+        fakeLyrics.changed()
+        compare(page.lyricsColumn.drawRepeater.count, 0)
+    }
+
+    function test_lyrics_long_current_takes_rows() {
+        const long = "A very long current lyric line that keeps going and going until it needs many rows of text to fit"
+        fakeLyrics.set([{ ms: 0, text: "Before" }, { ms: 4000, text: long }, { ms: 9000, text: "After" }])
+        const page = open()
+        verify(router.dispatch("y", false))
+        const blocks = page.lyricsColumn.plan.b
+        const cur = blocks.filter((b) => b.big)[0]
+        verify(cur.rows >= 2)
+        const item = page.lyricsColumn.drawRepeater.itemAt(blocks.indexOf(cur))
+        const rows = item.children[1].children
+        fuzzyCompare(rows[1].y - rows[0].y, Ui.px(31.2), 0.01)
+        verify(cur.rows <= Math.floor((416 - 117) / 31.2))
+        const bottom = Math.max.apply(null, blocks.map((b) => b.top + b.rows * b.pitch))
+        verify(bottom <= 416 + 1e-6)
+    }
+
+    function test_lyrics_landscape_column() {
+        tc.setWindow(960, 640)
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        verify(router.dispatch("y", false))
+        compare(page.lyricsColumn.textLeft, Ui.npColumnRight)
+        compare(page.lyricsColumn.textTop, Ui.npArtistBaselineLandscape)
+        compare(page.lyricsColumn.textBottom, Ui.npNextBaselineLandscape + 36)
+        const item = page.lyricsColumn.drawRepeater.itemAt(0)
+        fuzzyCompare(item.x, Ui.px(Ui.npColumnRight), 0.01)
+        compare(item.width, Ui.px(Ui.canvasW - Ui.edge - Ui.npColumnRight))
+    }
+
+    function test_lyrics_variant_ends_mode() {
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        verify(router.dispatch("y", false))
+        compare(page.lyricsShown, true)
+        fakeBluez.activate()
+        compare(page.shownVariant, true)
+        compare(page.lyricsMode, false)
+        compare(page.lyricsShown, false)
+        compare(page.lyricsShade, 0)
     }
 
     function test_touch_art_does_nothing() {

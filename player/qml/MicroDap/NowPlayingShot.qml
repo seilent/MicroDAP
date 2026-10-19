@@ -5,6 +5,10 @@ Item {
     id: root
 
     property string fixture: "browse"
+    readonly property bool lyricsFixture: root.fixture.startsWith("lyrics") || root.fixture.startsWith("lyricslide")
+    readonly property var slideParts: root.fixture.startsWith("lyricslide-") ? root.fixture.split("-") : []
+    readonly property string lyricsKind: root.slideParts.length === 3 ? root.slideParts[1]
+        : root.fixture.startsWith("lyrics-") ? root.fixture.substring(7) : ""
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
 
     Rectangle {
@@ -42,6 +46,58 @@ Item {
     }
 
     QtObject {
+        id: sampleLyrics
+
+        readonly property bool pending: root.lyricsKind === "pending"
+        readonly property var short: [
+            { ms: 0, text: "Under the paper lanterns" },
+            { ms: 4000, text: "We counted every light" },
+            { ms: 9000, text: "The river kept on moving" },
+            { ms: 13000, text: "" },
+            { ms: 15000, text: "And carried half the night" },
+            { ms: 19000, text: "Somebody called your name out" },
+            { ms: 23000, text: "Across the empty square" },
+            { ms: 27000, text: "I turned around to answer" },
+            { ms: 31000, text: "But no one else was there" }
+        ]
+        readonly property var long: [
+            { ms: 0, text: "Under the paper lanterns" },
+            { ms: 4000, text: "We counted every light that hung above the water like a promise" },
+            { ms: 9000, text: "The river kept on moving through the town and past the station where the last train waits" },
+            { ms: 13000, text: "And carried half the night" },
+            { ms: 17000, text: "Somebody called your name out" },
+            { ms: 21000, text: "Across the empty square" }
+        ]
+        readonly property var cjk: [
+            { ms: 0, text: "夜空に浮かぶ星を数えて" },
+            { ms: 4000, text: "君の名前を呼んだ夏の終わりに静かな風が吹いていた" },
+            { ms: 9000, text: "川は流れ続ける" },
+            { ms: 13000, text: "遠い街の灯りまで" },
+            { ms: 17000, text: "誰もいない広場で" }
+        ]
+        readonly property var before: [
+            { ms: 8000, text: "Under the paper lanterns" },
+            { ms: 12000, text: "We counted every light" },
+            { ms: 16000, text: "The river kept on moving" },
+            { ms: 20000, text: "And carried half the night" }
+        ]
+        readonly property var plainText: [
+            "Under the paper lanterns", "We counted every light", "The river kept on moving",
+            "And carried half the night", "", "Somebody called your name out across the empty square",
+            "I turned around to answer", "But no one else was there", "", "Under the paper lanterns",
+            "We counted every light", "The river kept on moving", "And carried half the night"
+        ]
+        readonly property var lines: root.lyricsKind === "long" ? sampleLyrics.long
+            : root.lyricsKind === "cjk" ? sampleLyrics.cjk
+            : root.lyricsKind === "before" ? sampleLyrics.before
+            : root.lyricsKind === "plain" || root.lyricsKind === "none" || root.lyricsKind === "pending" ? []
+            : sampleLyrics.short
+        readonly property var plain: root.lyricsKind === "plain" ? sampleLyrics.plainText : []
+
+        signal changed()
+    }
+
+    QtObject {
         id: samplePlayer
 
         readonly property int status: 1
@@ -59,6 +115,7 @@ Item {
         player: samplePlayer
         bluez: root.contextBluez
         status: sampleStatus
+        lyrics: root.lyricsFixture ? sampleLyrics : null
 
         Component.onCompleted: {
             screen.completeAll()
@@ -67,7 +124,19 @@ Item {
                 screen.seekAt(Ui.px(Ui.npSeekMargin) + screen.progressWidth * 0.6)
             if (root.fixture === "track-info")
                 Qt.callLater(root.infoFixture)
+            if (root.lyricsFixture)
+                root.lyricsShot()
         }
+    }
+
+    function lyricsShot(): void {
+        screen.lyricsMode = true
+        screen.landLyrics()
+        if (root.slideParts.length !== 3)
+            return
+        screen.lyricsColumn.from = 1
+        screen.lyricsColumn.to = 2
+        screen.lyricsColumn.p = Motion.expOut6(Number(root.slideParts[2]) / 100)
     }
 
     function infoFixture(): void {

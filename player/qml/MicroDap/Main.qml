@@ -115,10 +115,12 @@ Window {
     readonly property bool hidden: root.overlay && !root.overlayMapped
     readonly property bool touchOn: !root.overlay && !root.screenshot && (root.settings === null || root.settings.touch !== false)
     readonly property bool off: root.powerScreenOff || root.hidden
+    readonly property bool lyricsHold: root.playing && pages.currentItem !== null
+        && pages.currentItem.objectName === "nowplaying" && pages.currentItem.lyricsShown === true
     readonly property bool saverArmed: !root.overlay && !root.off && !root.screenshot && root.playing
-        && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown
+        && root.saverSeconds > 0 && !saver.shown && !switchPrompt.shown && !powerMenu.shown && !root.lyricsHold
     readonly property bool screenOffArmed: !root.overlay && !root.off && !root.screenshot && root.power !== null
-        && root.screenOffSeconds > 0 && !root.switching
+        && root.screenOffSeconds > 0 && !root.switching && !root.lyricsHold
     property alias rotor: rotor
     property alias pageStack: pages
     property alias overlayLayer: overlays
@@ -1263,6 +1265,7 @@ Window {
             player: root.player
             bluez: root.bluez
             status: root.status
+            lyrics: root.lyrics
             property var infoId: null
 
             onOpenQueue: root.openQueue()

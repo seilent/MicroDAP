@@ -302,6 +302,40 @@ TestCase {
         compare(home.focusIndex, focus + 1)
     }
 
+    function test_lyrics_mode_holds_saver_while_playing() {
+        fakeLyrics.lines = [{ ms: 0, text: "One" }, { ms: 4000, text: "Two" }]
+        fakeLyrics.changed()
+        main.openNowPlaying()
+        main.pageStack.completeAll()
+        const np = main.pageStack.currentItem
+        compare(np.objectName, "nowplaying")
+        compare(np.hasLyrics, true)
+        compare(main.saverArmed, true)
+        np.toggleLyrics()
+        np.completeAll()
+        compare(np.lyricsShown, true)
+        compare(main.lyricsHold, true)
+        compare(main.saverArmed, false)
+        compare(main.saverTimer.running, false)
+        fakeSettings.screenOffSeconds = 1
+        compare(main.screenOffArmed, false)
+        fakePlayer.status = 2
+        compare(main.lyricsHold, false)
+        compare(main.saverTimer.running, false)
+        compare(main.screenOffArmed, true)
+        fakePlayer.status = 1
+        compare(main.saverArmed, false)
+        np.toggleLyrics()
+        np.completeAll()
+        compare(main.lyricsHold, false)
+        compare(main.saverArmed, true)
+        compare(main.saverTimer.running, true)
+        fakeSettings.screenOffSeconds = 0
+        main.pageStack.pop()
+        main.pageStack.completeAll()
+        compare(main.pageStack.currentItem, home)
+    }
+
     function test_not_armed_when_paused() {
         fakePlayer.status = 2
         compare(main.saverArmed, false)

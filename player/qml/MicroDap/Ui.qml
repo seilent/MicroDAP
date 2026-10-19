@@ -352,6 +352,8 @@ QtObject {
     readonly property real npNextIndent: 40
     readonly property real npNextPitch: 18
     readonly property int npNextCount: 3
+    readonly property real npPlainPitch: ui.npAlbumBaseline - ui.npTextTop
+    readonly property real npLyricPitch: ui.npPlainPitch * ui.npTitle.size / ui.npAlbum.size
     readonly property real npRing: 32
     readonly property real npRingStroke: 3
     readonly property real npRingY: ui.canvasH - 40

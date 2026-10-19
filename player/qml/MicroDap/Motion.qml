@@ -121,6 +121,7 @@ QtObject {
 
     readonly property int artistFade: 2000
     readonly property int variantFade: 380
+    readonly property int lyricSlide: 350
 
     readonly property int sheet: 380
     readonly property real sheetScrim: 0.55

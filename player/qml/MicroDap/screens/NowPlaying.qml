@@ -7,6 +7,7 @@ Page {
     property QtObject player: null
     property QtObject bluez: null
     property QtObject status: null
+    property QtObject lyrics: null
     property bool animated: true
     property bool screenOff: false
     property int focusRow: 0
@@ -20,6 +21,9 @@ Page {
     property real contentOpacity: 1
     property real variantScale: 1
     property real localLayerOpacity: 1
+    property bool lyricsMode: false
+    property bool lyricsView: false
+    property real lyricsShade: 0
     property var shown: ({ id: null, title: "", artist: "", album: "", artPath: "", rating: 0 })
     property var pending: null
     property var nextTitles: []
@@ -103,6 +107,15 @@ Page {
     readonly property real contentScale: !np.fadingPage ? np.variantScale
         : Motion.lerp(Motion.nowPlayingScale, 1, np.contentFade)
     readonly property bool trackAnimating: trackAnim.running
+    readonly property bool lyricsShown: np.lyricsView && !np.shownVariant
+    readonly property bool lyricsMatch: np.lyrics !== null && !np.shownVariant && np.shown.id !== null
+        && np.shown.id === np.trackId(np.current)
+    readonly property bool lyricsPending: np.lyricsMatch && np.lyrics.pending === true
+    readonly property bool hasLyrics: np.lyricsMatch && !np.lyricsPending && (d.lines.length > 0 || d.plain.length > 0)
+    readonly property bool lyricsToggling: lyricsFade.running
+    readonly property real lyricsTop: Ui.landscape ? Ui.npArtistBaselineLandscape : Ui.npTextTop
+    readonly property real lyricsBottom: (Ui.landscape ? Ui.npNextBaselineLandscape : Ui.npTitleY + Ui.npNextPitch)
+        + Ui.npNextPitch * (Ui.npNextCount - 1)
     readonly property bool variantAnimating: variantIn.running || variantOut.running
 
     property alias surface: surface
@@ -131,6 +144,11 @@ Page {
     property alias variantInAnimation: variantIn
     property alias variantOutAnimation: variantOut
     property alias sheet: sheet
+    property alias lyricsColumn: lyricsColumn
+    property alias lyricsShadeItem: shade
+    property alias lyricsFadeAnimation: lyricsFade
+    property alias lyricsSlideAnimation: slideAnim
+    property alias lyricsDueTimer: dueTimer
 
     signal openQueue()
     signal trackInfo(int id)
@@ -212,6 +230,7 @@ Page {
     function applyShown(map: var) {
         np.shown = map
         np.nextTitles = np.buildNext()
+        np.stepLyrics(np.livePosition(), false)
     }
 
     function trackChanged() {
@@ -247,6 +266,10 @@ Page {
     }
 
     function switchVariant() {
+        if (lyricsFade.running)
+            lyricsFade.complete()
+        if (np.variant)
+            np.lyricsMode = false
         if (variantIn.running)
             variantIn.complete()
         if (variantOut.running)
@@ -265,6 +288,11 @@ Page {
 
     function landVariant() {
         np.shownVariant = np.variant
+        if (np.variant) {
+            np.lyricsView = false
+            np.lyricsShade = 0
+            np.enterLyrics()
+        }
         np.contentOpacity = 1
         np.variantScale = 1
         np.localLayerOpacity = np.variant ? 0 : 1
@@ -399,11 +427,126 @@ Page {
         return true
     }
 
+    function readLyrics(): void {
+        const ready = np.lyrics !== null && np.lyrics.pending !== true
+        d.lines = ready && np.lyrics.lines !== undefined ? np.lyrics.lines : []
+        d.plain = ready && np.lyrics.plain !== undefined ? np.lyrics.plain : []
+        d.lyricsGen++
+        slideAnim.stop()
+        d.lineTrack = null
+        np.stepLyrics(np.livePosition(), false)
+    }
+
+    function livePosition(): real {
+        return np.player !== null && np.player.position !== undefined ? Number(np.player.position) : 0
+    }
+
+    function lyricIndex(pos: real): int {
+        if (!np.lyricsMatch)
+            return lyricsColumn.none
+        if (np.lyricsPending)
+            return -1
+        if (d.lines.length === 0)
+            return lyricsColumn.none
+        let at = -1
+        for (let i = 0; i < d.lines.length && Number(d.lines[i].ms) <= pos; i++)
+            at = i
+        return at
+    }
+
+    function stamp(line: int): real {
+        return line >= 0 && line < d.lines.length ? Number(d.lines[line].ms) : -1
+    }
+
+    function stepLyrics(pos: real, due: bool): void {
+        dueTimer.stop()
+        if (!np.lyricsShown)
+            return
+        const fresh = np.shown.id !== d.lineTrack
+        if (!fresh && trackAnim.running)
+            return
+        let line = np.lyricIndex(pos)
+        if (!due && line === d.lineShown)
+            d.dueLine = lyricsColumn.none
+        if (!fresh && !due && d.dueLine === d.lineShown && line === d.lineShown - 1
+                && pos >= np.stamp(d.lineShown) - Motion.progress)
+            line = d.lineShown
+        if (fresh || line !== d.lineShown) {
+            slideAnim.stop()
+            let slide = false
+            const drawn = !fresh && d.drawnGen === d.lyricsGen && np.lyricsMatch && !np.lyricsPending
+            if (drawn && np.live && line >= 0 && line === d.lineShown + 1) {
+                const at = np.stamp(line)
+                const late = Math.max(0, pos - at)
+                let span = Motion.lyricSlide
+                if (line + 1 < d.lines.length)
+                    span = Math.min(span, np.stamp(line + 1) - at)
+                if (span - late >= Motion.scroll) {
+                    slide = true
+                    d.slideFrom = d.lineShown
+                    slideAnim.from = late / span
+                    slideAnim.duration = span - late
+                }
+            }
+            d.lineTrack = np.shown.id
+            d.lineShown = line
+            d.dueLine = due ? line : lyricsColumn.none
+            d.drawnGen = line !== lyricsColumn.none && np.lyricsMatch && !np.lyricsPending ? d.lyricsGen : -1
+            if (slide)
+                slideAnim.restart()
+        }
+        np.armDue(pos)
+    }
+
+    function armDue(pos: real): void {
+        if (!np.lyricsShown || !np.localPlaying || !np.live || d.lineShown < -1)
+            return
+        const next = d.lineShown + 1
+        if (next >= d.lines.length)
+            return
+        dueTimer.interval = Math.max(1, np.stamp(next) - pos)
+        dueTimer.restart()
+    }
+
+    function toggleLyrics(): void {
+        if (lyricsFade.running || np.shownVariant)
+            return
+        if (!np.lyricsMode && !np.hasLyrics)
+            return
+        np.lyricsMode = !np.lyricsMode
+        np.focusRow = 0
+        if (!np.live) {
+            np.landLyrics()
+            return
+        }
+        lyricsFade.restart()
+    }
+
+    function landLyrics(): void {
+        np.lyricsView = np.lyricsMode
+        np.lyricsShade = np.lyricsMode ? 1 : 0
+        np.contentOpacity = 1
+        np.enterLyrics()
+    }
+
+    function enterLyrics(): void {
+        d.lineTrack = null
+        slideAnim.stop()
+        if (np.lyricsView)
+            np.stepLyrics(np.livePosition(), false)
+        else
+            dueTimer.stop()
+    }
+
     function touchContext(kind: string, index: int, hit: Item): bool {
         return kind === "title" && np.openInfo()
     }
 
     function touchTap(kind: string, index: int, hit: Item): void {
+        if (kind === "art" || kind === "lyrics") {
+            np.toggleLyrics()
+            return
+        }
         if (kind !== "title" || !d.titleTap)
             return
         d.titleTap = false
@@ -441,6 +584,9 @@ Page {
             return ""
         case "back":
             return "b"
+        case "art":
+        case "lyrics":
+            return ""
         case "seek":
             if (np.shownVariant || np.duration <= 0)
                 return ""
@@ -489,6 +635,10 @@ Page {
     function completeAll() {
         if (trackAnim.running)
             trackAnim.complete()
+        if (lyricsFade.running)
+            lyricsFade.complete()
+        if (slideAnim.running)
+            slideAnim.complete()
         if (variantIn.running)
             variantIn.complete()
         if (variantOut.running)
@@ -511,7 +661,7 @@ Page {
             return sheet.handleAction(name, repeat)
         switch (name) {
         case "up":
-            if (np.focusRow !== 0)
+            if (np.focusRow !== 0 || np.lyricsMode)
                 return false
             np.focusRow = 1
             return true
@@ -531,12 +681,23 @@ Page {
         case "b":
             if (repeat)
                 return false
+            if (np.lyricsMode) {
+                np.toggleLyrics()
+                return true
+            }
             return np.back()
         case "x":
             if (!repeat)
                 np.playPause()
             return true
         case "y":
+            if (repeat)
+                return true
+            if (np.lyricsMode || np.hasLyrics)
+                np.toggleLyrics()
+            else
+                np.openQueue()
+            return true
         case "back":
             if (!repeat)
                 np.openQueue()
@@ -593,11 +754,13 @@ Page {
         }
         np.completeAll()
         np.cancelSeek()
+        dueTimer.stop()
         idleTimer.stop()
         np.idle = false
     }
 
     onDurationChanged: np.updateTimes()
+    onLyricsChanged: np.readLyrics()
     onRingLastChanged: np.ringIndex = Math.min(np.ringIndex, np.ringLast)
     onShownVariantChanged: np.updateTimes()
 
@@ -608,6 +771,7 @@ Page {
         np.localLayerOpacity = np.variant ? 0 : 1
         np.applyShown(np.snapshot(np.current))
         np.syncPosition()
+        np.readLyrics()
         d.ready = true
         if (np.live)
             idleTimer.restart()
@@ -622,6 +786,44 @@ Page {
         property bool seekHeld: false
         property real seekPos: 0
         property bool titleTap: false
+        property var lines: []
+        property var plain: []
+        property int lyricsGen: 0
+        property int drawnGen: -1
+        property var lineTrack: null
+        property int lineShown: -2
+        property int slideFrom: -2
+        property int dueLine: -2
+        property real slideT: 1
+    }
+
+    Timer {
+        id: dueTimer
+
+        repeat: false
+        onTriggered: {
+            const next = d.lineShown + 1
+            if (next < d.lines.length)
+                np.stepLyrics(np.stamp(next), true)
+        }
+    }
+
+    NumberAnimation {
+        id: slideAnim
+
+        target: d
+        property: "slideT"
+        to: 1
+        easing.type: Motion.linear
+    }
+
+    Connections {
+        target: np.lyrics
+        ignoreUnknownSignals: true
+
+        function onChanged() {
+            np.readLyrics()
+        }
     }
 
     Timer {
@@ -654,6 +856,13 @@ Page {
         function onPositionChanged() {
             if (!np.live)
                 np.syncPosition()
+            if (np.lyricsShown)
+                np.stepLyrics(np.livePosition(), false)
+        }
+
+        function onStatusChanged() {
+            if (np.lyricsShown)
+                np.stepLyrics(np.livePosition(), false)
         }
     }
 
@@ -749,6 +958,15 @@ Page {
 
             anchors.fill: parent
         }
+
+        Rectangle {
+            id: shade
+
+            anchors.fill: parent
+            color: Ui.scrimSheet
+            opacity: np.lyricsShade
+            visible: np.lyricsShade > 0
+        }
     }
 
     Item {
@@ -825,6 +1043,7 @@ Page {
 
             x: np.textX
             y: np.artistBaseline - artistItem.baselineOffset
+            visible: !np.lyricsShown
             text: np.artistText
             color: Ui.white(Ui.npArtist.alpha)
             font: Ui.font(Ui.npArtist)
@@ -835,6 +1054,7 @@ Page {
 
             x: np.textX
             y: np.albumBaseline - albumItem.baselineOffset
+            visible: !np.lyricsShown
             text: np.albumText
             color: Ui.white(Ui.npAlbum.alpha)
             font: Ui.font(Ui.npAlbum)
@@ -843,10 +1063,13 @@ Page {
         Item {
             id: artItem
 
+            readonly property string touchKind: np.hasLyrics && !np.lyricsShown ? "art" : ""
+
             x: np.artX
             y: np.artY
             width: np.artSide
             height: np.artSide
+            visible: !np.lyricsShown
             opacity: np.artOpacity
             transform: Scale {
                 origin.x: artItem.width * Motion.trackArtOriginX
@@ -898,7 +1121,7 @@ Page {
                 y: np.progressY
                 width: np.progressWidth
                 height: Ui.px(Ui.npProgressThick)
-                visible: np.progressShown
+                visible: np.progressShown && !np.lyricsShown
                 color: Ui.textLow
 
                 Rectangle {
@@ -915,7 +1138,7 @@ Page {
             Item {
                 id: seekBand
 
-                readonly property string touchKind: np.shownVariant || !np.progressShown ? "" : "seek"
+                readonly property string touchKind: np.shownVariant || !np.progressShown || np.lyricsShown ? "" : "seek"
                 readonly property bool touchTrack: true
 
                 x: np.artX - Ui.px(Ui.npSeekMargin)
@@ -929,7 +1152,7 @@ Page {
 
                 x: np.artX
                 y: np.timeBaseline - elapsedItem.baselineOffset
-                visible: np.progressShown
+                visible: np.progressShown && !np.lyricsShown
                 text: np.elapsedText
                 color: Ui.white(Ui.time.alpha)
                 font: Ui.font(Ui.time)
@@ -940,7 +1163,7 @@ Page {
 
                 x: np.artX + np.progressWidth - remainingItem.width
                 y: np.timeBaseline - remainingItem.baselineOffset
-                visible: np.progressShown
+                visible: np.progressShown && !np.lyricsShown
                 text: np.remainingText
                 color: Ui.white(Ui.time.alpha)
                 font: Ui.font(Ui.time)
@@ -952,7 +1175,7 @@ Page {
                 x: np.textX - Ui.px(Ui.focusBarOffset)
                 rowY: np.titleBaseline - Ui.px(Ui.capHeight * Ui.npTitle.size)
                 rowHeight: Ui.px(Ui.capHeight * Ui.npTitle.size)
-                visible: np.focusRow === 1
+                visible: np.focusRow === 1 && !np.lyricsShown
                 opacity: np.focusOpacity
                 animated: np.live
             }
@@ -960,7 +1183,7 @@ Page {
             Item {
                 id: titleBlock
 
-                readonly property string touchKind: "title"
+                readonly property string touchKind: np.lyricsShown ? "" : "title"
 
                 x: np.textX
                 y: np.titleBaseline - Ui.px(Ui.capHeight * Ui.npTitle.size)
@@ -973,6 +1196,7 @@ Page {
 
                 x: np.textX
                 y: np.titleBaseline - titleItem.baselineOffset
+                visible: !np.lyricsShown
                 text: np.titleText
                 color: Ui.white(Ui.npTitle.alpha)
                 font: Ui.font(Ui.npTitle)
@@ -992,7 +1216,7 @@ Page {
             Repeater {
                 id: nextRepeater
 
-                model: np.shownVariant ? [] : np.nextTitles
+                model: np.shownVariant || np.lyricsShown ? [] : np.nextTitles
 
                 Text {
                     id: nextText
@@ -1006,6 +1230,24 @@ Page {
                     color: Ui.white(Ui.npNext.alpha)
                     font: Ui.font(Ui.npNext)
                 }
+            }
+
+            LyricsColumn {
+                id: lyricsColumn
+
+                anchors.fill: parent
+                visible: np.lyricsShown
+                lines: np.lyricsMatch ? d.lines : []
+                plain: np.lyricsMatch ? d.plain : []
+                pending: np.lyricsPending
+                title: np.shown.title
+                next: np.nextTitles.length > 0 ? np.nextTitles[0] : ""
+                from: slideAnim.running ? d.slideFrom : d.lineShown
+                to: d.lineShown
+                p: slideAnim.running ? Motion.expOut6(d.slideT) : 1
+                textLeft: Ui.landscape ? Ui.npColumnRight : Ui.edge
+                textTop: np.lyricsTop
+                textBottom: np.lyricsBottom
             }
         }
 
@@ -1125,6 +1367,43 @@ Page {
     }
 
     SequentialAnimation {
+        id: lyricsFade
+
+        ParallelAnimation {
+            NumberAnimation {
+                target: np
+                property: "contentOpacity"
+                to: 0
+                duration: Motion.variantFade
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.decel
+            }
+            NumberAnimation {
+                target: np
+                property: "lyricsShade"
+                to: np.lyricsMode ? 1 : 0
+                duration: Motion.variantFade
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.decel
+            }
+        }
+        ScriptAction {
+            script: {
+                np.lyricsView = np.lyricsMode
+                np.enterLyrics()
+            }
+        }
+        NumberAnimation {
+            target: np
+            property: "contentOpacity"
+            to: 1
+            duration: Motion.variantFade
+            easing.type: Motion.bezier
+            easing.bezierCurve: Motion.decel
+        }
+    }
+
+    SequentialAnimation {
         id: variantIn
 
         ParallelAnimation {
@@ -1144,9 +1423,20 @@ Page {
                 duration: Motion.nowPlayingFade
                 easing.type: Motion.pop
             }
+            NumberAnimation {
+                target: np
+                property: "lyricsShade"
+                to: 0
+                duration: Motion.nowPlayingFade
+                easing.type: Motion.pop
+            }
         }
         ScriptAction {
-            script: np.shownVariant = true
+            script: {
+                np.shownVariant = true
+                np.lyricsView = false
+                np.enterLyrics()
+            }
         }
         ParallelAnimation {
             NumberAnimation {
