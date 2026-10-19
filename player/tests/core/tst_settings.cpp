@@ -651,6 +651,11 @@ void SettingsTest::rowTable()
     const SettingsRows::Row *scale = SettingsRows::find(QStringLiteral("scale"));
     QVERIFY(near(scale->min, Settings::minScale));
     QVERIFY(near(scale->max, Settings::maxScale));
+    const SettingsRows::Row *saverLyrics = SettingsRows::find(QStringLiteral("saverLyrics"));
+    QVERIFY(saverLyrics);
+    QCOMPARE(saverLyrics->pivot, QStringLiteral("display"));
+    QCOMPARE(saverLyrics->kind, QStringLiteral("flip"));
+    QCOMPARE(saverLyrics->setting, QStringLiteral("saverLyrics"));
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
 }
 

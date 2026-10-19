@@ -116,6 +116,7 @@ Page {
     readonly property string clockMode: page.settings !== null && page.settings.clock !== undefined ? String(page.settings.clock) : "24h"
     readonly property bool batteryPercent: page.settings !== null && page.settings.batteryPercent === true
     readonly property bool quickplay: page.settings === null || page.settings.quickplay !== false
+    readonly property bool saverLyrics: page.settings !== null && page.settings.saverLyrics === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
@@ -363,6 +364,8 @@ Page {
             return Ui.userScale.toFixed(1)
         case "saver":
             return page.minutes(page.saverSeconds)
+        case "saverLyrics":
+            return page.saverLyrics ? "on" : "off"
         case "clock":
             return page.clockMode
         case "batteryPercent":
@@ -849,6 +852,8 @@ Page {
             return page.savedScale
         case "saver":
             return page.saverSeconds
+        case "saverLyrics":
+            return page.saverLyrics
         case "clock":
             return page.clockMode
         case "batteryPercent":

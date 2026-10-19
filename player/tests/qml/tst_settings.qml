@@ -51,6 +51,7 @@ TestCase {
         property bool accentFromArt: false
         property real scale: 1.0
         property int saverSeconds: 30
+        property bool saverLyrics: false
         property bool overlayToasts: false
         property int screenOffSeconds: 300
         property int suspendMinutes: 10
@@ -261,14 +262,14 @@ TestCase {
     readonly property var expectedKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
+        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "codec", "level", "rate", "replaygain", "eq", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "scale", "saver", "clock", "batteryPercent", "quickplay", "toasts"],
+        ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "closePlayer", "about"]
     ]
@@ -304,6 +305,7 @@ TestCase {
         fakeSettings.accentFromArt = false
         fakeSettings.scale = 1.0
         fakeSettings.saverSeconds = 30
+        fakeSettings.saverLyrics = false
         fakeSettings.overlayToasts = false
         fakeSettings.screenOffSeconds = 300
         fakeSettings.suspendMinutes = 10
@@ -739,6 +741,20 @@ TestCase {
         compare(page.valueOpen, false)
         compare(fakeSettings.autoNowPlaying, true)
         compare(tc.rowOf(page, "autoNowPlaying").value, "on")
+    }
+
+    function test_saver_lyrics_row() {
+        const page = open()
+        verify(page.focusKey("saverLyrics"))
+        compare(tc.rowOf(page, "saverLyrics").spec.pivot, "display")
+        compare(tc.rowOf(page, "saverLyrics").value, "off")
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.saverLyrics, true)
+        compare(tc.rowOf(page, "saverLyrics").value, "on")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.saverLyrics, false)
+        compare(tc.rowOf(page, "saverLyrics").value, "off")
     }
 
     function test_clock_and_battery_percent_rows() {
