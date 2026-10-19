@@ -67,6 +67,7 @@ TestCase {
         property string outputLevel: "off"
         property string sampleRate: "auto"
         property string playThrough: "off"
+        property string replaygain: "off"
         property string resume: "position"
         property bool autoNowPlaying: false
         property string clock: "24h"
@@ -326,6 +327,7 @@ TestCase {
         fakeSettings.outputLevel = "off"
         fakeSettings.sampleRate = "auto"
         fakeSettings.playThrough = "off"
+        fakeSettings.replaygain = "off"
         fakeSettings.resume = "position"
         fakeSettings.autoNowPlaying = false
         fakeSettings.clock = "24h"
@@ -949,7 +951,7 @@ TestCase {
 
     function test_value_sheet_drafts_apply_only_on_a() {
         const page = open()
-        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "codec", "level", "rate", "crossfeed", "orientation", "scale", "boot"]) {
+        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "codec", "level", "rate", "replaygain", "crossfeed", "orientation", "scale", "boot"]) {
             verify(tc.rowOf(page, key).spec.draft, key)
             const before = String(page.currentOf(key))
             tc.sheetOpen(page, key)
@@ -986,11 +988,6 @@ TestCase {
         verify(router.dispatch("a", false))
         compare(page.aboutOpen, true)
         compare(page.editing, false)
-        for (const key of ["replaygain"]) {
-            tc.focusKey(page, key)
-            verify(router.dispatch("a", false))
-            compare(page.editing, false)
-        }
     }
 
     function test_output_no_jack() {
@@ -1296,13 +1293,14 @@ TestCase {
         compare(page.editing, false)
         compare(fakeSettings.sampleRate, "auto")
         compare(tc.rowOf(page, "replaygain").title, "replaygain")
-        compare(tc.rowOf(page, "replaygain").value, "off")
+        compare(tc.rowOf(page, "replaygain").value, "bit perfect")
         compare(tc.rowOf(page, "replaygain").readOnly, true)
         tc.focusKey(page, "replaygain")
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
-        compare(tc.rowOf(page, "replaygain").value, "off")
+        compare(page.valueOpen, false)
+        compare(fakeSettings.replaygain, "off")
         const item = tc.itemOf(page, "replaygain")
         compare(item.valueItem.font.pixelSize, Ui.fontPx(11))
         compare(item.valueItem.font.styleName, "Light")
@@ -1399,6 +1397,33 @@ TestCase {
         fakeSettings.balance = 6
         compare(page.editing, false)
         compare(fakeSettings.balance, 6)
+    }
+
+    function test_replaygain_row() {
+        const page = open()
+        compare(tc.keyIndex(page, "replaygain"), tc.keyIndex(page, "rate") + 1)
+        compare(tc.rowOf(page, "replaygain").value, "off")
+        compare(tc.rowOf(page, "replaygain").readOnly, false)
+        tc.sheetOpen(page, "replaygain")
+        compare(tc.items(page), JSON.stringify(["off", "track", "album"]))
+        compare(page.sheet.mark, 0)
+        compare(page.sheet.wrap, true)
+        verify(router.dispatch("up", false))
+        compare(tc.focused(page), "album")
+        compare(fakeSettings.replaygain, "off")
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.replaygain, "album")
+        compare(tc.rowOf(page, "replaygain").value, "album")
+        tc.sheetOpen(page, "replaygain")
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.replaygain, "album")
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "replaygain").value, "bit perfect")
+        compare(tc.rowOf(page, "replaygain").readOnly, true)
+        fakeMode.effective = false
+        compare(tc.rowOf(page, "replaygain").value, "album")
     }
 
     function test_crossfeed_row() {

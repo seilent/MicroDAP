@@ -2,6 +2,7 @@
 
 #include "OutputPorts.h"
 #include "Queue.h"
+#include "ReplayGain.h"
 
 #include <QList>
 #include <QMutex>
@@ -13,6 +14,7 @@
 
 #include <gst/gst.h>
 
+#include <atomic>
 #include <memory>
 #include <optional>
 
@@ -120,6 +122,7 @@ public:
     Q_INVOKABLE void toggleShuffle();
     Q_INVOKABLE void cycleRepeat();
     Q_INVOKABLE void rate();
+    void setReplayGain(const QString &mode);
 
 signals:
     void statusChanged();
@@ -155,7 +158,7 @@ private:
         QString target;
     };
 
-    QString nextPath();
+    QueueEntry nextEntry();
     static GstPadProbeReturn bitPerfectProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static void setStreamProperties(GstElement *element, const QString &text);
 
@@ -248,6 +251,7 @@ private:
     int m_removeTarget = -1;
     QMutex m_chainMutex;
     Chain m_chain;
+    std::atomic<ReplayGainMode> m_replayGain{ReplayGainMode::Off};
 };
 
 struct Admit

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "OutputPorts.h"
+#include "Queue.h"
 
+#include <QHash>
 #include <QList>
 #include <QMutex>
 #include <QString>
@@ -10,13 +12,15 @@
 
 #include <atomic>
 #include <functional>
+#include <optional>
 
 namespace microdap {
 
 class Deck
 {
 public:
-    using Next = std::function<QString()>;
+    using Next = std::function<QueueEntry()>;
+    using Gain = std::function<double(const QueueEntry &)>;
 
     Deck(PlayerPort::OutputChain chain, bool dsd);
     ~Deck();
@@ -30,7 +34,9 @@ public:
     static constexpr const char *switched = "microdap-deck-switched";
 
     void setNext(Next next);
-    void start(const QString &path);
+    void setGain(Gain gain);
+    void start(const QueueEntry &entry);
+    void regain();
     void close();
     void reap();
 
@@ -46,12 +52,23 @@ private:
         GstPad *pad = nullptr;
     };
 
-    bool append(const QString &path);
+    bool append(const QueueEntry &entry);
     void drop(const Item &item);
     static void padAdded(GstElement *decoder, GstPad *pad, gpointer data);
     static void drained(GstElement *decoder, gpointer data);
     static void activePad(GObject *join, GParamSpec *pspec, gpointer data);
     static GstPadProbeReturn capsProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    struct Start
+    {
+        Deck *deck = nullptr;
+        QueueEntry entry;
+        bool seen = false;
+    };
+
+    static QString streamOf(GstPadProbeInfo *info);
+    static GstPadProbeReturn itemProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    static GstPadProbeReturn gainProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    void applyGain(const QueueEntry &entry);
     void accept();
 
     GstElement *m_bin = nullptr;
@@ -68,6 +85,10 @@ private:
     QList<Item> m_items;
     bool m_open = false;
     Next m_next;
+    QMutex m_gainLock;
+    QHash<QString, QList<QueueEntry>> m_starts;
+    std::optional<QueueEntry> m_playing;
+    Gain m_gain;
 };
 
 class Tail

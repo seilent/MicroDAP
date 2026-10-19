@@ -45,6 +45,15 @@
       "label": "Auto now playing",
       "ui": {"order": 4}
     },
+    "microdap.replaygain": {
+      "type": "s",
+      "default": "off",
+      "enum": ["off", "track", "album"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "ReplayGain",
+      "ui": {"order": 5}
+    },
     "microdap.roots": {
       "type": "as",
       "default": [],

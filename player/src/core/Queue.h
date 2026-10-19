@@ -7,6 +7,8 @@
 #include <QString>
 #include <QVariantMap>
 
+#include <optional>
+
 namespace microdap {
 
 struct QueueEntry
@@ -18,6 +20,10 @@ struct QueueEntry
     QString album;
     QString artPath;
     qint64 durationMs = 0;
+    std::optional<double> trackGainDb;
+    std::optional<double> albumGainDb;
+    std::optional<double> trackPeak;
+    std::optional<double> albumPeak;
 
     QVariantMap toMap() const;
     static QueueEntry fromMap(const QVariantMap &map);

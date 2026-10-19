@@ -213,6 +213,8 @@ const QStringList &states()
         QStringLiteral("crossfeed-sheet"),
         QStringLiteral("crossfeed-speaker"),
         QStringLiteral("crossfeed-bit-perfect"),
+        QStringLiteral("replaygain-sheet"),
+        QStringLiteral("replaygain-bit-perfect"),
         QStringLiteral("kb-empty"),
         QStringLiteral("kb-long"),
         QStringLiteral("kb-petal"),

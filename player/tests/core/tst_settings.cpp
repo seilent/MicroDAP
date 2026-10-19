@@ -146,6 +146,12 @@ void SettingsTest::defaultsWithoutDaemon()
     QVERIFY(settings.quickplay());
     settings.setPlayThrough(QStringLiteral("genres"));
     QCOMPARE(settings.playThrough(), QStringLiteral("off"));
+    QCOMPARE(settings.replaygain(), QStringLiteral("off"));
+    settings.setReplaygain(QStringLiteral("loud"));
+    QCOMPARE(settings.replaygain(), QStringLiteral("off"));
+    settings.setReplaygain(QStringLiteral("album"));
+    QCOMPARE(settings.replaygain(), QStringLiteral("album"));
+    settings.setReplaygain(QStringLiteral("off"));
     settings.setResume(QStringLiteral("track"));
     QCOMPARE(settings.resume(), QStringLiteral("track"));
     settings.setResume(QStringLiteral("position"));
@@ -678,6 +684,12 @@ void SettingsTest::rowTable()
     QVERIFY(crossfeed && crossfeed->draft && !crossfeed->bounded);
     QCOMPARE(crossfeed->kind, QStringLiteral("sheet"));
     QCOMPARE(strings(crossfeed->values), Settings::crossfeedModes());
+    const SettingsRows::Row *replaygain = SettingsRows::find(QStringLiteral("replaygain"));
+    QVERIFY(replaygain && replaygain->draft && !replaygain->bounded);
+    QCOMPARE(replaygain->kind, QStringLiteral("sheet"));
+    QCOMPARE(replaygain->setting, QStringLiteral("replaygain"));
+    QCOMPARE(replaygain->readOnly, QStringLiteral("bitPerfect"));
+    QCOMPARE(strings(replaygain->values), Settings::replaygainModes());
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
 }
 

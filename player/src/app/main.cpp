@@ -308,6 +308,9 @@ int main(int argc, char *argv[])
     settings.setOutputSlot(eqControl->activeOutput());
     QObject::connect(eqControl.get(), &microdap::EqControl::activeOutputChanged, &settings,
                      [&settings, eq = eqControl.get()] { settings.setOutputSlot(eq->activeOutput()); });
+    player.setReplayGain(settings.replaygain());
+    QObject::connect(&settings, &microdap::Settings::replaygainChanged, &player,
+                     [&settings, &player] { player.setReplayGain(settings.replaygain()); });
     microdap::PlayThrough playThrough(player.queue(), &library, &albums);
     playThrough.setMode(settings.playThrough());
     playThrough.setRoots(settings.roots());

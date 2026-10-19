@@ -106,6 +106,8 @@ add_library(microdapcore STATIC
     src/core/PowerBridge.h
     src/core/Queue.cpp
     src/core/Queue.h
+    src/core/ReplayGain.cpp
+    src/core/ReplayGain.h
     src/core/RgbControl.cpp
     src/core/RgbControl.h
     src/core/Rotation.cpp

@@ -17,7 +17,6 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QSocketNotifier>
-#include <QSqlQuery>
 #include <QStandardPaths>
 
 #include <atomic>
@@ -38,7 +37,6 @@ constexpr int saveIntervalMs = 10000;
 constexpr int queueDelayMs = 1000;
 constexpr int pauseSaveDelayMs = 500;
 constexpr qint64 handoffWindowS = 60;
-constexpr int pathChunk = 500;
 
 std::atomic<int> signalFd{-1};
 
@@ -96,41 +94,6 @@ QList<int> parseOrder(const QJsonArray &array)
         order.append(value.toInt());
     }
     return order;
-}
-
-QHash<QString, QueueEntry> entriesByPath(const QSqlDatabase &db, const QStringList &paths)
-{
-    QHash<QString, QueueEntry> found;
-    const QStringList unique = QSet<QString>(paths.begin(), paths.end()).values();
-    for (qsizetype from = 0; from < unique.size(); from += pathChunk) {
-        const QStringList chunk = unique.mid(from, pathChunk);
-        QStringList marks;
-        marks.reserve(chunk.size());
-        for (qsizetype i = 0; i < chunk.size(); ++i)
-            marks.append(QStringLiteral("?"));
-        QSqlQuery query(db);
-        query.prepare(QStringLiteral("SELECT t.id, t.path, t.title, t.artist, a.title, "
-                                     "COALESCE(t.art_path, a.art_path), t.duration_ms "
-                                     "FROM tracks t JOIN albums a ON a.id = t.album_id "
-                                     "WHERE t.path IN (%1)")
-                          .arg(marks.join(QLatin1Char(','))));
-        for (const QString &path : chunk)
-            query.addBindValue(path);
-        if (!query.exec())
-            continue;
-        while (query.next()) {
-            QueueEntry entry;
-            entry.id = query.value(0).toLongLong();
-            entry.path = query.value(1).toString();
-            entry.title = query.value(2).toString();
-            entry.artist = query.value(3).toString();
-            entry.album = query.value(4).toString();
-            entry.artPath = query.value(5).toString();
-            entry.durationMs = query.value(6).toLongLong();
-            found.insert(entry.path, entry);
-        }
-    }
-    return found;
 }
 
 }
@@ -483,7 +446,7 @@ QList<QueueEntry> State::resolveEntries(const QList<qint64> &ids, const QStringL
             }
         }
         if (!missing.isEmpty()) {
-            const QHash<QString, QueueEntry> byPath = entriesByPath(library->database(), missing);
+            const QHash<QString, QueueEntry> byPath = library->entriesByPath(missing);
             for (qsizetype i = 0; i < n; ++i) {
                 if (found.at(i))
                     continue;

@@ -118,6 +118,7 @@ Page {
     readonly property int accentHue: page.settings !== null && page.settings.accentHue !== undefined ? Ui.hueOnGrid(Number(page.settings.accentHue)) : Ui.accentHueDefault
     readonly property bool accentFromArt: page.settings !== null && page.settings.accentFromArt === true
     readonly property string playThrough: page.settings !== null && page.settings.playThrough !== undefined ? String(page.settings.playThrough) : "off"
+    readonly property string replaygain: page.settings !== null && page.settings.replaygain !== undefined ? String(page.settings.replaygain) : "off"
     readonly property string resume: page.settings !== null && page.settings.resume !== undefined ? String(page.settings.resume) : "position"
     readonly property bool autoNowPlaying: page.settings !== null && page.settings.autoNowPlaying === true
     readonly property string clockMode: page.settings !== null && page.settings.clock !== undefined ? String(page.settings.clock) : "24h"
@@ -310,8 +311,8 @@ Page {
 
     function ruleOn(rule: string): bool {
         switch (rule) {
-        case "always":
-            return true
+        case "bitPerfect":
+            return page.levelEffective
         case "usbActive":
             return page.usbActive
         case "overlay":
@@ -375,7 +376,7 @@ Page {
         case "rate":
             return page.rateValue
         case "replaygain":
-            return "off"
+            return page.levelEffective ? "bit perfect" : page.replaygain
         case "eq":
             return page.eqValue
         case "pair":
@@ -901,6 +902,8 @@ Page {
             return page.accentHue
         case "accentArt":
             return page.accentFromArt
+        case "replaygain":
+            return page.replaygain
         case "playThrough":
             return page.playThrough
         case "resume":

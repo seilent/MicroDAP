@@ -56,6 +56,7 @@ const QString keyTouch = QStringLiteral("microdap.touch");
 const QString keyOutputLevel = QStringLiteral("microdap.output_level");
 const QString keySampleRate = QStringLiteral("microdap.sample_rate");
 const QString keyPlayThrough = QStringLiteral("microdap.play_through");
+const QString keyReplayGain = QStringLiteral("microdap.replaygain");
 const QString keyResume = QStringLiteral("microdap.resume");
 const QString keyAutoNowPlaying = QStringLiteral("microdap.auto_now_playing");
 const QString keyClock = QStringLiteral("microdap.clock");
@@ -89,6 +90,7 @@ constexpr Key keys[] = {
     {"microdap.output_level", QMetaType::QString, &Settings::outputLevelChanged},
     {"microdap.sample_rate", QMetaType::QString, &Settings::sampleRateChanged},
     {"microdap.play_through", QMetaType::QString, &Settings::playThroughChanged},
+    {"microdap.replaygain", QMetaType::QString, &Settings::replaygainChanged},
     {"microdap.resume", QMetaType::QString, &Settings::resumeChanged},
     {"microdap.auto_now_playing", QMetaType::Bool, &Settings::autoNowPlayingChanged},
     {"microdap.clock", QMetaType::QString, &Settings::clockChanged},
@@ -184,6 +186,7 @@ QVariantMap defaults()
         {keyOutputLevel, QStringLiteral("off")},
         {keySampleRate, QStringLiteral("auto")},
         {keyPlayThrough, QStringLiteral("off")},
+        {keyReplayGain, QStringLiteral("off")},
         {keyResume, QStringLiteral("position")},
         {keyAutoNowPlaying, false},
         {keyClock, QStringLiteral("24h")},
@@ -370,6 +373,11 @@ QString Settings::crossfeedKey(const QString &slot)
 QStringList Settings::playThroughModes()
 {
     return {QStringLiteral("off"), QStringLiteral("folders"), QStringLiteral("albums")};
+}
+
+QStringList Settings::replaygainModes()
+{
+    return {QStringLiteral("off"), QStringLiteral("track"), QStringLiteral("album")};
 }
 
 QStringList Settings::resumeModes()
@@ -964,6 +972,17 @@ void Settings::setPlayThrough(const QString &mode)
 {
     if (playThroughModes().contains(mode))
         store(keyPlayThrough, mode);
+}
+
+QString Settings::replaygain() const
+{
+    return pick(m_values.value(keyReplayGain).toString(), replaygainModes(), QStringLiteral("off"));
+}
+
+void Settings::setReplaygain(const QString &mode)
+{
+    if (replaygainModes().contains(mode))
+        store(keyReplayGain, mode);
 }
 
 QString Settings::resume() const

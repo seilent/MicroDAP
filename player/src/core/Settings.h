@@ -46,6 +46,7 @@ class Settings : public QObject
     Q_PROPERTY(QString outputLevel READ outputLevel WRITE setOutputLevel NOTIFY outputLevelChanged)
     Q_PROPERTY(QString sampleRate READ sampleRate WRITE setSampleRate NOTIFY sampleRateChanged)
     Q_PROPERTY(QString playThrough READ playThrough WRITE setPlayThrough NOTIFY playThroughChanged)
+    Q_PROPERTY(QString replaygain READ replaygain WRITE setReplaygain NOTIFY replaygainChanged)
     Q_PROPERTY(QString resume READ resume WRITE setResume NOTIFY resumeChanged)
     Q_PROPERTY(bool autoNowPlaying READ autoNowPlaying WRITE setAutoNowPlaying NOTIFY autoNowPlayingChanged)
     Q_PROPERTY(QString clock READ clock WRITE setClock NOTIFY clockChanged)
@@ -88,6 +89,7 @@ public:
     static QStringList outputLevels();
     static QStringList sampleRates();
     static QStringList playThroughModes();
+    static QStringList replaygainModes();
     static QStringList resumeModes();
     static QStringList clockModes();
     Q_INVOKABLE static QStringList defaultRoots();
@@ -161,6 +163,8 @@ public:
     void setSampleRate(const QString &rate);
     QString playThrough() const;
     void setPlayThrough(const QString &mode);
+    QString replaygain() const;
+    void setReplaygain(const QString &mode);
     QString resume() const;
     void setResume(const QString &mode);
     bool autoNowPlaying() const;
@@ -204,6 +208,7 @@ signals:
     void outputLevelChanged();
     void sampleRateChanged();
     void playThroughChanged();
+    void replaygainChanged();
     void resumeChanged();
     void autoNowPlayingChanged();
     void clockChanged();

@@ -6,6 +6,20 @@
 
 namespace microdap {
 
+namespace {
+
+QVariant optionalValue(const std::optional<double> &value)
+{
+    return value ? QVariant(*value) : QVariant();
+}
+
+std::optional<double> optionalOf(const QVariant &value)
+{
+    return value.isValid() && !value.isNull() ? std::optional<double>(value.toDouble()) : std::nullopt;
+}
+
+}
+
 QVariantMap QueueEntry::toMap() const
 {
     return {
@@ -16,6 +30,10 @@ QVariantMap QueueEntry::toMap() const
         {QStringLiteral("album"), album},
         {QStringLiteral("artPath"), artPath},
         {QStringLiteral("durationMs"), durationMs},
+        {QStringLiteral("trackGainDb"), optionalValue(trackGainDb)},
+        {QStringLiteral("albumGainDb"), optionalValue(albumGainDb)},
+        {QStringLiteral("trackPeak"), optionalValue(trackPeak)},
+        {QStringLiteral("albumPeak"), optionalValue(albumPeak)},
     };
 }
 
@@ -29,6 +47,10 @@ QueueEntry QueueEntry::fromMap(const QVariantMap &map)
     entry.album = map.value(QStringLiteral("album")).toString();
     entry.artPath = map.value(QStringLiteral("artPath")).toString();
     entry.durationMs = map.value(QStringLiteral("durationMs")).toLongLong();
+    entry.trackGainDb = optionalOf(map.value(QStringLiteral("trackGainDb")));
+    entry.albumGainDb = optionalOf(map.value(QStringLiteral("albumGainDb")));
+    entry.trackPeak = optionalOf(map.value(QStringLiteral("trackPeak")));
+    entry.albumPeak = optionalOf(map.value(QStringLiteral("albumPeak")));
     return entry;
 }
 

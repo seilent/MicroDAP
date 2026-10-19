@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QDebug>
 #include <QFile>
+#include <QString>
 
 #include <utility>
 
@@ -76,6 +77,11 @@ Deck::Deck(PlayerPort::OutputChain chain, bool dsd)
                           &Deck::capsProbe, this, nullptr);
         gst_object_unref(sink);
     }
+    if (m_volume) {
+        GstPad *sink = gst_element_get_static_pad(m_volume, "sink");
+        gst_pad_add_probe(sink, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Deck::gainProbe, this, nullptr);
+        gst_object_unref(sink);
+    }
     GstPad *src = gst_element_get_static_pad(m_cueProbe, "src");
     gst_element_add_pad(m_bin, gst_ghost_pad_new("src", src));
     gst_object_unref(src);
@@ -108,7 +114,13 @@ void Deck::setNext(Next next)
     m_next = std::move(next);
 }
 
-void Deck::start(const QString &path)
+void Deck::setGain(Gain gain)
+{
+    QMutexLocker lock(&m_gainLock);
+    m_gain = std::move(gain);
+}
+
+void Deck::start(const QueueEntry &entry)
 {
     QList<Item> items;
     {
@@ -118,8 +130,13 @@ void Deck::start(const QString &path)
     }
     for (const Item &item : std::as_const(items))
         drop(item);
+    {
+        QMutexLocker gainLock(&m_gainLock);
+        m_starts.clear();
+        m_playing.reset();
+    }
     QMutexLocker lock(&m_lock);
-    m_open = append(path);
+    m_open = append(entry);
     if (!m_open && m_bin) {
         GError *err = g_error_new_literal(GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_NOT_FOUND, "bad path");
         gst_element_post_message(m_bin, gst_message_new_error(GST_OBJECT(m_bin), err, nullptr));
@@ -155,10 +172,63 @@ void Deck::reap()
         drop(item);
 }
 
-bool Deck::append(const QString &path)
+void Deck::regain()
+{
+    QMutexLocker lock(&m_gainLock);
+    if (m_playing)
+        applyGain(*m_playing);
+}
+
+void Deck::applyGain(const QueueEntry &entry)
+{
+    if (m_volume)
+        g_object_set(m_volume, "volume", m_gain && !m_dsd ? m_gain(entry) : 1.0, nullptr);
+}
+
+QString Deck::streamOf(GstPadProbeInfo *info)
+{
+    GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+    if (GST_EVENT_TYPE(event) != GST_EVENT_STREAM_START)
+        return {};
+    const gchar *id = nullptr;
+    gst_event_parse_stream_start(event, &id);
+    return id ? QString::fromUtf8(id) : QStringLiteral("-");
+}
+
+GstPadProbeReturn Deck::itemProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    const QString id = streamOf(info);
+    if (id.isEmpty())
+        return GST_PAD_PROBE_OK;
+    auto *start = static_cast<Start *>(data);
+    QMutexLocker lock(&start->deck->m_gainLock);
+    if (!std::exchange(start->seen, true))
+        start->deck->m_starts[id].append(start->entry);
+    return GST_PAD_PROBE_OK;
+}
+
+GstPadProbeReturn Deck::gainProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    const QString id = streamOf(info);
+    if (id.isEmpty())
+        return GST_PAD_PROBE_OK;
+    auto *self = static_cast<Deck *>(data);
+    QMutexLocker lock(&self->m_gainLock);
+    const auto it = self->m_starts.find(id);
+    if (it == self->m_starts.end())
+        return GST_PAD_PROBE_OK;
+    self->m_playing = it->takeFirst();
+    if (it->isEmpty())
+        self->m_starts.erase(it);
+    self->applyGain(*self->m_playing);
+    return GST_PAD_PROBE_OK;
+}
+
+bool Deck::append(const QueueEntry &entry)
 {
     if (!m_bin)
         return false;
+    const QString &path = entry.path;
     gchar *uri = gst_filename_to_uri(QFile::encodeName(path).constData(), nullptr);
     if (!uri) {
         qWarning() << "microdap player: bad path" << path;
@@ -178,6 +248,9 @@ bool Deck::append(const QString &path)
     g_signal_connect_data(decoder, "pad-added", G_CALLBACK(&Deck::padAdded), gst_object_ref(pad),
                           [](gpointer data, GClosure *) { gst_object_unref(data); }, GConnectFlags(0));
     g_signal_connect(decoder, "drained", G_CALLBACK(&Deck::drained), this);
+    if (m_volume)
+        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, &Deck::itemProbe, new Start{this, entry},
+                          [](gpointer data) { delete static_cast<Start *>(data); });
     gst_bin_add(GST_BIN(m_bin), decoder);
     m_items.append({decoder, pad});
     gst_element_sync_state_with_parent(decoder);
@@ -199,9 +272,9 @@ void Deck::drained(GstElement *decoder, gpointer data)
     QMutexLocker lock(&self->m_lock);
     if (!self->m_open || !self->m_next || self->m_items.isEmpty() || self->m_items.constLast().decoder != decoder)
         return;
-    const QString path = self->m_next();
-    if (!path.isEmpty())
-        self->append(path);
+    const QueueEntry next = self->m_next();
+    if (!next.path.isEmpty())
+        self->append(next);
 }
 
 void Deck::activePad(GObject *, GParamSpec *, gpointer data)

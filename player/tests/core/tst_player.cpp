@@ -194,6 +194,8 @@ private slots:
     void gaplessPerChain();
     void gaplessRealTime();
     void cueProbeUntouched();
+    void replayGainPerTrack();
+    void replayGainWhilePaused();
     void dsdRoutes();
     void dsdBoundary();
     void deckMissing();
@@ -394,6 +396,65 @@ GstPadProbeReturn captureProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
 {
     static_cast<Capture *>(data)->add(GST_PAD_PROBE_INFO_BUFFER(info));
     return GST_PAD_PROBE_OK;
+}
+
+float peakOf(GstBuffer *buffer)
+{
+    GstMapInfo map;
+    if (!buffer || !gst_buffer_map(buffer, &map, GST_MAP_READ))
+        return 0.0f;
+    float peak = 0.0f;
+    const auto *samples = reinterpret_cast<const float *>(map.data);
+    for (gsize i = 0; i < map.size / sizeof(float); ++i)
+        peak = std::max(peak, std::abs(samples[i]));
+    gst_buffer_unmap(buffer, &map);
+    return peak;
+}
+
+struct Levels
+{
+    std::mutex lock;
+    std::vector<std::pair<int, float>> peaks;
+    int item = -1;
+
+    void add(int at, float peak)
+    {
+        std::lock_guard guard(lock);
+        peaks.emplace_back(at, peak);
+    }
+};
+
+GstPadProbeReturn levelProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    auto *levels = static_cast<Levels *>(data);
+    if (GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+        if (GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) == GST_EVENT_STREAM_START) {
+            std::lock_guard guard(levels->lock);
+            ++levels->item;
+        }
+        return GST_PAD_PROBE_OK;
+    }
+    const float peak = peakOf(GST_PAD_PROBE_INFO_BUFFER(info));
+    std::lock_guard guard(levels->lock);
+    levels->peaks.emplace_back(levels->item, peak);
+    return GST_PAD_PROBE_OK;
+}
+
+GstElement *deckVolume(Player &player)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    GstElement *volume = gst_bin_get_by_name(GST_BIN(top), "volume");
+    gst_object_unref(top);
+    if (volume)
+        gst_object_unref(volume);
+    return volume;
+}
+
+double volumeOf(GstElement *volume)
+{
+    gdouble value = 0;
+    g_object_get(volume, "volume", &value, nullptr);
+    return value;
 }
 
 QStringList factories(GstElement *bin, bool recurse)
@@ -2578,6 +2639,95 @@ void PlayerTest::cueProbeUntouched()
         if (chain == Chain::Ex)
             QVERIFY(sunk > 20);
     }
+}
+
+void PlayerTest::replayGainPerTrack()
+{
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-rg sync=false max-buffers=1"));
+    player->setReplayGain(QStringLiteral("track"));
+    QList<QueueEntry> entries = m_tracks.mid(0, 2);
+    entries[0].trackGainDb = -6.0;
+    entries[0].trackPeak = 1.0;
+    entries[1].trackGainDb = 6.0;
+    entries[1].trackPeak = 0.25;
+    entries[1].albumGainDb = -9.0;
+    const double first = std::pow(10.0, -6.0 / 20.0);
+    const double second = std::pow(10.0, 6.0 / 20.0);
+
+    GstElement *volume = deckVolume(*player);
+    QVERIFY(volume);
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-rg");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    Levels in;
+    std::vector<float> out;
+    std::mutex outLock;
+    GstPad *volumeSink = gst_element_get_static_pad(volume, "sink");
+    const gulong probe = gst_pad_add_probe(
+        volumeSink, static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM),
+        levelProbe, &in, nullptr);
+    std::jthread puller([&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            GstSample *sample = nullptr;
+            g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(200 * GST_MSECOND), &sample);
+            if (!sample)
+                continue;
+            const float peak = peakOf(gst_sample_get_buffer(sample));
+            gst_sample_unref(sample);
+            std::lock_guard guard(outLock);
+            out.push_back(peak);
+        }
+    });
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    player->play(entries, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    puller.request_stop();
+    puller.join();
+    gst_pad_remove_probe(volumeSink, probe);
+    gst_object_unref(volumeSink);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+
+    QCOMPARE(out.size(), in.peaks.size());
+    int seen[2] = {0, 0};
+    double gain[2] = {0, 0};
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const auto [item, peak] = in.peaks.at(i);
+        QVERIFY(item == 0 || item == 1);
+        if (peak < 0.01f)
+            continue;
+        const double ratio = out.at(i) / peak;
+        if (seen[item]++ == 0)
+            gain[item] = ratio;
+        QVERIFY2(std::abs(ratio - (item == 0 ? first : second)) < 1e-4, qPrintable(QString::number(ratio)));
+    }
+    QVERIFY(seen[0] > 10 && seen[1] > 10);
+    QVERIFY(std::abs(gain[0] - first) < 1e-4);
+    QVERIFY(std::abs(gain[1] - second) < 1e-4);
+}
+
+void PlayerTest::replayGainWhilePaused()
+{
+    QueueEntry entry = m_long;
+    entry.trackGainDb = -6.0;
+    entry.albumGainDb = -3.0;
+    entry.albumPeak = 0.5;
+    auto player = syncPlayer();
+    player->setReplayGain(QStringLiteral("album"));
+    player->restore({entry}, 0, 0);
+    QVERIFY(prerolled(*player));
+    GstElement *volume = deckVolume(*player);
+    QVERIFY(volume);
+    QVERIFY(std::abs(volumeOf(volume) - std::pow(10.0, -3.0 / 20.0)) < 1e-6);
+    player->setReplayGain(QStringLiteral("track"));
+    QVERIFY(std::abs(volumeOf(volume) - std::pow(10.0, -6.0 / 20.0)) < 1e-6);
+    player->setReplayGain(QStringLiteral("off"));
+    QCOMPARE(volumeOf(volume), 1.0);
+    player->resume();
+    QVERIFY(reachesPlaying(*player));
+    player->setReplayGain(QStringLiteral("track"));
+    QCOMPARE(volumeOf(volume), 1.0);
+    player->stop();
 }
 
 void PlayerTest::dsdRoutes()

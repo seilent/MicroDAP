@@ -73,6 +73,7 @@ public:
     Q_INVOKABLE QVariantList trackRows(const QVariantList &trackIds) const;
     QList<QueueEntry> queueEntries(const QVariantList &trackIds) const;
     QList<QueueEntry> entriesFor(const QString &kind, qint64 id) const;
+    QHash<QString, QueueEntry> entriesByPath(const QStringList &paths) const;
     Q_INVOKABLE bool pin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;

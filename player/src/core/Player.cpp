@@ -390,7 +390,8 @@ bool Player::configure(OutputChain chain, bool dsd)
     }
     gst_bin_add_many(GST_BIN(m_pipeline), m_deck->element(), m_tail->element(), nullptr);
     gst_element_link(m_deck->element(), m_tail->element());
-    m_deck->setNext([this] { return nextPath(); });
+    m_deck->setNext([this] { return nextEntry(); });
+    m_deck->setGain([this](const QueueEntry &entry) { return replayGainFactor(entry, m_replayGain.load()); });
     return true;
 }
 
@@ -666,7 +667,7 @@ void Player::onTransportActiveChanged()
     setTransportActive(m_bluez && m_bluez->transportActive());
 }
 
-QString Player::nextPath()
+QueueEntry Player::nextEntry()
 {
     QMutexLocker lock(&m_chainMutex);
     Chain &chain = m_chain;
@@ -674,15 +675,15 @@ QString Player::nextPath()
                                    chain.shuffle, chain.repeat, false);
     if (next < 0 || next >= chain.entries.size())
         return {};
-    const QString path = chain.entries.at(next).path;
+    const QueueEntry &entry = chain.entries.at(next);
     if (chain.last >= 0 && chain.last < chain.entries.size()
-        && isDsd(path) != isDsd(chain.entries.at(chain.last).path)) {
+        && isDsd(entry.path) != isDsd(chain.entries.at(chain.last).path)) {
         chain.held = true;
         return {};
     }
     chain.last = next;
     chain.pending.append(next);
-    return path;
+    return entry;
 }
 
 void Player::syncChain()
@@ -891,7 +892,7 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
         target = GST_STATE_PAUSED;
     m_historyCounted = true;
     setPosition(0);
-    m_deck->start(pending.entry.path);
+    m_deck->start(pending.entry);
     m_playAfterSeek = target == GST_STATE_PLAYING && pending.positionMs > 0;
     gst_element_set_state(m_pipeline, m_playAfterSeek ? GST_STATE_PAUSED : target);
     setStatus(target == GST_STATE_PLAYING ? Playing : Paused);
@@ -1149,6 +1150,15 @@ void Player::seek(qint64 ms)
         return;
     }
     doSeek(target);
+}
+
+void Player::setReplayGain(const QString &mode)
+{
+    const ReplayGainMode wanted = replayGainMode(mode);
+    if (m_replayGain.exchange(wanted) == wanted)
+        return;
+    if (m_status == Paused && m_deck)
+        m_deck->regain();
 }
 
 void Player::toggleShuffle()

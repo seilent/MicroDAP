@@ -105,6 +105,8 @@
 | settings | `crossfeed-sheet` | `--size 640x960` and `960x640` | CROSSFEED sheet OFF, DEFAULT, CHU MOY, JAN MEIER marked in the accent | 2026-10-20 |
 | settings | `crossfeed-speaker` | `--size 640x960` and `960x640` | CROSSFEED HEADPHONES ONLY on the speaker, BALANCE editable | 2026-10-20 |
 | settings | `crossfeed-bit-perfect` | `--size 640x960` and `960x640` | BALANCE and CROSSFEED values with `(NOT ON BIT PERFECT)`, clear of the titles | 2026-10-20 |
+| settings | `replaygain-sheet` | `--size 640x960` and `960x640` | REPLAYGAIN sheet OFF, TRACK, ALBUM, ALBUM marked in the accent, focus on OFF | 2026-10-20 |
+| settings | `replaygain-bit-perfect` | `--size 640x960` and `960x640` | REPLAYGAIN reads BIT PERFECT, read only, while bit perfect is in effect | 2026-10-20 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

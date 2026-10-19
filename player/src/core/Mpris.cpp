@@ -6,7 +6,6 @@
 #include <QDBusMessage>
 #include <QDebug>
 #include <QFileInfo>
-#include <QSqlQuery>
 #include <QUrl>
 
 namespace microdap {
@@ -423,28 +422,19 @@ void Mpris::openUri(const QString &uri)
 
 QueueEntry Mpris::entryForPath(const QString &path) const
 {
+    Library *library = m_player->library();
+    if (library && library->isOpen()) {
+        const QHash<QString, QueueEntry> found = library->entriesByPath({path});
+        if (const auto hit = found.constFind(path); hit != found.cend()) {
+            QueueEntry entry = *hit;
+            if (entry.title.isEmpty())
+                entry.title = QFileInfo(path).completeBaseName();
+            return entry;
+        }
+    }
     QueueEntry entry;
     entry.path = path;
     entry.title = QFileInfo(path).completeBaseName();
-
-    Library *library = m_player->library();
-    if (!library || !library->isOpen())
-        return entry;
-    QSqlQuery query(library->database());
-    query.prepare(QStringLiteral(
-        "SELECT t.id, t.title, t.artist, a.title, COALESCE(t.art_path, a.art_path), t.duration_ms "
-        "FROM tracks t LEFT JOIN albums a ON a.id = t.album_id WHERE t.path = ?"));
-    query.addBindValue(path);
-    if (!query.exec() || !query.next())
-        return entry;
-    entry.id = query.value(0).toLongLong();
-    const QString title = query.value(1).toString();
-    if (!title.isEmpty())
-        entry.title = title;
-    entry.artist = query.value(2).toString();
-    entry.album = query.value(3).toString();
-    entry.artPath = query.value(4).toString();
-    entry.durationMs = query.value(5).toLongLong();
     return entry;
 }
 

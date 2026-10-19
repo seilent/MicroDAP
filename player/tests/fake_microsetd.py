@@ -44,6 +44,7 @@ KEYS = {
     'microdap.output_level': ('s', 'off', {}),
     'microdap.sample_rate': ('s', 'auto', {}),
     'microdap.play_through': ('s', 'off', {'enum': ['off', 'folders', 'albums']}),
+    'microdap.replaygain': ('s', 'off', {'enum': ['off', 'track', 'album']}),
     'microdap.resume': ('s', 'position', {'enum': ['off', 'track', 'position']}),
     'microdap.auto_now_playing': ('b', False, {}),
     'microdap.clock': ('s', '24h', {'enum': ['24h', '12h', 'off']}),

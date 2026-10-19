@@ -10,15 +10,17 @@ Item {
 
     readonly property bool levelShot: root.fixture.startsWith("bit-perfect")
     readonly property bool chainShot: root.fixture.startsWith("balance") || root.fixture.startsWith("crossfeed")
+    readonly property bool replaygainShot: root.fixture.startsWith("replaygain")
+    readonly property bool chainBitPerfect: root.fixture === "crossfeed-bit-perfect" || root.fixture === "replaygain-bit-perfect"
     readonly property bool rateShot: root.fixture.startsWith("sample-rate")
     readonly property bool dacShot: root.fixture.startsWith("eq-dac")
     readonly property bool bootShot: root.fixture.startsWith("boot")
     readonly property bool aboutShot: root.fixture.startsWith("about")
-    readonly property bool usbShot: (root.levelShot || root.rateShot || root.dacShot || root.fixture === "crossfeed-bit-perfect")
+    readonly property bool usbShot: (root.levelShot || root.rateShot || root.dacShot || root.chainBitPerfect)
         && root.fixture !== "bit-perfect-usb-only"
     readonly property string levelShown: root.fixture === "bit-perfect-phone" ? "exclusive (phone)"
         : root.fixture === "bit-perfect-unavailable" ? "exclusive (unavailable)"
-        : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" || root.fixture === "crossfeed-bit-perfect" ? "on" : "off"
+        : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" || root.chainBitPerfect ? "on" : "off"
 
     Rectangle {
         anchors.fill: parent
@@ -30,6 +32,15 @@ Item {
             screen.focusKey(root.fixture.startsWith("max-volume") ? "maxVolume" : "powerOnVolume")
             screen.keepFocusVisible()
             if (root.fixture.endsWith("-sheet")) {
+                screen.activate()
+                screen.sheet.handleAction("down", false)
+            }
+            return
+        }
+        if (root.replaygainShot) {
+            screen.focusKey("replaygain")
+            screen.keepFocusVisible()
+            if (root.fixture === "replaygain-sheet") {
                 screen.activate()
                 screen.sheet.handleAction("down", false)
             }
@@ -141,9 +152,10 @@ Item {
         property bool autoRotate: root.fixture === "auto-rotate" || root.fixture === "auto-rotate-below"
         property bool touch: true
         property string outputLevel: root.fixture === "bit-perfect-phone" || root.fixture === "bit-perfect-unavailable" ? "exclusive"
-            : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" || root.fixture === "crossfeed-bit-perfect" ? "bitperfect" : "off"
+            : root.levelShot || root.dacShot || root.fixture === "sample-rate-locked" || root.chainBitPerfect ? "bitperfect" : "off"
         property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
         property string playThrough: root.fixture === "play-through" ? "albums" : "off"
+        property string replaygain: root.replaygainShot ? "album" : "off"
         property string resume: "position"
         property bool autoNowPlaying: root.fixture === "play-through"
         property string bootSession: root.fixture === "boot-missing" ? "handheld-desktop-session" : "steam"

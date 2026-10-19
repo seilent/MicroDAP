@@ -192,7 +192,8 @@ const char *const pruneGenres[] = {
 };
 
 constexpr const char *entryColumns =
-    "SELECT t.id, t.path, t.title, t.artist, a.title, COALESCE(t.art_path, a.art_path), t.duration_ms";
+    "SELECT t.id, t.path, t.title, t.artist, a.title, COALESCE(t.art_path, a.art_path), t.duration_ms, "
+    "t.rg_track_gain, t.rg_album_gain, t.rg_track_peak, t.rg_album_peak";
 
 constexpr const char *rowColumns =
     "SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms, t.sample_rate, t.bit_depth";
@@ -221,6 +222,11 @@ QList<qint64> distinctIds(const QVariantList &ids)
     return out;
 }
 
+std::optional<double> optionalOf(const QVariant &value)
+{
+    return value.isNull() ? std::nullopt : std::optional<double>(value.toDouble());
+}
+
 QueueEntry entryOf(const QSqlQuery &query)
 {
     QueueEntry entry;
@@ -231,6 +237,10 @@ QueueEntry entryOf(const QSqlQuery &query)
     entry.album = query.value(4).toString();
     entry.artPath = query.value(5).toString();
     entry.durationMs = query.value(6).toLongLong();
+    entry.trackGainDb = optionalOf(query.value(7));
+    entry.albumGainDb = optionalOf(query.value(8));
+    entry.trackPeak = optionalOf(query.value(9));
+    entry.albumPeak = optionalOf(query.value(10));
     return entry;
 }
 
@@ -1938,6 +1948,29 @@ QList<QueueEntry> Library::queueEntries(const QVariantList &trackIds) const
             entries.append(*hit);
     }
     return entries;
+}
+
+QHash<QString, QueueEntry> Library::entriesByPath(const QStringList &paths) const
+{
+    QHash<QString, QueueEntry> found;
+    const QStringList unique = QSet<QString>(paths.begin(), paths.end()).values();
+    QSqlQuery query(m_db);
+    for (qsizetype from = 0; from < unique.size(); from += idChunk) {
+        const qsizetype size = qMin<qsizetype>(idChunk, unique.size() - from);
+        query.prepare(QString::fromLatin1(entryColumns)
+                      + QStringLiteral(" FROM tracks t JOIN albums a ON a.id = t.album_id WHERE t.path IN (%1)")
+                            .arg(placeholders(size)));
+        for (qsizetype i = 0; i < size; ++i)
+            query.bindValue(static_cast<int>(i), unique.at(from + i));
+        if (!query.exec())
+            continue;
+        while (query.next()) {
+            const QueueEntry entry = entryOf(query);
+            found.insert(entry.path, entry);
+        }
+        query.finish();
+    }
+    return found;
 }
 
 QList<QueueEntry> Library::entryRows(const QString &sql, const QVariantList &binds) const

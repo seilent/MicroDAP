@@ -201,6 +201,11 @@ target_link_libraries(tst_biquad PRIVATE microdapcore Qt6::Test)
 add_test(NAME biquad COMMAND tst_biquad)
 microdap_test_env(biquad)
 
+qt_add_executable(tst_replaygain core/tst_replaygain.cpp)
+target_link_libraries(tst_replaygain PRIVATE microdapcore Qt6::Test)
+add_test(NAME replaygain COMMAND tst_replaygain)
+microdap_test_env(replaygain)
+
 qt_add_executable(tst_fiio core/tst_fiio.cpp)
 target_link_libraries(tst_fiio PRIVATE microdapcore Qt6::Test)
 add_test(NAME fiio COMMAND tst_fiio)

@@ -148,9 +148,8 @@ QList<Row> build()
                       words({"auto", "44100", "48000", "88200", "96000", "176400", "192000"}));
     out.push_back(readOnly(draft(rate, "chain reconfigure"), "rate"));
 
-    Row replaygain = row("output", "replaygain", "replaygain", "info", "sheet", "");
-    link(replaygain, "replaygain");
-    out.push_back(readOnly(draft(replaygain, "can raise the level"), "always"));
+    Row replaygain = choice("output", "replaygain", "replaygain", "replaygain", words({"off", "track", "album"}));
+    out.push_back(readOnly(draft(replaygain, "off plays louder than track or album"), "bitPerfect"));
 
     out.push_back(action("output", "eq", "eq", "eq"));
 
