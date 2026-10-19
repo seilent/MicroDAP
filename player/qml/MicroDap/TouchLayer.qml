@@ -305,7 +305,7 @@ Item {
         if (layer.owner !== null) {
             const x = layer.localIn(found.hit, p).x
             layer.action = String(layer.owner.touchPress(layer.kind, layer.hitIndex, x, found.hit))
-            if (found.hit.touchTrack === true && typeof layer.owner.touchMove === "function") {
+            if (layer.action === "" && found.hit.touchTrack === true && typeof layer.owner.touchMove === "function") {
                 layer.tracking = true
                 layer.frame = found.hit
             }

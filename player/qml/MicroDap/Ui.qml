@@ -341,6 +341,8 @@ QtObject {
     readonly property real npProgressGapLandscape: 8
     readonly property real npProgressY: ui.canvasH - 156
     readonly property real npProgressThick: 2
+    readonly property real npSeekMargin: 8
+    readonly property real npSeekBandH: ui.npTitleY - ui.capHeight * ui.npTitle.size - ui.npProgressY
     readonly property real npTimeDrop: 14
     readonly property real npTitleY: ui.canvasH - 118
     readonly property real npNextIndent: 40

@@ -24,6 +24,7 @@ Page {
     property var pending: null
     property var nextTitles: []
     property real shownPosition: 0
+    property real seekTo: -1
     property string elapsedText: "0:00"
     property string remainingText: ""
 
@@ -51,7 +52,7 @@ Page {
     readonly property string countText: np.trackNumber > 0 && np.numberOfTracks > 0 ? np.trackNumber + " of " + np.numberOfTracks : ""
     readonly property real position: np.shownVariant
         ? (np.bluez.positionMs !== undefined ? np.bluez.positionMs : 0)
-        : np.shownPosition
+        : np.seekTo >= 0 ? np.seekTo : np.shownPosition
     readonly property real duration: np.shownVariant
         ? (np.bluez.durationMs !== undefined ? np.bluez.durationMs : 0)
         : (np.player !== null && np.player.duration !== undefined ? np.player.duration : 0)
@@ -116,6 +117,7 @@ Page {
     property alias albumItem: albumItem
     property alias progressItem: progressItem
     property alias progressFill: progressFill
+    property alias seekBand: seekBand
     property alias elapsedItem: elapsedItem
     property alias remainingItem: remainingItem
     property alias titleItem: titleItem
@@ -415,9 +417,49 @@ Page {
             return "a"
         case "back":
             return "b"
+        case "seek":
+            if (np.shownVariant || np.duration <= 0)
+                return ""
+            d.seekX = x
+            np.seekAt(x)
+            if (np.live)
+                idleTimer.restart()
+            return ""
         default:
             return ""
         }
+    }
+
+    function seekAt(x: real): void {
+        const f = Math.max(0, Math.min(1, (x - Ui.px(Ui.npSeekMargin)) / np.progressWidth))
+        np.seekTo = Math.max(0, Math.min(np.duration - Ui.seekEndMarginMs, f * np.duration))
+        np.updateTimes()
+    }
+
+    function touchMove(kind: string, index: int, dx: real, dy: real, hit: Item): void {
+        if (kind !== "seek" || np.seekTo < 0)
+            return
+        np.seekAt(d.seekX + dx)
+        if (np.live)
+            idleTimer.restart()
+    }
+
+    function touchLift(kind: string, index: int, dx: real, dy: real, hit: Item): void {
+        if (kind !== "seek" || np.seekTo < 0)
+            return
+        np.seekAt(d.seekX + dx)
+        const target = np.seekTo
+        np.callPlayer("seek", target)
+        np.shownPosition = target
+        np.seekTo = -1
+        np.updateTimes()
+        if (np.live)
+            idleTimer.restart()
+    }
+
+    function touchCancel(kind: string, index: int, hit: Item): void {
+        np.seekTo = -1
+        np.updateTimes()
     }
 
     function completeAll() {
@@ -550,6 +592,7 @@ Page {
 
         property bool ready: false
         property int seekDir: 0
+        property real seekX: 0
         property bool seekHeld: false
         property real seekPos: 0
     }
@@ -841,6 +884,18 @@ Page {
                     height: progressItem.height
                     color: Ui.accent
                 }
+            }
+
+            Item {
+                id: seekBand
+
+                readonly property string touchKind: np.shownVariant || !np.progressShown ? "" : "seek"
+                readonly property bool touchTrack: true
+
+                x: np.artX - Ui.px(Ui.npSeekMargin)
+                y: np.progressY
+                width: np.progressWidth + 2 * Ui.px(Ui.npSeekMargin)
+                height: Ui.px(Ui.npSeekBandH)
             }
 
             Text {

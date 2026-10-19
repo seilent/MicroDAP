@@ -184,6 +184,7 @@ const QStringList &states()
         QStringLiteral("power-none"),
         QStringLiteral("power-long"),
         QStringLiteral("tracknum"),
+        QStringLiteral("seek"),
         QStringLiteral("play-through"),
         QStringLiteral("play-through-sheet"),
         QStringLiteral("resume-sheet"),

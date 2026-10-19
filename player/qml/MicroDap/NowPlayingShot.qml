@@ -62,6 +62,8 @@ Item {
         Component.onCompleted: {
             screen.completeAll()
             screen.pressed = root.fixture === "pressed"
+            if (root.fixture === "seek")
+                screen.seekAt(Ui.px(Ui.npSeekMargin) + screen.progressWidth * 0.6)
         }
     }
 }

@@ -873,6 +873,75 @@ TestCase {
         compare(fakeBluez.shuffle, "alltracks")
     }
 
+    function test_touch_seek_band() {
+        const page = open()
+        const band = page.seekBand
+        const line = page.progressItem
+        const m = Ui.px(Ui.npSeekMargin)
+        compare(band.x, line.x - m)
+        compare(band.width, line.width + 2 * m)
+        compare(band.y, line.y)
+        fuzzyCompare(band.height, Ui.px(19.8), 0.01)
+        const y = band.height / 2
+        mousePress(band, m + line.width / 2, y)
+        compare(page.seekTo, 120000)
+        compare(page.progressFill.width, line.width / 2)
+        compare(page.elapsedItem.text, "2:00")
+        mouseMove(band, m + line.width * 3 / 4, y)
+        compare(page.seekTo, 180000)
+        mouseMove(band, m + line.width * 3 / 4, y + Ui.px(200))
+        compare(page.seekTo, 180000)
+        mouseMove(band, -Ui.px(40), y + Ui.px(200))
+        compare(page.seekTo, 0)
+        mouseMove(band, m + line.width / 4, y)
+        compare(fakePlayer.calls, [])
+        mouseRelease(band, m + line.width / 4, y)
+        wait(0)
+        wait(0)
+        compare(fakePlayer.calls, ["seek 60000"])
+        compare(page.seekTo, -1)
+        mousePress(band, band.width - 1, y)
+        compare(page.seekTo, 240000 - Ui.seekEndMarginMs)
+        mouseRelease(band, band.width - 1, y)
+        wait(0)
+        wait(0)
+        compare(fakePlayer.calls, ["seek 60000", "seek " + (240000 - Ui.seekEndMarginMs)])
+    }
+
+    function test_touch_seek_band_idle_wakes() {
+        const page = open({ animated: true })
+        page.idle = true
+        const band = page.seekBand
+        mousePress(band, band.width / 2, band.height / 2)
+        mouseRelease(band, band.width / 2, band.height / 2)
+        wait(0)
+        wait(0)
+        wait(Motion.touchReturnDelay + 50)
+        compare(page.idle, false)
+        compare(page.pressed, false)
+        compare(page.seekTo, -1)
+        compare(fakePlayer.calls.filter((c) => c.startsWith("seek")), [])
+    }
+
+    function test_touch_seek_drag_keeps_awake() {
+        const page = open({ animated: true })
+        const band = page.seekBand
+        const m = Ui.px(Ui.npSeekMargin)
+        const y = band.height / 2
+        mousePress(band, m, y)
+        const steps = 6
+        for (let i = 1; i <= steps; i++) {
+            wait(Motion.idle / 4)
+            mouseMove(band, m + page.progressItem.width * i / (steps * 2), y)
+        }
+        compare(page.idle, false)
+        mouseRelease(band, m + page.progressItem.width / 2, y)
+        wait(0)
+        wait(0)
+        compare(page.idle, false)
+        compare(page.idleTimer.running, true)
+    }
+
     function test_touch_title_opens_queue() {
         const page = open()
         tc.tapAt(page.titleItem)
