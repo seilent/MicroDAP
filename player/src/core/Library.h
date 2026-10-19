@@ -89,6 +89,14 @@ public:
 
     PlaylistStore &playlistStore();
     PlaylistStore::Edit editPlaylist(const QString &path, const PlaylistStore::Change &change);
+    Q_INVOKABLE QVariantList sourceTracks(const QString &kind, qint64 id) const;
+    Q_INVOKABLE QVariantList editablePlaylists() const;
+    Q_INVOKABLE bool editable(qint64 playlistId) const;
+    Q_INVOKABLE QString addToPlaylist(qint64 playlistId, const QVariantList &trackIds);
+    Q_INVOKABLE QVariantMap createPlaylist(const QVariantList &trackIds);
+    Q_INVOKABLE QString deletePlaylist(qint64 playlistId);
+    QString newPlaylistPath() const;
+    static bool onAbsentCard(const QString &path);
 
     QHash<QString, FileStamp> snapshot() const;
     QHash<QString, FileStamp> playlistStamps() const;
@@ -119,6 +127,7 @@ private:
     bool applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed);
     QString playlistRoot(const QString &dir) const;
     int removePlaylists(const QStringList &sources);
+    QString appendTracks(const QString &path, const QString &name, const QVariantList &trackIds);
     QVariantList songOrder(const QString &where, const QVariantList &binds) const;
     QList<QueueEntry> entryRows(const QString &sql, const QVariantList &binds) const;
     QVariantList trackRowsWhere(const QString &sql, qint64 bind) const;

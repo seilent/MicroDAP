@@ -65,6 +65,7 @@ Page {
 
     signal openQueue()
     signal sheetAction(string action, string kind, int id)
+    signal playlistPicked(int index)
     signal listPlayed(int count)
 
     list: trackList
@@ -153,7 +154,7 @@ Page {
     }
 
     function sheetItemsFor(kind: string, id: int): var {
-        return ["play", "play next", "add to queue", page.pinLabel(kind, id)]
+        return ["play", "play next", "add to queue", "add to playlist", page.pinLabel(kind, id)]
     }
 
     function touchContext(kind: string, index: int, hit: Item): bool {
@@ -481,8 +482,14 @@ Page {
         anchors.fill: parent
         screenOff: !page.live
         onAccepted: (index) => {
+            if (sheet.depth > 0) {
+                page.playlistPicked(index)
+                sheet.close()
+                return
+            }
             page.runSheet(index)
-            sheet.close()
+            if (sheet.depth === 0)
+                sheet.close()
         }
     }
 }

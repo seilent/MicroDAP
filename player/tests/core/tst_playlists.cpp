@@ -146,6 +146,10 @@ private slots:
     void favoritesRetry();
     void favoritesNotScanned();
     void favoritesFallback();
+    void favoritesAdd();
+    void playlistCreate();
+    void playlistAppendDelete();
+    void playlistCardAbsent();
 };
 
 namespace {
@@ -774,6 +778,121 @@ void PlaylistsTest::favoritesFallback()
     QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("removed from favorites"));
     QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n"));
     QCOMPARE(favorites.count(), 1);
+}
+
+void PlaylistsTest::favoritesAdd()
+{
+    Rig rig;
+    QVERIFY(rig.scan());
+    Favorites favorites(rig.library.get());
+    const qint64 one = rig.id(rig.cardTrack(0));
+    const qint64 two = rig.id(rig.cardTrack(1));
+    const qint64 single = rig.id(rig.single());
+    QCOMPARE(favorites.add({one, two, single}), QString());
+    QCOMPARE(readBytes(rig.cardFile()),
+             QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n../Music/Album One/02 Two.flac\n"));
+    QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n../Single/01 Single.mp3\n"));
+    QCOMPARE(titles(favorites),
+             (QStringList{QStringLiteral("01 One.flac"), QStringLiteral("02 Two.flac"), QStringLiteral("01 Single.mp3")}));
+    QCOMPARE(favorites.add({two, single}), QString());
+    QCOMPARE(readBytes(rig.cardFile()),
+             QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n../Music/Album One/02 Two.flac\n"));
+    const qint64 three = rig.id(rig.cardTrack(2));
+    QCOMPARE(favorites.add({three}), QString());
+    QCOMPARE(titles(favorites).first(), QStringLiteral("03 Three.flac"));
+    favorites.toggle(single);
+    QVERIFY(!favorites.contains(single));
+    const QByteArray internal = readBytes(rig.internalFile());
+    QVERIFY(writeBytes(rig.cardFile(), QByteArray(PlaylistStore::maxBytes + 1, 'a')));
+    favorites.reload();
+    QCOMPARE(favorites.add({rig.id(rig.cardTrack(3)), single}), QStringLiteral("favorites not readable"));
+    QCOMPARE(readBytes(rig.internalFile()), internal);
+    QVERIFY(!favorites.contains(single));
+    fakeMount.clear();
+    favorites.reload();
+    QCOMPARE(favorites.add({rig.id(rig.cardTrack(3))}), QStringLiteral("card not available"));
+    fakeMount = rig.card;
+}
+
+void PlaylistsTest::playlistCreate()
+{
+    Rig rig;
+    const QString dir = musicHome() + QStringLiteral("/Playlists");
+    QVERIFY(writeBytes(dir + QStringLiteral("/playlist 1.m3u8"), "#EXTM3U\n../Single/01 Single.mp3\n"));
+    QVERIFY(writeBytes(dir + QStringLiteral("/Playlist 2.m3u"), "../Single/01 Single.mp3\n"));
+    QVERIFY(writeBytes(dir + QStringLiteral("/playlist 3.m3u8.new"), "#EXTM3U\n"));
+    QVERIFY(rig.scan());
+    QCOMPARE(rig.library->newPlaylistPath(), dir + QStringLiteral("/playlist 4.m3u8"));
+    const qint64 single = rig.id(rig.single());
+    const QVariantMap made = rig.library->createPlaylist({single});
+    QCOMPARE(made.value(QStringLiteral("error")).toString(), QString());
+    QCOMPARE(made.value(QStringLiteral("name")).toString(), QStringLiteral("playlist 4"));
+    const qint64 id = made.value(QStringLiteral("id")).toLongLong();
+    QVERIFY(id > 0);
+    QCOMPARE(readBytes(dir + QStringLiteral("/playlist 4.m3u8")), QByteArray("#EXTM3U\n../Single/01 Single.mp3\n"));
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{single}));
+    QStringList names;
+    for (const QVariant &row : rig.library->editablePlaylists())
+        names.append(row.toMap().value(QStringLiteral("name")).toString());
+    QVERIFY(names.contains(QStringLiteral("playlist 1")));
+    QVERIFY(names.contains(QStringLiteral("playlist 4")));
+    QVERIFY(!names.contains(QStringLiteral("Playlist 2")));
+    QVERIFY(rig.library->editable(id));
+    const qint64 m3u = scalar(rig.library->database(), QStringLiteral("SELECT id FROM playlists WHERE name = 'Playlist 2'")).toLongLong();
+    QVERIFY(m3u > 0);
+    QVERIFY(!rig.library->editable(m3u));
+    QCOMPARE(rig.library->newPlaylistPath(), dir + QStringLiteral("/playlist 5.m3u8"));
+}
+
+void PlaylistsTest::playlistAppendDelete()
+{
+    Rig rig;
+    const QString dir = musicHome() + QStringLiteral("/Playlists");
+    const QByteArray original = "\xEF\xBB\xBF#EXTM3U\r\n# mine\r\n../Single/01 Single.mp3\r\n#EXTINF:1,trailing\r\n";
+    QVERIFY(writeBytes(dir + QStringLiteral("/Mix.m3u8"), original));
+    QVERIFY(rig.scan());
+    const qint64 id = scalar(rig.library->database(), QStringLiteral("SELECT id FROM playlists WHERE name = 'Mix'")).toLongLong();
+    QVERIFY(id > 0);
+    const qint64 single = rig.id(rig.single());
+    const qint64 one = rig.id(rig.cardTrack(0));
+    const qint64 two = rig.id(rig.cardTrack(1));
+    QSignalSpy changed(rig.library.get(), &Library::playlistsChanged);
+    QCOMPARE(rig.library->addToPlaylist(id, {one, two}), QString());
+    const QByteArray line1 = PlaylistStore::relative(rig.cardTrack(0), dir).toUtf8();
+    const QByteArray line2 = PlaylistStore::relative(rig.cardTrack(1), dir).toUtf8();
+    QCOMPARE(readBytes(dir + QStringLiteral("/Mix.m3u8")),
+             QByteArray("\xEF\xBB\xBF#EXTM3U\r\n# mine\r\n../Single/01 Single.mp3\r\n") + line1 + "\r\n" + line2
+                 + "\r\n#EXTINF:1,trailing\r\n");
+    QCOMPARE(rig.library->sourceTracks(QStringLiteral("playlist"), id), (QVariantList{single, one, two}));
+    QVERIFY(changed.count() >= 1);
+
+    QVERIFY(writeBytes(dir + QStringLiteral("/Mix.m3u8.tmp"), "#EXTM3U\n"));
+    QSignalSpy count(rig.library.get(), &Library::playlistCountChanged);
+    QCOMPARE(rig.library->deletePlaylist(id), QString());
+    QVERIFY(!QFileInfo::exists(dir + QStringLiteral("/Mix.m3u8")));
+    QVERIFY(!QFileInfo::exists(dir + QStringLiteral("/Mix.m3u8.tmp")));
+    QCOMPARE(count.count(), 1);
+    QVERIFY(rig.library->playlistInfo(id).isEmpty());
+    QCOMPARE(rig.library->deletePlaylist(id), QStringLiteral("playlist not readable"));
+}
+
+void PlaylistsTest::playlistCardAbsent()
+{
+    Rig rig;
+    const QString file = rig.card + QStringLiteral("/Playlists/Card Mix.m3u8");
+    QVERIFY(writeBytes(file, "#EXTM3U\n../Music/Album One/01 One.flac\n"));
+    QVERIFY(rig.scan());
+    const qint64 id = scalar(rig.library->database(), QStringLiteral("SELECT id FROM playlists WHERE name = 'Card Mix'")).toLongLong();
+    QVERIFY(id > 0);
+    const qint64 two = rig.id(rig.cardTrack(1));
+    fakeMount.clear();
+    QCOMPARE(rig.library->addToPlaylist(id, {two}), QStringLiteral("card not available"));
+    QCOMPARE(rig.library->deletePlaylist(id), QStringLiteral("card not available"));
+    QCOMPARE(readBytes(file), QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n"));
+    fakeMount = rig.card;
+    QCOMPARE(rig.library->addToPlaylist(id, {two}), QString());
+    QCOMPARE(readBytes(file),
+             QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n../Music/Album One/02 Two.flac\n"));
 }
 
 QTEST_GUILESS_MAIN(PlaylistsTest)

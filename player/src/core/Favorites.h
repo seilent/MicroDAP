@@ -33,6 +33,7 @@ public:
     QStringList media() const;
     QString fileFor(const QString &medium) const;
     Q_INVOKABLE void toggle(qint64 trackId);
+    Q_INVOKABLE QString add(const QVariantList &trackIds);
 
 public slots:
     void reload();
@@ -54,6 +55,7 @@ private:
     };
 
     Medium *mediumOf(const QString &path);
+    QString ready(Medium &medium);
     QString key(const Medium &medium, const QString &path) const;
     bool sameTrack(const Medium &medium, const QString &a, const QString &b) const;
     void readMedium(Medium &medium);

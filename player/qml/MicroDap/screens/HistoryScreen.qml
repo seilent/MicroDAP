@@ -34,6 +34,7 @@ Page {
 
     signal play(string kind, int id)
     signal sheetAction(string action, string kind, int id)
+    signal playlistPicked(int index)
     signal listPlayed(int count)
 
     list: page.activeList
@@ -141,8 +142,8 @@ Page {
         page.sheetEntry = e
         sheet.title = e.title
         sheet.items = e.kind === "song"
-            ? ["play", "play next", "add to queue", page.pinLabel(e.kind, e.id)]
-            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(e.kind, e.id)]
+            ? ["play", "play next", "add to queue", "add to playlist", page.pinLabel(e.kind, e.id)]
+            : ["play", "play next", "add to queue", "shuffle", "add to playlist", page.pinLabel(e.kind, e.id)]
         sheet.open()
         return true
     }
@@ -538,8 +539,14 @@ Page {
         anchors.fill: parent
         screenOff: !page.live
         onAccepted: (index) => {
+            if (sheet.depth > 0) {
+                page.playlistPicked(index)
+                sheet.close()
+                return
+            }
             page.runSheet(index)
-            sheet.close()
+            if (sheet.depth === 0)
+                sheet.close()
         }
     }
 

@@ -12,6 +12,7 @@ Page {
     property bool screenOff: false
     property var rows: []
     property var sheetRow: null
+    property var deleteRow: null
     property string shownCount: ""
 
     readonly property bool live: page.animated && !page.screenOff
@@ -29,6 +30,7 @@ Page {
     property alias listView: listView
     property alias focusBar: focusBar
     property alias sheet: sheet
+    property alias deleteDialog: deleteDialog
 
     signal nowPlaying()
     signal play(string kind, int id)
@@ -127,9 +129,21 @@ Page {
         page.sheetRow = r
         sheet.title = r.title
         sheet.items = r.kind === "favorites" ? ["play", "play next", "add to queue", "shuffle"]
-            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id)]
+            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id)].concat(page.playlistVerbs(r.id))
         sheet.open()
         return true
+    }
+
+    function playlistVerbs(id: int): var {
+        return page.library !== null && typeof page.library.editable === "function" && page.library.editable(id) === true
+            ? ["delete playlist"] : []
+    }
+
+    function confirmDelete(r: var): void {
+        page.deleteRow = r
+        deleteDialog.open()
+        deleteDialog.focusIndex = 1
+        deleteDialog.barIndex = 1
     }
 
     function runSheet(index: int) {
@@ -139,6 +153,8 @@ Page {
         const action = sheet.items[index]
         if (action === "play")
             page.playRow(r)
+        else if (action === "delete playlist")
+            page.confirmDelete(r)
         else
             page.sheetAction(action, r.kind, r.id)
     }
@@ -154,9 +170,12 @@ Page {
         page.shownCount = page.countLine
         countText.opacity = 1
         sheet.complete()
+        deleteDialog.complete()
     }
 
     function handleAction(name: string, repeat: bool): bool {
+        if (deleteDialog.shown)
+            return deleteDialog.handleAction(name, repeat)
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
         switch (name) {
@@ -362,7 +381,7 @@ Page {
         visible: page.rows.length > 0
         rowY: listView.y + listView.focusY
         rowHeight: listView.rowPitch
-        opacity: page.focusOpacity
+        opacity: page.focusOpacity * (1 - deleteDialog.scrim.opacity)
         animated: page.live
     }
 
@@ -414,5 +433,22 @@ Page {
             page.runSheet(index)
             sheet.close()
         }
+    }
+
+    Dialog {
+        id: deleteDialog
+
+        anchors.fill: parent
+        screenOff: !page.live
+        title: "delete playlist?"
+        items: ["delete playlist", "keep playlist"]
+        onAccepted: (index) => {
+            const r = page.deleteRow
+            deleteDialog.close()
+            page.deleteRow = null
+            if (index === 0 && r !== null)
+                page.sheetAction("delete playlist", r.kind, r.id)
+        }
+        onRejected: page.deleteRow = null
     }
 }

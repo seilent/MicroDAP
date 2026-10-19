@@ -16,6 +16,35 @@ TestCase {
 
         property int playlistCount: 0
         property var all: [1, 2, 3, 4, 5]
+        property var edits: []
+        property string refuse: ""
+
+        function sourceTracks(kind, id) {
+            return kind === "album" && id === 12 ? [21, 22] : kind === "artist" && id === 7 ? [21, 22, 23] : []
+        }
+
+        function editablePlaylists() {
+            return [{ id: 4, name: "Road", source: "/home/micro/Music/Playlists/Road.m3u8" }]
+        }
+
+        function editable(id) {
+            return id === 4
+        }
+
+        function addToPlaylist(id, ids) {
+            fakeLibrary.edits = fakeLibrary.edits.concat([{ verb: "add", id: id, ids: ids }])
+            return fakeLibrary.refuse
+        }
+
+        function createPlaylist(ids) {
+            fakeLibrary.edits = fakeLibrary.edits.concat([{ verb: "create", ids: ids }])
+            return { name: "playlist 1", id: 9, error: fakeLibrary.refuse }
+        }
+
+        function deletePlaylist(id) {
+            fakeLibrary.edits = fakeLibrary.edits.concat([{ verb: "delete", id: id }])
+            return fakeLibrary.refuse
+        }
 
         function albumInfo(id) {
             return id === 12 ? { id: 12, title: "Stories", artist: "Addison Road", year: 0, artPath: "" } : {}
@@ -125,6 +154,8 @@ TestCase {
         fakePlayer.calls = []
         fakeQueue.shuffle = false
         fakeLibrary.all = [1, 2, 3, 4, 5]
+        fakeLibrary.edits = []
+        fakeLibrary.refuse = ""
         tc.toast.hide()
         fakeSettings.autoNowPlaying = false
         fakePlayer.status = 0
@@ -284,5 +315,111 @@ TestCase {
         main.sheetAction("play", "album", 12)
         main.playEntry({ kind: "album", id: 12 })
         compare(main.topScreen, "home")
+    }
+
+    function hubSheet(title, items) {
+        if (main.pageStack.currentItem.objectName !== "music")
+            main.navigate("music")
+        main.pageStack.completeAll()
+        const hub = main.pageStack.currentItem
+        compare(hub.objectName, "music")
+        hub.sheet.title = title
+        hub.sheet.items = items
+        hub.sheet.open()
+        hub.sheet.complete()
+        return hub
+    }
+
+    function test_add_to_playlist_second_sheet() {
+        const hub = tc.hubSheet("Stories", hub_items())
+        main.sheetAction("add to playlist", "album", 12)
+        compare(hub.sheet.depth, 1)
+        compare(hub.sheet.title, "Stories")
+        compare(JSON.stringify(hub.sheet.items), JSON.stringify(["new playlist", "Road"]))
+        hub.sheet.focusIndex = 1
+        verify(main.router.dispatch("a", false))
+        compare(hub.sheet.shown, false)
+        compare(fakeLibrary.edits.length, 1)
+        compare(fakeLibrary.edits[0].verb, "add")
+        compare(fakeLibrary.edits[0].id, 4)
+        compare(JSON.stringify(fakeLibrary.edits[0].ids), JSON.stringify([21, 22]))
+        compare(tc.toast.artist, "added to Road")
+        compare(tc.toast.title, "Stories")
+        tc.home()
+    }
+
+    function hub_items() {
+        return ["play", "play next", "add to queue", "shuffle", "add to playlist", "pin to quickplay"]
+    }
+
+    function test_add_to_playlist_new_and_back() {
+        const hub = tc.hubSheet("Song 5", ["play", "play next", "add to queue", "add to playlist"])
+        main.sheetAction("add to playlist", "song", 5)
+        compare(hub.sheet.depth, 1)
+        verify(main.router.dispatch("b", false))
+        compare(hub.sheet.depth, 0)
+        compare(hub.sheet.shown, true)
+        compare(hub.sheet.title, "Song 5")
+        main.sheetAction("add to playlist", "song", 5)
+        verify(main.router.dispatch("a", false))
+        compare(fakeLibrary.edits[0].verb, "create")
+        compare(JSON.stringify(fakeLibrary.edits[0].ids), JSON.stringify([5]))
+        compare(tc.toast.artist, "added to playlist 1")
+        tc.toast.hide()
+        tc.hubSheet("Song 5", ["play"])
+        fakeLibrary.refuse = "card not available"
+        main.sheetAction("add to playlist", "song", 5)
+        hub.sheet.focusIndex = 1
+        verify(main.router.dispatch("a", false))
+        compare(tc.toast.artist, "")
+        compare(tc.toast.title, "card not available")
+        tc.toast.hide()
+        tc.hubSheet("Song 5", ["play"])
+        fakeLibrary.refuse = "playlist not readable"
+        main.sheetAction("add to playlist", "song", 5)
+        hub.sheet.focusIndex = 1
+        verify(main.router.dispatch("a", false))
+        compare(tc.toast.artist, "playlist not readable")
+        compare(tc.toast.title, "Road")
+        tc.home()
+    }
+
+    function test_add_to_playlist_items_on_sheets() {
+        main.navigate("music")
+        main.pageStack.completeAll()
+        const hub = main.pageStack.currentItem
+        for (const kind of ["song", "album", "artist", "genre", "folder"])
+            verify(hub.sheetItemsFor(kind, 1).indexOf("add to playlist") >= 0, kind)
+        for (const kind of ["playlist", "favorites"])
+            verify(hub.sheetItemsFor(kind, 4).indexOf("add to playlist") < 0, kind)
+        compare(hub.sheetItemsFor("album", 1).indexOf("add to playlist"), hub.sheetItemsFor("album", 1).indexOf("shuffle") + 1)
+        verify(hub.sheetItemsFor("playlist", 4).indexOf("delete playlist") >= 0)
+        verify(hub.sheetItemsFor("playlist", 5).indexOf("delete playlist") < 0)
+        tc.home()
+    }
+
+    function test_delete_playlist_confirm() {
+        main.navigate("music")
+        main.pageStack.completeAll()
+        const hub = main.pageStack.currentItem
+        hub.confirmDelete({ kind: "playlist", id: 4, title: "Road" })
+        hub.deleteDialog.complete()
+        compare(hub.deleteDialog.shown, true)
+        compare(hub.deleteDialog.title, "delete playlist?")
+        compare(JSON.stringify(hub.deleteDialog.items), JSON.stringify(["delete playlist", "keep playlist"]))
+        compare(hub.deleteDialog.focusIndex, 1)
+        verify(main.router.dispatch("a", false))
+        compare(hub.deleteDialog.shown, false)
+        compare(fakeLibrary.edits.length, 0)
+        hub.confirmDelete({ kind: "playlist", id: 4, title: "Road" })
+        verify(main.router.dispatch("b", false))
+        compare(fakeLibrary.edits.length, 0)
+        hub.confirmDelete({ kind: "playlist", id: 4, title: "Road" })
+        verify(main.router.dispatch("up", false))
+        verify(main.router.dispatch("a", false))
+        compare(fakeLibrary.edits.length, 1)
+        compare(fakeLibrary.edits[0].verb, "delete")
+        compare(fakeLibrary.edits[0].id, 4)
+        tc.home()
     }
 }

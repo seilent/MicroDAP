@@ -96,6 +96,8 @@
 | album | `art-collapse`, `art-dock`, `art-docked` | `--size 640x960`, docked also `960x640` | art 71 u at 155; art at 150 with the lines at 60 u; docked art at 103 beside the lines, rows from 186 | pending |
 | nowplaying | `clock-24h`, `clock-12h`, `percent`, `percent-low` | `--size 640x960`, `percent` also `960x640` | 19:30, 7:30, 73% left of the glyph, 5% white beside the accent glyph | pending |
 | home | `quickplay-off` | `--size 640x960` and `960x640` | no Quickplay panel, play ring kept | pending |
+| hub | `playlist-pick` | `--pivot albums` and `--pivot songs`, `--size 640x960` and `960x640` | second sheet titled with the target: NEW PLAYLIST, FAVORITES, the playlists | 2026-10-20 |
+| playlists | `playlist-sheet`, `playlist-delete` | `--size 640x960` and `960x640` | DELETE PLAYLIST last on a `.m3u8` row; T13 `delete playlist?` with KEEP PLAYLIST focused, the page bar faded | 2026-10-20 |
 | settings | `max-volume`, `max-volume-sheet`, `power-on-sheet` | `--size 640x960` and `960x640` | MAX VOLUME 70 after VOLUME STEP; sheet 100 to 50, 70 marked; POWER ON VOLUME 100 to 10 then LAST, 40 marked | 2026-10-20 |
 | settings | `balance`, `balance-edit` | `--size 640x960` and `960x640` | BALANCE L 3.5 DB after VOLUME STEP; edit mode L 4 DB in the accent | 2026-10-20 |
 | settings | `crossfeed-sheet` | `--size 640x960` and `960x640` | CROSSFEED sheet OFF, DEFAULT, CHU MOY, JAN MEIER marked in the accent | 2026-10-20 |

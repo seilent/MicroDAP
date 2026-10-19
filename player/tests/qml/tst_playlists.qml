@@ -70,6 +70,10 @@ TestCase {
         function isPinned(kind, id) {
             return fakeLibrary.pinned.indexOf(kind + ":" + id) >= 0
         }
+
+        function editable(id) {
+            return id === 1
+        }
     }
 
     QtObject {
@@ -235,7 +239,7 @@ TestCase {
         router.dispatch("x", false)
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "Morning")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "shuffle", "pin to quickplay", "delete playlist"]))
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
@@ -253,6 +257,38 @@ TestCase {
         router.dispatch("y", false)
         compare(counters.sheetActions[1].action, "add to queue")
         compare(counters.sheetActions[1].id, 2)
+    }
+
+    function test_playlists_delete_confirm() {
+        const page = open(playlistsComponent, { player: fakePlayer, library: fakeLibrary })
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        const at = page.sheet.items.indexOf("delete playlist")
+        compare(at, page.sheet.items.length - 1)
+        page.sheet.focusIndex = at
+        verify(router.dispatch("a", false))
+        compare(page.sheet.shown, false)
+        page.deleteDialog.complete()
+        compare(page.deleteDialog.shown, true)
+        compare(page.deleteDialog.title, "delete playlist?")
+        compare(JSON.stringify(page.deleteDialog.items), JSON.stringify(["delete playlist", "keep playlist"]))
+        compare(page.deleteDialog.focusIndex, 1)
+        verify(router.dispatch("a", false))
+        compare(page.deleteDialog.shown, false)
+        compare(counters.sheetActions.length, 0)
+        router.dispatch("x", false)
+        page.sheet.focusIndex = at
+        router.dispatch("a", false)
+        router.dispatch("up", false)
+        router.dispatch("a", false)
+        compare(counters.sheetActions.length, 1)
+        compare(counters.sheetActions[0].action, "delete playlist")
+        compare(counters.sheetActions[0].id, 1)
+        router.dispatch("down", false)
+        router.dispatch("x", false)
+        compare(page.sheet.items.indexOf("delete playlist"), -1)
+        router.dispatch("b", false)
+        compare(page.sheet.shown, false)
     }
 
     function test_playlists_model_changes_and_b() {
@@ -348,7 +384,7 @@ TestCase {
         verify(router.dispatch("x", false))
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "Song 0")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "unpin from quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "unpin from quickplay"]))
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("a", false)

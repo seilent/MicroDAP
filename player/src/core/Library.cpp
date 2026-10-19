@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <optional>
 #include <span>
 #include <utility>
@@ -1186,6 +1187,169 @@ PlaylistStore::Edit Library::editPlaylist(const QString &path, const PlaylistSto
     if (began)
         m_db.rollback();
     return result;
+}
+
+bool Library::onAbsentCard(const QString &path)
+{
+    const QString base = QDir::cleanPath(QDir(Scanner::mediaBase()).absolutePath()) + QLatin1Char('/');
+    if (!QDir::cleanPath(path).startsWith(base))
+        return false;
+    const QString clean = QDir::cleanPath(path);
+    QString dir = QFileInfo(clean).absolutePath();
+    while (dir.startsWith(base)) {
+        if (Scanner::isMountPoint(dir))
+            return false;
+        dir = QFileInfo(dir).absolutePath();
+    }
+    return true;
+}
+
+QVariantList Library::sourceTracks(const QString &kind, qint64 id) const
+{
+    QVariantList out;
+    for (const QueueEntry &entry : entriesFor(kind, id))
+        out.append(entry.id);
+    return out;
+}
+
+QVariantList Library::editablePlaylists() const
+{
+    QList<QVariantMap> rows;
+    QSqlQuery query(QStringLiteral("SELECT id, name, source FROM playlists"), m_db);
+    while (query.next()) {
+        const QString source = query.value(2).toString();
+        if (!source.endsWith(QLatin1StringView(".m3u8"), Qt::CaseInsensitive))
+            continue;
+        rows.append({{QStringLiteral("id"), query.value(0).toLongLong()},
+                     {QStringLiteral("name"), query.value(1).toString()},
+                     {QStringLiteral("source"), source}});
+    }
+    std::stable_sort(rows.begin(), rows.end(), [](const QVariantMap &a, const QVariantMap &b) {
+        const QString x = a.value(QStringLiteral("name")).toString().toCaseFolded();
+        const QString y = b.value(QStringLiteral("name")).toString().toCaseFolded();
+        if (x != y)
+            return x < y;
+        return a.value(QStringLiteral("source")).toString() < b.value(QStringLiteral("source")).toString();
+    });
+    QVariantList out;
+    for (const QVariantMap &row : std::as_const(rows))
+        out.append(row);
+    return out;
+}
+
+bool Library::editable(qint64 playlistId) const
+{
+    return playlistInfo(playlistId).value(QStringLiteral("source")).toString().endsWith(QLatin1StringView(".m3u8"),
+                                                                                      Qt::CaseInsensitive);
+}
+
+QString Library::newPlaylistPath() const
+{
+    const QString dir = PlaylistStore::playlistsDir(QStandardPaths::writableLocation(QStandardPaths::MusicLocation));
+    QSet<QString> taken;
+    QSqlQuery query(QStringLiteral("SELECT name FROM playlists"), m_db);
+    while (query.next())
+        taken.insert(query.value(0).toString().toCaseFolded());
+    const QStringList files = QDir(dir).entryList(QDir::Files | QDir::Hidden);
+    for (const QString &file : files) {
+        QString name = file.toCaseFolded();
+        for (const QLatin1StringView spare : {QLatin1StringView(".tmp"), QLatin1StringView(".new")}) {
+            if (name.endsWith(spare))
+                name.chop(spare.size());
+        }
+        for (const QLatin1StringView ext : {QLatin1StringView(".m3u8"), QLatin1StringView(".m3u")}) {
+            if (name.endsWith(ext)) {
+                name.chop(ext.size());
+                taken.insert(name);
+            }
+        }
+    }
+    for (int n = 1;; ++n) {
+        const QString name = QStringLiteral("playlist %1").arg(n);
+        if (!taken.contains(name.toCaseFolded()))
+            return dir + QLatin1Char('/') + name + QStringLiteral(".m3u8");
+    }
+}
+
+QString Library::appendTracks(const QString &path, const QString &name, const QVariantList &trackIds)
+{
+    if (onAbsentCard(path))
+        return QStringLiteral("card not available");
+    const QList<QueueEntry> entries = queueEntries(trackIds);
+    const QString dir = QFileInfo(path).absolutePath();
+    const PlaylistStore::Edit result = editPlaylist(path, [&](M3u &doc) {
+        for (const QueueEntry &entry : entries)
+            PlaylistStore::insert(doc, std::numeric_limits<qsizetype>::max(), entry.path, dir);
+        return true;
+    });
+    if (result == PlaylistStore::Edit::Unreadable) {
+        qWarning().noquote() << "microdap library: playlist not readable" << path;
+        return QStringLiteral("playlist not readable");
+    }
+    if (result == PlaylistStore::Edit::Unwritten) {
+        qWarning().noquote() << "microdap library: playlist not written" << path;
+        return QStringLiteral("card not available");
+    }
+    qInfo().noquote() << "microdap library: added" << entries.size() << "to" << name;
+    return {};
+}
+
+QString Library::addToPlaylist(qint64 playlistId, const QVariantList &trackIds)
+{
+    const QVariantMap info = playlistInfo(playlistId);
+    const QString source = info.value(QStringLiteral("source")).toString();
+    if (source.isEmpty() || !editable(playlistId))
+        return QStringLiteral("playlist not readable");
+    return appendTracks(source, info.value(QStringLiteral("name")).toString(), trackIds);
+}
+
+QVariantMap Library::createPlaylist(const QVariantList &trackIds)
+{
+    const QString path = newPlaylistPath();
+    const QString name = QFileInfo(path).completeBaseName();
+    QVariantMap out{{QStringLiteral("name"), name}, {QStringLiteral("id"), -1}};
+    const QString refused = appendTracks(path, name, trackIds);
+    if (!refused.isEmpty()) {
+        out.insert(QStringLiteral("error"), refused);
+        return out;
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT id FROM playlists WHERE source = ?"));
+    query.addBindValue(path);
+    if (query.exec() && query.next())
+        out.insert(QStringLiteral("id"), query.value(0).toLongLong());
+    return out;
+}
+
+QString Library::deletePlaylist(qint64 playlistId)
+{
+    const QVariantMap info = playlistInfo(playlistId);
+    const QString source = info.value(QStringLiteral("source")).toString();
+    if (source.isEmpty() || !editable(playlistId))
+        return QStringLiteral("playlist not readable");
+    if (onAbsentCard(source))
+        return QStringLiteral("card not available");
+    if (QFileInfo::exists(source) && !QFile::remove(source)) {
+        qWarning().noquote() << "microdap library: cannot delete" << source;
+        return QStringLiteral("card not available");
+    }
+    for (const char *spare : {".tmp", ".new"})
+        QFile::remove(source + QLatin1StringView(spare));
+    const bool began = m_db.transaction();
+    const int removed = began ? removePlaylists({source}) : -1;
+    const int pins = removed >= 0 ? prunePins() : -1;
+    if (removed < 0 || pins < 0 || !m_db.commit()) {
+        qWarning() << "microdap library: playlist row delete failed" << source << m_db.lastError().text();
+        if (began)
+            m_db.rollback();
+        return QStringLiteral("playlist not readable");
+    }
+    qInfo().noquote() << "microdap library: deleted playlist" << source;
+    emit playlistsChanged();
+    emit playlistCountChanged();
+    if (pins > 0)
+        emit pinsChanged();
+    return {};
 }
 
 int Library::removePlaylists(const QStringList &sources)

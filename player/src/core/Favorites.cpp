@@ -313,6 +313,95 @@ void Favorites::rebuild()
     emit changed();
 }
 
+QString Favorites::ready(Medium &medium)
+{
+    if (medium.card && !Scanner::isMountPoint(medium.root)) {
+        reload();
+        return QStringLiteral("card not available");
+    }
+    if (medium.failed)
+        readMedium(medium);
+    migrate(medium);
+    if (medium.failed || m_library->metaValue(migratedKey + medium.id).isEmpty())
+        return QStringLiteral("favorites not readable");
+    return {};
+}
+
+QString Favorites::add(const QVariantList &trackIds)
+{
+    const QList<QueueEntry> found = m_library->queueEntries(trackIds);
+    if (found.isEmpty())
+        return {};
+    QStringList order;
+    QHash<QString, QList<QueueEntry>> byMedium;
+    for (const QueueEntry &entry : found) {
+        Medium *medium = mediumOf(entry.path);
+        if (!medium)
+            return QStringLiteral("card not available");
+        if (!byMedium.contains(medium->id))
+            order.append(medium->id);
+        byMedium[medium->id].append(entry);
+    }
+    QList<Medium *> media;
+    for (const QString &id : std::as_const(order)) {
+        Medium *medium = nullptr;
+        for (Medium &m : m_media) {
+            if (m.id == id)
+                medium = &m;
+        }
+        if (!medium)
+            return QStringLiteral("card not available");
+        const QString refused = ready(*medium);
+        if (!refused.isEmpty())
+            return refused;
+        media.append(medium);
+    }
+    bool stamped = true;
+    for (auto it = media.crbegin(); it != media.crend(); ++it) {
+        Medium *medium = *it;
+        const QList<QueueEntry> &entries = byMedium.value(medium->id);
+        QList<std::pair<QString, int>> stamps;
+        const PlaylistStore::Edit result = m_library->playlistStore().edit(medium->file, [&](M3u &doc) {
+            const QList<qint64> resolved = resolve(*medium, doc);
+            QList<QString> present;
+            for (qsizetype i = 0; i < doc.items.size(); ++i) {
+                if (doc.items.at(i).entry)
+                    present.append(doc.items.at(i).path);
+            }
+            for (qsizetype k = entries.size() - 1; k >= 0; --k) {
+                const QueueEntry &entry = entries.at(k);
+                const bool had = resolved.contains(entry.id)
+                    || std::any_of(present.cbegin(), present.cend(),
+                                   [&](const QString &p) { return sameTrack(*medium, p, entry.path); });
+                if (had)
+                    continue;
+                PlaylistStore::insert(doc, 0, entry.path, medium->dir);
+                present.append(entry.path);
+                stamps.append({key(*medium, entry.path), 0});
+            }
+            return !stamps.isEmpty();
+        });
+        if (result == PlaylistStore::Edit::Unreadable) {
+            medium->failed = true;
+            rebuild();
+            return QStringLiteral("favorites not readable");
+        }
+        if (result == PlaylistStore::Edit::Unwritten) {
+            rebuild();
+            return QStringLiteral("card not available");
+        }
+        if (!stamps.isEmpty())
+            stamped = m_library->stampFavorites(medium->id, stamps) && stamped;
+        readMedium(*medium);
+    }
+    rebuild();
+    if (!stamped) {
+        qWarning() << "microdap favorites: add order not stored";
+        return QStringLiteral("favorites not readable");
+    }
+    return {};
+}
+
 void Favorites::toggle(qint64 trackId)
 {
     const QList<QueueEntry> found = m_library->queueEntries({QVariant(trackId)});
@@ -324,16 +413,9 @@ void Favorites::toggle(qint64 trackId)
         emit notice(QStringLiteral("card not available"));
         return;
     }
-    if (medium->card && !Scanner::isMountPoint(medium->root)) {
-        emit notice(QStringLiteral("card not available"));
-        reload();
-        return;
-    }
-    if (medium->failed)
-        readMedium(*medium);
-    migrate(*medium);
-    if (medium->failed || m_library->metaValue(migratedKey + medium->id).isEmpty()) {
-        emit notice(QStringLiteral("favorites not readable"));
+    const QString refused = ready(*medium);
+    if (!refused.isEmpty()) {
+        emit notice(refused);
         return;
     }
     bool had = false;

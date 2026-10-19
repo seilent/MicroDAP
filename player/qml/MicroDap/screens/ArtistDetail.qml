@@ -50,6 +50,7 @@ Page {
     signal openAlbum(int id)
     signal openQueue()
     signal sheetAction(string action, string kind, int id)
+    signal playlistPicked(int index)
     signal listPlayed(int count)
 
     list: page.activeList
@@ -181,8 +182,8 @@ Page {
 
     function sheetItemsFor(kind: string, id: int): var {
         if (kind === "song")
-            return ["play", "play next", "add to queue", page.pinLabel(kind, id)]
-        return ["play", "play next", "add to queue", "shuffle", page.pinLabel(kind, id)]
+            return ["play", "play next", "add to queue", "add to playlist", page.pinLabel(kind, id)]
+        return ["play", "play next", "add to queue", "shuffle", "add to playlist", page.pinLabel(kind, id)]
     }
 
     function queueAction(): void {
@@ -794,8 +795,14 @@ Page {
         anchors.fill: parent
         screenOff: !page.live
         onAccepted: (index) => {
+            if (sheet.depth > 0) {
+                page.playlistPicked(index)
+                sheet.close()
+                return
+            }
             page.runSheet(index)
-            sheet.close()
+            if (sheet.depth === 0)
+                sheet.close()
         }
     }
 

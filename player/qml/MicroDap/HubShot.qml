@@ -25,6 +25,16 @@ Item {
             hubModel.source = sample
     }
 
+    function pickFixture(): void {
+        const entry = hub.focusedEntry()
+        if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
+            hub.handleAction(hub.grid ? "right" : "down", false)
+        hub.completeAll()
+        hub.openSheet()
+        hub.sheet.push(hub.sheet.title, ["new playlist", "favorites", "Harmonics", "Morning", "Night Drive", "Workout"])
+        hub.completeAll()
+    }
+
     function scrollFixture(): void {
         hub.activeList.contentY = 1.5 * hub.activeList.rowPitch
         hub.activeList.clampFocusToView()
@@ -56,6 +66,8 @@ Item {
             }
             hub.completeAll()
         }
+        if (root.fixture === "playlist-pick")
+            Qt.callLater(root.pickFixture)
         if (root.fixture === "pressed") {
             const entry = hub.focusedEntry()
             if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
@@ -153,7 +165,7 @@ Item {
         id: hub
 
         anchors.fill: parent
-        animated: root.jump
+        animated: root.jump || root.fixture === "playlist-pick"
         pivotIndex: Math.max(0, root.pivots.indexOf(root.pivot))
         artistsModel: root.artistsHub !== null ? root.artistsHub : sampleArtists
         albumsModel: root.albumsGrid !== null ? root.albumsGrid : sampleAlbums

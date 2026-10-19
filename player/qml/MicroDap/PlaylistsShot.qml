@@ -4,6 +4,8 @@ import QtQuick
 Item {
     id: root
 
+    property string fixture: "browse"
+
     readonly property var contextPlaylists: typeof Playlists === "undefined" ? null : Playlists
 
     Rectangle {
@@ -35,14 +37,43 @@ Item {
         }
     }
 
+    QtObject {
+        id: sampleLibrary
+
+        function editable(id) {
+            return id !== 4
+        }
+
+        function isPinned(kind, id) {
+            return false
+        }
+    }
+
     PlaylistsScreen {
         id: screen
 
         anchors.fill: parent
-        animated: false
+        animated: root.fixture === "playlist-sheet" || root.fixture === "playlist-delete"
         playlistsModel: root.contextPlaylists !== null ? root.contextPlaylists : samplePlaylists
         player: samplePlayer
+        library: root.contextPlaylists !== null ? null : sampleLibrary
 
-        Component.onCompleted: screen.completeAll()
+        Component.onCompleted: {
+            screen.completeAll()
+            if (root.fixture === "playlist-sheet" || root.fixture === "playlist-delete")
+                Qt.callLater(root.sheetFixture)
+        }
+    }
+
+    function sheetFixture(): void {
+        screen.completeAll()
+        screen.handleAction("down", false)
+        screen.openSheet()
+        if (root.fixture === "playlist-delete") {
+            screen.sheet.close()
+            screen.confirmDelete(screen.sheetRow)
+        }
+        screen.completeAll()
+        Qt.callLater(screen.completeAll)
     }
 }

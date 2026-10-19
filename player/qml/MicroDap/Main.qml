@@ -111,6 +111,7 @@ Window {
     property var lastToastId: null
     property Item autoNowPage: null
     property string addSource: ""
+    property var playlistPick: null
     readonly property bool hidden: root.overlay && !root.overlayMapped
     readonly property bool touchOn: !root.overlay && !root.screenshot && (root.settings === null || root.settings.touch !== false)
     readonly property bool off: root.powerScreenOff || root.hidden
@@ -579,10 +580,85 @@ Window {
         case "play next":
             root.addTracks(action === "play next", kind, id)
             return
+        case "add to playlist":
+            root.openPlaylistPick(kind, id)
+            return
+        case "delete playlist":
+            root.deletePlaylist(id)
+            return
         default:
             console.info("microdap: " + action + " " + kind + " " + id)
             return
         }
+    }
+
+    function trackIdsFor(kind: string, id: int): var {
+        if (kind === "song")
+            return [id]
+        if (kind === "folder")
+            return root.foldersHub === null ? [] : root.foldersHub.tracks(id)
+        return root.library === null || typeof root.library.sourceTracks !== "function" ? [] : root.library.sourceTracks(kind, id)
+    }
+
+    function playlistTargets(): var {
+        const out = [{ kind: "new", id: -1, name: "new playlist" }]
+        if (root.favorites !== null)
+            out.push({ kind: "favorites", id: 0, name: "favorites" })
+        const lists = root.library !== null && typeof root.library.editablePlaylists === "function"
+            ? root.library.editablePlaylists() : []
+        for (const p of lists)
+            out.push({ kind: "playlist", id: Number(p.id), name: String(p.name) })
+        return out
+    }
+
+    function openPlaylistPick(kind: string, id: int): void {
+        const page = pages.currentItem
+        if (page === null || page.sheet === undefined || page.sheet === null || !page.sheet.shown)
+            return
+        const targets = root.playlistTargets()
+        root.playlistPick = { kind: kind, id: id, title: page.sheet.title, targets: targets }
+        page.sheet.push(page.sheet.title, targets.map((t) => t.name))
+    }
+
+    function pickPlaylist(index: int): void {
+        const pick = root.playlistPick
+        root.playlistPick = null
+        if (pick === null || index < 0 || index >= pick.targets.length)
+            return
+        const target = pick.targets[index]
+        const ids = root.trackIdsFor(pick.kind, pick.id)
+        if (ids.length === 0)
+            return
+        let error = ""
+        let name = target.name
+        if (target.kind === "favorites") {
+            error = root.favorites === null || typeof root.favorites.add !== "function" ? "" : root.str(root.favorites.add(ids))
+        } else if (target.kind === "new") {
+            const made = root.library === null || typeof root.library.createPlaylist !== "function" ? null : root.library.createPlaylist(ids)
+            if (made === null)
+                return
+            error = root.str(made.error)
+            name = root.str(made.name)
+        } else {
+            error = root.library === null || typeof root.library.addToPlaylist !== "function" ? "" : root.str(root.library.addToPlaylist(target.id, ids))
+        }
+        if (error === "playlist not readable")
+            overlays.toast.show(error, name)
+        else if (error !== "")
+            overlays.toast.show("", error)
+        else
+            overlays.toast.show("added to " + name, pick.title)
+    }
+
+    function deletePlaylist(id: int): void {
+        if (root.library === null || typeof root.library.deletePlaylist !== "function")
+            return
+        const name = root.sourceName("playlist", id)
+        const error = root.str(root.library.deletePlaylist(id))
+        if (error === "playlist not readable")
+            overlays.toast.show(error, name)
+        else if (error !== "")
+            overlays.toast.show("", error)
     }
 
     function str(value: var): string {
@@ -1188,6 +1264,7 @@ Window {
             onNowPlaying: root.openNowPlaying()
             onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onPlaylistPicked: (index) => root.pickPlaylist(index)
             onListPlayed: (count) => root.listPlayed(count)
         }
     }
@@ -1223,6 +1300,7 @@ Window {
             library: root.library
             onPlay: (kind, id) => root.playEntry({ kind: kind, id: id })
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onPlaylistPicked: (index) => root.pickPlaylist(index)
             onListPlayed: (count) => root.listPlayed(count)
         }
     }
@@ -1277,6 +1355,7 @@ Window {
             onOpenAlbum: (id) => root.openAlbum(id)
             onOpenQueue: root.openQueue()
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onPlaylistPicked: (index) => root.pickPlaylist(index)
             onListPlayed: (count) => root.listPlayed(count)
         }
     }
@@ -1294,6 +1373,7 @@ Window {
             bluez: root.bluez
             onOpenQueue: root.openQueue()
             onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
+            onPlaylistPicked: (index) => root.pickPlaylist(index)
             onListPlayed: (count) => root.listPlayed(count)
         }
     }
@@ -1343,7 +1423,9 @@ Window {
 
     Component {
         id: playlistsShotComponent
-        PlaylistsShot {}
+        PlaylistsShot {
+            fixture: root.shotState
+        }
     }
 
     Component {

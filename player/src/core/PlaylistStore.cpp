@@ -1,5 +1,7 @@
 #include "PlaylistStore.h"
 
+#include "Library.h"
+
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -305,6 +307,10 @@ PlaylistStore::Loaded PlaylistStore::read(const QString &path)
 bool PlaylistStore::write(const QString &path, const M3u &doc)
 {
     const QString dir = QFileInfo(path).absolutePath();
+    if (Library::onAbsentCard(path)) {
+        qWarning() << "microdap playlists: card not mounted for" << path;
+        return false;
+    }
     if (!QDir().mkpath(dir)) {
         qWarning() << "microdap playlists: cannot create" << dir;
         return false;
@@ -317,10 +323,12 @@ bool PlaylistStore::write(const QString &path, const M3u &doc)
                          && file.flush() && ::fsync(file.handle()) == 0;
     const QString writeError = file.errorString();
     file.close();
-    const bool renamed =
-        written && ::rename(QFile::encodeName(spare).constData(), QFile::encodeName(path).constData()) == 0;
+    const bool mounted = !Library::onAbsentCard(path);
+    const bool renamed = written && mounted
+                         && ::rename(QFile::encodeName(spare).constData(), QFile::encodeName(path).constData()) == 0;
     if (!renamed) {
-        qWarning() << "microdap playlists: cannot write" << path << (written ? qt_error_string(errno) : writeError);
+        qWarning() << "microdap playlists: cannot write" << path
+                   << (!written ? writeError : mounted ? qt_error_string(errno) : QStringLiteral("card not mounted"));
         QFile::remove(spare);
         return false;
     }

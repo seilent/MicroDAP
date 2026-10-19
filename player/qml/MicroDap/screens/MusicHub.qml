@@ -24,6 +24,7 @@ Page {
     property var playlistRows: []
     property var focusedRow: null
     property var sheetRow: null
+    property var deleteRow: null
 
     readonly property bool live: hub.animated && !hub.screenOff
     readonly property bool arriving: !hub.arrived && hub.live && hub.stackAnimates
@@ -49,6 +50,7 @@ Page {
     property alias strip: strip
     property alias focusBar: focusBar
     property alias sheet: sheet
+    property alias deleteDialog: deleteDialog
     property alias jump: jump
     property alias jumpGrid: jumpGrid
     property alias body: body
@@ -64,6 +66,7 @@ Page {
     signal jumpRequested(string letter)
     signal play(string kind, int id)
     signal sheetAction(string action, string kind, int id)
+    signal playlistPicked(int index)
     signal listPlayed(int count)
 
     list: hub.activeList
@@ -503,14 +506,30 @@ Page {
         return pinned ? "unpin from quickplay" : "pin to quickplay"
     }
 
+    function playlistVerbs(id: int): var {
+        return hub.library !== null && typeof hub.library.editable === "function" && hub.library.editable(id) === true
+            ? ["delete playlist"] : []
+    }
+
+    function confirmDelete(t: var): void {
+        hub.deleteRow = t
+        deleteDialog.open()
+        deleteDialog.focusIndex = 1
+        deleteDialog.barIndex = 1
+    }
+
     function sheetItemsFor(kind: string, id: int): var {
         if (kind === "genre")
-            return ["play", "add to queue"]
-        if (kind === "folder" || kind === "favorites")
+            return ["play", "add to queue", "add to playlist"]
+        if (kind === "folder")
+            return ["play", "play next", "add to queue", "shuffle", "add to playlist"]
+        if (kind === "favorites")
             return ["play", "play next", "add to queue", "shuffle"]
         if (kind === "song")
-            return ["play", "play next", "add to queue", hub.pinLabel(kind, id)]
-        return ["play", "play next", "add to queue", "shuffle", hub.pinLabel(kind, id)]
+            return ["play", "play next", "add to queue", "add to playlist", hub.pinLabel(kind, id)]
+        if (kind === "playlist")
+            return ["play", "play next", "add to queue", "shuffle", hub.pinLabel(kind, id)].concat(hub.playlistVerbs(id))
+        return ["play", "play next", "add to queue", "shuffle", "add to playlist", hub.pinLabel(kind, id)]
     }
 
     function runSheet(index: int): void {
@@ -524,6 +543,8 @@ Page {
             hub.playSong(t)
         else if (action === "play" && (t.kind === "genre" || t.kind === "playlist" || t.kind === "favorites"))
             hub.playCollection(t.kind, t.id)
+        else if (action === "delete playlist")
+            hub.confirmDelete(t)
         else
             hub.sheetAction(action, t.kind, t.id)
     }
@@ -631,6 +652,7 @@ Page {
         jump.complete()
         jumpGrid.complete()
         sheet.complete()
+        deleteDialog.complete()
     }
 
     function back(): bool {
@@ -683,6 +705,8 @@ Page {
     }
 
     function handleAction(name: string, repeat: bool): bool {
+        if (deleteDialog.shown)
+            return deleteDialog.handleAction(name, repeat)
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
         if (jumpGrid.shown)
@@ -1256,7 +1280,7 @@ Page {
             x: Ui.px(Ui.hubEdge - Ui.focusBarOffset) + hub.activeList.x
             rowY: hub.activeList.y + hub.activeList.focusY
             rowHeight: hub.activeList.rowPitch
-            opacity: hub.activeList.opacity * hub.focusOpacity
+            opacity: hub.activeList.opacity * hub.focusOpacity * (1 - deleteDialog.scrim.opacity)
             animated: hub.live
         }
 
@@ -1292,9 +1316,32 @@ Page {
         anchors.fill: parent
         screenOff: !hub.live
         onAccepted: (index) => {
+            if (sheet.depth > 0) {
+                hub.playlistPicked(index)
+                sheet.close()
+                return
+            }
             hub.runSheet(index)
-            sheet.close()
+            if (sheet.depth === 0)
+                sheet.close()
         }
+    }
+
+    Dialog {
+        id: deleteDialog
+
+        anchors.fill: parent
+        screenOff: !hub.live
+        title: "delete playlist?"
+        items: ["delete playlist", "keep playlist"]
+        onAccepted: (index) => {
+            const t = hub.deleteRow
+            deleteDialog.close()
+            hub.deleteRow = null
+            if (index === 0 && t !== null)
+                hub.sheetAction("delete playlist", t.kind, t.id)
+        }
+        onRejected: hub.deleteRow = null
     }
 
     JumpLetter {
