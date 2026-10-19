@@ -69,9 +69,11 @@ class PowerBridge : public QObject, protected QDBusContext
     Q_PROPERTY(QString updateVersion READ updateVersion NOTIFY updateChanged)
     Q_PROPERTY(QString updateState READ updateState NOTIFY updateChanged)
     Q_PROPERTY(QString updateChecked READ updateChecked NOTIFY updateChanged)
+    Q_PROPERTY(int sleepMinutesLeft READ sleepMinutesLeft NOTIFY sleepTimerChanged)
 
 public:
     static constexpr int toggleDebounceMs = 2000;
+    static constexpr int sleepEndDelayMs = 500;
 
     PowerBridge(Player *player, const QDBusConnection &bus, QObject *parent = nullptr);
     ~PowerBridge() override;
@@ -132,6 +134,7 @@ public:
     QString updateVersion() const;
     QString updateState() const;
     QString updateChecked() const;
+    int sleepMinutesLeft() const;
 
     Q_INVOKABLE bool runVerb(const QString &verb);
     Q_INVOKABLE void runScreenOff();
@@ -140,6 +143,8 @@ public:
     Q_INVOKABLE void closeAndSwitch();
     Q_INVOKABLE bool switchTo(const QString &session);
     Q_INVOKABLE void reloadUpdate();
+    Q_INVOKABLE void startSleepTimer(int minutes);
+    Q_INVOKABLE void noteInput();
     void requestPowerMenu();
     void requestSwitchPrompt();
     void requestScreenOff(bool off);
@@ -158,6 +163,7 @@ signals:
     void switchingChanged();
     void holdModeChanged();
     void updateChanged();
+    void sleepTimerChanged();
     void wakeFinished(bool ok);
     void verbFailed(const QString &verb);
 
@@ -193,6 +199,8 @@ private:
     void notifyOverlayShown();
     void emitPropertiesChanged(const QVariantMap &changed);
     void emitScreenOffChanged();
+    void sleepTick();
+    void setSleepLeft(int minutes);
 
     Player *m_player;
     QDBusConnection m_bus;
@@ -211,6 +219,12 @@ private:
     QTimer m_switchTimer;
     QTimer m_readyTimer;
     QTimer m_idleTimer;
+    QTimer m_sleepTimer;
+    QTimer m_sleepEnd;
+    QElapsedTimer m_sleepClock;
+    qint64 m_sleepMs = 0;
+    int m_sleepMinuteMs = 0;
+    int m_sleepLeft = 0;
     QElapsedTimer m_idleSince;
     QElapsedTimer m_lastTransition;
     QString m_switchTarget;

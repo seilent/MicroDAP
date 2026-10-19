@@ -422,6 +422,8 @@ Window {
             saverTimer.restart()
         if (screenOffTimer.running)
             screenOffTimer.restart()
+        if (root.power !== null && typeof root.power.noteInput === "function")
+            root.power.noteInput()
     }
 
     function requestScreenOff(): void {
@@ -985,6 +987,11 @@ Window {
 
         function onRouted() {
             root.touch()
+        }
+
+        function onDropped() {
+            if (root.power !== null && typeof root.power.noteInput === "function")
+                root.power.noteInput()
         }
     }
 

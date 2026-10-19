@@ -1,5 +1,6 @@
 #include "Eq.h"
 #include "FakeService.h"
+#include "PowerBridge.h"
 #include "Rotation.h"
 #include "Settings.h"
 #include "SettingsRows.h"
@@ -627,7 +628,9 @@ void SettingsTest::rowTable()
             || row.type == QLatin1StringView("range") || row.type == QLatin1StringView("toggle")) {
             const QByteArray name = row.setting.toLatin1();
             QVERIFY2(!name.isEmpty() && (Settings::staticMetaObject.indexOfProperty(name.constData()) >= 0
-                                         || EqControl::staticMetaObject.indexOfProperty(name.constData()) >= 0),
+                                         || EqControl::staticMetaObject.indexOfProperty(name.constData()) >= 0
+                                         || (row.key == QLatin1StringView("sleep")
+                                             && PowerBridge::staticMetaObject.indexOfProperty(name.constData()) >= 0)),
                      qPrintable(row.key));
         }
         if (row.type == QLatin1StringView("toggle"))
@@ -702,6 +705,14 @@ void SettingsTest::rowTable()
     QCOMPARE(crossfade->setting, QStringLiteral("crossfadeMs"));
     QCOMPARE(crossfade->readOnly, QStringLiteral("bitPerfect"));
     QCOMPARE(ints(crossfade->values), Settings::crossfadeSteps());
+    const SettingsRows::Row *sleep = SettingsRows::find(QStringLiteral("sleep"));
+    QVERIFY(sleep && sleep->draft && !sleep->bounded);
+    QCOMPARE(sleep->kind, QStringLiteral("sheet"));
+    QCOMPARE(sleep->pivot, QStringLiteral("power"));
+    QCOMPARE(sleep->setting, QStringLiteral("sleepMinutesLeft"));
+    QCOMPARE(sleep->linkKey, QStringLiteral("sleep"));
+    QCOMPARE(sleep->shown, QStringLiteral("dap"));
+    QCOMPARE(ints(sleep->values), QList<int>({0, 15, 30, 45, 60, 90, 120}));
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
 }
 

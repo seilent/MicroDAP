@@ -89,13 +89,15 @@ set_property(TEST mpris APPEND PROPERTY ENVIRONMENT "MICRODAP_AUDIO_SINK=fakesin
 
 qt_add_executable(tst_power core/tst_power.cpp)
 target_compile_definitions(tst_power PRIVATE MICRODAP_FAKE_LOGIN1="${CMAKE_CURRENT_SOURCE_DIR}/fake_login1.py"
-                                             MICRODAP_FAKE_POWERD="${CMAKE_CURRENT_SOURCE_DIR}/fake_powerd.py")
+                                             MICRODAP_FAKE_POWERD="${CMAKE_CURRENT_SOURCE_DIR}/fake_powerd.py"
+                                             MICRODAP_FIXTURE_MUSIC="${fixtures}")
 target_link_libraries(tst_power PRIVATE microdapcore Qt6::DBus Qt6::Test)
 if(DBUS_RUN_SESSION)
     add_test(NAME power COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_power>)
 else()
     add_test(NAME power COMMAND tst_power)
 endif()
+set_tests_properties(power PROPERTIES FIXTURES_REQUIRED library-fixtures)
 microdap_test_env(power)
 set_property(TEST power APPEND PROPERTY ENVIRONMENT "MICRODAP_AUDIO_SINK=fakesink sync=false")
 

@@ -129,6 +129,7 @@ Page {
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
     readonly property int suspendMinutes: page.settings !== null && page.settings.suspendMinutes !== undefined ? page.settings.suspendMinutes : 10
+    readonly property int sleepLeft: page.power !== null && page.power.sleepMinutesLeft !== undefined ? Number(page.power.sleepMinutesLeft) : 0
     readonly property bool wifiOffScreenOff: page.settings !== null && page.settings.wifiOffScreenOff === true
     readonly property bool hasBoot: page.settings !== null && page.settings.bootSession !== undefined
     readonly property string bootSession: page.hasBoot ? String(page.settings.bootSession) : ""
@@ -426,6 +427,8 @@ Page {
             return page.offOr(Math.round(page.screenOffSeconds / 60), "min")
         case "suspend":
             return page.offOr(page.suspendMinutes, "min")
+        case "sleep":
+            return page.sleepLeft > 0 ? page.sleepLeft + " min left" : "off"
         case "wifi":
             return page.wifiOffScreenOff ? "off" : "keep"
         case "boot":
@@ -774,6 +777,7 @@ Page {
         case "screenOff":
             return page.offOr(Math.round(Number(value) / 60), "min")
         case "suspend":
+        case "sleep":
             return page.offOr(Number(value), "min")
         default:
             return String(value)
@@ -804,16 +808,23 @@ Page {
         d.ours = [d.valueOriginal]
         d.valueItems = JSON.stringify(page.valueWords(key, values))
         d.valueKey = key
+        d.leadSleep = key === "sleep"
         d.riseKept = ""
         sheet.title = spec.title
         sheet.items = page.valueWords(key, values)
         sheet.open()
-        sheet.mark = mark
+        sheet.mark = key === "sleep" ? Qt.binding(() => page.sleepMark()) : mark
         sheet.wrap = !spec.bounded
         sheet.focusIndex = Math.max(0, near)
     }
 
+    function sleepMark(): int {
+        return d.valueValues.findIndex((v) => Number(v) === page.sleepLeft)
+    }
+
     function endValue(): void {
+        if (d.valueKey === "sleep")
+            sheet.mark = page.sleepMark()
         d.valueKey = ""
         d.riseKept = ""
         d.valueValues = []
@@ -835,6 +846,12 @@ Page {
         page.endValue()
         if (value === undefined)
             return
+        if (key === "sleep") {
+            if (page.power !== null && typeof page.power.startSleepTimer === "function")
+                page.power.startSleepTimer(Number(value))
+            d.ours = []
+            return
+        }
         if (draft || String(page.liveOf(key)) !== String(value))
             page.write(page.settingOf(key), value)
         d.ours = []
@@ -869,7 +886,9 @@ Page {
     }
 
     function watchOf(open: bool, valueKey: string, editing: bool, editKey: string): var {
-        return open ? page.currentOf(valueKey) : editing ? page.currentOf(editKey) : undefined
+        if (open)
+            return valueKey === "sleep" ? undefined : page.currentOf(valueKey)
+        return editing ? page.currentOf(editKey) : undefined
     }
 
     function flip(key: string): void {
@@ -941,6 +960,8 @@ Page {
             return page.screenOffSeconds
         case "suspend":
             return page.suspendMinutes
+        case "sleep":
+            return page.sleepLeft
         case "wifi":
             return page.wifiOffScreenOff
         case "orientation":
@@ -1281,6 +1302,7 @@ Page {
         property var valueValues: []
         property var valueOriginal: null
         property bool valueDraft: false
+        property bool leadSleep: false
         property string valueItems: ""
         property var ours: []
         property bool internal: false
@@ -1559,6 +1581,7 @@ Page {
         id: sheet
 
         anchors.fill: parent
+        lead: d.leadSleep && sheet.depth === 0 && page.sleepLeft > 0 ? page.sleepLeft + " min left" : ""
         screenOff: page.screenOff
         animated: page.live
         onAccepted: (index) => {
@@ -1571,6 +1594,10 @@ Page {
         }
         onRejected: page.cancelValue()
         onFocusMoved: (index) => page.previewValue(index)
+        onProgressChanged: {
+            if (!sheet.shown && sheet.progress === 0)
+                d.leadSleep = false
+        }
         onAnimatingChanged: {
             if (sheet.animating || d.riseKept === "")
                 return

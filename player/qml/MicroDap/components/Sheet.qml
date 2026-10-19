@@ -8,6 +8,7 @@ Item {
     property bool screenOff: false
     property bool animated: !root.screenOff
     property string title: ""
+    property string lead: ""
     property var items: []
     property int focusIndex: 0
     property int mark: -1
@@ -27,14 +28,17 @@ Item {
     readonly property real pitch: Ui.px(Ui.settingsPitch)
     readonly property real edge: Ui.px(Ui.edge)
     readonly property real titleHeight: titleText.visible ? titleText.implicitHeight : 0
+    readonly property real leadHeight: root.lead === "" ? 0 : root.pitch
     readonly property int shownRows: root.items.length === 0 ? 0
-        : Math.max(1, Math.min(root.items.length, Math.floor((root.height - 2 * root.edge - root.titleHeight) / root.pitch)))
+        : Math.max(1, Math.min(root.items.length,
+                               Math.floor((root.height - 2 * root.edge - root.titleHeight - root.leadHeight) / root.pitch)))
     readonly property int lastFirstRow: Math.max(0, root.items.length - root.shownRows)
     property alias scrim: scrim
     property alias panel: panel
     property alias bar: bar
     property alias list: list
     property alias window: window
+    property alias leadItem: leadText
     readonly property string touchKind: root.shown ? "" : "block"
     readonly property font plainFont: Qt.font({
         family: Ui.family,
@@ -84,7 +88,7 @@ Item {
         x: 0
         y: root.height - panel.height + (1 - root.progress) * panel.height
         width: root.width
-        height: root.edge + root.titleHeight + root.shownRows * root.pitch + root.edge
+        height: root.edge + root.titleHeight + root.leadHeight + root.shownRows * root.pitch + root.edge
         color: Ui.bgElevated
         opacity: root.progress
 
@@ -99,6 +103,19 @@ Item {
             font: Ui.font(Ui.dialogTitle)
         }
 
+        Text {
+            id: leadText
+
+            x: root.edge
+            y: root.edge + root.titleHeight
+            height: root.leadHeight
+            visible: root.lead !== ""
+            verticalAlignment: Text.AlignVCenter
+            text: root.lead
+            color: Ui.white(Ui.settingsValue.alpha)
+            font: Ui.font(Ui.settingsValue)
+        }
+
         Flickable {
             id: window
 
@@ -107,7 +124,7 @@ Item {
             property alias touch: touchScroller
 
             x: 0
-            y: root.edge + root.titleHeight
+            y: root.edge + root.titleHeight + root.leadHeight
             width: panel.width
             height: root.shownRows * root.pitch
             contentWidth: window.width

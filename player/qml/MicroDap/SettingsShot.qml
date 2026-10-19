@@ -29,6 +29,13 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.fixture.startsWith("sleep")) {
+            screen.focusKey("sleep")
+            screen.keepFocusVisible()
+            if (root.fixture.endsWith("-sheet"))
+                screen.activate()
+            return
+        }
         if (root.fixture.startsWith("max-volume") || root.fixture.startsWith("power-on")) {
             screen.focusKey(root.fixture.startsWith("max-volume") ? "maxVolume" : "powerOnVolume")
             screen.keepFocusVisible()
@@ -190,6 +197,7 @@ Item {
         readonly property string updateStatus: root.fixture === "about-available" ? "available"
             : root.fixture === "about-missing" ? "unchecked" : "none"
         readonly property string updateVersion: root.fixture === "about-available" ? "testing-0628a41" : ""
+        readonly property int sleepMinutesLeft: root.fixture === "sleep" || root.fixture === "sleep-left-sheet" ? 29 : 0
     }
 
     QtObject {

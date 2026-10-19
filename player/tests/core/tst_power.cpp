@@ -18,6 +18,7 @@
 #include <QDBusMessage>
 #include <QDBusReply>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -239,6 +240,7 @@ private slots:
     void holdsAgainForNewPowerd();
     void overlayHoldsNothing();
     void idleSuspend();
+    void sleepTimer();
     void sessionsAndSwitchTo();
     void imageAndUpdate();
 
@@ -1577,6 +1579,68 @@ void PowerTest::idleSuspend()
         bridge.runScreenOn();
     }
     QDBusConnection::disconnectFromBus(QStringLiteral("power-idle"));
+}
+
+void PowerTest::sleepTimer()
+{
+    if (!m_login1Running)
+        QSKIP("fake login1 did not start (python3 with dbus and gi needed)");
+    QDirIterator it(QStringLiteral(MICRODAP_FIXTURE_MUSIC), {QStringLiteral("*.flac")}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    QVERIFY(it.hasNext());
+    QueueEntry entry;
+    entry.path = it.next();
+    entry.title = QStringLiteral("fixture");
+    const QByteArray sink = qgetenv("MICRODAP_AUDIO_SINK");
+    qputenv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink sync=true"));
+    qputenv("MICRODAP_IDLE_MINUTE_MS", QByteArrayLiteral("150"));
+    auto restore = qScopeGuard([sink] {
+        qputenv("MICRODAP_AUDIO_SINK", sink);
+        qunsetenv("MICRODAP_IDLE_MINUTE_MS");
+    });
+    Player player;
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-sleep"));
+    {
+        PowerBridge bridge(&player, other);
+        QSignalSpy changed(&bridge, &PowerBridge::sleepTimerChanged);
+        const int before = login1Calls(QStringLiteral("Suspend"));
+        bridge.startSleepTimer(0);
+        QCOMPARE(changed.count(), 0);
+        QCOMPARE(bridge.sleepMinutesLeft(), 0);
+
+        bridge.startSleepTimer(3);
+        QCOMPARE(bridge.sleepMinutesLeft(), 3);
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.sleepMinutesLeft(), 2, busTimeoutMs);
+        player.play({entry}, 0);
+        QCOMPARE(player.status(), Player::Playing);
+        QElapsedTimer timer;
+        timer.start();
+        bridge.startSleepTimer(3);
+        QCOMPARE(bridge.sleepMinutesLeft(), 3);
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.sleepMinutesLeft(), 0, busTimeoutMs);
+        QVERIFY(timer.elapsed() >= 400);
+        QCOMPARE(player.status(), Player::Paused);
+        QCOMPARE(login1Calls(QStringLiteral("Suspend")), before);
+        QTRY_COMPARE_WITH_TIMEOUT(login1Calls(QStringLiteral("Suspend")), before + 1, busTimeoutMs);
+        QVERIFY(timer.elapsed() >= 400 + PowerBridge::sleepEndDelayMs);
+
+        bridge.startSleepTimer(1);
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.sleepMinutesLeft(), 0, busTimeoutMs);
+        bridge.noteInput();
+        QTest::qWait(PowerBridge::sleepEndDelayMs + 300);
+        QCOMPARE(login1Calls(QStringLiteral("Suspend")), before + 1);
+
+        bridge.startSleepTimer(1);
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.sleepMinutesLeft(), 0, busTimeoutMs);
+        bridge.startSleepTimer(2);
+        QCOMPARE(bridge.sleepMinutesLeft(), 2);
+        bridge.startSleepTimer(0);
+        QCOMPARE(bridge.sleepMinutesLeft(), 0);
+        QTest::qWait(300 + PowerBridge::sleepEndDelayMs + 300);
+        QCOMPARE(login1Calls(QStringLiteral("Suspend")), before + 1);
+        bridge.noteInput();
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-sleep"));
 }
 
 void PowerTest::sessionsAndSwitchTo()

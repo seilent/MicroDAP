@@ -128,9 +128,15 @@ TestCase {
         property string updateStatus: "none"
         property string updateVersion: ""
         property int updateReloads: 0
+        property int sleepMinutesLeft: 0
+        property var sleeps: []
 
         function reloadUpdate() {
             fakePower.updateReloads++
+        }
+
+        function startSleepTimer(minutes) {
+            fakePower.sleeps = fakePower.sleeps.concat([minutes])
         }
 
         function runVerb(verb) {
@@ -270,7 +276,7 @@ TestCase {
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
-        ["screenOff", "suspend", "wifi"],
+        ["screenOff", "suspend", "sleep", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
@@ -360,6 +366,8 @@ TestCase {
         fakeRgb.supported = true
         fakePower.verbs = []
         fakePower.switches = 0
+        fakePower.sleepMinutesLeft = 0
+        fakePower.sleeps = []
         fakePower.imageVersion = "testing-38784f1"
         fakePower.updateStatus = "none"
         fakePower.updateVersion = ""
@@ -466,6 +474,98 @@ TestCase {
 
     function focused(page) {
         return page.sheet.items[page.sheet.focusIndex]
+    }
+
+    function test_sleep_timer() {
+        const page = tc.open()
+        compare(tc.rowOf(page, "sleep").title, "sleep timer")
+        compare(tc.rowOf(page, "sleep").value, "off")
+        tc.sheetOpen(page, "sleep")
+        compare(tc.items(page), JSON.stringify(["120 min", "90 min", "60 min", "45 min", "30 min", "15 min", "off"]))
+        compare(page.sheet.lead, "")
+        compare(page.sheet.leadItem.visible, false)
+        compare(tc.focused(page), "off")
+        compare(page.sheet.mark, 6)
+        compare(page.sheet.wrap, true)
+        router.dispatch("up", false)
+        router.dispatch("up", false)
+        compare(tc.focused(page), "30 min")
+        compare(fakePower.sleeps, [])
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakePower.sleeps, [30])
+        fakePower.sleepMinutesLeft = 30
+        compare(tc.rowOf(page, "sleep").value, "30 min left")
+
+        fakePower.sleepMinutesLeft = 29
+        compare(tc.rowOf(page, "sleep").value, "29 min left")
+        tc.sheetOpen(page, "sleep")
+        compare(page.sheet.lead, "29 min left")
+        compare(page.sheet.leadItem.visible, true)
+        compare(page.sheet.leadItem.font.capitalization, Font.AllUppercase)
+        compare(page.sheet.leadItem.font.pixelSize, Ui.fontPx(11))
+        fuzzyCompare(page.sheet.leadItem.color.a, 0.6, 0.01)
+        compare(page.sheet.leadItem.x, page.sheet.edge)
+        compare(page.sheet.leadItem.y, page.sheet.edge + page.sheet.titleHeight)
+        compare(page.sheet.leadItem.height, page.sheet.pitch)
+        compare(page.sheet.window.y, page.sheet.edge + page.sheet.titleHeight + page.sheet.pitch)
+        compare(tc.focused(page), "30 min")
+        compare(page.sheet.mark, -1)
+        fakePower.sleepMinutesLeft = 30
+        compare(page.sheet.mark, 4)
+        fakePower.sleepMinutesLeft = 28
+        compare(page.sheet.mark, -1)
+        compare(page.valueOpen, true)
+        compare(page.sheet.lead, "28 min left")
+        compare(tc.focused(page), "30 min")
+        verify(router.dispatch("a", false))
+        compare(fakePower.sleeps, [30, 30])
+
+        tc.sheetOpen(page, "sleep")
+        router.dispatch("down", false)
+        verify(router.dispatch("b", false))
+        compare(page.valueOpen, false)
+        compare(fakePower.sleeps, [30, 30])
+
+        tc.sheetOpen(page, "sleep")
+        router.dispatch("down", false)
+        router.dispatch("down", false)
+        compare(tc.focused(page), "off")
+        router.dispatch("down", false)
+        compare(tc.focused(page), "120 min")
+        router.dispatch("up", false)
+        fakePower.sleepMinutesLeft = 0
+        compare(page.valueOpen, true)
+        compare(page.sheet.lead, "")
+        compare(page.sheet.leadItem.visible, false)
+        compare(page.sheet.mark, 6)
+        compare(tc.focused(page), "off")
+        verify(router.dispatch("a", false))
+        compare(fakePower.sleeps, [30, 30, 0])
+        compare(tc.rowOf(page, "sleep").value, "off")
+    }
+
+    function test_sleep_lead_kept_while_closing() {
+        fakePower.sleepMinutesLeft = 29
+        const page = tc.open({ animated: true })
+        tc.focusKey(page, "sleep")
+        verify(router.dispatch("a", false))
+        tryCompare(page.sheet, "animating", false, 2000)
+        compare(page.sheet.lead, "29 min left")
+        const height = page.sheet.panel.height
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(page.sheet.animating, true)
+        compare(page.sheet.lead, "29 min left")
+        compare(page.sheet.panel.height, height)
+        compare(page.sheet.mark, -1)
+        tryCompare(page.sheet, "progress", 0, 2000)
+        compare(page.sheet.lead, "")
+        compare(fakePower.sleeps, [30])
+        tc.focusKey(page, "crossfade")
+        verify(router.dispatch("a", false))
+        compare(page.sheet.lead, "")
+        verify(router.dispatch("b", false))
     }
 
     function sheetItem(page, index) {

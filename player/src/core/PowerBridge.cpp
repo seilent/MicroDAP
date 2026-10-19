@@ -128,6 +128,15 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
     watchUpdate();
     m_idleTimer.setInterval(idleCheckMs());
     connect(&m_idleTimer, &QTimer::timeout, this, &PowerBridge::checkIdle);
+    m_sleepTimer.setSingleShot(true);
+    m_sleepTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_sleepTimer, &QTimer::timeout, this, &PowerBridge::sleepTick);
+    m_sleepEnd.setSingleShot(true);
+    m_sleepEnd.setInterval(sleepEndDelayMs);
+    connect(&m_sleepEnd, &QTimer::timeout, this, [this] {
+        qInfo() << "microdap power: sleep timer end, suspending";
+        logind(QStringLiteral("Suspend"));
+    });
     if (m_player)
         connect(m_player, &Player::statusChanged, this, &PowerBridge::notifyPlaybackStatus);
     if (m_powerd.isConnected()) {
@@ -755,6 +764,7 @@ void PowerBridge::screenOnNow(bool wake)
         return;
     }
     qInfo() << "microdap power: screen on" << (wake ? "after wake" : "");
+    noteInput();
     writeBacklight(0);
     m_lastTransition.start();
     setScreenOff(false);
@@ -842,6 +852,65 @@ void PowerBridge::checkIdle()
     qInfo() << "microdap power: idle for" << minutes << "min, suspending";
     m_idleSince.invalidate();
     logind(QStringLiteral("Suspend"));
+}
+
+int PowerBridge::sleepMinutesLeft() const
+{
+    return m_sleepLeft;
+}
+
+void PowerBridge::setSleepLeft(int minutes)
+{
+    if (m_sleepLeft == minutes)
+        return;
+    m_sleepLeft = minutes;
+    emit sleepTimerChanged();
+}
+
+void PowerBridge::startSleepTimer(int minutes)
+{
+    m_sleepEnd.stop();
+    if (minutes <= 0) {
+        if (m_sleepMs <= 0)
+            return;
+        qInfo() << "microdap power: sleep timer off";
+        m_sleepTimer.stop();
+        m_sleepMs = 0;
+        setSleepLeft(0);
+        return;
+    }
+    qInfo() << "microdap power: sleep timer" << minutes << "min";
+    m_sleepMinuteMs = idleMinuteMs();
+    m_sleepMs = qint64(minutes) * m_sleepMinuteMs;
+    m_sleepClock.start();
+    sleepTick();
+}
+
+void PowerBridge::sleepTick()
+{
+    if (m_sleepMs <= 0)
+        return;
+    const qint64 remaining = m_sleepMs - m_sleepClock.elapsed();
+    if (remaining > 0) {
+        const qint64 left = (remaining + m_sleepMinuteMs - 1) / m_sleepMinuteMs;
+        setSleepLeft(int(left));
+        m_sleepTimer.start(int(remaining - (left - 1) * m_sleepMinuteMs));
+        return;
+    }
+    m_sleepMs = 0;
+    setSleepLeft(0);
+    qInfo() << "microdap power: sleep timer end, pausing";
+    if (m_player && m_player->status() == Player::Playing)
+        m_player->pause();
+    m_sleepEnd.start();
+}
+
+void PowerBridge::noteInput()
+{
+    if (!m_sleepEnd.isActive())
+        return;
+    qInfo() << "microdap power: sleep timer suspend cancelled by input";
+    m_sleepEnd.stop();
 }
 
 void PowerBridge::logind(const QString &method)

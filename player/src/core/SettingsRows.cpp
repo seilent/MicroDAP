@@ -197,6 +197,8 @@ QList<Row> build()
 
     out.push_back(steps("power", "screenOff", "screen off after", "screenOffSeconds", numbers({0, 60, 120, 300, 600, 1800})));
     out.push_back(steps("power", "suspend", "suspend after", "suspendMinutes", numbers({0, 5, 10, 30, 60})));
+    Row sleep = steps("power", "sleep", "sleep timer", "sleepMinutesLeft", numbers({0, 15, 30, 45, 60, 90, 120}));
+    out.push_back(shown(link(draft(sleep, "starts the timer on confirm, a browse never changes it"), "sleep"), "dap"));
     out.push_back(toggle("power", "wifi", "wi-fi when off", "wifiOffScreenOff"));
 
     Row boot = choice("system", "boot", "boot into", "bootSession", {});
