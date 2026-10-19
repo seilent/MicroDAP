@@ -4,6 +4,7 @@
 #include <taglib/fileref.h>
 #include <taglib/flacproperties.h>
 #include <taglib/mp4properties.h>
+#include <taglib/opusfile.h>
 #include <taglib/tag.h>
 #include <taglib/tbytevector.h>
 #include <taglib/tfile.h>
@@ -19,6 +20,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
 #include <QStorageInfo>
@@ -108,6 +110,53 @@ int bitDepthOf(const TagLib::AudioProperties *audio)
     if (const auto *wav = dynamic_cast<const TagLib::RIFF::WAV::Properties *>(audio))
         return wav->bitsPerSample();
     return 0;
+}
+
+constexpr double gainLimitDb = 51;
+constexpr double r128Offset = 5;
+
+std::optional<double> leadingDecimal(TagLib::PropertyMap &map, const char *key)
+{
+    if (!map.contains(key) || map[key].isEmpty())
+        return std::nullopt;
+    static const QRegularExpression pattern(QStringLiteral("^[+-]?([0-9]+([.,][0-9]*)?|[.,][0-9]+)"));
+    const QRegularExpressionMatch match = pattern.match(fromTag(map[key].front()));
+    if (!match.hasMatch())
+        return std::nullopt;
+    bool ok = false;
+    const double value = match.captured(0).replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&ok);
+    return ok ? std::optional<double>(value) : std::nullopt;
+}
+
+std::optional<double> gainOf(std::optional<double> db)
+{
+    if (!db || *db < -gainLimitDb || *db > gainLimitDb)
+        return std::nullopt;
+    return db;
+}
+
+std::optional<double> gainOf(TagLib::PropertyMap &map, const char *replayGain, const char *r128, bool opus)
+{
+    if (opus) {
+        if (const std::optional<double> q78 = leadingDecimal(map, r128))
+            return gainOf(*q78 / 256 + r128Offset);
+    }
+    return gainOf(leadingDecimal(map, replayGain));
+}
+
+std::optional<double> peakOf(TagLib::PropertyMap &map, const char *key)
+{
+    const std::optional<double> peak = leadingDecimal(map, key);
+    return peak && *peak > 0 ? peak : std::nullopt;
+}
+
+bool hasLyricsTag(TagLib::PropertyMap &map)
+{
+    for (const char *key : {"LYRICS", "UNSYNCEDLYRICS"}) {
+        if (map.contains(key) && !map[key].isEmpty() && !map[key].front().isEmpty())
+            return true;
+    }
+    return false;
 }
 
 std::atomic<Scanner::MountCheck> mountCheck{nullptr};
@@ -313,6 +362,7 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
 {
     m_art.clear();
     m_folderArt.clear();
+    m_listing.clear();
     m_mounts.clear();
 
     struct Walked
@@ -458,6 +508,14 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
                 track.albumArtist = fromTag(map["ALBUMARTIST"].front());
             if (map.contains("DISCNUMBER") && !map["DISCNUMBER"].isEmpty())
                 track.discNo = leadingInt(fromTag(map["DISCNUMBER"].front()));
+            const bool opus = dynamic_cast<TagLib::Ogg::Opus::File *>(file) != nullptr;
+            track.trackGain = gainOf(map, "REPLAYGAIN_TRACK_GAIN", "R128_TRACK_GAIN", opus);
+            track.albumGain = gainOf(map, "REPLAYGAIN_ALBUM_GAIN", "R128_ALBUM_GAIN", opus);
+            track.trackPeak = peakOf(map, "REPLAYGAIN_TRACK_PEAK");
+            track.albumPeak = peakOf(map, "REPLAYGAIN_ALBUM_PEAK");
+            track.hasLyrics = hasLyricsTag(map);
+            if (const std::optional<Picture> picture = embeddedPicture(file))
+                track.trackArtPath = writeArt(picture->data, picture->mime);
         }
     }
 
@@ -475,21 +533,18 @@ TrackInfo Scanner::read(const QFileInfo &info, const FileStamp &stamp)
     if (track.albumArtist.isEmpty())
         track.albumArtist = track.artist;
 
-    track.artPath = resolveArt(ref.isNull() ? nullptr : ref.file(),
-                               albumKey(track.album, track.albumArtist), info.dir());
+    if (!track.hasLyrics)
+        track.hasLyrics = listing(info.dir()).contains((info.completeBaseName() + QStringLiteral(".lrc")).toLower());
+    track.artPath = resolveArt(track.trackArtPath, albumKey(track.album, track.albumArtist), info.dir());
     return track;
 }
 
-QString Scanner::resolveArt(TagLib::File *file, const QString &key, const QDir &dir)
+QString Scanner::resolveArt(const QString &trackArt, const QString &key, const QDir &dir)
 {
     if (const auto it = m_art.constFind(key); it != m_art.cend())
         return *it;
 
-    QString path;
-    if (file) {
-        if (const std::optional<Picture> picture = embeddedPicture(file))
-            path = writeArt(picture->data, picture->mime);
-    }
+    QString path = trackArt;
     if (path.isEmpty())
         path = folderArt(dir);
     if (!path.isEmpty())
@@ -525,11 +580,7 @@ QString Scanner::folderArt(const QDir &dir)
     if (const auto it = m_folderArt.constFind(dirPath); it != m_folderArt.cend())
         return *it;
 
-    QHash<QString, QString> lower;
-    const QStringList entries = dir.entryList(QDir::Files | QDir::Readable);
-    for (const QString &entry : entries)
-        lower.insert(entry.toLower(), entry);
-
+    const QHash<QString, QString> &lower = listing(dir);
     QString found;
     for (const QString &candidate : folderNames()) {
         if (const auto hit = lower.constFind(candidate); hit != lower.cend()) {
@@ -539,6 +590,18 @@ QString Scanner::folderArt(const QDir &dir)
     }
     m_folderArt.insert(dirPath, found);
     return found;
+}
+
+const QHash<QString, QString> &Scanner::listing(const QDir &dir)
+{
+    const QString dirPath = dir.absolutePath();
+    if (const auto it = m_listing.constFind(dirPath); it != m_listing.cend())
+        return *it;
+    QHash<QString, QString> lower;
+    const QStringList entries = dir.entryList(QDir::Files | QDir::Readable);
+    for (const QString &entry : entries)
+        lower.insert(entry.toLower(), entry);
+    return *m_listing.insert(dirPath, lower);
 }
 
 }

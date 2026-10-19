@@ -7,13 +7,10 @@
 #include <QStringList>
 
 #include <atomic>
+#include <optional>
 
 class QDir;
 class QFileInfo;
-
-namespace TagLib {
-class File;
-}
 
 namespace microdap {
 
@@ -41,6 +38,12 @@ struct TrackInfo
     int sampleRate = 0;
     int bitDepth = 0;
     QString artPath;
+    QString trackArtPath;
+    std::optional<double> trackGain;
+    std::optional<double> albumGain;
+    std::optional<double> trackPeak;
+    std::optional<double> albumPeak;
+    bool hasLyrics = false;
 };
 
 struct PlaylistFile
@@ -96,13 +99,15 @@ private:
     static QString mountOf(const QString &root);
 
     TrackInfo read(const QFileInfo &info, const FileStamp &stamp);
-    QString resolveArt(TagLib::File *file, const QString &key, const QDir &dir);
+    QString resolveArt(const QString &trackArt, const QString &key, const QDir &dir);
     QString writeArt(const QByteArray &data, const QString &mime);
     QString folderArt(const QDir &dir);
+    const QHash<QString, QString> &listing(const QDir &dir);
 
     QString m_artDir;
     QHash<QString, QString> m_art;
     QHash<QString, QString> m_folderArt;
+    QHash<QString, QHash<QString, QString>> m_listing;
     QHash<QString, bool> m_mounts;
 };
 

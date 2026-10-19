@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <span>
 #include <utility>
 
 namespace microdap {
@@ -22,7 +23,7 @@ namespace {
 
 std::atomic_int connectionCounter{0};
 
-constexpr int schemaVersion = 5;
+constexpr int schemaVersion = 6;
 
 constexpr const char *trackArtistsTable =
     "CREATE TABLE IF NOT EXISTS track_artists("
@@ -40,6 +41,8 @@ constexpr const char *addPlaylistSkipped =
 constexpr const char *playlistSourceIndex =
     "CREATE UNIQUE INDEX IF NOT EXISTS playlists_source ON playlists(source)";
 constexpr const char *dropUnsourced = "DELETE FROM playlists WHERE source IS NULL";
+constexpr const char *dropUnsourcedItems =
+    "DELETE FROM playlist_items WHERE playlist_id NOT IN (SELECT id FROM playlists)";
 constexpr const char *dropUnsourcedPins =
     "DELETE FROM pins WHERE kind = 'playlist' AND ref_id NOT IN (SELECT id FROM playlists)";
 constexpr const char *addPlaylistMtime =
@@ -48,7 +51,10 @@ constexpr const char *addPlaylistSize =
     "ALTER TABLE playlists ADD COLUMN size INTEGER NOT NULL DEFAULT -1";
 constexpr const char *playlistItemsTrackIndex =
     "CREATE INDEX IF NOT EXISTS playlist_items_track ON playlist_items(track_id)";
-constexpr const char *setVersion = "PRAGMA user_version = 5";
+constexpr const char *metaTable =
+    "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value NOT NULL)";
+constexpr const char *setMinReader =
+    "INSERT OR REPLACE INTO meta(key, value) VALUES('min_reader', 5)";
 
 const char *const schema[] = {
     "CREATE TABLE IF NOT EXISTS artists(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)",
@@ -61,7 +67,8 @@ const char *const schema[] = {
     "album_artist TEXT NOT NULL, album_id INTEGER NOT NULL REFERENCES albums(id), "
     "track_no INTEGER, disc_no INTEGER, year INTEGER, genre TEXT NOT NULL DEFAULT '', "
     "duration_ms INTEGER, added INTEGER NOT NULL, rating INTEGER NOT NULL DEFAULT 0, "
-    "sample_rate INTEGER, bit_depth INTEGER)",
+    "sample_rate INTEGER, bit_depth INTEGER, rg_track_gain REAL, rg_album_gain REAL, "
+    "rg_track_peak REAL, rg_album_peak REAL, art_path TEXT, has_lyrics INTEGER NOT NULL DEFAULT 0)",
     "CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist)",
     "CREATE INDEX IF NOT EXISTS tracks_genre ON tracks(genre)",
@@ -84,58 +91,74 @@ const char *const schema[] = {
     playlistItemsTrackIndex,
     "CREATE TABLE IF NOT EXISTS pins(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, "
     "ref_id INTEGER NOT NULL, pos INTEGER NOT NULL)",
-    setVersion,
+    metaTable,
+    setMinReader,
 };
 
-const char *const migrateFrom1[] = {
+const char *const toVersion2[] = {
     trackArtistsTable,
     trackArtistsIndex,
+};
+
+const char *const toVersion3[] = {
     addSampleRate,
     addBitDepth,
     markReread,
+};
+
+const char *const toVersion4[] = {
     addPlaylistSource,
     addPlaylistSkipped,
     playlistSourceIndex,
     dropUnsourced,
+    dropUnsourcedItems,
     dropUnsourcedPins,
+};
+
+const char *const toVersion5[] = {
     addPlaylistMtime,
     addPlaylistSize,
     playlistItemsTrackIndex,
-    setVersion,
 };
 
-const char *const migrateFrom2[] = {
-    addSampleRate,
-    addBitDepth,
+const char *const toVersion6[] = {
+    "ALTER TABLE tracks ADD COLUMN rg_track_gain REAL",
+    "ALTER TABLE tracks ADD COLUMN rg_album_gain REAL",
+    "ALTER TABLE tracks ADD COLUMN rg_track_peak REAL",
+    "ALTER TABLE tracks ADD COLUMN rg_album_peak REAL",
+    "ALTER TABLE tracks ADD COLUMN art_path TEXT",
+    "ALTER TABLE tracks ADD COLUMN has_lyrics INTEGER NOT NULL DEFAULT 0",
+    metaTable,
+    setMinReader,
     markReread,
-    addPlaylistSource,
-    addPlaylistSkipped,
-    playlistSourceIndex,
-    dropUnsourced,
-    dropUnsourcedPins,
-    addPlaylistMtime,
-    addPlaylistSize,
-    playlistItemsTrackIndex,
-    setVersion,
 };
 
-const char *const migrateFrom3[] = {
-    addPlaylistSource,
-    addPlaylistSkipped,
-    playlistSourceIndex,
-    dropUnsourced,
-    dropUnsourcedPins,
-    addPlaylistMtime,
-    addPlaylistSize,
-    playlistItemsTrackIndex,
-    setVersion,
+struct Orphans
+{
+    const char *table;
+    const char *sql;
 };
 
-const char *const migrateFrom4[] = {
-    addPlaylistMtime,
-    addPlaylistSize,
-    playlistItemsTrackIndex,
-    setVersion,
+const Orphans cascadeOrphans[] = {
+    {"history", "DELETE FROM history WHERE track_id NOT IN (SELECT id FROM tracks)"},
+    {"playlist_items", "DELETE FROM playlist_items WHERE track_id NOT IN (SELECT id FROM tracks) "
+                       "OR playlist_id NOT IN (SELECT id FROM playlists)"},
+    {"track_artists", "DELETE FROM track_artists WHERE track_id NOT IN (SELECT id FROM tracks) "
+                      "OR artist_id NOT IN (SELECT id FROM artists)"},
+};
+
+struct Migration
+{
+    int to;
+    std::span<const char *const> statements;
+};
+
+const Migration migrations[] = {
+    {2, toVersion2},
+    {3, toVersion3},
+    {4, toVersion4},
+    {5, toVersion5},
+    {6, toVersion6},
 };
 
 const char *const pruneAlbumsAndArtists[] = {
@@ -213,6 +236,11 @@ QVariant nullable(const QString &value)
 QVariant nullable(int value)
 {
     return value > 0 ? QVariant(value) : QVariant(QMetaType::fromType<int>());
+}
+
+QVariant nullable(const std::optional<double> &value)
+{
+    return value ? QVariant(*value) : QVariant(QMetaType::fromType<double>());
 }
 
 bool run(QSqlQuery &query)
@@ -315,25 +343,83 @@ void Library::open()
 
     QSqlQuery version(QStringLiteral("PRAGMA user_version"), m_db);
     const int current = version.next() ? version.value(0).toInt() : 0;
-    if (current == 0) {
-        for (const char *sql : schema)
-            run(m_db, sql);
-    } else if (current == 1) {
-        for (const char *sql : migrateFrom1)
-            run(m_db, sql);
-    } else if (current == 2) {
-        for (const char *sql : migrateFrom2)
-            run(m_db, sql);
-    } else if (current == 3) {
-        for (const char *sql : migrateFrom3)
-            run(m_db, sql);
-    } else if (current == 4) {
-        for (const char *sql : migrateFrom4)
-            run(m_db, sql);
-    } else if (current != schemaVersion) {
-        qWarning() << "microdap library: unsupported schema version" << current << "in" << m_dbPath;
-        m_db.close();
+    version.finish();
+    if (current > schemaVersion) {
+        const int reader = minReader();
+        if (reader < 0 || reader > schemaVersion) {
+            qWarning() << "microdap library: schema version" << current << "needs reader" << reader << "in"
+                       << m_dbPath;
+            m_db.close();
+        }
+        return;
     }
+    if (current == 0) {
+        if (!migrate(schemaVersion, schema))
+            m_db.close();
+        return;
+    }
+    for (const Migration &step : migrations) {
+        if (step.to <= current)
+            continue;
+        if (!migrate(step.to, step.statements)) {
+            qWarning() << "microdap library: migration to" << step.to << "failed, kept at"
+                       << step.to - 1 << "in" << m_dbPath;
+            m_db.close();
+            return;
+        }
+    }
+}
+
+bool Library::migrate(int to, std::span<const char *const> statements)
+{
+    run(m_db, "PRAGMA foreign_keys = OFF");
+    QSqlQuery keys(QStringLiteral("PRAGMA foreign_keys"), m_db);
+    const bool off = keys.next() && keys.value(0).toInt() == 0;
+    keys.finish();
+    if (!off) {
+        qWarning() << "microdap library: foreign keys still on before migration to" << to;
+        run(m_db, "PRAGMA foreign_keys = ON");
+        return false;
+    }
+    bool ok = m_db.transaction();
+    const bool began = ok;
+    for (const Orphans &orphans : cascadeOrphans) {
+        QSqlQuery table(m_db);
+        table.prepare(QStringLiteral("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"));
+        table.addBindValue(QString::fromLatin1(orphans.table));
+        const bool present = ok && table.exec() && table.next();
+        table.finish();
+        if (present)
+            ok = run(m_db, orphans.sql);
+    }
+    for (const char *sql : statements)
+        ok = ok && run(m_db, sql);
+    if (ok) {
+        QSqlQuery check(m_db);
+        ok = check.exec(QStringLiteral("PRAGMA foreign_key_check"));
+        if (ok && check.next()) {
+            qWarning() << "microdap library: foreign key violation in" << check.value(0).toString()
+                       << "after migration to" << to;
+            ok = false;
+        }
+    }
+    if (ok) {
+        QSqlQuery stamp(m_db);
+        ok = stamp.exec(QStringLiteral("PRAGMA user_version = %1").arg(to));
+    }
+    ok = ok && m_db.commit();
+    if (!ok && began)
+        m_db.rollback();
+    run(m_db, "PRAGMA foreign_keys = ON");
+    return ok;
+}
+
+int Library::minReader() const
+{
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("SELECT value FROM meta WHERE key = 'min_reader'")) || !query.next())
+        return -1;
+    return query.value(0).toInt();
 }
 
 bool Library::isOpen() const
@@ -672,13 +758,17 @@ bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qin
     QSqlQuery query(m_db);
     query.prepare(QStringLiteral(
         "INSERT INTO tracks(path, mtime, size, title, artist, album_artist, album_id, track_no, "
-        "disc_no, year, genre, duration_ms, added, rating, sample_rate, bit_depth) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
+        "disc_no, year, genre, duration_ms, added, rating, sample_rate, bit_depth, rg_track_gain, "
+        "rg_album_gain, rg_track_peak, rg_album_peak, art_path, has_lyrics) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(path) DO UPDATE SET mtime = excluded.mtime, size = excluded.size, "
         "title = excluded.title, artist = excluded.artist, album_artist = excluded.album_artist, "
         "album_id = excluded.album_id, track_no = excluded.track_no, disc_no = excluded.disc_no, "
         "year = excluded.year, genre = excluded.genre, duration_ms = excluded.duration_ms, "
-        "sample_rate = excluded.sample_rate, bit_depth = excluded.bit_depth"));
+        "sample_rate = excluded.sample_rate, bit_depth = excluded.bit_depth, "
+        "rg_track_gain = excluded.rg_track_gain, rg_album_gain = excluded.rg_album_gain, "
+        "rg_track_peak = excluded.rg_track_peak, rg_album_peak = excluded.rg_album_peak, "
+        "art_path = excluded.art_path, has_lyrics = excluded.has_lyrics"));
     query.addBindValue(track.path);
     query.addBindValue(track.mtime);
     query.addBindValue(track.size);
@@ -694,6 +784,12 @@ bool Library::upsertTrack(const TrackInfo &track, qint64 now, QHash<QString, qin
     query.addBindValue(now);
     query.addBindValue(track.sampleRate);
     query.addBindValue(track.bitDepth);
+    query.addBindValue(nullable(track.trackGain));
+    query.addBindValue(nullable(track.albumGain));
+    query.addBindValue(nullable(track.trackPeak));
+    query.addBindValue(nullable(track.albumPeak));
+    query.addBindValue(nullable(track.trackArtPath));
+    query.addBindValue(track.hasLyrics ? 1 : 0);
     if (!run(query))
         return false;
 
@@ -911,6 +1007,13 @@ bool Library::isPinned(const QString &kind, qint64 refId) const
 
 void Library::pruneArt()
 {
+    QSet<QString> cached;
+    const QFileInfoList files = QDir(m_artDir).entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+    for (const QFileInfo &file : files) {
+        if (artNamePattern().match(file.fileName()).hasMatch())
+            cached.insert(m_artDir + QLatin1Char('/') + file.fileName());
+    }
+
     QSet<QString> referenced;
     QList<qint64> missing;
     QSqlQuery query(QStringLiteral("SELECT id, art_path FROM albums WHERE art_path IS NOT NULL"),
@@ -924,17 +1027,39 @@ void Library::pruneArt()
     }
     query.finish();
 
-    for (qint64 id : missing) {
-        QSqlQuery update(m_db);
-        update.prepare(QStringLiteral("UPDATE albums SET art_path = NULL WHERE id = ?"));
-        update.addBindValue(id);
-        run(update);
+    QList<qint64> lost;
+    QSqlQuery tracks(QStringLiteral("SELECT id, art_path FROM tracks WHERE art_path IS NOT NULL"), m_db);
+    while (tracks.next()) {
+        const QString path = tracks.value(1).toString();
+        if (cached.contains(path))
+            referenced.insert(path);
+        else
+            lost.append(tracks.value(0).toLongLong());
+    }
+    tracks.finish();
+
+    if (!missing.isEmpty() || !lost.isEmpty()) {
+        bool ok = m_db.transaction();
+        QSqlQuery album(m_db);
+        album.prepare(QStringLiteral("UPDATE albums SET art_path = NULL WHERE id = ?"));
+        for (qint64 id : std::as_const(missing)) {
+            album.addBindValue(id);
+            ok = ok && run(album);
+        }
+        QSqlQuery track(m_db);
+        track.prepare(QStringLiteral("UPDATE tracks SET art_path = NULL, mtime = -1 WHERE id = ?"));
+        for (qint64 id : std::as_const(lost)) {
+            track.addBindValue(id);
+            ok = ok && run(track);
+        }
+        if (!ok || !m_db.commit()) {
+            qWarning() << "microdap library: art prune failed" << m_db.lastError().text();
+            m_db.rollback();
+        }
     }
 
-    const QFileInfoList files = QDir(m_artDir).entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
-    for (const QFileInfo &file : files) {
-        const QString path = file.absoluteFilePath();
-        if (!referenced.contains(path) && artNamePattern().match(file.fileName()).hasMatch())
+    for (const QString &path : std::as_const(cached)) {
+        if (!referenced.contains(path))
             QFile::remove(path);
     }
 }

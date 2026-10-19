@@ -14,6 +14,7 @@
 #include <QVariantMap>
 
 #include <atomic>
+#include <span>
 
 namespace microdap {
 
@@ -95,6 +96,8 @@ signals:
 
 private:
     void open();
+    bool migrate(int to, std::span<const char *const> statements);
+    int minReader() const;
     void setScanning(bool scanning);
     int count(const QString &table) const;
     bool applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed);
