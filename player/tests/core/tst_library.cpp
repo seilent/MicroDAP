@@ -444,6 +444,7 @@ private slots:
     void trackTags();
     void trackArtFirst();
     void newFormats();
+    void trackInfo();
     void migrateFrom6();
     void playlistFallback();
 
@@ -2844,6 +2845,58 @@ void LibraryTest::migrateFrom6()
         QVERIFY(library.favoriteStamps(QStringLiteral("CARD")).isEmpty());
     }
     QCOMPARE(dumpVersion5(path), before);
+}
+
+void LibraryTest::trackInfo()
+{
+    QCOMPARE(Library::infoLines(QStringLiteral("flac"), 44100, 16, 10000000, 60000),
+             (QStringList{QStringLiteral("flac"), QStringLiteral("44100 hz"), QStringLiteral("16 bit"),
+                          QStringLiteral("1333 kbps"), QStringLiteral("10.0 mb")}));
+    QCOMPARE(Library::infoLines(QStringLiteral("mp3"), 48000, 16, 2500000, 0),
+             (QStringList{QStringLiteral("mp3"), QStringLiteral("48000 hz"), QStringLiteral("2.5 mb")}));
+    QCOMPARE(Library::infoLines(QStringLiteral("dsf"), 5644800, 1, 0, 1000),
+             (QStringList{QStringLiteral("dsf"), QStringLiteral("5644800 hz"), QStringLiteral("dsd128")}));
+    QCOMPARE(Library::infoLines(QString(), 0, 0, 0, 0), QStringList());
+    QCOMPARE(Library::pathParts(QStringLiteral("/run/media/micro/CARD/Music/A/01.flac"),
+                                {QStringLiteral("/run/media/micro/CARD")}),
+             (QStringList{QStringLiteral("Music"), QStringLiteral("A"), QStringLiteral("01.flac")}));
+    QCOMPARE(Library::pathParts(QDir::homePath() + QStringLiteral("/Music/B/02.mp3"), {}),
+             (QStringList{QStringLiteral("Music"), QStringLiteral("B"), QStringLiteral("02.mp3")}));
+    QCOMPARE(Library::pathParts(QStringLiteral("/srv/x.flac"), {}),
+             (QStringList{QStringLiteral("srv"), QStringLiteral("x.flac")}));
+    QCOMPARE(Library::pathParts(QStringLiteral("/run/media/micro/e8ea5deb/Music/A/01.flac"), {}),
+             (QStringList{QStringLiteral("Music"), QStringLiteral("A"), QStringLiteral("01.flac")}));
+    const QString bad = m_dir.path() + QStringLiteral("/bad.m4a");
+    {
+        QFile file(bad);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("not an mp4 file");
+    }
+    QCOMPARE(Library::codecOf(bad), QString());
+
+    const QString music = m_dir.path() + QStringLiteral("/info");
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_FORMATS), music));
+    Library library(m_dir.path() + QStringLiteral("/info.db"), m_dir.path() + QStringLiteral("/info-art"));
+    QSignalSpy spy(&library, &Library::scanned);
+    library.rescan({music});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    const auto idOf = [&library, &music](const QString &file) {
+        QSqlQuery query(library.database());
+        query.prepare(QStringLiteral("SELECT id FROM tracks WHERE path = ?"));
+        query.addBindValue(music + QLatin1Char('/') + file);
+        return query.exec() && query.next() ? query.value(0).toLongLong() : -1;
+    };
+    const QVariantMap dsf = library.trackInfo(idOf(QStringLiteral("dsd64.dsf")));
+    QCOMPARE(dsf.value(QStringLiteral("title")).toString(), QStringLiteral("DSF"));
+    const QStringList dsfLines = dsf.value(QStringLiteral("lines")).toStringList();
+    QCOMPARE(dsfLines.mid(0, 3), (QStringList{QStringLiteral("dsf"), QStringLiteral("2822400 hz"), QStringLiteral("dsd64")}));
+    QVERIFY(dsfLines.last().endsWith(QStringLiteral(" mb")));
+    QCOMPARE(dsf.value(QStringLiteral("parts")).toStringList().last(), QStringLiteral("dsd64.dsf"));
+    QCOMPARE(library.trackInfo(idOf(QStringLiteral("aac.mp4"))).value(QStringLiteral("lines")).toStringList().first(),
+             QStringLiteral("aac"));
+    QCOMPARE(library.trackInfo(idOf(QStringLiteral("vorbis.oga"))).value(QStringLiteral("lines")).toStringList().first(),
+             QStringLiteral("vorbis"));
+    QVERIFY(library.trackInfo(-5).isEmpty());
 }
 
 void LibraryTest::newFormats()

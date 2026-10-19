@@ -30,6 +30,8 @@ Page {
     property alias focusBar: focusBar
     property alias sheet: sheet
 
+    signal sheetAction(string action, string kind, int id)
+
     list: queueList
 
     function slotEntry(slot: int): var {
@@ -133,6 +135,7 @@ Page {
             items.push("move up")
         if (index < screen.count - 1)
             items.push("move down")
+        items.push("info")
         return items
     }
 
@@ -186,6 +189,13 @@ Page {
             return screen.moveEntry(index, index - 1)
         case "move down":
             return screen.moveEntry(index, index + 1)
+        case "info": {
+            const e = screen.slotEntry(index)
+            if (e === null)
+                return false
+            screen.sheetAction("info", "song", e.id)
+            return true
+        }
         default:
             return false
         }
@@ -520,7 +530,8 @@ Page {
         screenOff: !screen.live
         onAccepted: (index) => {
             screen.runSheet(index)
-            sheet.close()
+            if (sheet.depth === 0)
+                sheet.close()
         }
     }
 }

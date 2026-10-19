@@ -109,12 +109,13 @@ Page {
 
     function verbsFor(index: int): var {
         if (!page.editable)
-            return []
+            return ["info"]
         const items = ["remove"]
         if (index > 0)
             items.push("move up")
         if (index < page.rows.length - 1)
             items.push("move down")
+        items.push("info")
         return items
     }
 
@@ -170,7 +171,10 @@ Page {
         const action = sheet.items[index]
         if (t === null || action === undefined)
             return
-        page.edit(action, t.index)
+        if (action === "info")
+            page.sheetAction("info", "song", t.id)
+        else
+            page.edit(action, t.index)
     }
 
     function moveRow(delta: int): bool {
@@ -460,7 +464,8 @@ Page {
         screenOff: !page.live
         onAccepted: (index) => {
             page.runSheet(index)
-            sheet.close()
+            if (sheet.depth === 0)
+                sheet.close()
         }
     }
 }

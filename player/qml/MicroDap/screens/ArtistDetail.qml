@@ -182,7 +182,7 @@ Page {
 
     function sheetItemsFor(kind: string, id: int): var {
         if (kind === "song")
-            return ["play", "play next", "add to queue", "add to playlist", page.pinLabel(kind, id)]
+            return ["play", "play next", "add to queue", "add to playlist", page.pinLabel(kind, id), "info"]
         return ["play", "play next", "add to queue", "shuffle", "add to playlist", page.pinLabel(kind, id)]
     }
 

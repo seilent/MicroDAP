@@ -731,7 +731,7 @@ TestCase {
         verify(router.dispatch("x", false))
         compare(page.sheet.shown, true)
         compare(page.sheet.title, "a song 1")
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "pin to quickplay", "info"]))
         router.dispatch("down", false)
         compare(page.sheet.focusIndex, 1)
         compare(page.rowIndex, 1)
@@ -857,7 +857,7 @@ TestCase {
         compare(fakePlayer.idCalls[0].startId, 11)
 
         verify(router.dispatch("x", false))
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "pin to quickplay", "info"]))
         router.dispatch("a", false)
         compare(fakePlayer.idCalls.length, 2)
         compare(fakePlayer.idCalls[1].startId, 11)
@@ -898,7 +898,7 @@ TestCase {
         const page = open({ pivotIndex: 2, library: fakeLibrary })
         verify(router.dispatch("down", false))
         verify(router.dispatch("x", false))
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "unpin from quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "unpin from quickplay", "info"]))
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
@@ -910,7 +910,7 @@ TestCase {
         compare(counters.sheetActions[0].id, 1)
         router.dispatch("down", false)
         verify(router.dispatch("x", false))
-        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "pin to quickplay"]))
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["play", "play next", "add to queue", "add to playlist", "pin to quickplay", "info"]))
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
@@ -1328,7 +1328,7 @@ TestCase {
 
     function scrimY(page) {
         const pane = page.songsPane
-        const y = pane.y + 1.5 * pane.rowPitch
+        const y = pane.y + 0.5 * pane.rowPitch
         verify(y < page.sheet.panel.y)
         return y
     }

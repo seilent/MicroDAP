@@ -154,7 +154,7 @@ Page {
     }
 
     function sheetItemsFor(kind: string, id: int): var {
-        return ["play", "play next", "add to queue", "add to playlist", page.pinLabel(kind, id)]
+        return ["play", "play next", "add to queue", "add to playlist", page.pinLabel(kind, id), "info"]
     }
 
     function touchContext(kind: string, index: int, hit: Item): bool {

@@ -25,6 +25,22 @@ Item {
             hubModel.source = sample
     }
 
+    function infoFixture(): void {
+        const entry = hub.focusedEntry()
+        if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
+            hub.handleAction("down", false)
+        hub.completeAll()
+        hub.openSheet()
+        const parts = root.fixture === "track-info-short" ? ["Music", "Single", "01 Single.mp3"]
+            : ["Music", "HARMONICS vol.2 夢", "Disc 1", "07 A very long track title that keeps on going past the edge.flac"]
+        const width = hub.width - 2 * Ui.px(Ui.edge)
+        const path = Env.fitPath(parts, hub.sheet.plainFont, width)
+        const lines = root.fixture === "track-info-short" ? ["mp3", "44100 hz", "320 kbps", "9.8 mb", path]
+            : ["flac", "96000 hz", "24 bit", "4608 kbps", "212.6 mb", path]
+        hub.sheet.showLines(hub.sheet.title, lines, lines.length - 1)
+        hub.completeAll()
+    }
+
     function pickFixture(): void {
         const entry = hub.focusedEntry()
         if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
@@ -68,6 +84,8 @@ Item {
         }
         if (root.fixture === "playlist-pick")
             Qt.callLater(root.pickFixture)
+        if (root.fixture.startsWith("track-info"))
+            Qt.callLater(root.infoFixture)
         if (root.fixture === "pressed") {
             const entry = hub.focusedEntry()
             if (entry !== null && (entry.kind === "letter" || entry.kind === "divider"))
@@ -165,7 +183,7 @@ Item {
         id: hub
 
         anchors.fill: parent
-        animated: root.jump || root.fixture === "playlist-pick"
+        animated: root.jump || root.fixture === "playlist-pick" || root.fixture.startsWith("track-info")
         pivotIndex: Math.max(0, root.pivots.indexOf(root.pivot))
         artistsModel: root.artistsHub !== null ? root.artistsHub : sampleArtists
         albumsModel: root.albumsGrid !== null ? root.albumsGrid : sampleAlbums

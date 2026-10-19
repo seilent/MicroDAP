@@ -23,6 +23,11 @@ TestCase {
             return kind === "album" && id === 12 ? [21, 22] : kind === "artist" && id === 7 ? [21, 22, 23] : []
         }
 
+        function trackInfo(id) {
+            return id === 5 ? { title: "Song 5", lines: ["flac", "44100 hz", "16 bit", "1000 kbps", "4.2 mb"],
+                parts: ["Music", "A", "05.flac"] } : {}
+        }
+
         function editablePlaylists() {
             return [{ id: 4, name: "Road", source: "/home/micro/Music/Playlists/Road.m3u8" }]
         }
@@ -420,6 +425,55 @@ TestCase {
         compare(fakeLibrary.edits.length, 1)
         compare(fakeLibrary.edits[0].verb, "delete")
         compare(fakeLibrary.edits[0].id, 4)
+        tc.home()
+    }
+
+    function test_track_info_second_sheet() {
+        const hub = tc.hubSheet("Song 5", ["play", "play next", "add to queue", "add to playlist", "pin to quickplay", "info"])
+        main.sheetAction("info", "song", 5)
+        compare(hub.sheet.depth, 1)
+        compare(hub.sheet.lines, true)
+        compare(hub.sheet.title, "Song 5")
+        compare(JSON.stringify(hub.sheet.items),
+            JSON.stringify(["flac", "44100 hz", "16 bit", "1000 kbps", "4.2 mb", "Music / A / 05.flac"]))
+        compare(hub.sheet.plainIndex, 5)
+        compare(hub.sheet.bar.visible, false)
+        verify(main.router.dispatch("a", false))
+        compare(hub.sheet.shown, true)
+        compare(fakePlayer.calls.length, 0)
+        verify(main.router.dispatch("b", false))
+        compare(hub.sheet.shown, false)
+        compare(hub.sheet.depth, 0)
+        const font = hub.sheet.plainFont
+        compare(Env.fitPath(["Music", "A", "05.flac"], font, 10000), "Music / A / 05.flac")
+        const wide = Env.fitPath(["Music", "Addison Road", "Stories", "05.flac"], font, hub.width / 2)
+        verify(wide.startsWith("... / "))
+        verify(wide.endsWith("05.flac"))
+        compare(Env.fitPath(["Music", "05 a title too long for any width.flac"], font, 10), "05 a title too long for any width.flac")
+        tc.hubSheet("Song 6", ["play"])
+        main.sheetAction("info", "song", 6)
+        compare(hub.sheet.depth, 0)
+        compare(hub.sheet.lines, false)
+        tc.home()
+    }
+
+    function test_track_info_closes_on_track_change() {
+        fakePlayer.current = { id: 5, title: "Song 5", artist: "Addison Road", rating: 0 }
+        fakePlayer.status = main.statusPlaying
+        main.openNowPlaying()
+        main.pageStack.completeAll()
+        const np = main.pageStack.currentItem
+        compare(np.objectName, "nowplaying")
+        verify(np.openInfo())
+        compare(np.sheet.shown, true)
+        compare(np.sheet.lines, true)
+        compare(np.sheet.title, "Song 5")
+        fakePlayer.current = { id: 5, title: "Song 5", artist: "Addison Road", rating: 1 }
+        compare(np.shown.rating, 1)
+        compare(np.sheet.shown, true)
+        fakePlayer.current = { id: 6, title: "Song 6", artist: "Addison Road", rating: 0 }
+        tryVerify(() => np.shown.id === 6, 5000)
+        tryCompare(np.sheet, "shown", false)
         tc.home()
     }
 }

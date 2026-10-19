@@ -130,8 +130,10 @@ Page {
     property alias trackAnimation: trackAnim
     property alias variantInAnimation: variantIn
     property alias variantOutAnimation: variantOut
+    property alias sheet: sheet
 
     signal openQueue()
+    signal trackInfo(int id)
 
     focusCount: 0
 
@@ -390,9 +392,28 @@ Page {
             item.toggled()
     }
 
+    function openInfo(): bool {
+        if (np.shownVariant || np.shown.id === null || np.shown.id === undefined)
+            return false
+        np.trackInfo(Number(np.shown.id))
+        return true
+    }
+
+    function touchContext(kind: string, index: int, hit: Item): bool {
+        return kind === "title" && np.openInfo()
+    }
+
+    function touchTap(kind: string, index: int, hit: Item): void {
+        if (kind !== "title" || !d.titleTap)
+            return
+        d.titleTap = false
+        np.openQueue()
+    }
+
     function activate() {
         if (np.focusRow === 1) {
-            np.openQueue()
+            if (!np.openInfo())
+                np.openQueue()
             return
         }
         np.toggleRing(np.ringIndex)
@@ -406,6 +427,7 @@ Page {
     }
 
     function touchPress(kind: string, index: int, x: real, hit: Item): string {
+        d.titleTap = false
         if (np.idle)
             return "a"
         switch (kind) {
@@ -415,7 +437,8 @@ Page {
             return "a"
         case "title":
             np.focusRow = 1
-            return "a"
+            d.titleTap = true
+            return ""
         case "back":
             return "b"
         case "seek":
@@ -484,6 +507,8 @@ Page {
         }
         if (np.live)
             idleTimer.restart()
+        if (sheet.shown)
+            return sheet.handleAction(name, repeat)
         switch (name) {
         case "up":
             if (np.focusRow !== 0)
@@ -596,6 +621,7 @@ Page {
         property real seekX: 0
         property bool seekHeld: false
         property real seekPos: 0
+        property bool titleTap: false
     }
 
     Timer {
@@ -1180,5 +1206,12 @@ Page {
                 easing.bezierCurve: Motion.decel
             }
         }
+    }
+
+    Sheet {
+        id: sheet
+
+        anchors.fill: parent
+        screenOff: !np.live
     }
 }

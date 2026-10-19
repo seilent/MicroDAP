@@ -142,7 +142,7 @@ Page {
         page.sheetEntry = e
         sheet.title = e.title
         sheet.items = e.kind === "song"
-            ? ["play", "play next", "add to queue", "add to playlist", page.pinLabel(e.kind, e.id)]
+            ? ["play", "play next", "add to queue", "add to playlist", page.pinLabel(e.kind, e.id), "info"]
             : ["play", "play next", "add to queue", "shuffle", "add to playlist", page.pinLabel(e.kind, e.id)]
         sheet.open()
         return true

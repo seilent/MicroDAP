@@ -90,6 +90,10 @@ public:
     PlaylistStore &playlistStore();
     PlaylistStore::Edit editPlaylist(const QString &path, const PlaylistStore::Change &change);
     Q_INVOKABLE QVariantList sourceTracks(const QString &kind, qint64 id) const;
+    Q_INVOKABLE QVariantMap trackInfo(qint64 trackId) const;
+    static QString codecOf(const QString &path);
+    static QStringList infoLines(const QString &codec, int rate, int depth, qint64 size, qint64 durationMs);
+    static QStringList pathParts(const QString &path, const QStringList &mounts);
     Q_INVOKABLE QVariantList editablePlaylists() const;
     Q_INVOKABLE bool editable(qint64 playlistId) const;
     Q_INVOKABLE QString addToPlaylist(qint64 playlistId, const QVariantList &trackIds);

@@ -603,6 +603,9 @@ Window {
         case "open playlist":
             root.openPlaylistView(kind, id)
             return
+        case "info":
+            root.openTrackInfo(id)
+            return
         default:
             console.info("microdap: " + action + " " + kind + " " + id)
             return
@@ -665,6 +668,20 @@ Window {
             overlays.toast.show("", error)
         else
             overlays.toast.show("added to " + name, pick.title)
+    }
+
+    function openTrackInfo(id: int): void {
+        const page = pages.currentItem
+        if (page === null || page.sheet === undefined || page.sheet === null)
+            return
+        const info = root.callLibrary("trackInfo", id)
+        if (info === undefined || info === null || info.title === undefined)
+            return
+        const parts = info.parts === undefined ? [] : info.parts
+        const width = page.width - 2 * Ui.px(Ui.edge)
+        const path = Env.fitPath(parts, page.sheet.plainFont, width)
+        const lines = info.lines.concat(path === "" ? [] : [path])
+        page.sheet.showLines(String(info.title), lines, path === "" ? -1 : lines.length - 1)
     }
 
     function deletePlaylist(id: int): void {
@@ -1246,7 +1263,17 @@ Window {
             player: root.player
             bluez: root.bluez
             status: root.status
+            property var infoId: null
+
             onOpenQueue: root.openQueue()
+            onTrackInfo: (id) => {
+                infoId = id
+                root.openTrackInfo(id)
+            }
+            onShownChanged: {
+                if (infoId !== null && Number(shown.id) !== infoId && sheet.shown && sheet.lines)
+                    sheet.close()
+            }
         }
     }
 
@@ -1258,6 +1285,7 @@ Window {
             animated: !root.hidden
             screenOff: root.off
             player: root.player
+            onSheetAction: (action, kind, id) => root.sheetAction(action, kind, id)
         }
     }
 

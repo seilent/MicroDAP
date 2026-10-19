@@ -31,6 +31,7 @@ target_link_libraries(microdap-fiio PRIVATE microdapfiio)
 install(TARGETS microdap-fiio RUNTIME DESTINATION libexec/microdap)
 
 add_library(microdaprows STATIC
+    src/core/PathFit.h
     src/core/SettingsRows.cpp
     src/core/SettingsRows.h
 )

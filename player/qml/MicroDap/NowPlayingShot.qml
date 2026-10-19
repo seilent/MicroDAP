@@ -55,7 +55,7 @@ Item {
         id: screen
 
         anchors.fill: parent
-        animated: false
+        animated: root.fixture === "track-info"
         player: samplePlayer
         bluez: root.contextBluez
         status: sampleStatus
@@ -65,6 +65,17 @@ Item {
             screen.pressed = root.fixture === "pressed"
             if (root.fixture === "seek")
                 screen.seekAt(Ui.px(Ui.npSeekMargin) + screen.progressWidth * 0.6)
+            if (root.fixture === "track-info")
+                Qt.callLater(root.infoFixture)
         }
+    }
+
+    function infoFixture(): void {
+        const parts = ["Music", "Addison Road", "Addison Road", "01 Sticking With You.flac"]
+        const width = screen.width - 2 * Ui.px(Ui.edge)
+        const path = Env.fitPath(parts, screen.sheet.plainFont, width)
+        screen.sheet.showLines(screen.titleItem.text, ["flac", "44100 hz", "16 bit", "912 kbps", "27.4 mb", path], 5)
+        screen.completeAll()
+        screen.sheet.complete()
     }
 }

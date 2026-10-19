@@ -1,4 +1,5 @@
 #include "Library.h"
+#include "Favorites.h"
 #include "SectionKey.h"
 
 #include <QDebug>
@@ -18,6 +19,11 @@
 #include <optional>
 #include <span>
 #include <utility>
+
+#include <taglib/fileref.h>
+#include <taglib/mp4file.h>
+#include <taglib/oggflacfile.h>
+#include <taglib/opusfile.h>
 
 namespace microdap {
 
@@ -1210,6 +1216,86 @@ QVariantList Library::sourceTracks(const QString &kind, qint64 id) const
     for (const QueueEntry &entry : entriesFor(kind, id))
         out.append(entry.id);
     return out;
+}
+
+QString Library::codecOf(const QString &path)
+{
+    const QString ext = QFileInfo(path).suffix().toLower();
+    if (ext == QLatin1StringView("m4a") || ext == QLatin1StringView("mp4") || ext == QLatin1StringView("m4b")) {
+        TagLib::MP4::File file(QFile::encodeName(path).constData(), true, TagLib::AudioProperties::Fast);
+        const TagLib::MP4::Properties *audio = file.isValid() ? file.audioProperties() : nullptr;
+        if (!audio)
+            return {};
+        return audio->codec() == TagLib::MP4::Properties::ALAC ? QStringLiteral("alac") : QStringLiteral("aac");
+    }
+    if (ext == QLatin1StringView("ogg") || ext == QLatin1StringView("oga")) {
+        const TagLib::FileRef ref(QFile::encodeName(path).constData(), false);
+        if (dynamic_cast<const TagLib::Ogg::Opus::File *>(ref.file()))
+            return QStringLiteral("opus");
+        if (dynamic_cast<const TagLib::Ogg::FLAC::File *>(ref.file()))
+            return QStringLiteral("flac");
+        return QStringLiteral("vorbis");
+    }
+    if (ext == QLatin1StringView("opus"))
+        return QStringLiteral("opus");
+    if (ext == QLatin1StringView("flac") || ext == QLatin1StringView("mp3") || ext == QLatin1StringView("wav")
+        || ext == QLatin1StringView("ape") || ext == QLatin1StringView("dsf") || ext == QLatin1StringView("dff"))
+        return ext;
+    return {};
+}
+
+QStringList Library::infoLines(const QString &codec, int rate, int depth, qint64 size, qint64 durationMs)
+{
+    QStringList out;
+    if (!codec.isEmpty())
+        out.append(codec);
+    if (rate > 0)
+        out.append(QStringLiteral("%1 hz").arg(rate));
+    const bool dsd = codec == QLatin1StringView("dsf") || codec == QLatin1StringView("dff");
+    const bool lossless = codec == QLatin1StringView("flac") || codec == QLatin1StringView("alac")
+                          || codec == QLatin1StringView("wav") || codec == QLatin1StringView("ape");
+    if (dsd && rate > 0)
+        out.append(QStringLiteral("dsd%1").arg(qRound(rate / 44100.0)));
+    else if (lossless && depth > 0)
+        out.append(QStringLiteral("%1 bit").arg(depth));
+    if (size > 0 && durationMs > 0)
+        out.append(QStringLiteral("%1 kbps").arg(qRound64(double(size) * 8.0 / double(durationMs))));
+    if (size > 0)
+        out.append(QStringLiteral("%1 mb").arg(QString::number(double(size) / 1e6, 'f', 1)));
+    return out;
+}
+
+QStringList Library::pathParts(const QString &path, const QStringList &mounts)
+{
+    const QString clean = QDir::cleanPath(path);
+    QString root;
+    for (const QString &mount : mounts) {
+        if (clean.startsWith(mount + QLatin1Char('/')) && mount.size() > root.size())
+            root = mount;
+    }
+    const QString home = QDir::cleanPath(QDir::homePath());
+    if (root.isEmpty() && clean.startsWith(home + QLatin1Char('/')))
+        root = home;
+    const QString media = QDir::cleanPath(QDir(Scanner::mediaBase()).absolutePath());
+    if (root.isEmpty() && clean.startsWith(media + QLatin1Char('/')))
+        return clean.mid(media.size() + 1).split(QLatin1Char('/'), Qt::SkipEmptyParts).mid(2);
+    const QString rel = root.isEmpty() ? clean.mid(1) : clean.mid(root.size() + 1);
+    return rel.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+}
+
+QVariantMap Library::trackInfo(qint64 trackId) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT title, path, size, duration_ms, sample_rate, bit_depth FROM tracks WHERE id = ?"));
+    query.addBindValue(trackId);
+    if (!query.exec() || !query.next())
+        return {};
+    const QString path = query.value(1).toString();
+    const QStringList lines = infoLines(codecOf(path), query.value(4).toInt(), query.value(5).toInt(),
+                                        query.value(2).toLongLong(), query.value(3).toLongLong());
+    return {{QStringLiteral("title"), query.value(0).toString()},
+            {QStringLiteral("lines"), lines},
+            {QStringLiteral("parts"), pathParts(path, Favorites::cardMounts())}};
 }
 
 QVariantList Library::editablePlaylists() const

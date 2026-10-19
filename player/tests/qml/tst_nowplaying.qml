@@ -230,6 +230,7 @@ TestCase {
         id: counters
 
         property int queueOpens: 0
+        property var infos: []
     }
 
     Component {
@@ -247,6 +248,7 @@ TestCase {
             bluez: fakeBluez
             status: fakeStatus
             onOpenQueue: counters.queueOpens++
+            onTrackInfo: (id) => counters.infos = counters.infos.concat([id])
         }
     }
 
@@ -277,6 +279,7 @@ TestCase {
         fakeStatus.battery = 73
         fakeStatus.batteryPresent = true
         counters.queueOpens = 0
+        counters.infos = []
     }
 
     function open(properties) {
@@ -440,7 +443,10 @@ TestCase {
         compare(page.ring(2).focused, false)
         verify(!router.dispatch("up", false))
         verify(router.dispatch("a", false))
-        compare(counters.queueOpens, 1)
+        compare(counters.queueOpens, 0)
+        compare(JSON.stringify(counters.infos), JSON.stringify([page.shown.id]))
+        verify(router.dispatch("x", false))
+        compare(fakePlayer.calls, ["playPause"])
         verify(router.dispatch("down", false))
         compare(page.focusRow, 0)
         compare(page.ringIndex, 2)
@@ -954,7 +960,7 @@ TestCase {
         const seen = (name) => routed.push(name)
         router.routed.connect(seen)
         mousePress(title, title.width / 2, title.height / 2)
-        compare(layer.holdTimer.running, false)
+        compare(layer.holdTimer.running, true)
         wait(Ui.seekHoldMs + 150)
         mouseRelease(title, title.width / 2, title.height / 2)
         wait(0)
@@ -962,6 +968,24 @@ TestCase {
         router.routed.disconnect(seen)
         compare(fakePlayer.calls, [])
         compare(routed.indexOf("x"), -1)
+        compare(JSON.stringify(counters.infos), JSON.stringify([page.shown.id]))
+        compare(counters.queueOpens, 0)
+    }
+
+    function test_info_sheet_routes_keys() {
+        const page = open()
+        page.sheet.showLines("Song", ["flac", "44100 hz", "16 bit", "Music / A / 01.flac"], 3)
+        page.sheet.complete()
+        compare(page.sheet.shown, true)
+        compare(page.sheet.lines, true)
+        compare(page.sheet.bar.visible, false)
+        verify(router.dispatch("a", false))
+        verify(router.dispatch("x", false))
+        compare(fakePlayer.calls, [])
+        compare(page.sheet.shown, true)
+        verify(router.dispatch("b", false))
+        compare(page.sheet.shown, false)
+        compare(pages.depth, 2)
     }
 
     function test_touch_last_next_track_opens_queue() {

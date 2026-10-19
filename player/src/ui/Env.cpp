@@ -1,8 +1,10 @@
 #include "Env.h"
 
+#include "PathFit.h"
 #include "SettingsRows.h"
 
 #include <QCoreApplication>
+#include <QFontMetricsF>
 
 namespace microdap {
 
@@ -40,6 +42,12 @@ bool Env::rotateMotion() const
 QVariantList Env::settingsRows() const
 {
     return SettingsRows::maps();
+}
+
+QString Env::fitPath(const QStringList &parts, const QFont &font, qreal width) const
+{
+    const QFontMetricsF metrics(font);
+    return fitPathParts(parts, [&metrics](const QString &text) { return metrics.horizontalAdvance(text); }, width);
 }
 
 }

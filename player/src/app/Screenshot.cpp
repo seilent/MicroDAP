@@ -199,6 +199,8 @@ const QStringList &states()
         QStringLiteral("playlist-pick"),
         QStringLiteral("playlist-sheet"),
         QStringLiteral("playlist-delete"),
+        QStringLiteral("track-info"),
+        QStringLiteral("track-info-short"),
         QStringLiteral("view"),
         QStringLiteral("view-sheet"),
         QStringLiteral("view-long"),

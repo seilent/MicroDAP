@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QFont>
 #include <QObject>
 #include <QQmlEngine>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 
 namespace microdap {
@@ -27,6 +29,7 @@ public:
     int landscapeTurn() const;
     bool rotateMotion() const;
     QVariantList settingsRows() const;
+    Q_INVOKABLE QString fitPath(const QStringList &parts, const QFont &font, qreal width) const;
 };
 
 }
