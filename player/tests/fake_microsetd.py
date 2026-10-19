@@ -46,6 +46,7 @@ KEYS = {
     'microdap.accent_from_art': ('b', False, {}),
     'microdap.scale': ('d', 1.0, {}),
     'microdap.saver_seconds': ('u', 30, {}),
+    'microdap.saver_lyrics': ('b', False, {}),
     'microdap.touch': ('b', True, {}),
     'microdap.rgb': ('s', 'system', {'enum': ['system', 'accent', 'off']}),
     'microdap.overlay_toasts': ('b', False, {}),

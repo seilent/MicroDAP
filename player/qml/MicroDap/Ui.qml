@@ -361,6 +361,7 @@ QtObject {
     readonly property real saverArtistPitch: ui.saverArtist.size
     readonly property real saverAlbumPitch: ui.saverAlbum.size
     readonly property real saverClockBaseline: ui.edge + ui.capHeight * ui.saverClock.size
+    readonly property real saverLyricBaseline: ui.saverArtY - 16
     readonly property real overlayRing: 64
     readonly property real overlayGlyph: 20
     readonly property real overlayGlyphOffset: 80

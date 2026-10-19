@@ -65,6 +65,7 @@ Window {
 
     property var power: root.screenshot || typeof PowerBridge === "undefined" ? null : PowerBridge
     property var player: root.screenshot || typeof Player === "undefined" ? null : Player
+    property var lyrics: root.screenshot || typeof Lyrics === "undefined" ? null : Lyrics
     readonly property var status: root.screenshot || typeof StatusModel === "undefined" ? null : StatusModel
     readonly property bool powerScreenOff: root.power !== null && root.power.screenOff === true
     readonly property bool switching: root.power !== null && root.power.switching === true
@@ -79,6 +80,7 @@ Window {
     readonly property int saverSeconds: root.settings !== null && root.settings.saverSeconds !== undefined ? Number(root.settings.saverSeconds) : 0
     readonly property int screenOffSeconds: root.settings !== null && root.settings.screenOffSeconds !== undefined ? Number(root.settings.screenOffSeconds) : 0
     readonly property bool overlayToasts: root.settings !== null && root.settings.overlayToasts === true
+    readonly property bool saverLyrics: root.settings !== null && root.settings.saverLyrics === true
 
     property bool overlay: root.bridge !== null
     property bool overlayMapped: root.bridge !== null ? root.bridge.mapped : true
@@ -954,6 +956,9 @@ Window {
             artist: root.field("artist")
             album: root.field("album")
             artPath: root.field("artPath")
+            lyricsOn: root.saverLyrics
+            lyrics: root.lyrics
+            player: root.player
         }
 
         PadRouter {

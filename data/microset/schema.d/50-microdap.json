@@ -66,6 +66,14 @@
       "label": "Screen saver after",
       "ui": {"order": 4, "values": {"10": "10 s", "15": "15 s", "30": "30 s", "60": "1 min", "120": "2 min", "300": "5 min"}}
     },
+    "microdap.saver_lyrics": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_display",
+      "label": "Saver lyrics",
+      "ui": {"order": 5}
+    },
     "microdap.touch": {
       "type": "b",
       "default": true,
@@ -81,7 +89,7 @@
       "applier": null,
       "group": "microdap_display",
       "label": "RGB",
-      "ui": {"order": 5}
+      "ui": {"order": 6}
     },
     "microdap.overlay_toasts": {
       "type": "b",
@@ -89,7 +97,7 @@
       "applier": null,
       "group": "microdap_display",
       "label": "Toasts in game",
-      "ui": {"order": 6}
+      "ui": {"order": 7}
     },
     "microdap.screen_off_seconds": {
       "type": "u",

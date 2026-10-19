@@ -127,6 +127,7 @@ void SettingsTest::defaultsWithoutDaemon()
     QCOMPARE(settings.accentHue(), 350);
     QCOMPARE(settings.scale(), 1.0);
     QCOMPARE(settings.saverSeconds(), 30);
+    QVERIFY(!settings.saverLyrics());
     QCOMPARE(settings.screenOffSeconds(), 300);
     QCOMPARE(settings.suspendMinutes(), 10);
     QVERIFY(settings.touch());
@@ -201,9 +202,10 @@ void SettingsTest::writesTypedKeys()
     settings.setTouch(false);
     settings.setRgb(QStringLiteral("ACCENT"));
     settings.setSaverSeconds(60);
+    settings.setSaverLyrics(true);
     settings.setHpGain(QStringLiteral("low"));
     settings.setBootSession(QStringLiteral("microemu"));
-    QTRY_COMPARE_WITH_TIMEOUT(m_set.calls().filter(QStringLiteral("Set ")).size(), 11, waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(m_set.calls().filter(QStringLiteral("Set ")).size(), 12, waitMs);
     QTest::qWait(100);
     QCOMPARE(client.get(QStringLiteral("audio.output")).toString(), QStringLiteral("headphones"));
     QCOMPARE(client.get(QStringLiteral("audio.volume_step")).toUInt(), 2u);
@@ -214,13 +216,14 @@ void SettingsTest::writesTypedKeys()
     QCOMPARE(client.get(QStringLiteral("microdap.touch")).toBool(), false);
     QCOMPARE(client.get(QStringLiteral("microdap.rgb")).toString(), QStringLiteral("accent"));
     QCOMPARE(client.get(QStringLiteral("microdap.saver_seconds")).toUInt(), 60u);
+    QCOMPARE(client.get(QStringLiteral("microdap.saver_lyrics")).toBool(), true);
     QCOMPARE(client.get(QStringLiteral("audio.hp_gain")).toString(), QStringLiteral("low"));
     QCOMPARE(client.get(QStringLiteral("session.default")).toString(), QStringLiteral("microemu"));
     QCOMPARE(settings.output(), QStringLiteral("headphones"));
     settings.setOutput(QStringLiteral("headphones"));
     settings.setBootSession(QStringLiteral("nowhere"));
     QTest::qWait(200);
-    QCOMPARE(m_set.calls().filter(QStringLiteral("Set ")).size(), 11);
+    QCOMPARE(m_set.calls().filter(QStringLiteral("Set ")).size(), 12);
 }
 
 void SettingsTest::rootsStoreEmpty()

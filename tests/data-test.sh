@@ -63,7 +63,7 @@ python3 - "${data}/microset/schema.d/50-microdap.json" <<'PY' || fail "schema ch
 import json, re, sys
 d = json.load(open(sys.argv[1]))
 assert d["owner"] == "microdap", d["owner"]
-want = {"output_level", "sample_rate", "roots", "accent_hue", "accent_from_art", "scale", "saver_seconds", "touch",
+want = {"output_level", "sample_rate", "roots", "accent_hue", "accent_from_art", "scale", "saver_seconds", "saver_lyrics", "touch",
         "rgb", "overlay_toasts", "screen_off_seconds", "suspend_minutes", "wifi_off_screen_off"}
 keys = d["keys"]
 assert {k.split(".", 1)[1] for k in keys} == want, sorted(keys)

@@ -61,6 +61,26 @@ TestCase {
         property int screenOffSeconds: 0
         property int suspendMinutes: 10
         property bool wifiOffScreenOff: false
+        property bool saverLyrics: false
+    }
+
+    QtObject {
+        id: fakeLyrics
+
+        property bool pending: false
+        property var lines: []
+        property var plain: []
+
+        signal changed()
+
+        function lineAt(ms) {
+            let found = -1
+            for (let i = 0; i < fakeLyrics.lines.length; ++i) {
+                if (fakeLyrics.lines[i].ms <= ms)
+                    found = i
+            }
+            return found
+        }
     }
 
     Main {
@@ -69,6 +89,7 @@ TestCase {
         power: fakePower
         player: fakePlayer
         settings: fakeSettings
+        lyrics: fakeLyrics
         shotWidth: 640
         shotHeight: 960
     }
@@ -83,6 +104,11 @@ TestCase {
         fakePower.verbs = []
         fakePlayer.status = 1
         fakeSettings.saverSeconds = 1
+        fakeSettings.saverLyrics = false
+        fakeLyrics.pending = false
+        fakeLyrics.lines = []
+        fakeLyrics.changed()
+        fakePlayer.position = 0
         saver.hide()
         saver.land()
         saver.dimTimer.interval = Motion.dimDelay
@@ -127,6 +153,87 @@ TestCase {
         compare(Motion.saverDrift, 18000)
         compare(Motion.saverDriftFrom, 8)
         compare(Motion.saverDriftTo, -27)
+    }
+
+    function test_lyric_line() {
+        fakeLyrics.lines = [{ ms: 1000, text: "First line" }, { ms: 2000, text: "" }, { ms: 3000, text: "Third line" }]
+        fakeLyrics.changed()
+        fakePlayer.position = 1500
+        saver.show()
+        saver.land()
+        compare(saver.shownLyric, "")
+        compare(saver.lyricItem.visible, false)
+
+        fakeSettings.saverLyrics = true
+        compare(saver.lyricsOn, true)
+        compare(saver.shownLyric, "First line")
+        compare(saver.lyricItem.visible, true)
+        compare(saver.lyricItem.x, Ui.px(16))
+        compare(saver.lyricItem.width, main.width - 2 * Ui.px(16))
+        compare(saver.lyricItem.clip, true)
+        compare(saver.lyricItem.font.pixelSize, Ui.fontPx(13))
+        compare(saver.lyricItem.font.styleName, "Light")
+        fuzzyCompare(saver.lyricItem.color.a, 0.6, 1 / 255)
+        fuzzyCompare(saver.lyricItem.y + saver.lyricItem.baselineOffset,
+                     saver.artItem.y - Ui.px(16) + Ui.px(saver.drift), 0.5)
+        verify(saver.lyricItem.y + saver.lyricItem.height - Ui.px(saver.drift) + Ui.px(Motion.saverDriftFrom)
+               <= saver.artItem.y + 0.5)
+
+        fakePlayer.position = 1900
+        compare(saver.lyricSwap.running, false)
+        fakePlayer.position = 3100
+        compare(saver.lyricSwap.running, true)
+        compare(Motion.valueChange, 200)
+        compare(Motion.valueDip, 0.2)
+        tryCompare(saver, "shownLyric", "Third line", 1000)
+        tryCompare(saver.lyricSwap, "running", false, 1000)
+        compare(saver.lyricItem.opacity, 1)
+
+        fakePlayer.position = 2500
+        tryCompare(saver, "shownLyric", "", 1000)
+        compare(saver.lyricItem.visible, false)
+        fakePlayer.position = 500
+        compare(saver.lyricText, "")
+
+        fakePlayer.position = 3500
+        tryCompare(saver, "shownLyric", "Third line", 1000)
+        tryCompare(saver.lyricItem, "opacity", 1, 1000)
+
+        fakePlayer.position = 1500
+        compare(saver.lyricSwap.running, true)
+        fakePlayer.position = 3500
+        compare(saver.lyricSwap.running, false)
+        compare(saver.lyricItem.opacity, 1)
+        compare(saver.shownLyric, "Third line")
+
+        fakePlayer.position = 2500
+        tryCompare(saver, "shownLyric", "", 1000)
+        tryCompare(saver.lyricSwap, "running", false, 1000)
+        fakePlayer.position = 3500
+        compare(saver.shownLyric, "Third line")
+        compare(saver.lyricSwap.running, false)
+        tryCompare(saver.lyricItem, "opacity", 1, 1000)
+        fakeLyrics.lines = []
+        fakeLyrics.plain = ["Plain text"]
+        fakeLyrics.changed()
+        tryCompare(saver, "shownLyric", "", 1000)
+
+        fakeLyrics.lines = [{ ms: 0, text: "Pending" }]
+        fakeLyrics.pending = true
+        fakeLyrics.changed()
+        compare(saver.lyricText, "")
+        fakeLyrics.pending = false
+        fakeLyrics.changed()
+        tryCompare(saver, "shownLyric", "Pending", 1000)
+
+        fakePower.screenOff = true
+        fakeLyrics.lines = [{ ms: 0, text: "Off" }]
+        fakeLyrics.changed()
+        compare(saver.lyricSwap.running, false)
+        compare(saver.shownLyric, "Off")
+        fakePower.screenOff = false
+        fakeSettings.saverLyrics = false
+        compare(saver.shownLyric, "")
     }
 
     function test_track_art_in_one_album() {

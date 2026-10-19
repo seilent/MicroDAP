@@ -24,6 +24,7 @@ class Settings : public QObject
     Q_PROPERTY(bool accentFromArt READ accentFromArt WRITE setAccentFromArt NOTIFY accentFromArtChanged)
     Q_PROPERTY(double scale READ scale WRITE setScale NOTIFY scaleChanged)
     Q_PROPERTY(int saverSeconds READ saverSeconds WRITE setSaverSeconds NOTIFY saverSecondsChanged)
+    Q_PROPERTY(bool saverLyrics READ saverLyrics WRITE setSaverLyrics NOTIFY saverLyricsChanged)
     Q_PROPERTY(int screenOffSeconds READ screenOffSeconds WRITE setScreenOffSeconds NOTIFY screenOffSecondsChanged)
     Q_PROPERTY(int suspendMinutes READ suspendMinutes WRITE setSuspendMinutes NOTIFY suspendMinutesChanged)
     Q_PROPERTY(bool wifiOffScreenOff READ wifiOffScreenOff WRITE setWifiOffScreenOff NOTIFY wifiOffScreenOffChanged)
@@ -95,6 +96,8 @@ public:
     void setScale(double scale);
     int saverSeconds() const;
     void setSaverSeconds(int seconds);
+    bool saverLyrics() const;
+    void setSaverLyrics(bool on);
     int screenOffSeconds() const;
     void setScreenOffSeconds(int seconds);
     int suspendMinutes() const;
@@ -136,6 +139,7 @@ signals:
     void accentFromArtChanged();
     void scaleChanged();
     void saverSecondsChanged();
+    void saverLyricsChanged();
     void screenOffSecondsChanged();
     void suspendMinutesChanged();
     void wifiOffScreenOffChanged();

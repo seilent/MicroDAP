@@ -44,6 +44,7 @@ const QString keyAccentHue = QStringLiteral("microdap.accent_hue");
 const QString keyAccentFromArt = QStringLiteral("microdap.accent_from_art");
 const QString keyScale = QStringLiteral("microdap.scale");
 const QString keySaverSeconds = QStringLiteral("microdap.saver_seconds");
+const QString keySaverLyrics = QStringLiteral("microdap.saver_lyrics");
 const QString keyScreenOffSeconds = QStringLiteral("microdap.screen_off_seconds");
 const QString keySuspendMinutes = QStringLiteral("microdap.suspend_minutes");
 const QString keyWifiOffScreenOff = QStringLiteral("microdap.wifi_off_screen_off");
@@ -68,6 +69,7 @@ constexpr Key keys[] = {
     {"microdap.accent_from_art", QMetaType::Bool, &Settings::accentFromArtChanged},
     {"microdap.scale", QMetaType::Double, &Settings::scaleChanged},
     {"microdap.saver_seconds", QMetaType::UInt, &Settings::saverSecondsChanged},
+    {"microdap.saver_lyrics", QMetaType::Bool, &Settings::saverLyricsChanged},
     {"microdap.screen_off_seconds", QMetaType::UInt, &Settings::screenOffSecondsChanged},
     {"microdap.suspend_minutes", QMetaType::UInt, &Settings::suspendMinutesChanged},
     {"microdap.wifi_off_screen_off", QMetaType::Bool, &Settings::wifiOffScreenOffChanged},
@@ -147,6 +149,7 @@ QVariantMap defaults()
         {keyAccentFromArt, false},
         {keyScale, 1.0},
         {keySaverSeconds, 30u},
+        {keySaverLyrics, false},
         {keyScreenOffSeconds, 300u},
         {keySuspendMinutes, 10u},
         {keyWifiOffScreenOff, false},
@@ -781,6 +784,16 @@ bool Settings::autoRotate() const
 void Settings::setAutoRotate(bool on)
 {
     store(keyAutoRotate, on);
+}
+
+bool Settings::saverLyrics() const
+{
+    return m_values.value(keySaverLyrics).toBool();
+}
+
+void Settings::setSaverLyrics(bool on)
+{
+    store(keySaverLyrics, on);
 }
 
 bool Settings::touch() const
