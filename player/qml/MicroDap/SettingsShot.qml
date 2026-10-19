@@ -10,8 +10,9 @@ Item {
 
     readonly property bool levelShot: root.fixture.startsWith("bit-perfect")
     readonly property bool chainShot: root.fixture.startsWith("balance") || root.fixture.startsWith("crossfeed")
-    readonly property bool replaygainShot: root.fixture.startsWith("replaygain")
+    readonly property bool replaygainShot: root.fixture.startsWith("replaygain") || root.fixture.startsWith("crossfade-")
     readonly property bool chainBitPerfect: root.fixture === "crossfeed-bit-perfect" || root.fixture === "replaygain-bit-perfect"
+        || root.fixture === "crossfade-bit-perfect"
     readonly property bool rateShot: root.fixture.startsWith("sample-rate")
     readonly property bool dacShot: root.fixture.startsWith("eq-dac")
     readonly property bool bootShot: root.fixture.startsWith("boot")
@@ -38,9 +39,9 @@ Item {
             return
         }
         if (root.replaygainShot) {
-            screen.focusKey("replaygain")
+            screen.focusKey(root.fixture.startsWith("crossfade-") ? "crossfade" : "replaygain")
             screen.keepFocusVisible()
-            if (root.fixture === "replaygain-sheet") {
+            if (root.fixture.endsWith("-sheet")) {
                 screen.activate()
                 screen.sheet.handleAction("down", false)
             }
@@ -156,6 +157,7 @@ Item {
         property string sampleRate: root.fixture === "sample-rate-unsupported" ? "96000" : "auto"
         property string playThrough: root.fixture === "play-through" ? "albums" : "off"
         property string replaygain: root.replaygainShot ? "album" : "off"
+        property int crossfadeMs: root.replaygainShot ? 3000 : 0
         property string resume: "position"
         property bool autoNowPlaying: root.fixture === "play-through"
         property string bootSession: root.fixture === "boot-missing" ? "handheld-desktop-session" : "steam"

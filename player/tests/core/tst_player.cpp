@@ -1,3 +1,4 @@
+#include "Crossfade.h"
 #include "Deck.h"
 #include "FakeBluezModel.h"
 #include "Library.h"
@@ -19,6 +20,7 @@
 #include <QScopeGuard>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QtTest>
 
 #include <gst/gst.h>
@@ -26,6 +28,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <ctime>
 #include <initializer_list>
@@ -196,6 +199,16 @@ private slots:
     void cueProbeUntouched();
     void replayGainPerTrack();
     void replayGainWhilePaused();
+    void crossfadeOverlap();
+    void crossfadeRateChangeGapless();
+    void crossfadeAlbumGapless();
+    void crossfadeSkipDropsOutgoing();
+    void crossfadeSeekBeforeOverlap();
+    void crossfadeSeekInOverlap();
+    void crossfadeEarlyEnd();
+    void crossfadeStalePlan();
+    void crossfadeOffsetAfterJoin();
+    void crossfadeErrorWhileMixing();
     void dsdRoutes();
     void dsdBoundary();
     void deckMissing();
@@ -457,6 +470,50 @@ double volumeOf(GstElement *volume)
     return value;
 }
 
+struct MixerWatch
+{
+    std::atomic<int> added{0};
+    std::atomic<int> removed{0};
+};
+
+void mixerAdded(GstBin *, GstElement *element, gpointer data)
+{
+    if (g_strcmp0(GST_OBJECT_NAME(element), Crossfade::mixerName) == 0)
+        ++static_cast<MixerWatch *>(data)->added;
+}
+
+void mixerRemoved(GstBin *, GstElement *element, gpointer data)
+{
+    if (g_strcmp0(GST_OBJECT_NAME(element), Crossfade::mixerName) == 0)
+        ++static_cast<MixerWatch *>(data)->removed;
+}
+
+void watchMixer(Player &player, MixerWatch &watch)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    g_signal_connect(top, "element-added", G_CALLBACK(mixerAdded), &watch);
+    g_signal_connect(top, "element-removed", G_CALLBACK(mixerRemoved), &watch);
+    gst_object_unref(top);
+}
+
+int childCount(Player &player)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    const int n = GST_BIN_NUMCHILDREN(GST_BIN(top));
+    gst_object_unref(top);
+    return n;
+}
+
+QueueEntry sineEntry(const QString &path, qint64 id, int seconds)
+{
+    QueueEntry entry;
+    entry.id = id;
+    entry.path = path;
+    entry.title = QFileInfo(path).completeBaseName();
+    entry.durationMs = seconds * 1000;
+    return entry;
+}
+
 QStringList factories(GstElement *bin, bool recurse)
 {
     QStringList names;
@@ -521,6 +578,32 @@ bool reachesPlaying(Player &player)
     return state == GST_STATE_PLAYING;
 }
 
+
+bool claimSeconds(const QString &path, int seconds, int rate = 44100)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadWrite))
+        return false;
+    QByteArray head = file.read(26);
+    if (head.size() != 26 || !head.startsWith("fLaC") || (quint8(head.at(4)) & 0x7f) != 0)
+        return false;
+    const quint64 total = quint64(seconds) * quint64(rate);
+    quint8 *info = reinterpret_cast<quint8 *>(head.data()) + 8;
+    info[13] = quint8((info[13] & 0xf0) | ((total >> 32) & 0x0f));
+    info[14] = quint8(total >> 24);
+    info[15] = quint8(total >> 16);
+    info[16] = quint8(total >> 8);
+    info[17] = quint8(total);
+    return file.seek(0) && file.write(head) == head.size();
+}
+
+GstElement *pipelineChild(Player &player, const char *name)
+{
+    GstElement *top = pipelineOf(player.audioSink());
+    GstElement *child = gst_bin_get_by_name(GST_BIN(top), name);
+    gst_object_unref(top);
+    return child;
+}
 }
 
 int PlayerTest::historyCount() const
@@ -2728,6 +2811,420 @@ void PlayerTest::replayGainWhilePaused()
     player->setReplayGain(QStringLiteral("track"));
     QCOMPARE(volumeOf(volume), 1.0);
     player->stop();
+}
+
+void PlayerTest::crossfadeOverlap()
+{
+    const QString a = m_dir.path() + QStringLiteral("/fade-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/fade-b.flac");
+    QVERIFY(encodeSine(a, 3));
+    QVERIFY(encodeSine(b, 3));
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-xf sync=true"));
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-xf");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    std::mutex lock;
+    qint64 frames = 0;
+    std::vector<std::pair<qint64, float>> peaks;
+    QStringList caps;
+    GstPad *sinkPad = gst_element_get_static_pad(sink, "sink");
+    gst_pad_add_probe(sinkPad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+                      [](GstPad *, GstPadProbeInfo *info, gpointer data) {
+                          GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+                          if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
+                              GstCaps *c = nullptr;
+                              gst_event_parse_caps(event, &c);
+                              gchar *text = gst_caps_to_string(c);
+                              static_cast<QStringList *>(data)->append(QString::fromUtf8(text));
+                              g_free(text);
+                          }
+                          return GST_PAD_PROBE_OK;
+                      },
+                      &caps, nullptr);
+    gst_object_unref(sinkPad);
+    std::jthread puller([&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            GstSample *sample = nullptr;
+            g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(200 * GST_MSECOND), &sample);
+            if (!sample)
+                continue;
+            gint channels = 1;
+            if (GstCaps *caps = gst_sample_get_caps(sample))
+                gst_structure_get_int(gst_caps_get_structure(caps, 0), "channels", &channels);
+            GstBuffer *buffer = gst_sample_get_buffer(sample);
+            const qint64 n = qint64(gst_buffer_get_size(buffer) / sizeof(float) / std::max(1, channels));
+            const float peak = peakOf(buffer);
+            gst_sample_unref(sample);
+            std::lock_guard guard(lock);
+            peaks.emplace_back(frames, peak);
+            frames += n;
+        }
+    });
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    QList<int> mixersAtStart;
+    connect(player.get(), &Player::trackStarted, this, [&] { mixersAtStart.append(watch.added.load()); });
+    player->play({sineEntry(a, 1, 3), sineEntry(b, 2, 3)}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(watch.removed.load(), 1, 8000);
+    QCOMPARE(player->status(), Player::Playing);
+    QCOMPARE(childCount(*player), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
+    puller.request_stop();
+    puller.join();
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(mixersAtStart, QList<int>({0, 1}));
+    QCOMPARE(errors.count(), 0);
+    QCOMPARE(watch.added.load(), 1);
+    caps.removeDuplicates();
+    QVERIFY2(caps.size() == 1, qPrintable(caps.join(QStringLiteral(" | "))));
+    const qint64 rate = 44100;
+    QVERIFY2(std::abs(frames - (6 * rate - rate)) <= 1, qPrintable(QString::number(frames)));
+    const qint64 middle = 2 * rate + rate / 2;
+    float mixed = 0.0f;
+    float alone = 0.0f;
+    for (const auto &[at, peak] : peaks) {
+        if (at <= middle && at + 2205 > middle)
+            mixed = std::max(mixed, peak);
+        if (at > rate / 2 && at < rate)
+            alone = std::max(alone, peak);
+    }
+    QVERIFY(alone > 0.5f);
+    QVERIFY2(std::abs(mixed - alone * float(std::sqrt(2.0))) < 0.02f * alone,
+             qPrintable(QStringLiteral("%1 %2").arg(mixed).arg(alone)));
+}
+
+void PlayerTest::crossfadeRateChangeGapless()
+{
+    const QString a = m_dir.path() + QStringLiteral("/rate-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/rate-b.flac");
+    QVERIFY(encodeSine(a, 2, 44100));
+    QVERIFY(encodeSine(b, 2, 48000));
+    for (const bool known : {true, false}) {
+        QueueEntry first = sineEntry(a, 1, 2);
+        QueueEntry second = sineEntry(b, 2, 2);
+        if (known) {
+            first.sampleRate = 44100;
+            second.sampleRate = 48000;
+        }
+        auto player = syncPlayer();
+        player->setCrossfade(1000);
+        MixerWatch watch;
+        watchMixer(*player, watch);
+        QSignalSpy started(player.get(), &Player::trackStarted);
+        QSignalSpy eos(player.get(), &Player::endOfStream);
+        QSignalSpy errors(player.get(), &Player::error);
+        player->play({first, second}, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
+        QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+        QCOMPARE(errors.count(), 0);
+        QCOMPARE(watch.added.load(), known ? 0 : 1);
+        QCOMPARE(watch.removed.load(), known ? 0 : 1);
+        QCOMPARE(childCount(*player), 2);
+    }
+}
+
+void PlayerTest::crossfadeAlbumGapless()
+{
+    QList<QueueEntry> entries = m_tracks.mid(0, 2);
+    for (int i = 0; i < entries.size(); ++i) {
+        entries[i].albumId = 11;
+        entries[i].discNo = 1;
+        entries[i].trackNo = i + 1;
+        entries[i].durationMs = 2000;
+    }
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    player->play(entries, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(watch.added.load(), 0);
+}
+
+void PlayerTest::crossfadeSkipDropsOutgoing()
+{
+    QList<QueueEntry> entries;
+    for (int i = 0; i < 3; ++i) {
+        const QString path = m_dir.path() + QStringLiteral("/skip-%1.flac").arg(i);
+        QVERIFY(encodeSine(path, 3));
+        entries.append(sineEntry(path, i + 1, 3));
+    }
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy errors(player.get(), &Player::error);
+    player->play(entries, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(watch.added.load() == 1 && started.count() == 2, 6000);
+    QCOMPARE(watch.removed.load(), 0);
+    QCOMPARE(childCount(*player), 4);
+    player->next();
+    QCOMPARE(watch.removed.load(), 1);
+    QCOMPARE(childCount(*player), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 3, playTimeoutMs);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2}));
+    QCOMPARE(player->queue()->currentIndex(), 2);
+    QCOMPARE(errors.count(), 0);
+    player->stop();
+}
+
+void PlayerTest::crossfadeSeekBeforeOverlap()
+{
+    const QString a = m_dir.path() + QStringLiteral("/seek-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/seek-b.flac");
+    QVERIFY(encodeSine(a, 3));
+    QVERIFY(encodeSine(b, 3));
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    player->play({sineEntry(a, 1, 3), sineEntry(b, 2, 3)}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(watch.added.load(), 1, playTimeoutMs);
+    QCOMPARE(started.count(), 1);
+    player->seek(500);
+    QCOMPARE(watch.removed.load(), 1);
+    QCOMPARE(childCount(*player), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(watch.added.load(), 2, playTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(watch.removed.load(), 2);
+    QCOMPARE(errors.count(), 0);
+}
+
+void PlayerTest::crossfadeSeekInOverlap()
+{
+    const QString a = m_dir.path() + QStringLiteral("/over-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/over-b.flac");
+    QVERIFY(encodeSine(a, 3));
+    QVERIFY(encodeSine(b, 3));
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    player->play({sineEntry(a, 1, 3), sineEntry(b, 2, 3)}, 0);
+    QTRY_VERIFY_WITH_TIMEOUT(watch.added.load() == 1 && started.count() == 2, 6000);
+    player->seek(1500);
+    QCOMPARE(watch.removed.load(), 1);
+    QCOMPARE(childCount(*player), 2);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() >= 1500 && player->position() < 2500, playTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(errors.count(), 0);
+}
+
+void PlayerTest::crossfadeEarlyEnd()
+{
+    const QString a = m_dir.path() + QStringLiteral("/early-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/early-b.flac");
+    QVERIFY(encodeSine(a, 3));
+    QVERIFY(encodeSine(b, 2));
+    QVERIFY(claimSeconds(a, 6));
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    int eosAtSecond = -1;
+    connect(player.get(), &Player::trackStarted, this, [&](int index) {
+        if (index == 1)
+            eosAtSecond = int(eos.count());
+    });
+    player->play({sineEntry(a, 1, 3), sineEntry(b, 2, 2)}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(watch.added.load(), 1, playTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(eosAtSecond, 0);
+    QCOMPARE(watch.removed.load(), 1);
+    QCOMPARE(player->status(), Player::Playing);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(errors.count(), 0);
+}
+
+void PlayerTest::crossfadeStalePlan()
+{
+    const QString a = m_dir.path() + QStringLiteral("/stale-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/stale-b.flac");
+    const QString c = m_dir.path() + QStringLiteral("/stale-c.flac");
+    QVERIFY(encodeSine(a, 2));
+    QVERIFY(encodeSine(b, 6));
+    QVERIFY(encodeSine(c, 2));
+    QVERIFY(claimSeconds(a, 8));
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy errors(player.get(), &Player::error);
+    int childrenAtThird = -1;
+    connect(player.get(), &Player::trackStarted, this, [&](int index) {
+        if (index == 2)
+            childrenAtThird = childCount(*player);
+    });
+    player->play({sineEntry(a, 1, 2), sineEntry(b, 2, 6), sineEntry(c, 3, 2)}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QCOMPARE(watch.added.load(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 3, 10000);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2}));
+    QCOMPARE(childrenAtThird, 4);
+    QCOMPARE(watch.added.load(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(watch.removed.load(), 1, playTimeoutMs);
+    QCOMPARE(errors.count(), 0);
+    player->stop();
+}
+
+void PlayerTest::crossfadeOffsetAfterJoin()
+{
+    QList<QueueEntry> entries;
+    for (int i = 0; i < 4; ++i) {
+        const QString path = m_dir.path() + QStringLiteral("/join-%1.flac").arg(i);
+        QVERIFY(encodeSine(path, 3));
+        entries.append(sineEntry(path, i + 1, 3));
+    }
+    entries[1].albumId = 7;
+    entries[1].album = QStringLiteral("Joined");
+    entries[1].trackNo = 1;
+    entries[2].albumId = 7;
+    entries[2].album = QStringLiteral("Joined");
+    entries[2].trackNo = 2;
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("appsink name=microdap-join sync=true"));
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-join");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    std::atomic<qint64> frames{0};
+    std::jthread puller([&](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            GstSample *sample = nullptr;
+            g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(200 * GST_MSECOND), &sample);
+            if (!sample)
+                continue;
+            gint channels = 1;
+            if (GstCaps *caps = gst_sample_get_caps(sample))
+                gst_structure_get_int(gst_caps_get_structure(caps, 0), "channels", &channels);
+            frames += qint64(gst_buffer_get_size(gst_sample_get_buffer(sample)) / sizeof(float) / std::max(1, channels));
+            gst_sample_unref(sample);
+        }
+    });
+    struct Hold
+    {
+        std::mutex lock;
+        std::condition_variable wake;
+        GstPad *pad = nullptr;
+        gulong id = 0;
+        QString stream;
+        bool fresh = false;
+        bool held = false;
+        bool open = false;
+    } hold;
+    const auto release = [&hold] {
+        std::lock_guard guard(hold.lock);
+        hold.open = true;
+        hold.wake.notify_all();
+    };
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    connect(player.get(), &Player::trackStarted, this, [&](int index) {
+        if (index == 1 && !hold.pad) {
+            GstElement *deck = pipelineChild(*player, "deck1");
+            QVERIFY(deck);
+            std::lock_guard guard(hold.lock);
+            hold.pad = gst_element_get_static_pad(deck, "src");
+            gst_object_unref(deck);
+            if (GstEvent *sticky = gst_pad_get_sticky_event(hold.pad, GST_EVENT_STREAM_START, 0)) {
+                const gchar *id = nullptr;
+                gst_event_parse_stream_start(sticky, &id);
+                hold.stream = QString::fromUtf8(id);
+                gst_event_unref(sticky);
+            }
+            hold.id = gst_pad_add_probe(
+                hold.pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+                [](GstPad *, GstPadProbeInfo *info, gpointer data) {
+                    auto *held = static_cast<Hold *>(data);
+                    GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+                    std::unique_lock guard(held->lock);
+                    if (GST_EVENT_TYPE(event) == GST_EVENT_STREAM_START) {
+                        const gchar *id = nullptr;
+                        gst_event_parse_stream_start(event, &id);
+                        held->fresh = held->fresh || QString::fromUtf8(id) != held->stream;
+                    }
+                    if (GST_EVENT_TYPE(event) == GST_EVENT_SEGMENT && held->fresh && !held->held) {
+                        held->held = true;
+                        held->wake.wait_for(guard, std::chrono::seconds(5), [held] { return held->open; });
+                    }
+                    return GST_PAD_PROBE_OK;
+                },
+                &hold, nullptr);
+        }
+        if (index == 2)
+            QTimer::singleShot(0, this, release);
+    });
+    player->play(entries, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 20000);
+    release();
+    puller.request_stop();
+    puller.join();
+    QVERIFY(hold.held);
+    gst_pad_remove_probe(hold.pad, hold.id);
+    gst_object_unref(hold.pad);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2, 3}));
+    QCOMPARE(watch.added.load(), 2);
+    QCOMPARE(errors.count(), 0);
+    const qint64 rate = 44100;
+    QVERIFY2(std::abs(frames.load() - (12 * rate - 2 * rate)) <= 2, qPrintable(QString::number(frames.load())));
+}
+
+void PlayerTest::crossfadeErrorWhileMixing()
+{
+    const QString a = m_dir.path() + QStringLiteral("/mixerr-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/mixerr-b.flac");
+    QVERIFY(encodeSine(a, 3));
+    QVERIFY(encodeSine(b, 3));
+    auto player = syncPlayer();
+    player->setCrossfade(1000);
+    MixerWatch watch;
+    watchMixer(*player, watch);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    connect(player.get(), &Player::trackStarted, this, [&](int index) {
+        if (index != 1)
+            return;
+        GstElement *deck = pipelineChild(*player, "deck");
+        QVERIFY(deck);
+        GError *err = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_DECODE, "cut");
+        gst_element_post_message(deck, gst_message_new_error(GST_OBJECT(deck), err, nullptr));
+        g_error_free(err);
+        gst_object_unref(deck);
+    });
+    player->play({sineEntry(a, 1, 3), sineEntry(b, 2, 3)}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, playTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(watch.removed.load(), 1, 500);
+    QCOMPARE(childCount(*player), 2);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QVERIFY(player->position() < 900);
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 8000);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(errors.count(), 0);
 }
 
 void PlayerTest::dsdRoutes()

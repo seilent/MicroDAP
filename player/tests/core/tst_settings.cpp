@@ -152,6 +152,12 @@ void SettingsTest::defaultsWithoutDaemon()
     settings.setReplaygain(QStringLiteral("album"));
     QCOMPARE(settings.replaygain(), QStringLiteral("album"));
     settings.setReplaygain(QStringLiteral("off"));
+    QCOMPARE(settings.crossfadeMs(), 0);
+    settings.setCrossfadeMs(1500);
+    QCOMPARE(settings.crossfadeMs(), 0);
+    settings.setCrossfadeMs(3000);
+    QCOMPARE(settings.crossfadeMs(), 3000);
+    settings.setCrossfadeMs(0);
     settings.setResume(QStringLiteral("track"));
     QCOMPARE(settings.resume(), QStringLiteral("track"));
     settings.setResume(QStringLiteral("position"));
@@ -690,6 +696,12 @@ void SettingsTest::rowTable()
     QCOMPARE(replaygain->setting, QStringLiteral("replaygain"));
     QCOMPARE(replaygain->readOnly, QStringLiteral("bitPerfect"));
     QCOMPARE(strings(replaygain->values), Settings::replaygainModes());
+    const SettingsRows::Row *crossfade = SettingsRows::find(QStringLiteral("crossfade"));
+    QVERIFY(crossfade && crossfade->draft && !crossfade->bounded);
+    QCOMPARE(crossfade->kind, QStringLiteral("sheet"));
+    QCOMPARE(crossfade->setting, QStringLiteral("crossfadeMs"));
+    QCOMPARE(crossfade->readOnly, QStringLiteral("bitPerfect"));
+    QCOMPARE(ints(crossfade->values), Settings::crossfadeSteps());
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
 }
 

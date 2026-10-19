@@ -47,6 +47,7 @@ class Settings : public QObject
     Q_PROPERTY(QString sampleRate READ sampleRate WRITE setSampleRate NOTIFY sampleRateChanged)
     Q_PROPERTY(QString playThrough READ playThrough WRITE setPlayThrough NOTIFY playThroughChanged)
     Q_PROPERTY(QString replaygain READ replaygain WRITE setReplaygain NOTIFY replaygainChanged)
+    Q_PROPERTY(int crossfadeMs READ crossfadeMs WRITE setCrossfadeMs NOTIFY crossfadeMsChanged)
     Q_PROPERTY(QString resume READ resume WRITE setResume NOTIFY resumeChanged)
     Q_PROPERTY(bool autoNowPlaying READ autoNowPlaying WRITE setAutoNowPlaying NOTIFY autoNowPlayingChanged)
     Q_PROPERTY(QString clock READ clock WRITE setClock NOTIFY clockChanged)
@@ -95,6 +96,7 @@ public:
     Q_INVOKABLE static QStringList defaultRoots();
     static QList<int> saverSteps();
     static QList<int> screenOffSteps();
+    static QList<int> crossfadeSteps();
     static QList<int> suspendSteps();
     static int snap(int value, const QList<int> &steps);
     Q_INVOKABLE static QStringList candidateRoots();
@@ -165,6 +167,8 @@ public:
     void setPlayThrough(const QString &mode);
     QString replaygain() const;
     void setReplaygain(const QString &mode);
+    int crossfadeMs() const;
+    void setCrossfadeMs(int ms);
     QString resume() const;
     void setResume(const QString &mode);
     bool autoNowPlaying() const;
@@ -209,6 +213,7 @@ signals:
     void sampleRateChanged();
     void playThroughChanged();
     void replaygainChanged();
+    void crossfadeMsChanged();
     void resumeChanged();
     void autoNowPlayingChanged();
     void clockChanged();

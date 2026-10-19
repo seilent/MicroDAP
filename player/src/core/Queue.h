@@ -24,6 +24,10 @@ struct QueueEntry
     std::optional<double> albumGainDb;
     std::optional<double> trackPeak;
     std::optional<double> albumPeak;
+    qint64 albumId = 0;
+    int discNo = 0;
+    int trackNo = 0;
+    int sampleRate = 0;
 
     QVariantMap toMap() const;
     static QueueEntry fromMap(const QVariantMap &map);

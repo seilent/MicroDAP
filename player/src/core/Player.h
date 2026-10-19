@@ -23,6 +23,7 @@ class QSocketNotifier;
 namespace microdap {
 
 class BluezModel;
+class Crossfade;
 class Deck;
 class Favorites;
 class Library;
@@ -123,6 +124,7 @@ public:
     Q_INVOKABLE void cycleRepeat();
     Q_INVOKABLE void rate();
     void setReplayGain(const QString &mode);
+    void setCrossfade(int ms);
 
 signals:
     void statusChanged();
@@ -159,6 +161,13 @@ private:
     };
 
     QueueEntry nextEntry();
+    int nextRow(const Chain &chain) const;
+    void planFade();
+    void prepareFade();
+    bool dropFade(bool idle = false);
+    void finishFade();
+    void endEarly();
+    bool queryPosition(gint64 &position) const;
     static GstPadProbeReturn bitPerfectProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static void setStreamProperties(GstElement *element, const QString &text);
 
@@ -252,6 +261,16 @@ private:
     QMutex m_chainMutex;
     Chain m_chain;
     std::atomic<ReplayGainMode> m_replayGain{ReplayGainMode::Off};
+    int m_crossfadeMs = 0;
+    std::unique_ptr<Deck> m_fade;
+    std::unique_ptr<Crossfade> m_crossfade;
+    int m_fadeGeneration = 0;
+    QueueEntry m_fadeEntry;
+    bool m_fadeAdded = false;
+    bool m_fadeSwapped = false;
+    bool m_replanFade = false;
+    GstClockTime m_fadeOffset = GST_CLOCK_TIME_NONE;
+    bool m_skipStart = false;
 };
 
 struct Admit

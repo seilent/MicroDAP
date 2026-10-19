@@ -57,6 +57,7 @@ const QString keyOutputLevel = QStringLiteral("microdap.output_level");
 const QString keySampleRate = QStringLiteral("microdap.sample_rate");
 const QString keyPlayThrough = QStringLiteral("microdap.play_through");
 const QString keyReplayGain = QStringLiteral("microdap.replaygain");
+const QString keyCrossfadeMs = QStringLiteral("microdap.crossfade_ms");
 const QString keyResume = QStringLiteral("microdap.resume");
 const QString keyAutoNowPlaying = QStringLiteral("microdap.auto_now_playing");
 const QString keyClock = QStringLiteral("microdap.clock");
@@ -91,6 +92,7 @@ constexpr Key keys[] = {
     {"microdap.sample_rate", QMetaType::QString, &Settings::sampleRateChanged},
     {"microdap.play_through", QMetaType::QString, &Settings::playThroughChanged},
     {"microdap.replaygain", QMetaType::QString, &Settings::replaygainChanged},
+    {"microdap.crossfade_ms", QMetaType::UInt, &Settings::crossfadeMsChanged},
     {"microdap.resume", QMetaType::QString, &Settings::resumeChanged},
     {"microdap.auto_now_playing", QMetaType::Bool, &Settings::autoNowPlayingChanged},
     {"microdap.clock", QMetaType::QString, &Settings::clockChanged},
@@ -187,6 +189,7 @@ QVariantMap defaults()
         {keySampleRate, QStringLiteral("auto")},
         {keyPlayThrough, QStringLiteral("off")},
         {keyReplayGain, QStringLiteral("off")},
+        {keyCrossfadeMs, 0u},
         {keyResume, QStringLiteral("position")},
         {keyAutoNowPlaying, false},
         {keyClock, QStringLiteral("24h")},
@@ -456,6 +459,11 @@ QList<int> Settings::saverSteps()
 QList<int> Settings::screenOffSteps()
 {
     return {0, 60, 120, 300, 600, 1800};
+}
+
+QList<int> Settings::crossfadeSteps()
+{
+    return {0, 1000, 2000, 3000, 5000};
 }
 
 QList<int> Settings::suspendSteps()
@@ -983,6 +991,18 @@ void Settings::setReplaygain(const QString &mode)
 {
     if (replaygainModes().contains(mode))
         store(keyReplayGain, mode);
+}
+
+int Settings::crossfadeMs() const
+{
+    const int value = m_values.value(keyCrossfadeMs).toInt();
+    return crossfadeSteps().contains(value) ? value : 0;
+}
+
+void Settings::setCrossfadeMs(int ms)
+{
+    if (crossfadeSteps().contains(ms))
+        store(keyCrossfadeMs, QVariant::fromValue(uint(ms)));
 }
 
 QString Settings::resume() const

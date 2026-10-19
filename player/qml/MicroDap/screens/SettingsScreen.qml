@@ -119,6 +119,7 @@ Page {
     readonly property bool accentFromArt: page.settings !== null && page.settings.accentFromArt === true
     readonly property string playThrough: page.settings !== null && page.settings.playThrough !== undefined ? String(page.settings.playThrough) : "off"
     readonly property string replaygain: page.settings !== null && page.settings.replaygain !== undefined ? String(page.settings.replaygain) : "off"
+    readonly property int crossfadeMs: page.settings !== null && page.settings.crossfadeMs !== undefined ? Number(page.settings.crossfadeMs) : 0
     readonly property string resume: page.settings !== null && page.settings.resume !== undefined ? String(page.settings.resume) : "position"
     readonly property bool autoNowPlaying: page.settings !== null && page.settings.autoNowPlaying === true
     readonly property string clockMode: page.settings !== null && page.settings.clock !== undefined ? String(page.settings.clock) : "24h"
@@ -258,6 +259,10 @@ Page {
         return value <= 0 ? "last" : String(value)
     }
 
+    function crossfadeText(ms: int): string {
+        return ms <= 0 ? "off" : ms / 1000 + " s"
+    }
+
     function balanceText(value: int): string {
         return value === 0 ? "center" : (value < 0 ? "l " : "r ") + Math.abs(value) / 2 + " db"
     }
@@ -377,6 +382,8 @@ Page {
             return page.rateValue
         case "replaygain":
             return page.levelEffective ? "bit perfect" : page.replaygain
+        case "crossfade":
+            return page.levelEffective ? "bit perfect" : page.crossfadeText(page.crossfadeMs)
         case "eq":
             return page.eqValue
         case "pair":
@@ -756,6 +763,8 @@ Page {
             return page.crossfeedWord(String(value))
         case "powerOnVolume":
             return page.powerOnText(Number(value))
+        case "crossfade":
+            return page.crossfadeText(Number(value))
         case "orientation":
             return String(value).replace("-", " ")
         case "scale":
@@ -904,6 +913,8 @@ Page {
             return page.accentFromArt
         case "replaygain":
             return page.replaygain
+        case "crossfade":
+            return page.crossfadeMs
         case "playThrough":
             return page.playThrough
         case "resume":

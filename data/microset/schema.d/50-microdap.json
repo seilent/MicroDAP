@@ -54,6 +54,15 @@
       "label": "ReplayGain",
       "ui": {"order": 5}
     },
+    "microdap.crossfade_ms": {
+      "type": "u",
+      "default": 0,
+      "enum": [0, 1000, 2000, 3000, 5000],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Crossfade",
+      "ui": {"order": 6, "values": {"0": "off", "1000": "1 s", "2000": "2 s", "3000": "3 s", "5000": "5 s"}}
+    },
     "microdap.roots": {
       "type": "as",
       "default": [],

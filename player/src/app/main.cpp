@@ -311,6 +311,9 @@ int main(int argc, char *argv[])
     player.setReplayGain(settings.replaygain());
     QObject::connect(&settings, &microdap::Settings::replaygainChanged, &player,
                      [&settings, &player] { player.setReplayGain(settings.replaygain()); });
+    player.setCrossfade(settings.crossfadeMs());
+    QObject::connect(&settings, &microdap::Settings::crossfadeMsChanged, &player,
+                     [&settings, &player] { player.setCrossfade(settings.crossfadeMs()); });
     microdap::PlayThrough playThrough(player.queue(), &library, &albums);
     playThrough.setMode(settings.playThrough());
     playThrough.setRoots(settings.roots());

@@ -68,6 +68,7 @@ TestCase {
         property string sampleRate: "auto"
         property string playThrough: "off"
         property string replaygain: "off"
+        property int crossfadeMs: 0
         property string resume: "position"
         property bool autoNowPlaying: false
         property string clock: "24h"
@@ -266,14 +267,14 @@ TestCase {
 
     readonly property var expectedPivots: ["output", "library", "display", "power", "system"]
     readonly property var expectedKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "about"]
     ]
     readonly property var overlayKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "toasts"],
         ["screenOff", "suspend", "wifi"],
@@ -328,6 +329,7 @@ TestCase {
         fakeSettings.sampleRate = "auto"
         fakeSettings.playThrough = "off"
         fakeSettings.replaygain = "off"
+        fakeSettings.crossfadeMs = 0
         fakeSettings.resume = "position"
         fakeSettings.autoNowPlaying = false
         fakeSettings.clock = "24h"
@@ -951,7 +953,7 @@ TestCase {
 
     function test_value_sheet_drafts_apply_only_on_a() {
         const page = open()
-        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "codec", "level", "rate", "replaygain", "crossfeed", "orientation", "scale", "boot"]) {
+        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "codec", "level", "rate", "replaygain", "crossfade", "crossfeed", "orientation", "scale", "boot"]) {
             verify(tc.rowOf(page, key).spec.draft, key)
             const before = String(page.currentOf(key))
             tc.sheetOpen(page, key)
@@ -1426,6 +1428,29 @@ TestCase {
         compare(tc.rowOf(page, "replaygain").value, "album")
     }
 
+    function test_crossfade_row() {
+        const page = open()
+        compare(tc.keyIndex(page, "crossfade"), tc.keyIndex(page, "replaygain") + 1)
+        compare(tc.rowOf(page, "crossfade").title, "crossfade")
+        compare(tc.rowOf(page, "crossfade").value, "off")
+        tc.sheetOpen(page, "crossfade")
+        compare(tc.items(page), JSON.stringify(["5 s", "3 s", "2 s", "1 s", "off"]))
+        compare(page.sheet.mark, 4)
+        compare(page.sheet.wrap, true)
+        verify(router.dispatch("up", false))
+        compare(tc.focused(page), "1 s")
+        compare(fakeSettings.crossfadeMs, 0)
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.crossfadeMs, 1000)
+        compare(tc.rowOf(page, "crossfade").value, "1 s")
+        fakeMode.effective = true
+        compare(tc.rowOf(page, "crossfade").value, "bit perfect")
+        compare(tc.rowOf(page, "crossfade").readOnly, true)
+        fakeMode.effective = false
+        compare(tc.rowOf(page, "crossfade").readOnly, false)
+    }
+
     function test_crossfeed_row() {
         const page = open({ eq: fakeEq })
         compare(tc.keyIndex(page, "crossfeed"), tc.keyIndex(page, "eq") + 1)
@@ -1859,7 +1884,7 @@ TestCase {
 
     function test_eq_row() {
         const page = open({ eq: fakeEq })
-        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "replaygain") + 1)
+        verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "crossfade") + 1)
         verify(tc.keyIndex(page, "eq") === tc.keyIndex(page, "crossfeed") - 1)
         compare(tc.rowOf(page, "eq").title, "eq")
         compare(tc.rowOf(page, "eq").value, "HD 600")

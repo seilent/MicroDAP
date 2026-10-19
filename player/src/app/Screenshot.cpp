@@ -215,6 +215,8 @@ const QStringList &states()
         QStringLiteral("crossfeed-bit-perfect"),
         QStringLiteral("replaygain-sheet"),
         QStringLiteral("replaygain-bit-perfect"),
+        QStringLiteral("crossfade-sheet"),
+        QStringLiteral("crossfade-bit-perfect"),
         QStringLiteral("kb-empty"),
         QStringLiteral("kb-long"),
         QStringLiteral("kb-petal"),

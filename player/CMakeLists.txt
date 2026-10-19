@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Qml Quick QuickTest DBus Sql Test)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0)
+pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-controller-1.0)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
 pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse libpulse-mainloop-glib)
@@ -50,6 +50,8 @@ add_library(microdapcore STATIC
     src/core/Biquad.h
     src/core/BluezModel.cpp
     src/core/BluezModel.h
+    src/core/Crossfade.cpp
+    src/core/Crossfade.h
     src/core/DacEq.cpp
     src/core/DacEq.h
     src/core/DbusPad.cpp

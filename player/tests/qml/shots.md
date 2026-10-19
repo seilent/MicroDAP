@@ -107,6 +107,8 @@
 | settings | `crossfeed-bit-perfect` | `--size 640x960` and `960x640` | BALANCE and CROSSFEED values with `(NOT ON BIT PERFECT)`, clear of the titles | 2026-10-20 |
 | settings | `replaygain-sheet` | `--size 640x960` and `960x640` | REPLAYGAIN sheet OFF, TRACK, ALBUM, ALBUM marked in the accent, focus on OFF | 2026-10-20 |
 | settings | `replaygain-bit-perfect` | `--size 640x960` and `960x640` | REPLAYGAIN reads BIT PERFECT, read only, while bit perfect is in effect | 2026-10-20 |
+| settings | `crossfade-sheet` | `--size 640x960` and `960x640` | CROSSFADE sheet 5 S, 3 S, 2 S, 1 S, OFF, 3 S marked in the accent | 2026-10-20 |
+| settings | `crossfade-bit-perfect` | `--size 640x960` and `960x640` | REPLAYGAIN and CROSSFADE read BIT PERFECT, read only | 2026-10-20 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

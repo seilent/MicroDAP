@@ -34,6 +34,10 @@ QVariantMap QueueEntry::toMap() const
         {QStringLiteral("albumGainDb"), optionalValue(albumGainDb)},
         {QStringLiteral("trackPeak"), optionalValue(trackPeak)},
         {QStringLiteral("albumPeak"), optionalValue(albumPeak)},
+        {QStringLiteral("albumId"), albumId},
+        {QStringLiteral("discNo"), discNo},
+        {QStringLiteral("trackNo"), trackNo},
+        {QStringLiteral("sampleRate"), sampleRate},
     };
 }
 
@@ -51,6 +55,10 @@ QueueEntry QueueEntry::fromMap(const QVariantMap &map)
     entry.albumGainDb = optionalOf(map.value(QStringLiteral("albumGainDb")));
     entry.trackPeak = optionalOf(map.value(QStringLiteral("trackPeak")));
     entry.albumPeak = optionalOf(map.value(QStringLiteral("albumPeak")));
+    entry.albumId = map.value(QStringLiteral("albumId")).toLongLong();
+    entry.discNo = map.value(QStringLiteral("discNo")).toInt();
+    entry.trackNo = map.value(QStringLiteral("trackNo")).toInt();
+    entry.sampleRate = map.value(QStringLiteral("sampleRate")).toInt();
     return entry;
 }
 

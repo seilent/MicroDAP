@@ -35,10 +35,12 @@ public:
 
     void setNext(Next next);
     void setGain(Gain gain);
-    void start(const QueueEntry &entry);
+    bool start(const QueueEntry &entry);
     void regain();
     void close();
+    void reopen();
     void reap();
+    void resetOffset();
 
     GstElement *element() const;
     GstElement *volume() const;
@@ -68,6 +70,7 @@ private:
     static QString streamOf(GstPadProbeInfo *info);
     static GstPadProbeReturn itemProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static GstPadProbeReturn gainProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    static GstPadProbeReturn flushProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     void applyGain(const QueueEntry &entry);
     void accept();
 

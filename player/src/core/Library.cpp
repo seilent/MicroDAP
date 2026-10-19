@@ -193,7 +193,7 @@ const char *const pruneGenres[] = {
 
 constexpr const char *entryColumns =
     "SELECT t.id, t.path, t.title, t.artist, a.title, COALESCE(t.art_path, a.art_path), t.duration_ms, "
-    "t.rg_track_gain, t.rg_album_gain, t.rg_track_peak, t.rg_album_peak";
+    "t.rg_track_gain, t.rg_album_gain, t.rg_track_peak, t.rg_album_peak, t.album_id, t.disc_no, t.track_no, t.sample_rate";
 
 constexpr const char *rowColumns =
     "SELECT t.id, t.title, t.artist, a.title, a.id, t.duration_ms, t.sample_rate, t.bit_depth";
@@ -241,6 +241,10 @@ QueueEntry entryOf(const QSqlQuery &query)
     entry.albumGainDb = optionalOf(query.value(8));
     entry.trackPeak = optionalOf(query.value(9));
     entry.albumPeak = optionalOf(query.value(10));
+    entry.albumId = query.value(11).toLongLong();
+    entry.discNo = query.value(12).toInt();
+    entry.trackNo = query.value(13).toInt();
+    entry.sampleRate = query.value(14).toInt();
     return entry;
 }
 

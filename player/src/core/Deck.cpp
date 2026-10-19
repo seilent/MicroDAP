@@ -83,7 +83,9 @@ Deck::Deck(PlayerPort::OutputChain chain, bool dsd)
         gst_object_unref(sink);
     }
     GstPad *src = gst_element_get_static_pad(m_cueProbe, "src");
-    gst_element_add_pad(m_bin, gst_ghost_pad_new("src", src));
+    GstPad *ghost = gst_ghost_pad_new("src", src);
+    gst_pad_add_probe(ghost, GST_PAD_PROBE_TYPE_EVENT_FLUSH, &Deck::flushProbe, nullptr, nullptr);
+    gst_element_add_pad(m_bin, ghost);
     gst_object_unref(src);
     g_signal_connect(m_join, "notify::active-pad", G_CALLBACK(&Deck::activePad), this);
 }
@@ -120,7 +122,7 @@ void Deck::setGain(Gain gain)
     m_gain = std::move(gain);
 }
 
-void Deck::start(const QueueEntry &entry)
+bool Deck::start(const QueueEntry &entry)
 {
     QList<Item> items;
     {
@@ -142,12 +144,35 @@ void Deck::start(const QueueEntry &entry)
         gst_element_post_message(m_bin, gst_message_new_error(GST_OBJECT(m_bin), err, nullptr));
         g_error_free(err);
     }
+    return m_open;
 }
 
 void Deck::close()
 {
     QMutexLocker lock(&m_lock);
     m_open = false;
+}
+
+void Deck::reopen()
+{
+    QMutexLocker lock(&m_lock);
+    m_open = !m_items.isEmpty();
+}
+
+void Deck::resetOffset()
+{
+    if (!m_bin)
+        return;
+    GstPad *src = gst_element_get_static_pad(m_bin, "src");
+    gst_pad_set_offset(src, 0);
+    gst_object_unref(src);
+}
+
+GstPadProbeReturn Deck::flushProbe(GstPad *pad, GstPadProbeInfo *info, gpointer)
+{
+    if (GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) == GST_EVENT_FLUSH_STOP)
+        gst_pad_set_offset(pad, 0);
+    return GST_PAD_PROBE_OK;
 }
 
 void Deck::reap()
