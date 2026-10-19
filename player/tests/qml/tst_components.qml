@@ -226,6 +226,21 @@ TestCase {
         row.number = "1"
     }
 
+    function test_row_number_column() {
+        verify(Ui.digitPx > Ui.px(5) && Ui.digitPx < Ui.px(5.7))
+        for (const n of ["1", "42", "999", "9999"]) {
+            row.number = n
+            fuzzyCompare(row.textX, Ui.px(Ui.hubEdge + 24), 0.01)
+        }
+        row.number = "10000"
+        fuzzyCompare(row.textX, Ui.px(Ui.hubEdge + 24) + Ui.digitPx, 0.01)
+        row.number = "123456"
+        fuzzyCompare(row.textX, Ui.px(Ui.hubEdge + 24) + 2 * Ui.digitPx, 0.01)
+        row.number = "44444"
+        verify(row.numberItem.x + row.numberItem.implicitWidth <= row.textX)
+        row.number = "1"
+    }
+
     function test_row_focus() {
         fuzzyCompare(row.primaryAlpha, Ui.listPrimary.alphaDim, 1e-6)
         fuzzyCompare(row.primaryColor.a, 0.85, 1 / 255)

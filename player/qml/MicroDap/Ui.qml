@@ -119,6 +119,18 @@ QtObject {
         ui.dialogTitle, ui.dialogItem, ui.watermark
     ]
 
+    function widestDigit(f: font, ready: bool): real {
+        let w = 0
+        for (const d of "0123456789")
+            w = Math.max(w, ui.countMetrics.advanceWidth(d))
+        return w
+    }
+
+    function songTextX(digits: int): real {
+        const indent = ui.px(ui.songIndent)
+        return Math.max(indent, digits * ui.digitPx + indent - ui.songIndentDigits * ui.digitPx)
+    }
+
     function letterSpacing(role) {
         return role.tracking * ui.u
     }
@@ -265,6 +277,9 @@ QtObject {
     readonly property real rowTextInset: 4
     readonly property real rowRing: 20
     readonly property real songIndent: 24
+    readonly property int songIndentDigits: 4
+    readonly property FontMetrics countMetrics: FontMetrics { font: ui.font(ui.listCount) }
+    readonly property real digitPx: ui.widestDigit(ui.countMetrics.font, ui.fontsReady)
     readonly property real detailRow: 124
     readonly property real detailNameDrop: 15
     readonly property real detailNameBaseline: ui.pivotBaseline + ui.detailNameDrop

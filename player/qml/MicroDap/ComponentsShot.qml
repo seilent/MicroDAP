@@ -5,6 +5,7 @@ import "GlyphPaths.js" as GlyphPaths
 Item {
     id: root
 
+    property string fixture: "browse"
     readonly property bool sideColumn: Ui.landscape
     readonly property real gap: 4
     readonly property real tileRowY: Ui.contentTop
@@ -75,7 +76,7 @@ Item {
 
         ListRow {
             width: list.width
-            number: "1"
+            number: root.fixture === "tracknum" ? "9999" : "1"
             primary: "This Could Be Our Day"
             secondary: "Addison Road"
             trailing: "3:48"
@@ -85,7 +86,7 @@ Item {
 
         ListRow {
             width: list.width
-            number: "2"
+            number: root.fixture === "tracknum" ? "10000" : "2"
             primary: "All That Matters"
             secondary: "Addison Road"
             trailing: "4:02"

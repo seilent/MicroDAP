@@ -15,9 +15,8 @@ PressScale {
     property bool ring: false
     property string ringGlyph: "play"
 
-    readonly property real indent: Ui.songIndent
     readonly property bool indented: root.number !== "" || root.ring
-    readonly property real textX: Ui.px(Ui.hubEdge + (root.indented ? root.indent : 0))
+    readonly property real textX: Ui.px(Ui.hubEdge) + (root.indented ? Ui.songTextX(root.number.length) : 0)
     readonly property var primaryRole: root.bold ? Ui.listPlaylist : Ui.listPrimary
     readonly property var secondaryRole: root.bold || root.countLine ? Ui.listCount : Ui.listSecondary
     readonly property real primaryAlpha: root.focused ? root.primaryRole.alpha : root.primaryRole.alphaDim
@@ -25,6 +24,7 @@ PressScale {
     readonly property real primaryBaseline: primaryText.y + primaryText.baselineOffset
     readonly property real secondaryBaseline: secondaryText.y + secondaryText.baselineOffset
     readonly property Item primaryItem: primaryText
+    readonly property Item numberItem: numberText
     readonly property Item secondaryItem: secondaryText
     readonly property Item trailingItem: trailingText
     readonly property Item ringItem: ringLoader.item

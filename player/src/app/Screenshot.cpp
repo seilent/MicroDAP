@@ -183,6 +183,7 @@ const QStringList &states()
         QStringLiteral("about-missing"),
         QStringLiteral("power-none"),
         QStringLiteral("power-long"),
+        QStringLiteral("tracknum"),
         QStringLiteral("play-through"),
         QStringLiteral("play-through-sheet"),
         QStringLiteral("resume-sheet"),

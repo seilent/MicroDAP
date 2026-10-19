@@ -1405,7 +1405,9 @@ Window {
 
     Component {
         id: componentsComponent
-        ComponentsShot {}
+        ComponentsShot {
+            fixture: root.shotState
+        }
     }
 
     Component {
