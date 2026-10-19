@@ -1,5 +1,7 @@
 #include "Scanner.h"
 
+#include "PlaylistStore.h"
+
 #include <taglib/apeproperties.h>
 #include <taglib/audioproperties.h>
 #include <taglib/dsdiffproperties.h>
@@ -389,6 +391,18 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
     QSet<QString> walked;
     QStringList present;
     QStringList absent;
+    const auto takePlaylist = [&](const QFileInfo &info) {
+        const QString path = info.absoluteFilePath();
+        if (seenPlaylists.contains(path))
+            return;
+        seenPlaylists.insert(path);
+        const FileStamp stamp = stampOf(info);
+        const auto known = playlistStamps.constFind(path);
+        if (known != playlistStamps.cend() && known->mtime == stamp.mtime && known->size == stamp.size)
+            result.keptPlaylists.append(path);
+        else
+            result.playlists.append(readPlaylist(path));
+    };
     for (const QString &root : roots) {
         if (root.isEmpty())
             continue;
@@ -422,16 +436,7 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
                     continue;
                 }
                 if (isPlaylistFile(path)) {
-                    if (!seenPlaylists.contains(path)) {
-                        seenPlaylists.insert(path);
-                        const FileStamp stamp = stampOf(info);
-                        const auto known = playlistStamps.constFind(path);
-                        if (known != playlistStamps.cend() && known->mtime == stamp.mtime
-                            && known->size == stamp.size)
-                            result.keptPlaylists.append(path);
-                        else
-                            result.playlists.append(readPlaylist(path));
-                    }
+                    takePlaylist(info);
                     continue;
                 }
                 if (!info.isReadable() || !isAudioFile(path) || seen.contains(path))
@@ -451,6 +456,19 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
                 else
                     result.updated.append(std::move(track));
             }
+        }
+
+        const QString lists = mount.isEmpty() ? QString() : PlaylistStore::playlistsDir(mount);
+        if (lists.isEmpty() || walked.contains(lists) || !QFileInfo(lists).isDir())
+            continue;
+        walked.insert(lists);
+        result.directories.append(lists);
+        const QFileInfoList files = QDir(lists).entryInfoList(QDir::Files | QDir::Readable, QDir::Name);
+        for (const QFileInfo &info : files) {
+            if (cancelled(cancel))
+                return ScanResult();
+            if (isPlaylistFile(info.absoluteFilePath()))
+                takePlaylist(info);
         }
     }
 

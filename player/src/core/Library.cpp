@@ -594,6 +594,13 @@ void Library::finishScan(const ScanResult &result)
     if (result.complete) {
         m_scannedRoots = m_scanRoots;
         m_scannedDirectories = result.directories;
+        QSet<QString> dirs;
+        for (const QString &source : playlistStamps().keys())
+            dirs.insert(QFileInfo(source).absolutePath());
+        for (const PlaylistFile &playlist : result.playlists)
+            dirs.insert(QFileInfo(playlist.source).absolutePath());
+        for (const QString &dir : std::as_const(dirs))
+            m_store.settle(dir);
     }
 
     if (result.complete && !tracksTouched && readable.isEmpty() && result.removedPlaylists.isEmpty()) {
@@ -922,6 +929,34 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
                                      .arg(skipped);
     }
     return true;
+}
+
+PlaylistStore &Library::playlistStore()
+{
+    return m_store;
+}
+
+PlaylistStore::Edit Library::editPlaylist(const QString &path, const PlaylistStore::Change &change)
+{
+    const PlaylistStore::Edit result = m_store.edit(path, change);
+    if (result != PlaylistStore::Edit::Done || !m_db.isOpen())
+        return result;
+    const PlaylistFile playlist = Scanner::readPlaylist(path);
+    if (!playlist.readable)
+        return result;
+    bool changed = false;
+    const bool began = m_db.transaction();
+    if (began && applyPlaylists({playlist}, changed) && m_db.commit()) {
+        if (changed) {
+            emit playlistsChanged();
+            emit playlistCountChanged();
+        }
+        return result;
+    }
+    qWarning() << "microdap library: playlist row update failed" << path << m_db.lastError().text();
+    if (began)
+        m_db.rollback();
+    return result;
 }
 
 int Library::removePlaylists(const QStringList &sources)

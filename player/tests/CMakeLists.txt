@@ -47,6 +47,13 @@ microdap_test_env(player)
 set_property(TEST player APPEND PROPERTY ENVIRONMENT "MICRODAP_AUDIO_SINK=fakesink sync=false"
              "MICRODAP_EXCLUSIVE_SINK=fakesink sync=false")
 
+qt_add_executable(tst_playlists core/tst_playlists.cpp)
+target_compile_definitions(tst_playlists PRIVATE MICRODAP_FIXTURE_MUSIC="${fixtures}")
+target_link_libraries(tst_playlists PRIVATE microdapcore Qt6::Test)
+add_test(NAME playlists COMMAND tst_playlists)
+set_tests_properties(playlists PROPERTIES FIXTURES_REQUIRED library-fixtures)
+microdap_test_env(playlists)
+
 qt_add_executable(tst_state core/tst_state.cpp)
 target_link_libraries(tst_state PRIVATE microdapcore Qt6::Test)
 add_test(NAME state COMMAND tst_state)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PlaylistStore.h"
 #include "Queue.h"
 #include "Scanner.h"
 #include "Settings.h"
@@ -74,6 +75,9 @@ public:
     Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;
 
+    PlaylistStore &playlistStore();
+    PlaylistStore::Edit editPlaylist(const QString &path, const PlaylistStore::Change &change);
+
     QHash<QString, FileStamp> snapshot() const;
     QHash<QString, FileStamp> playlistStamps() const;
     void finishScan(const ScanResult &result);
@@ -130,6 +134,7 @@ private:
     QStringList m_scannedRoots;
     QStringList m_scannedDirectories;
     QPointer<Settings> m_settings;
+    PlaylistStore m_store;
 };
 
 }

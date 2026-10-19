@@ -25,6 +25,8 @@ LibraryWatcher::LibraryWatcher(Library *library, QObject *parent)
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(defaultDebounceMs);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this](const QString &path) {
+        if (m_library->playlistStore().ownChange(path))
+            return;
         if (m_media.contains(path))
             m_mediaEvent = true;
         m_debounce.start();

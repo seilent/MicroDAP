@@ -85,6 +85,8 @@ add_library(microdapcore STATIC
     src/core/PadSource.h
     src/core/Player.cpp
     src/core/Player.h
+    src/core/PlaylistStore.cpp
+    src/core/PlaylistStore.h
     src/core/PowerBridge.cpp
     src/core/PowerBridge.h
     src/core/Queue.cpp
