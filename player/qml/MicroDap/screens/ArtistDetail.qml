@@ -688,8 +688,6 @@ Page {
         id: backdrop
 
         anchors.fill: parent
-        paused: !page.live
-        screenOff: page.screenOff
     }
 
     Pane {

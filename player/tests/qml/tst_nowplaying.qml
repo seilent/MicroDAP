@@ -687,7 +687,6 @@ TestCase {
         fakePlayer.select(0)
         const page = open({ animated: true })
         compare(page.backdrop.source.toString(), "")
-        compare(page.backdrop.animating, false)
         fakePlayer.select(5)
         tryCompare(page, "trackAnimating", false, 3000)
         compare(page.shown.artPath, "/tmp/b.png")
@@ -838,7 +837,6 @@ TestCase {
         compare(page.trackAnimating, false)
         compare(page.shown.id, 2)
         compare(page.idleTimer.running, false)
-        compare(page.backdrop.animating, false)
         page.screenOff = false
         compare(page.idleTimer.running, true)
     }

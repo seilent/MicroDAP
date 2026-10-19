@@ -225,8 +225,6 @@ TestCase {
         status.batteryPresent = true
         overlay.width = 640
         overlay.height = 960
-        backdrop.screenOff = false
-        backdrop.paused = false
         sheet.screenOff = false
         sheet.close()
         sheet.complete()
@@ -268,39 +266,23 @@ TestCase {
         fuzzyCompare(stops[2].color.r, 17 / 255, 0.005)
         compare(backdrop.shade.gradient.orientation, Gradient.Vertical)
         compare(backdrop.art.fillMode, Image.PreserveAspectCrop)
-        fuzzyCompare(backdrop.amplitude, Ui.px(8), 1e-9)
     }
 
-    function test_backdrop_loop() {
-        compare(Motion.backdropScale, 20000)
-        compare(Motion.backdropPan, 26000)
-        fuzzyCompare(Motion.backdropScaleMax, 1.06, 1e-9)
-        compare(backdrop.animating, true)
+    function test_backdrop_static() {
+        compare(backdrop.art.x, 0)
+        compare(backdrop.art.y, 0)
+        compare(backdrop.art.width, backdrop.width)
+        compare(backdrop.art.height, backdrop.height)
+        compare(backdrop.art.scale, 1)
+        compare(backdrop.art.visible, true)
         wait(60)
-        verify(backdrop.art.scale > 1.0)
-        backdrop.screenOff = true
-        compare(backdrop.animating, false)
-        const held = backdrop.art.scale
-        const heldPan = backdrop.art.pan
-        wait(60)
-        fuzzyCompare(backdrop.art.scale, held, 1e-9)
-        fuzzyCompare(backdrop.art.pan, heldPan, 1e-9)
-        backdrop.screenOff = false
-        compare(backdrop.animating, true)
-        wait(60)
-        verify(backdrop.art.scale > held)
-        backdrop.paused = true
-        compare(backdrop.animating, false)
-        backdrop.paused = false
-        compare(backdrop.animating, true)
+        compare(backdrop.art.x, 0)
+        compare(backdrop.art.scale, 1)
         backdrop.source = ""
         compare(backdrop.hasArt, false)
-        compare(backdrop.holding, true)
-        compare(backdrop.animating, false)
         compare(backdrop.art.visible, false)
         compare(backdrop.shade.visible, false)
         backdrop.source = "file:///tmp/microdap-backdrop-test.png"
-        compare(backdrop.animating, true)
     }
 
     function test_status_geometry() {

@@ -522,8 +522,6 @@ TestCase {
         compare(page.artPath, "/tmp/microdap-artist.jpg")
         compare(page.backdrop.source.toString(), "")
         compare(page.backdrop.hasArt, false)
-        compare(page.backdrop.holding, true)
-        compare(page.backdrop.animating, false)
         verify(Qt.colorEqual(page.surface.color, Ui.bg))
         compare(page.surface.width, page.width)
         compare(page.surface.height, page.height)
@@ -715,7 +713,6 @@ TestCase {
         page.screenOff = true
         compare(page.switching, false)
         compare(page.shownPivot, 1)
-        compare(page.backdrop.holding, true)
         router.dispatch("x", false)
         compare(page.sheet.visible, false)
     }

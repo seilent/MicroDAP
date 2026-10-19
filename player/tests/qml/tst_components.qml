@@ -591,7 +591,6 @@ TestCase {
             compare(first.height, page.height)
             compare(page.backdrop.source.toString(), "")
             compare(page.backdrop.hasArt, false)
-            compare(page.backdrop.animating, false)
         }
     }
 }

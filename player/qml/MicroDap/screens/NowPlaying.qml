@@ -721,8 +721,6 @@ Page {
             id: backdrop
 
             anchors.fill: parent
-            paused: !np.live || np.shownVariant
-            screenOff: np.screenOff
         }
     }
 

@@ -178,10 +178,6 @@ QtObject {
     readonly property int listChangeCap: 10
     readonly property real listChangeShift: -5
 
-    readonly property int backdropScale: 20000
-    readonly property int backdropPan: 26000
-    readonly property real backdropScaleMax: 1.06
-    readonly property real backdropPanAmplitude: 8
     readonly property int saverDrift: 18000
     readonly property real saverDriftFrom: 8
     readonly property real saverDriftTo: -27

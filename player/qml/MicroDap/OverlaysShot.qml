@@ -26,7 +26,6 @@ Item {
         y: 0
         width: root.width
         height: root.bandTop
-        paused: true
 
         StatusStrip {
             anchors.left: parent.left
