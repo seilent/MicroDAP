@@ -1,12 +1,42 @@
 #include "BluezModel.h"
 
+#include <QDebug>
+
 #include <QDir>
 
 namespace microdap {
 
+namespace {
+
+int switchMs()
+{
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue("MICRODAP_BT_SWITCH_MS", &ok);
+    return ok && value > 0 ? value : BluezModel::roleSwitchMs;
+}
+
+QString roleFor(bool search)
+{
+    return search ? QStringLiteral("headphones") : QStringLiteral("receiver");
+}
+
+}
+
 BluezModel::BluezModel(QObject *parent)
     : QObject(parent)
 {
+    m_switchTimer.setSingleShot(true);
+    connect(&m_switchTimer, &QTimer::timeout, this, [this] {
+        qWarning() << "microdap bluez: role switch to" << m_targetRole << "timed out, devices of" << m_role
+                   << "still connected";
+        m_switchTimer.stop();
+        roleDevicesChanged();
+    });
+}
+
+QStringList BluezModel::roles()
+{
+    return {QStringLiteral("receiver"), QStringLiteral("headphones")};
 }
 
 QString BluezModel::lastPhonePath()
@@ -123,6 +153,123 @@ bool BluezModel::pairing() const
 int BluezModel::pairingRemaining() const
 {
     return m_pairingRemaining;
+}
+
+bool BluezModel::searching() const
+{
+    return m_searching;
+}
+
+int BluezModel::searchRemaining() const
+{
+    return m_searchRemaining;
+}
+
+QString BluezModel::role() const
+{
+    return m_role;
+}
+
+QString BluezModel::activeRole() const
+{
+    return m_switching ? m_targetRole : m_role;
+}
+
+bool BluezModel::switching() const
+{
+    return m_switching;
+}
+
+QString BluezModel::headsetName() const
+{
+    return m_headsetName;
+}
+
+void BluezModel::setRole(const QString &role)
+{
+    if (!roles().contains(role) || role == activeRole())
+        return;
+    if (m_held != Held::None && roleFor(m_held == Held::Search) != role)
+        m_held = Held::None;
+    if (role == QLatin1StringView("headphones") && pairing())
+        stopPairing();
+    else if (role == QLatin1StringView("receiver") && searching())
+        stopSearch();
+    if (role == m_role) {
+        m_switchTimer.stop();
+        m_switching = false;
+        m_targetRole.clear();
+        applyRole(role);
+        emit switchingChanged();
+        runHeld();
+        return;
+    }
+    qInfo() << "microdap bluez: role" << m_role << "to" << role;
+    m_targetRole = role;
+    const bool started = !m_switching;
+    m_switching = true;
+    m_switchTimer.start(switchMs());
+    if (started)
+        emit switchingChanged();
+    applyRole(role);
+    dropRole(m_role);
+    roleDevicesChanged();
+}
+
+void BluezModel::roleDevicesChanged()
+{
+    if (!m_switching || (m_switchTimer.isActive() && roleDevices(m_role) > 0))
+        return;
+    m_switchTimer.stop();
+    m_role = m_targetRole;
+    m_targetRole.clear();
+    m_switching = false;
+    emit roleChanged();
+    emit switchingChanged();
+    runHeld();
+}
+
+void BluezModel::runHeld()
+{
+    const Held held = m_held;
+    m_held = Held::None;
+    if (held == Held::Pairing)
+        startPairing(m_heldSeconds);
+    else if (held == Held::Search)
+        startSearch(m_heldSeconds);
+}
+
+void BluezModel::dropHeld(bool search)
+{
+    if (m_held == (search ? Held::Search : Held::Pairing))
+        m_held = Held::None;
+}
+
+bool BluezModel::holdWindow(bool search, int timeoutSeconds)
+{
+    const QString needed = roleFor(search);
+    if (!m_switching && m_role == needed)
+        return false;
+    m_held = search ? Held::Search : Held::Pairing;
+    m_heldSeconds = timeoutSeconds;
+    setRole(needed);
+    return true;
+}
+
+bool BluezModel::wrongRoleCheck(const QString &device, bool source, bool sink)
+{
+    if (m_switching)
+        return false;
+    QString pivot;
+    if (m_role == QLatin1StringView("receiver") && sink && !source)
+        pivot = QStringLiteral("headphones");
+    else if (m_role == QLatin1StringView("headphones") && source && !sink)
+        pivot = QStringLiteral("phone");
+    if (pivot.isEmpty())
+        return false;
+    qInfo() << "microdap bluez: wrong role" << device << "in" << m_role << ", use the" << pivot << "pivot";
+    emit wrongRole(device, pivot);
+    return true;
 }
 
 bool BluezModel::active() const
@@ -325,6 +472,31 @@ void BluezModel::updatePairingRemaining(int seconds)
         return;
     m_pairingRemaining = value;
     emit pairingRemainingChanged();
+}
+
+void BluezModel::updateSearching(bool searching)
+{
+    if (m_searching == searching)
+        return;
+    m_searching = searching;
+    emit searchingChanged();
+}
+
+void BluezModel::updateSearchRemaining(int seconds)
+{
+    const int value = qMax(0, seconds);
+    if (m_searchRemaining == value)
+        return;
+    m_searchRemaining = value;
+    emit searchRemainingChanged();
+}
+
+void BluezModel::updateHeadsetName(const QString &name)
+{
+    if (m_headsetName == name)
+        return;
+    m_headsetName = name;
+    emit headsetNameChanged();
 }
 
 }

@@ -123,6 +123,18 @@ class Adapter(dbus.service.Object):
     def PropertiesChanged(self, interface, changed, invalidated):
         pass
 
+    @dbus.service.method(ADAPTER, in_signature='a{sv}', out_signature='')
+    def SetDiscoveryFilter(self, filter):
+        self.fake.discovery.append(('filter', {str(k): str(v) for k, v in filter.items()}))
+
+    @dbus.service.method(ADAPTER, in_signature='', out_signature='')
+    def StartDiscovery(self):
+        self.fake.discovery.append('start')
+
+    @dbus.service.method(ADAPTER, in_signature='', out_signature='')
+    def StopDiscovery(self):
+        self.fake.discovery.append('stop')
+
     @dbus.service.method(ADAPTER, in_signature='o', out_signature='')
     def RemoveDevice(self, path):
         device = self.fake.devices.pop(str(path), None)
@@ -184,6 +196,7 @@ class Fake:
         self.devices = {}
         self.removed = []
         self.disconnected = []
+        self.discovery = []
         self.agent = None
         self.default_agent = None
         self.signals = []
@@ -452,6 +465,131 @@ class Driver:
         self.check(code == 0, f'{label}: microdap-bt exit {code}')
         self.check(wait_for(lambda: not self.bus.name_has_owner(SERVICE), 2), f'{label}: {SERVICE} still owned')
 
+    def searching(self):
+        return bool(self.service_get('SearchActive'))
+
+    def test_search(self):
+        headset = ADAPTER_PATH + '/dev_20_00_00_00_00_01'
+        late_headset = ADAPTER_PATH + '/dev_20_00_00_00_00_02'
+        stray = ADAPTER_PATH + '/dev_20_00_00_00_00_03'
+        in_loop(self.fake.add_device, headset, [uuid('110b'), uuid('110c'), uuid('110e')])
+        in_loop(self.fake.add_device, late_headset, [])
+        in_loop(self.fake.add_device, stray, [uuid('110b'), uuid('110c')])
+        self.fake.discovery.clear()
+        self.fake.signals.clear()
+        self.check(self.searching() is False, 'SearchActive true at start')
+        self.check(int(self.service_get('SearchRemaining')) == 0, 'SearchRemaining not 0 at start')
+        self.expect_invalid('StartSearch(0)', self.service.StartSearch, dbus.UInt32(0))
+        self.expect_invalid('StartSearch(601)', self.service.StartSearch, dbus.UInt32(601))
+        self.check(self.fake.discovery == [], f'discovery after a refused StartSearch {self.fake.discovery}')
+        started = time.monotonic()
+        self.expect_ok('StartSearch(2)', self.service.StartSearch, dbus.UInt32(2))
+        self.check(self.searching() is True, 'SearchActive not true')
+        self.check(int(self.service_get('SearchRemaining')) == 2, 'SearchRemaining not 2')
+        self.check(self.active() is False, 'PairingActive true during search')
+        self.check(bool(self.adapter_get('Discoverable')) is False, 'Discoverable true during search')
+        self.check(bool(self.adapter_get('Pairable')) is True, 'Pairable false during search')
+        self.check(int(self.adapter_get('PairableTimeout')) == 2, 'PairableTimeout not 2 during search')
+        self.check(self.fake.discovery == [('filter', {'Transport': 'bredr'}), 'start'],
+                   f'discovery at search {self.fake.discovery}')
+        self.expect_ok('RequestConfirmation search', self.agent.RequestConfirmation, dbus.ObjectPath(headset),
+                       dbus.UInt32(123456))
+        in_loop(self.fake.flip, headset, 'Paired', dbus.Boolean(True))
+        in_loop(self.fake.flip, headset, 'ServicesResolved', dbus.Boolean(True))
+        in_loop(self.fake.flip, late_headset, 'Paired', dbus.Boolean(True))
+        time.sleep(0.3)
+        self.check(headset in self.fake.devices, 'headset paired from SEARCH removed')
+        self.check(self.searching() is True, 'search closed by a paired headset')
+        self.check(wait_for(lambda: not self.searching(), 4), 'search did not time out')
+        elapsed = time.monotonic() - started
+        self.check(1.5 <= elapsed <= 3.5, f'search closed after {elapsed:.1f} s')
+        self.check(self.fake.discovery[-1] == 'stop', f'discovery after search {self.fake.discovery}')
+        self.check_restored('search timeout')
+        in_loop(self.fake.flip, late_headset, 'UUIDs', dbus.Array([dbus.String(uuid('110b'))], signature='s'))
+        in_loop(self.fake.flip, late_headset, 'ServicesResolved', dbus.Boolean(True))
+        time.sleep(0.3)
+        self.check(late_headset in self.fake.devices, 'headset paired during SEARCH, resolved after it, removed')
+        self.expect_rejected('RequestConfirmation after search', self.agent.RequestConfirmation,
+                             dbus.ObjectPath(stray), dbus.UInt32(1))
+        in_loop(self.fake.flip, stray, 'Paired', dbus.Boolean(True))
+        in_loop(self.fake.flip, stray, 'ServicesResolved', dbus.Boolean(True))
+        self.check(wait_for(lambda: stray in self.fake.removed, 2), 'unsolicited headset pair not removed')
+        time.sleep(0.2)
+        actives = [bool(s['SearchActive']) for s in self.fake.signals if 'SearchActive' in s]
+        remaining = [int(s['SearchRemaining']) for s in self.fake.signals if 'SearchRemaining' in s]
+        self.check(actives == [True, False], f'SearchActive signals {actives}')
+        self.check(remaining == [2, 1, 0], f'SearchRemaining signals {remaining}')
+        self.check(not any('PairingActive' in s for s in self.fake.signals), 'PairingActive signalled by search')
+
+    def test_search_and_pairing(self):
+        speaker = ADAPTER_PATH + '/dev_20_00_00_00_00_04'
+        in_loop(self.fake.add_device, speaker, [uuid('110b')])
+        self.fake.discovery.clear()
+        self.expect_ok('StartSearch(10)', self.service.StartSearch, dbus.UInt32(10))
+        self.expect_ok('StartPairing(10) over search', self.service.StartPairing, dbus.UInt32(10))
+        self.check(self.searching() is False, 'search kept under a pairing window')
+        self.check_open('pairing over search', 10)
+        self.check(self.fake.discovery == [('filter', {'Transport': 'bredr'}), 'start', 'stop'],
+                   f'discovery after pairing over search {self.fake.discovery}')
+        in_loop(self.fake.flip, speaker, 'Paired', dbus.Boolean(True))
+        in_loop(self.fake.flip, speaker, 'ServicesResolved', dbus.Boolean(True))
+        self.check(wait_for(lambda: speaker in self.fake.removed, 2), 'headset paired in the phone window not removed')
+        self.expect_ok('StopSearch under pairing', self.service.StopSearch)
+        self.check_open('pairing after StopSearch', 10)
+        self.expect_ok('StartSearch(10) over pairing', self.service.StartSearch, dbus.UInt32(10))
+        self.check(self.active() is False, 'pairing kept under a search window')
+        self.check(bool(self.adapter_get('Discoverable')) is False, 'search over pairing: Discoverable true')
+        self.check(int(self.adapter_get('DiscoverableTimeout')) == 180, 'search over pairing: DiscoverableTimeout')
+        self.check(bool(self.adapter_get('Pairable')) is True, 'search over pairing: Pairable false')
+        self.check(self.searching() is True, 'search not open over pairing')
+        self.expect_ok('StopPairing under search', self.service.StopPairing)
+        self.check(self.searching() is True, 'StopPairing closed the search')
+        self.expect_ok('StopSearch', self.service.StopSearch)
+        self.check(self.searching() is False, 'StopSearch left the search open')
+        self.check(self.fake.discovery[-1] == 'stop', f'discovery after StopSearch {self.fake.discovery}')
+        self.check_restored('search stop')
+
+    def test_roles(self):
+        phone = ADAPTER_PATH + '/dev_20_00_00_00_00_05'
+        headset = ADAPTER_PATH + '/dev_20_00_00_00_00_06'
+        unknown = ADAPTER_PATH + '/dev_20_00_00_00_00_07'
+        in_loop(self.fake.add_device, phone, [uuid('110a'), uuid('110c'), uuid('110e')])
+        in_loop(self.fake.add_device, headset, [uuid('110b'), uuid('110c'), uuid('110e')])
+        in_loop(self.fake.add_device, unknown, [])
+        self.fake.signals.clear()
+        self.check(str(self.service_get('Role')) == 'receiver', f'role at start {self.service_get("Role")}')
+        self.expect_invalid('SetRole(source)', self.service.SetRole, dbus.String('source'))
+        for short in ('110b', '110e'):
+            self.expect_ok(f'receiver phone {short}', self.agent.AuthorizeService, dbus.ObjectPath(phone),
+                           dbus.String(uuid(short)))
+        self.expect_rejected('receiver 110a', self.agent.AuthorizeService, dbus.ObjectPath(unknown),
+                             dbus.String(uuid('110a')))
+        self.expect_rejected('receiver headset 110c', self.agent.AuthorizeService, dbus.ObjectPath(headset),
+                             dbus.String(uuid('110c')))
+        self.expect_ok('SetRole(headphones)', self.service.SetRole, dbus.String('headphones'))
+        self.check(str(self.service_get('Role')) == 'headphones', 'role not headphones')
+        self.expect_ok('SetRole(headphones) again', self.service.SetRole, dbus.String('headphones'))
+        for short in ('110a', '110c', '110d', '110e'):
+            self.expect_ok(f'headphones headset {short}', self.agent.AuthorizeService, dbus.ObjectPath(headset),
+                           dbus.String(uuid(short)))
+        self.expect_ok('headphones unknown 110a', self.agent.AuthorizeService, dbus.ObjectPath(unknown),
+                       dbus.String(uuid('110a')))
+        self.expect_rejected('headphones 110b', self.agent.AuthorizeService, dbus.ObjectPath(unknown),
+                             dbus.String(uuid('110b')))
+        for short in ('110d', '110e'):
+            self.expect_rejected(f'headphones phone {short}', self.agent.AuthorizeService, dbus.ObjectPath(phone),
+                                 dbus.String(uuid(short)))
+        both = ADAPTER_PATH + '/dev_20_00_00_00_00_08'
+        in_loop(self.fake.add_device, both, [uuid('110a'), uuid('110b')])
+        self.expect_ok('headphones both 110a', self.agent.AuthorizeService, dbus.ObjectPath(both),
+                       dbus.String(uuid('110a')))
+        self.expect_ok('SetRole(receiver)', self.service.SetRole, dbus.String('receiver'))
+        self.expect_ok('receiver both 110b', self.agent.AuthorizeService, dbus.ObjectPath(both),
+                       dbus.String(uuid('110b')))
+        time.sleep(0.2)
+        roles = [str(s['Role']) for s in self.fake.signals if 'Role' in s]
+        self.check(roles == ['headphones', 'receiver'], f'Role signals {roles}')
+
     def test_sigterm(self, proc):
         phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
         idle_phone = ADAPTER_PATH + '/dev_10_00_00_00_00_08'
@@ -571,6 +709,9 @@ def main():
         driver.test_bounds()
         driver.test_gate()
         driver.test_paired_closes()
+        driver.test_search()
+        driver.test_search_and_pairing()
+        driver.test_roles()
         driver.test_sigterm(proc)
         write_marker(BOOT_ID + '\n')
         proc = launch(fake, driver, env)
@@ -590,6 +731,8 @@ def main():
     driver.check(f'Rejected RequestConfirmation {PHONE}' in text, 'no Rejected RequestConfirmation line')
     driver.check(f'pairing window closed: paired {ADAPTER_PATH}/dev_10_00_00_00_00_06' in text,
                  'no pairing window closed: paired line')
+    driver.check(f'paired headset {ADAPTER_PATH}/dev_20_00_00_00_00_01' in text, 'no paired headset line')
+    driver.check('search window timed out' in text, 'no search window timed out line')
     driver.check(f'disconnected {ADAPTER_PATH}/dev_10_00_00_00_00_06 on exit' in text,
                  'no disconnected on exit line')
     driver.check(f'keeping {ADAPTER_PATH}/dev_10_00_00_00_00_06 connected' in text,

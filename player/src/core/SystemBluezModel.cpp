@@ -82,14 +82,37 @@ QString objectPathValue(const QVariant &value)
     return inner.toString();
 }
 
-bool hasA2dpSource(const QVariant &uuids)
+bool hasUuid(const QVariant &uuids, QLatin1StringView prefix)
 {
     const QStringList list = stringList(uuids);
     for (const QString &uuid : list) {
-        if (uuid.startsWith(QLatin1StringView("0000110a"), Qt::CaseInsensitive))
+        if (uuid.startsWith(prefix, Qt::CaseInsensitive))
             return true;
     }
     return false;
+}
+
+bool hasA2dpSource(const QVariant &uuids)
+{
+    return hasUuid(uuids, QLatin1StringView("0000110a"));
+}
+
+bool isHeadset(const QVariant &uuids)
+{
+    return hasUuid(uuids, QLatin1StringView("0000110b")) && !hasA2dpSource(uuids);
+}
+
+bool inRole(const QVariantMap &device, const QString &role)
+{
+    const QVariant uuids = device.value(QStringLiteral("UUIDs"));
+    return role == QLatin1StringView("receiver") ? hasA2dpSource(uuids) : isHeadset(uuids);
+}
+
+int roleCheckMs()
+{
+    bool ok = false;
+    const int value = qEnvironmentVariableIntValue("MICRODAP_BT_ROLE_CHECK_MS", &ok);
+    return ok && value > 0 ? value : 10000;
 }
 
 }
@@ -290,6 +313,11 @@ void SystemBluezModel::applyAgent(const QVariantMap &properties)
 {
     updatePairingRemaining(properties.value(QStringLiteral("PairingRemaining")).toInt());
     updatePairing(properties.value(QStringLiteral("PairingActive")).toBool());
+    updateSearchRemaining(properties.value(QStringLiteral("SearchRemaining")).toInt());
+    updateSearching(properties.value(QStringLiteral("SearchActive")).toBool());
+    if (properties.contains(QStringLiteral("Role"))
+        && properties.value(QStringLiteral("Role")).toString() != activeRole())
+        applyRole(activeRole());
 }
 
 void SystemBluezModel::onAgentPropertiesChanged(const QString &interface, const QVariantMap &changed,
@@ -302,8 +330,14 @@ void SystemBluezModel::onAgentPropertiesChanged(const QString &interface, const 
         updatePairingRemaining(changed.value(QStringLiteral("PairingRemaining")).toInt());
     if (changed.contains(QStringLiteral("PairingActive")))
         updatePairing(changed.value(QStringLiteral("PairingActive")).toBool());
+    if (changed.contains(QStringLiteral("SearchRemaining")))
+        updateSearchRemaining(changed.value(QStringLiteral("SearchRemaining")).toInt());
+    if (changed.contains(QStringLiteral("SearchActive")))
+        updateSearching(changed.value(QStringLiteral("SearchActive")).toBool());
     if (invalidated.contains(QStringLiteral("PairingRemaining"))
-        || invalidated.contains(QStringLiteral("PairingActive")))
+        || invalidated.contains(QStringLiteral("PairingActive"))
+        || invalidated.contains(QStringLiteral("SearchRemaining"))
+        || invalidated.contains(QStringLiteral("SearchActive")))
         refreshAgent();
 }
 
@@ -366,6 +400,63 @@ void SystemBluezModel::onBluezPropertiesChanged(const QString &interface, const 
     for (const QString &name : invalidated)
         properties.remove(name);
     apply();
+    if (interface != device1Interface())
+        return;
+    const QString path = message.path();
+    if (changed.value(QStringLiteral("ServicesResolved")).toBool() || changed.contains(QStringLiteral("UUIDs")))
+        checkRole(path);
+    if (changed.contains(QStringLiteral("Connected")) && !changed.value(QStringLiteral("Connected")).toBool())
+        m_wrongRole.remove(path);
+    if (changed.value(QStringLiteral("Connected")).toBool())
+        QTimer::singleShot(roleCheckMs(), this, [this, path] { checkRole(path); });
+}
+
+void SystemBluezModel::checkRole(const QString &path)
+{
+    const QVariantMap device = m_objects.value(path).value(device1Interface());
+    if (m_wrongRole.contains(path) || !device.value(QStringLiteral("Paired")).toBool()
+        || !device.value(QStringLiteral("Connected")).toBool())
+        return;
+    const QVariant uuids = device.value(QStringLiteral("UUIDs"));
+    const QString name = device.value(QStringLiteral("Alias"), device.value(QStringLiteral("Name"))).toString();
+    if (!wrongRoleCheck(name, hasA2dpSource(uuids), hasUuid(uuids, QLatin1StringView("0000110b"))))
+        return;
+    m_wrongRole.insert(path);
+    disconnectDevice(path);
+}
+
+void SystemBluezModel::disconnectDevice(const QString &path)
+{
+    if (!m_bluez.isConnected())
+        return;
+    qInfo() << "microdap bluez: disconnecting" << path;
+    m_bluez.asyncCall(QDBusMessage::createMethodCall(bluezService(), path, device1Interface(),
+                                                     QStringLiteral("Disconnect")));
+}
+
+int SystemBluezModel::roleDevices(const QString &role) const
+{
+    int count = 0;
+    for (auto it = m_objects.cbegin(); it != m_objects.cend(); ++it) {
+        const QVariantMap device = it->value(device1Interface());
+        if (device.value(QStringLiteral("Connected")).toBool() && inRole(device, role))
+            ++count;
+    }
+    return count;
+}
+
+void SystemBluezModel::dropRole(const QString &role)
+{
+    for (auto it = m_objects.cbegin(); it != m_objects.cend(); ++it) {
+        const QVariantMap device = it->value(device1Interface());
+        if (device.value(QStringLiteral("Connected")).toBool() && inRole(device, role))
+            disconnectDevice(it.key());
+    }
+}
+
+void SystemBluezModel::applyRole(const QString &role)
+{
+    callAgent(QStringLiteral("SetRole"), {role});
 }
 
 QString SystemBluezModel::childWithInterface(const QString &devicePath,
@@ -397,6 +488,8 @@ void SystemBluezModel::select(QString &devicePath, QString &transportPath,
             continue;
         const QVariantMap device = it->value(device1Interface());
         if (!device.value(QStringLiteral("Connected")).toBool())
+            continue;
+        if (isHeadset(device.value(QStringLiteral("UUIDs"))))
             continue;
         const QString transport = childWithInterface(it.key(), mediaTransport1Interface());
         if (!transport.isEmpty()) {
@@ -452,6 +545,15 @@ void SystemBluezModel::apply()
     m_devicePath = devicePath;
     m_transportPath = transportPath;
     m_playerPath = playerPath;
+
+    QString headset;
+    for (auto it = m_objects.cbegin(); it != m_objects.cend() && headset.isEmpty(); ++it) {
+        const QVariantMap props = it->value(device1Interface());
+        if (props.value(QStringLiteral("Connected")).toBool() && isHeadset(props.value(QStringLiteral("UUIDs"))))
+            headset = props.value(QStringLiteral("Alias"), props.value(QStringLiteral("Name"))).toString();
+    }
+    updateHeadsetName(headset);
+    roleDevicesChanged();
 
     if (devicePath.isEmpty()) {
         clearDevice();
@@ -691,13 +793,30 @@ void SystemBluezModel::fastForward()
 
 void SystemBluezModel::startPairing(int timeoutSeconds)
 {
+    if (holdWindow(false, timeoutSeconds))
+        return;
     const uint seconds = static_cast<uint>(qMax(1, timeoutSeconds));
     callAgent(QStringLiteral("StartPairing"), {QVariant::fromValue(seconds)});
 }
 
 void SystemBluezModel::stopPairing()
 {
+    dropHeld(false);
     callAgent(QStringLiteral("StopPairing"));
+}
+
+void SystemBluezModel::startSearch(int timeoutSeconds)
+{
+    if (holdWindow(true, timeoutSeconds))
+        return;
+    const uint seconds = static_cast<uint>(qMax(1, timeoutSeconds));
+    callAgent(QStringLiteral("StartSearch"), {QVariant::fromValue(seconds)});
+}
+
+void SystemBluezModel::stopSearch()
+{
+    dropHeld(true);
+    callAgent(QStringLiteral("StopSearch"));
 }
 
 void SystemBluezModel::setShuffle(const QString &shuffle)

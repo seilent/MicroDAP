@@ -29,8 +29,12 @@ AGENT_PATH = '/net/seilent/MicroDap/agent'
 SERVICE = 'net.seilent.MicroDap.Bluetooth'
 SERVICE_PATH = '/net/seilent/MicroDap/Bluetooth'
 BASE_UUID = '-0000-1000-8000-00805f9b34fb'
-ALLOWED = ('110b', '110c', '110d', '110e')
+ALLOWED = {
+    'receiver': ('110b', '110c', '110d', '110e'),
+    'headphones': ('110a', '110c', '110d', '110e'),
+}
 A2DP_SOURCE = '0000110a' + BASE_UUID
+A2DP_SINK = '0000110b' + BASE_UUID
 SAVED = ('Pairable', 'PairableTimeout', 'DiscoverableTimeout')
 MAX_TIMEOUT = 600
 KEEP_BIN = os.environ.get('MICRODAP_KEEP_BIN', '/usr/libexec/microdap/microdap-keep')
@@ -126,6 +130,16 @@ class Adapter:
         except dbus.DBusException as e:
             log(f'set {name} failed: {e.get_dbus_name()}')
 
+    def discovery(self, on):
+        try:
+            if on:
+                self.adapter.SetDiscoveryFilter(dbus.Dictionary({'Transport': dbus.String('bredr')}, signature='sv'))
+                self.adapter.StartDiscovery()
+            else:
+                self.adapter.StopDiscovery()
+        except dbus.DBusException as e:
+            log(f'discovery {"start" if on else "stop"} failed: {e.get_dbus_name()}')
+
     def remove_device(self, path):
         try:
             self.adapter.RemoveDevice(dbus.ObjectPath(path))
@@ -137,16 +151,29 @@ class Window(dbus.service.Object):
     def __init__(self, bus, adapter):
         super().__init__(bus, SERVICE_PATH)
         self.adapter = adapter
-        self.active = False
+        self.mode = None
+        self.role = 'receiver'
         self.remaining = 0
         self.saved = None
         self.timer = None
 
+    @property
+    def active(self):
+        return self.mode is not None
+
     def values(self):
+        pairing = self.mode == 'pairing'
+        search = self.mode == 'search'
         return {
-            'PairingActive': dbus.Boolean(self.active),
-            'PairingRemaining': dbus.UInt32(self.remaining),
+            'PairingActive': dbus.Boolean(pairing),
+            'PairingRemaining': dbus.UInt32(self.remaining if pairing else 0),
+            'SearchActive': dbus.Boolean(search),
+            'SearchRemaining': dbus.UInt32(self.remaining if search else 0),
+            'Role': dbus.String(self.role),
         }
+
+    def names(self, mode):
+        return ('PairingActive', 'PairingRemaining') if mode == 'pairing' else ('SearchActive', 'SearchRemaining')
 
     def notify(self, *names):
         values = self.values()
@@ -174,11 +201,23 @@ class Window(dbus.service.Object):
     def Set(self, interface, name, value):
         raise InvalidArgs(f'{interface}.{name} is read only')
 
-    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
-    def StartPairing(self, timeout):
+    def checked(self, timeout):
         timeout = int(timeout)
         if timeout < 1 or timeout > MAX_TIMEOUT:
             raise InvalidArgs(f'timeout must be 1 to {MAX_TIMEOUT} seconds')
+        return timeout
+
+    def start_timer(self, timeout):
+        if self.timer is not None:
+            GLib.source_remove(self.timer)
+        self.timer = GLib.timeout_add(1000, self.tick)
+        self.remaining = timeout
+
+    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
+    def StartPairing(self, timeout):
+        timeout = self.checked(timeout)
+        if self.mode == 'search':
+            self.close('closed: pairing')
         if self.saved is None:
             self.saved = {name: self.adapter.get(name) for name in SAVED}
         self.adapter.set('PairableTimeout', dbus.UInt32(timeout))
@@ -186,22 +225,51 @@ class Window(dbus.service.Object):
         self.adapter.set('DiscoverableTimeout', dbus.UInt32(timeout))
         self.adapter.set('Discoverable', dbus.Boolean(True))
         self.adapter.set('Alias', dbus.String(socket.gethostname()))
-        if self.timer is not None:
-            GLib.source_remove(self.timer)
-        self.timer = GLib.timeout_add(1000, self.tick)
-        self.active = True
-        self.remaining = timeout
+        self.start_timer(timeout)
+        self.mode = 'pairing'
         log(f'pairing window open for {timeout} s')
         self.notify('PairingActive', 'PairingRemaining')
 
     @dbus.service.method(SERVICE, in_signature='', out_signature='')
     def StopPairing(self):
-        self.close('stopped')
+        if self.mode == 'pairing':
+            self.close('stopped')
+
+    @dbus.service.method(SERVICE, in_signature='u', out_signature='')
+    def StartSearch(self, timeout):
+        timeout = self.checked(timeout)
+        if self.mode == 'pairing':
+            self.close('closed: search')
+        if self.mode is None:
+            self.saved = {name: self.adapter.get(name) for name in SAVED}
+            self.adapter.set('PairableTimeout', dbus.UInt32(timeout))
+            self.adapter.set('Pairable', dbus.Boolean(True))
+            self.adapter.discovery(True)
+        self.start_timer(timeout)
+        self.mode = 'search'
+        log(f'search window open for {timeout} s')
+        self.notify('SearchActive', 'SearchRemaining')
+
+    @dbus.service.method(SERVICE, in_signature='', out_signature='')
+    def StopSearch(self):
+        if self.mode == 'search':
+            self.close('stopped')
+
+    @dbus.service.method(SERVICE, in_signature='s', out_signature='')
+    def SetRole(self, role):
+        role = str(role)
+        if role not in ALLOWED:
+            raise InvalidArgs(f'role must be one of {", ".join(ALLOWED)}')
+        if role == self.role:
+            return
+        self.role = role
+        log(f'role {role}')
+        self.notify('Role')
 
     def tick(self):
         self.remaining -= 1
         if self.remaining > 0:
-            self.notify('PairingRemaining')
+            self.notify(self.names(self.mode)[1])
             return True
         self.timer = None
         self.close('timed out')
@@ -210,23 +278,47 @@ class Window(dbus.service.Object):
     def close(self, reason):
         if not self.active:
             return
+        mode = self.mode
         if self.timer is not None:
             GLib.source_remove(self.timer)
             self.timer = None
-        self.active = False
+        self.mode = None
         self.remaining = 0
         for name, value in self.saved.items():
             self.adapter.set(name, value)
         self.saved = None
-        self.adapter.set('Discoverable', dbus.Boolean(False))
-        log(f'pairing window {reason}')
-        self.notify('PairingActive', 'PairingRemaining')
+        if mode == 'pairing':
+            self.adapter.set('Discoverable', dbus.Boolean(False))
+        else:
+            self.adapter.discovery(False)
+        log(f'{mode} window {reason}')
+        self.notify(*self.names(mode))
+
+
+def kind(uuids):
+    uuids = [str(u).lower() for u in uuids]
+    if A2DP_SOURCE in uuids:
+        return 'phone'
+    if A2DP_SINK in uuids:
+        return 'headset'
+    return None
 
 
 class Agent(dbus.service.Object):
     def __init__(self, bus, window):
         super().__init__(bus, AGENT_PATH)
+        self.bus = bus
         self.window = window
+
+    def device_kind(self, device):
+        try:
+            obj = self.bus.get_object(BLUEZ, str(device), introspect=False)
+            uuids = [str(u).lower() for u in dbus.Interface(obj, PROPERTIES).Get(DEVICE, 'UUIDs')]
+        except dbus.DBusException:
+            return None
+        if (A2DP_SOURCE in uuids) == (A2DP_SINK in uuids):
+            return None
+        return 'phone' if A2DP_SOURCE in uuids else 'headset'
 
     def reject(self, what, device):
         log(f'Rejected {what} {device}')
@@ -267,7 +359,9 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(AGENT, in_signature='os', out_signature='')
     def AuthorizeService(self, device, uuid):
-        if short_uuid(uuid) in ALLOWED:
+        role = self.window.role
+        wrong = 'headset' if role == 'receiver' else 'phone'
+        if short_uuid(uuid) in ALLOWED[role] and self.device_kind(device) != wrong:
             log(f'authorized {uuid} {device}')
             return
         raise self.reject(str(uuid), device)
@@ -283,14 +377,20 @@ class Gate:
         self.adapter = adapter
         self.window = window
         self.pending = set()
+        self.searched = set()
         bus.add_signal_receiver(self.changed, bus_name=BLUEZ, dbus_interface=PROPERTIES,
                                 signal_name='PropertiesChanged', arg0=DEVICE, path_keyword='path')
 
     def changed(self, interface, changed, invalidated, path=None):
         path = str(path)
+        if 'Paired' in changed and not changed['Paired']:
+            self.pending.discard(path)
+            self.searched.discard(path)
+        if changed.get('Paired') and self.window.mode == 'search':
+            self.searched.add(path)
         if changed.get('Paired') or (path in self.pending and changed.get('ServicesResolved')):
             self.check(path)
-        elif changed.get('Connected') and self.window.active:
+        elif changed.get('Connected') and self.window.mode == 'pairing':
             self.connected(path)
 
     def connected(self, path):
@@ -315,15 +415,22 @@ class Gate:
             return
         if not props.get('Paired'):
             self.pending.discard(path)
+            self.searched.discard(path)
             return
         if not props.get('ServicesResolved'):
             self.pending.add(path)
             return
         self.pending.discard(path)
-        uuids = [str(u).lower() for u in props.get('UUIDs', [])]
-        if A2DP_SOURCE in uuids:
+        searched = path in self.searched
+        self.searched.discard(path)
+        found = kind(props.get('UUIDs', []))
+        if found == 'phone':
             log(f'paired {path}')
-            self.window.close(f'closed: paired {path}')
+            if self.window.mode == 'pairing':
+                self.window.close(f'closed: paired {path}')
+            return
+        if found == 'headset' and searched:
+            log(f'paired headset {path}')
             return
         log(f'removing {path}, no a2dp source')
         self.adapter.remove_device(path)

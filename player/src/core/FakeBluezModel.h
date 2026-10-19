@@ -2,6 +2,7 @@
 
 #include "BluezModel.h"
 
+#include <QMap>
 #include <QStringList>
 #include <QTemporaryDir>
 
@@ -44,6 +45,10 @@ public:
     void setBattery(int percent);
     void setPairing(bool pairing);
     void setPairingRemaining(int seconds);
+    void setSearchRemaining(int seconds);
+    void setHeadsetName(const QString &name);
+    void setRoleDevices(const QString &role, int count);
+    bool reportDevice(const QString &device, bool source, bool sink);
 
     void play() override;
     void pause() override;
@@ -53,14 +58,22 @@ public:
     void fastForward() override;
     void startPairing(int timeoutSeconds = defaultPairingTimeout) override;
     void stopPairing() override;
+    void startSearch(int timeoutSeconds = defaultPairingTimeout) override;
+    void stopSearch() override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
+
+protected:
+    int roleDevices(const QString &role) const override;
+    void dropRole(const QString &role) override;
+    void applyRole(const QString &role) override;
 
 private:
     void clearAll();
     QString sampleArt();
 
     QStringList m_commands;
+    QMap<QString, int> m_roleDevices;
     std::unique_ptr<QTemporaryDir> m_artDir;
 };
 

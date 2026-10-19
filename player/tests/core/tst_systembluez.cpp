@@ -146,6 +146,13 @@ public:
     bool paired() const { return m_object->get(device1(), QStringLiteral("Paired")).toBool(); }
     QStringList uuids() const { return m_object->get(device1(), QStringLiteral("UUIDs")).toStringList(); }
 
+public slots:
+    void Disconnect()
+    {
+        m_object->calls.append(QStringLiteral("Disconnect"));
+        m_object->set(device1(), QStringLiteral("Connected"), false);
+    }
+
 private:
     FakeObject *m_object;
 };
@@ -274,6 +281,19 @@ public slots:
         m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("PairingRemaining"),
                       QVariant::fromValue(seconds));
         m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("PairingActive"), true);
+    }
+
+    void SetRole(const QString &role)
+    {
+        m_object->calls.append(QStringLiteral("SetRole ") + role);
+    }
+
+    void StartSearch(uint seconds)
+    {
+        m_object->calls.append(QStringLiteral("StartSearch %1").arg(seconds));
+        m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("SearchRemaining"),
+                      QVariant::fromValue(seconds));
+        m_object->set(SystemBluezModel::agentInterface(), QStringLiteral("SearchActive"), true);
     }
 
     void StopPairing()
@@ -413,6 +433,7 @@ private slots:
     void pairing();
     void deviceLifecycle();
     void transportStateNone();
+    void headsetsAndRoles();
 
 private:
     std::unique_ptr<FakeBluez> m_fake;
@@ -429,6 +450,7 @@ void SystemBluezTest::initTestCase()
     if (!bus.isConnected())
         QSKIP("no session bus, run under dbus-run-session");
 
+    qputenv("MICRODAP_BT_ROLE_CHECK_MS", QByteArrayLiteral("500"));
     SystemBluezModel::registerMetaTypes();
     QVERIFY2(bus.registerService(SystemBluezModel::bluezService()),
              qPrintable(bus.lastError().message()));
@@ -773,6 +795,94 @@ void SystemBluezTest::transportStateNone()
     QVERIFY(!m_model->transportActive());
     QVERIFY(m_model->connected());
     QCOMPARE(stateSpy.count(), 3);
+}
+
+void SystemBluezTest::headsetsAndRoles()
+{
+    QVERIFY(m_model->connected());
+    QCOMPARE(m_model->devicePath(), secondDevicePath());
+    FakeObject *second = m_fake->object(secondDevicePath());
+    QVERIFY(second);
+    second->set(device1(), QStringLiteral("Paired"), true);
+
+    const QString headsetPath = QStringLiteral("/org/bluez/hci0/dev_77_88_99_AA_BB_CC");
+    QVariantMap headsetProps;
+    headsetProps.insert(QStringLiteral("Alias"), QStringLiteral("Buds"));
+    headsetProps.insert(QStringLiteral("Connected"), true);
+    headsetProps.insert(QStringLiteral("Paired"), true);
+    headsetProps.insert(QStringLiteral("UUIDs"), QStringList{QStringLiteral("0000110b-0000-1000-8000-00805f9b34fb"),
+                                                             QStringLiteral("0000110e-0000-1000-8000-00805f9b34fb")});
+    InterfaceList headsetInterfaces;
+    headsetInterfaces.insert(device1(), headsetProps);
+    FakeObject *headset = m_fake->add(headsetPath, headsetInterfaces, true);
+    QVERIFY(headset);
+    QVariantMap transportProps;
+    transportProps.insert(QStringLiteral("State"), QStringLiteral("active"));
+    transportProps.insert(QStringLiteral("Device"), QVariant::fromValue(QDBusObjectPath(headsetPath)));
+    InterfaceList transportInterfaces;
+    transportInterfaces.insert(mediaTransport1(), transportProps);
+    QVERIFY(m_fake->add(headsetPath + QStringLiteral("/fd1"), transportInterfaces, true));
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->headsetName(), QStringLiteral("Buds"), busTimeoutMs);
+    QCOMPARE(m_model->devicePath(), secondDevicePath());
+    QVERIFY(!m_model->transportActive());
+    QCOMPARE(m_model->role(), QStringLiteral("receiver"));
+
+    QSignalSpy wrong(m_model.get(), &BluezModel::wrongRole);
+    headset->set(device1(), QStringLiteral("ServicesResolved"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(wrong.count(), 1, busTimeoutMs);
+    QCOMPARE(wrong.at(0).at(0).toString(), QStringLiteral("Buds"));
+    QCOMPARE(wrong.at(0).at(1).toString(), QStringLiteral("headphones"));
+    QTRY_VERIFY_WITH_TIMEOUT(headset->calls.contains(QStringLiteral("Disconnect")), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->headsetName(), QString(), busTimeoutMs);
+    headset->calls.clear();
+    QVERIFY(second->calls.isEmpty());
+
+    m_agent->calls.clear();
+    m_model->startSearch(90);
+    QVERIFY(m_model->switching());
+    QCOMPARE(m_model->activeRole(), QStringLiteral("headphones"));
+    QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("SetRole headphones")), busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(second->calls.contains(QStringLiteral("Disconnect")), busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_model->switching(), busTimeoutMs);
+    QCOMPARE(m_model->role(), QStringLiteral("headphones"));
+    QVERIFY(!m_model->connected());
+    QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("StartSearch 90")), busTimeoutMs);
+    QTRY_VERIFY_WITH_TIMEOUT(m_model->searching(), busTimeoutMs);
+    QCOMPARE(m_model->searchRemaining(), 90);
+    QCOMPARE(m_agent->calls.indexOf(QStringLiteral("SetRole headphones")), 0);
+
+    headset->set(device1(), QStringLiteral("Connected"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->headsetName(), QStringLiteral("Buds"), busTimeoutMs);
+    headset->set(device1(), QStringLiteral("ServicesResolved"), true);
+    second->calls.clear();
+    second->set(device1(), QStringLiteral("Connected"), true);
+    second->set(device1(), QStringLiteral("ServicesResolved"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(wrong.count(), 2, busTimeoutMs);
+    QCOMPARE(wrong.at(1).at(0).toString(), QStringLiteral("Second Phone"));
+    QCOMPARE(wrong.at(1).at(1).toString(), QStringLiteral("phone"));
+    QTRY_VERIFY_WITH_TIMEOUT(second->calls.contains(QStringLiteral("Disconnect")), busTimeoutMs);
+    QVERIFY(headset->calls.isEmpty());
+
+    m_agent->calls.clear();
+    m_model->setRole(QStringLiteral("receiver"));
+    QTRY_VERIFY_WITH_TIMEOUT(headset->calls.contains(QStringLiteral("Disconnect")), busTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(m_model->role(), QStringLiteral("receiver"), busTimeoutMs);
+    QVERIFY(m_agent->calls.contains(QStringLiteral("SetRole receiver")));
+    QCOMPARE(m_model->headsetName(), QString());
+    QCOMPARE(wrong.count(), 2);
+
+    headset->calls.clear();
+    headset->set(device1(), QStringLiteral("Connected"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(wrong.count(), 3, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(headset->calls.contains(QStringLiteral("Disconnect")), busTimeoutMs);
+    headset->calls.clear();
+    headset->set(device1(), QStringLiteral("Connected"), true);
+    headset->set(device1(), QStringLiteral("UUIDs"), QStringList{QStringLiteral("0000110b-0000-1000-8000-00805f9b34fb")});
+    headset->set(device1(), QStringLiteral("ServicesResolved"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(wrong.count(), 4, busTimeoutMs);
+    QTest::qWait(1000);
+    QCOMPARE(wrong.count(), 4);
+    QCOMPARE(headset->calls.count(QStringLiteral("Disconnect")), 1);
 }
 
 QTEST_GUILESS_MAIN(SystemBluezTest)

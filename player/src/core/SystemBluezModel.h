@@ -10,6 +10,7 @@
 #include <QElapsedTimer>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -53,8 +54,15 @@ public:
     void fastForward() override;
     void startPairing(int timeoutSeconds = defaultPairingTimeout) override;
     void stopPairing() override;
+    void startSearch(int timeoutSeconds = defaultPairingTimeout) override;
+    void stopSearch() override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
+
+protected:
+    int roleDevices(const QString &role) const override;
+    void dropRole(const QString &role) override;
+    void applyRole(const QString &role) override;
 
 private slots:
     void onInterfacesAdded(const QDBusMessage &message);
@@ -71,6 +79,8 @@ private:
     void applyAgent(const QVariantMap &properties);
     void apply();
     void clearDevice();
+    void checkRole(const QString &path);
+    void disconnectDevice(const QString &path);
     void applyArt(const QString &address, int psm, const QString &handle);
     void updateArt();
     void nudge(const QString &handle);
@@ -99,6 +109,7 @@ private:
     QString m_imgHandle;
     QString m_handed;
     QString m_artSession;
+    QSet<QString> m_wrongRole;
     QElapsedTimer m_activeSince;
     QTimer m_gateTimer;
     enum class Nudge { Idle, Next, Previous, Watch, Done };

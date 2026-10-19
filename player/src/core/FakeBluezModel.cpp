@@ -272,6 +272,8 @@ void FakeBluezModel::fastForward()
 
 void FakeBluezModel::startPairing(int timeoutSeconds)
 {
+    if (holdWindow(false, timeoutSeconds))
+        return;
     m_commands.append(QStringLiteral("startPairing"));
     updatePairingRemaining(timeoutSeconds);
     updatePairing(true);
@@ -279,9 +281,63 @@ void FakeBluezModel::startPairing(int timeoutSeconds)
 
 void FakeBluezModel::stopPairing()
 {
+    dropHeld(false);
     m_commands.append(QStringLiteral("stopPairing"));
     updatePairing(false);
     updatePairingRemaining(0);
+}
+
+void FakeBluezModel::startSearch(int timeoutSeconds)
+{
+    if (holdWindow(true, timeoutSeconds))
+        return;
+    m_commands.append(QStringLiteral("startSearch"));
+    updateSearchRemaining(timeoutSeconds);
+    updateSearching(true);
+}
+
+void FakeBluezModel::stopSearch()
+{
+    dropHeld(true);
+    m_commands.append(QStringLiteral("stopSearch"));
+    updateSearching(false);
+    updateSearchRemaining(0);
+}
+
+void FakeBluezModel::setSearchRemaining(int seconds)
+{
+    updateSearchRemaining(seconds);
+}
+
+void FakeBluezModel::setHeadsetName(const QString &name)
+{
+    updateHeadsetName(name);
+}
+
+void FakeBluezModel::setRoleDevices(const QString &role, int count)
+{
+    m_roleDevices.insert(role, count);
+    roleDevicesChanged();
+}
+
+bool FakeBluezModel::reportDevice(const QString &device, bool source, bool sink)
+{
+    return wrongRoleCheck(device, source, sink);
+}
+
+int FakeBluezModel::roleDevices(const QString &role) const
+{
+    return m_roleDevices.value(role);
+}
+
+void FakeBluezModel::dropRole(const QString &role)
+{
+    m_commands.append(QStringLiteral("dropRole ") + role);
+}
+
+void FakeBluezModel::applyRole(const QString &role)
+{
+    m_commands.append(QStringLiteral("applyRole ") + role);
 }
 
 void FakeBluezModel::setShuffle(const QString &shuffle)

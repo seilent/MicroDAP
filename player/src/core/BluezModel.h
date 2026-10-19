@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QTimer>
 
 namespace microdap {
 
@@ -28,17 +30,25 @@ class BluezModel : public QObject
     Q_PROPERTY(int battery READ battery NOTIFY batteryChanged)
     Q_PROPERTY(bool pairing READ pairing NOTIFY pairingChanged)
     Q_PROPERTY(int pairingRemaining READ pairingRemaining NOTIFY pairingRemainingChanged)
+    Q_PROPERTY(bool searching READ searching NOTIFY searchingChanged)
+    Q_PROPERTY(int searchRemaining READ searchRemaining NOTIFY searchRemainingChanged)
+    Q_PROPERTY(QString role READ role NOTIFY roleChanged)
+    Q_PROPERTY(QString activeRole READ activeRole NOTIFY switchingChanged)
+    Q_PROPERTY(bool switching READ switching NOTIFY switchingChanged)
+    Q_PROPERTY(QString headsetName READ headsetName NOTIFY headsetNameChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
 
 public:
     static constexpr int transportVolumeMax = 127;
     static constexpr int defaultPairingTimeout = 120;
+    static constexpr int roleSwitchMs = 5000;
 
     explicit BluezModel(QObject *parent = nullptr);
 
     static int volumeFromTransport(int raw);
     static int volumeToTransport(int percent);
+    static QStringList roles();
 
     bool connected() const;
     QString deviceName() const;
@@ -61,6 +71,12 @@ public:
     int battery() const;
     bool pairing() const;
     int pairingRemaining() const;
+    bool searching() const;
+    int searchRemaining() const;
+    QString role() const;
+    QString activeRole() const;
+    bool switching() const;
+    QString headsetName() const;
     bool active() const;
     void setActive(bool active);
     bool ready() const;
@@ -73,6 +89,9 @@ public:
     Q_INVOKABLE virtual void fastForward() = 0;
     Q_INVOKABLE virtual void startPairing(int timeoutSeconds = defaultPairingTimeout) = 0;
     Q_INVOKABLE virtual void stopPairing() = 0;
+    Q_INVOKABLE virtual void startSearch(int timeoutSeconds = defaultPairingTimeout) = 0;
+    Q_INVOKABLE virtual void stopSearch() = 0;
+    Q_INVOKABLE void setRole(const QString &role);
     virtual void setShuffle(const QString &shuffle) = 0;
     virtual void setRepeat(const QString &repeat) = 0;
 
@@ -98,6 +117,12 @@ signals:
     void batteryChanged();
     void pairingChanged();
     void pairingRemainingChanged();
+    void searchingChanged();
+    void searchRemainingChanged();
+    void roleChanged();
+    void switchingChanged();
+    void headsetNameChanged();
+    void wrongRole(const QString &device, const QString &pivot);
     void activeChanged();
     void readyChanged();
 
@@ -124,6 +149,17 @@ protected:
     void updateBattery(int percent);
     void updatePairing(bool pairing);
     void updatePairingRemaining(int seconds);
+    void updateSearching(bool searching);
+    void updateSearchRemaining(int seconds);
+    void updateHeadsetName(const QString &name);
+    bool holdWindow(bool search, int timeoutSeconds);
+    void dropHeld(bool search);
+    bool wrongRoleCheck(const QString &device, bool source, bool sink);
+    void roleDevicesChanged();
+    void runHeld();
+    virtual int roleDevices(const QString &role) const = 0;
+    virtual void dropRole(const QString &role) = 0;
+    virtual void applyRole(const QString &role) = 0;
 
 private:
     bool m_connected = false;
@@ -147,6 +183,16 @@ private:
     int m_battery = -1;
     bool m_pairing = false;
     int m_pairingRemaining = 0;
+    bool m_searching = false;
+    int m_searchRemaining = 0;
+    QString m_role = QStringLiteral("receiver");
+    QString m_targetRole;
+    bool m_switching = false;
+    QString m_headsetName;
+    enum class Held { None, Pairing, Search };
+    Held m_held = Held::None;
+    int m_heldSeconds = 0;
+    QTimer m_switchTimer;
     bool m_active = true;
     bool m_ready = true;
 };
