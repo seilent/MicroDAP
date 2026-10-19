@@ -1,3 +1,4 @@
+#include "Biquad.h"
 #include "DacEq.h"
 #include "Eq.h"
 #include "FakeUsbIo.h"
@@ -68,7 +69,7 @@ DacEq::Bounds testBounds()
     return bounds;
 }
 
-EqProfile testProfile(double gain = 3.0)
+EqProfile testProfile(double gain = -3.0)
 {
     EqProfile profile = EqProfile::flat();
     profile.bands[0].enabled = true;
@@ -357,6 +358,9 @@ class DacEqTest : public QObject
 
 private slots:
     void framesBandCount();
+    void framesCutsOnlyUnverified();
+    void framesVerifiedPreamp();
+    void framesMatchedFit();
     void startLevelOffForces();
     void startLevelSetWaitsForResolve();
     void startLevelSetIgnoresWordApplied();
@@ -531,7 +535,7 @@ void DacEqTest::takeOrder()
     QVERIFY(rig.ready);
     QVERIFY(rig.takeOn());
     QStringList expected = takeFromBypass;
-    expected.append(QStringLiteral("set 15 00001e03e8008d00"));
+    expected.append(QStringLiteral("set 15 00ffe203e8008d00"));
     const QStringList outs = rig.outs();
     QCOMPARE(outs.mid(0, expected.size()), expected);
     QCOMPARE(outs.size(), expected.size() + 9);
@@ -595,10 +599,10 @@ void DacEqTest::updateGetsPresetFirst()
     QVERIFY(rig.ready);
     QVERIFY(rig.takeOn());
     const std::size_t from = rig.mark();
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QCOMPARE(rig.dac->status(), QStringLiteral("applying"));
     QTRY_COMPARE_WITH_TIMEOUT(rig.outs(from).size(), 2, waitMs);
-    QCOMPARE(rig.outs(from), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 15 00001f03e8008d00")}));
+    QCOMPARE(rig.outs(from), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 15 00ffe103e8008d00")}));
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
 }
 
@@ -609,14 +613,14 @@ void DacEqTest::coalescing()
     QVERIFY(rig.takeOn());
     const std::size_t from = rig.mark();
     for (int i = 0; i < 5; ++i) {
-        rig.eq->stepGain(usb, 0, 1);
+        rig.eq->stepGain(usb, 0, -1);
         QTest::qWait(20);
     }
     QTest::qWait(60);
     QCOMPARE(rig.countSince(from, FakeUsbIo::Op::Open), 0);
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
     QVERIFY(rig.idle());
-    QCOMPARE(rig.outs(from), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 15 00002303e8008d00")}));
+    QCOMPARE(rig.outs(from), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 15 00ffdd03e8008d00")}));
 }
 
 void DacEqTest::abandonWithinOneTransaction()
@@ -723,7 +727,7 @@ void DacEqTest::dacHeldClearedCardGone()
     QVERIFY(rig.ready);
     QVERIFY(rig.takeOn());
     const std::shared_ptr<FakeUsbIo::Hold> held = rig.fake->hold(FakeUsbIo::Op::Out);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTRY_VERIFY_WITH_TIMEOUT(held->waitEntered(1), waitMs);
     const std::size_t from = rig.mark();
     const std::vector<uint8_t> band = rig.fake->band(162, 0);
@@ -745,15 +749,15 @@ void DacEqTest::generationPresentKeeps()
     QVERIFY(rig.ready);
     QVERIFY(rig.takeOn());
     const std::shared_ptr<FakeUsbIo::Hold> held = rig.fake->hold(FakeUsbIo::Op::Out);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTRY_VERIFY_WITH_TIMEOUT(held->waitEntered(1), waitMs);
     rig.dac->onGenerationChanged(QStringLiteral("B"), 2, true);
     QVERIFY(rig.dac->dacHeld());
     held->release();
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
-    QCOMPARE(rig.fake->band(162, 0), (std::vector<uint8_t>{0x00, 0x00, 0x1f, 0x03, 0xe8, 0x00, 0x8d, 0x00}));
+    QCOMPARE(rig.fake->band(162, 0), (std::vector<uint8_t>{0x00, 0xff, 0xe1, 0x03, 0xe8, 0x00, 0x8d, 0x00}));
     const std::size_t from = rig.mark();
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTRY_COMPARE_WITH_TIMEOUT(bandSets(rig.outs(from)), 10, waitMs);
     const QStringList outs = rig.outs(from);
     QCOMPARE(outs.mid(0, 4), (QStringList{QStringLiteral("get 16"), QStringLiteral("get 0b"), QStringLiteral("get 16"),
@@ -777,7 +781,7 @@ void DacEqTest::failedRetriesOnChange()
     rig.dac->onGenerationChanged(QStringLiteral("B"), 2, true);
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
     rig.fake->setClaimError(-EBUSY);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("failed"), waitMs);
     rig.fake->setClaimError(0);
     QVERIFY(rig.idle(500));
@@ -1161,7 +1165,7 @@ void DacEqTest::startReleaseAfterAck()
     QCOMPARE(rig.fake->preset(), fiioBypass);
     QCOMPARE(rig.outs(from), QStringList{QStringLiteral("set 16 f0")});
     QVERIFY(!rig.dac->dacHeld());
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QVERIFY(rig.idle(400));
     QCOMPARE(rig.outs(from).size(), 1);
     QCOMPARE(called, 1);
@@ -1179,7 +1183,7 @@ void DacEqTest::quitSendsBypassThenJoins()
     QVERIFY(clock.elapsed() < 600);
     QCOMPARE(rig.fake->preset(), fiioBypass);
     QCOMPARE(rig.outs(from), QStringList{QStringLiteral("set 16 f0")});
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     rig.dac->onEffectiveChanged(false);
     QVERIFY(rig.idle());
     QCOMPARE(rig.outs(from).size(), 1);
@@ -1191,7 +1195,7 @@ void DacEqTest::quitJoinBlocked()
     QVERIFY(rig.ready);
     QVERIFY(rig.takeOn());
     const std::shared_ptr<FakeUsbIo::Hold> held = rig.fake->hold(FakeUsbIo::Op::Out);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTRY_VERIFY_WITH_TIMEOUT(held->waitEntered(1), waitMs);
     QElapsedTimer clock;
     clock.start();
@@ -1206,11 +1210,11 @@ void DacEqTest::guiNeverBlocks()
     QVERIFY(rig.ready);
     QVERIFY(rig.takeOn());
     const std::shared_ptr<FakeUsbIo::Hold> held = rig.fake->hold(FakeUsbIo::Op::Out);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTRY_VERIFY_WITH_TIMEOUT(held->waitEntered(1), waitMs);
     QElapsedTimer clock;
     clock.start();
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     rig.dac->onProfileChanged(usb);
     rig.dac->setLevel(QStringLiteral("exclusive"));
     rig.dac->onGenerationChanged(QStringLiteral("B"), 3, true);
@@ -1234,7 +1238,7 @@ void DacEqTest::switchingAllowsReleaseOnly()
     const std::size_t from = rig.mark();
     rig.dac->onSwitchingChanged(true);
     QTRY_COMPARE_WITH_TIMEOUT(rig.fake->preset(), fiioBypass, waitMs);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     rig.dac->setLevel(QStringLiteral("exclusive"));
     rig.dac->onGenerationChanged(QStringLiteral("B"), 3, true);
     rig.dac->onEffectiveChanged(false);
@@ -1246,7 +1250,7 @@ void DacEqTest::switchingAllowsReleaseOnly()
     rig.dac->onSwitchingChanged(false);
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
     QCOMPARE(rig.fake->preset(), uint8_t(162));
-    QCOMPARE(rig.fake->band(162, 0), (std::vector<uint8_t>{0x00, 0x00, 0x1f, 0x03, 0xe8, 0x00, 0x8d, 0x00}));
+    QCOMPARE(rig.fake->band(162, 0), (std::vector<uint8_t>{0x00, 0xff, 0xe1, 0x03, 0xe8, 0x00, 0x8d, 0x00}));
 }
 
 void DacEqTest::profileChangeDuringTake()
@@ -1257,12 +1261,12 @@ void DacEqTest::profileChangeDuringTake()
     const std::shared_ptr<FakeUsbIo::Hold> held = rig.fake->hold(FakeUsbIo::Op::Out);
     rig.holdLevel();
     QTRY_VERIFY_WITH_TIMEOUT(held->waitEntered(1), waitMs);
-    rig.eq->stepGain(usb, 0, 1);
+    rig.eq->stepGain(usb, 0, -1);
     QTest::qWait(250);
     held->release();
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
     QVERIFY(rig.idle());
-    QCOMPARE(rig.fake->band(162, 0), (std::vector<uint8_t>{0x00, 0x00, 0x1f, 0x03, 0xe8, 0x00, 0x8d, 0x00}));
+    QCOMPARE(rig.fake->band(162, 0), (std::vector<uint8_t>{0x00, 0xff, 0xe1, 0x03, 0xe8, 0x00, 0x8d, 0x00}));
     const QStringList outs = rig.outs();
     QCOMPARE(bandSets(outs), 10);
     QCOMPARE(outs.count(QStringLiteral("get 0b")), 1);
@@ -1668,22 +1672,60 @@ void DacEqTest::gateRetriesWhilePending()
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 1);
 }
 
+double framesDb(const FiioProfileFrames &frames, double f, double rate)
+{
+    double db = 0.0;
+    for (const auto &payload : frames.bands) {
+        const FiioBand b = *bandOfPayload(payload);
+        db += 20.0 * std::log10(biquadMagnitude(biquadFor(BiquadType(b.type), b.freq, b.gain, b.q, rate), f, rate));
+    }
+    return db;
+}
+
+double framesPeak(const FiioProfileFrames &frames, double rate)
+{
+    double peak = -1e9;
+    for (double f = 10.0; f < rate / 2.0; f *= std::pow(2.0, 1.0 / 96.0))
+        peak = std::max(peak, framesDb(frames, f, rate));
+    return peak;
+}
+
+double preampOf(const FiioProfileFrames &frames)
+{
+    return int16_t(uint16_t(frames.preamp.at(0) << 8 | frames.preamp.at(1))) / 10.0;
+}
+
+double matchedError(const EqProfile &profile, const FiioProfileFrames &frames, double rate)
+{
+    double worst = 0.0;
+    for (double f = 20.0; f <= 20000.0; f *= std::pow(2.0, 1.0 / 24.0)) {
+        double target = 0.0;
+        for (int i = 0; i < profile.count; ++i) {
+            const EqBand &b = profile.bands[i];
+            target += 20.0 * std::log10(biquadMagnitude(biquadFor(BiquadType::MatchedPeak, b.freq, b.gain, b.q, rate), f, rate));
+        }
+        worst = std::max(worst, std::abs(target - framesDb(frames, f, rate)));
+    }
+    return worst;
+}
+
 void DacEqTest::framesBandCount()
 {
     EqProfile profile = EqProfile::flat();
     profile.count = 3;
-    profile.bands[0].gain = 3.0;
+    profile.bands[0].gain = -3.0;
     profile.bands[1].type = EqBand::LowShelf;
     profile.bands[1].gain = -2.0;
-    profile.bands[2].gain = 4.0;
-    profile.bands[5].gain = 9.0;
+    profile.bands[2].gain = -4.0;
+    profile.bands[5].gain = -9.0;
     const FiioModel &model = fiioModels().front();
     const EqProfile flat = EqProfile::flat();
     FiioProfileFrames frames = DacEq::framesFor(model, profile);
-    QCOMPARE(bandOfPayload(frames.bands[0])->gain, 3.0);
+    QCOMPARE(bandOfPayload(frames.bands[0])->gain, -3.0);
     QCOMPARE(bandOfPayload(frames.bands[1])->gain, -2.0);
     QCOMPARE(bandOfPayload(frames.bands[1])->type, int(EqBand::LowShelf));
-    QCOMPARE(bandOfPayload(frames.bands[2])->gain, 4.0);
+    QCOMPARE(bandOfPayload(frames.bands[2])->gain, -4.0);
+    QCOMPARE(frames.preamp, (std::vector<uint8_t>{0, 0}));
     for (int i = 3; i < fiioBandCount; ++i) {
         const std::optional<FiioBand> band = bandOfPayload(frames.bands[i]);
         QVERIFY(band);
@@ -1702,11 +1744,107 @@ void DacEqTest::framesBandCount()
     frames = DacEq::framesFor(model, profile);
     QCOMPARE(bandOfPayload(frames.bands[0])->freq, 1234.0);
     QCOMPARE(bandOfPayload(frames.bands[0])->q, 0.71);
+    profile.bands[1].type = EqBand::MatchedPeak;
+    profile.bands[1].gain = -6.0;
+    profile.bands[1].q = 0.92;
+    frames = DacEq::framesFor(model, profile);
+    QCOMPARE(bandOfPayload(frames.bands[1])->type, int(EqBand::Peak));
+    QCOMPARE(bandOfPayload(frames.bands[1])->gain, -6.0);
+    QCOMPARE(bandOfPayload(frames.bands[1])->q, 0.92);
     profile.count = 1;
     frames = DacEq::framesFor(model, profile);
-    QCOMPARE(bandOfPayload(frames.bands[0])->gain, 3.0);
+    QCOMPARE(bandOfPayload(frames.bands[0])->gain, -3.0);
     QCOMPARE(bandOfPayload(frames.bands[1])->gain, 0.0);
     QCOMPARE(bandOfPayload(frames.bands[1])->type, 0);
+}
+
+void DacEqTest::framesCutsOnlyUnverified()
+{
+    const FiioModel &model = fiioModels().front();
+    QVERIFY(!model.preampVerified);
+    std::array<double, EqProfile::bandCount> bass{12, 12, 12, 0, 0, 0, 0, 0, 0, 0};
+    std::array<double, EqProfile::bandCount> all{};
+    all.fill(12.0);
+    for (const auto &gains : {bass, all}) {
+        for (const int rate : {44100, 48000, 96000, 192000}) {
+            const FiioProfileFrames frames = DacEq::framesFor(model, EqProfile::graphic(gains), rate);
+            QCOMPARE(frames.preamp, (std::vector<uint8_t>{0, 0}));
+            for (const auto &payload : frames.bands)
+                QVERIFY(bandOfPayload(payload)->gain <= 0.0);
+            QVERIFY2(framesPeak(frames, rate) <= 0.01, qPrintable(QString::number(framesPeak(frames, rate))));
+        }
+    }
+    EqProfile parametric = EqProfile::flat();
+    parametric.count = 3;
+    parametric.bands[0].gain = 6.0;
+    parametric.bands[1].type = EqBand::LowPass;
+    parametric.bands[1].q = 4.0;
+    parametric.bands[2].type = EqBand::HighShelf;
+    parametric.bands[2].gain = 9.0;
+    const FiioProfileFrames frames = DacEq::framesFor(model, parametric);
+    QCOMPARE(bandOfPayload(frames.bands[0])->gain, 0.0);
+    QCOMPARE(bandOfPayload(frames.bands[1])->q, 0.70);
+    QCOMPARE(bandOfPayload(frames.bands[2])->gain, 0.0);
+    QVERIFY(framesPeak(frames, 44100) <= 0.01);
+    DacEq dac(DacEq::Bounds{}, DacEq::Ports{});
+    const QVariantMap ranges = dac.ranges();
+    QCOMPARE(ranges.value(QStringLiteral("gain")).toList().at(1).toDouble(), 0.0);
+    QCOMPARE(ranges.value(QStringLiteral("preamp")).toList().at(0).toDouble(), 0.0);
+    QCOMPARE(ranges.value(QStringLiteral("qPass")).toList().at(1).toDouble(), 0.70);
+}
+
+void DacEqTest::framesVerifiedPreamp()
+{
+    FiioModel model = fiioModels().front();
+    model.preampVerified = true;
+    std::array<double, EqProfile::bandCount> bass{12, 12, 12, 0, 0, 0, 0, 0, 0, 0};
+    std::array<double, EqProfile::bandCount> all{};
+    all.fill(12.0);
+    for (const auto &gains : {bass, all}) {
+        for (const int rate : {44100, 96000}) {
+            const FiioProfileFrames frames = DacEq::framesFor(model, EqProfile::graphic(gains), rate);
+            const double preamp = preampOf(frames);
+            QVERIFY(preamp >= -12.0 && preamp <= 0.0);
+            QVERIFY2(framesPeak(frames, rate) + preamp <= 0.05,
+                     qPrintable(QStringLiteral("%1 %2").arg(framesPeak(frames, rate)).arg(preamp)));
+        }
+    }
+    const FiioProfileFrames frames = DacEq::framesFor(model, EqProfile::graphic(bass), 44100);
+    QVERIFY(bandOfPayload(frames.bands[0])->gain > 6.0);
+    QVERIFY(preampOf(frames) < -6.0);
+}
+
+void DacEqTest::framesMatchedFit()
+{
+    FiioModel model = fiioModels().front();
+    const std::array<std::array<double, EqProfile::bandCount>, 3> cuts{{
+        {0, 0, 0, 0, 0, 0, 0, 0, -6, -12},
+        {0, 0, 0, 0, 0, 0, -3, -6, -9, -12},
+        {0, 0, 0, 0, 0, 0, 0, 0, -12, 0},
+    }};
+    for (const auto &gains : cuts) {
+        const EqProfile profile = EqProfile::graphic(gains);
+        const FiioProfileFrames fitted = DacEq::framesFor(model, profile, 44100);
+        for (const double rate : {44100.0, 48000.0})
+            QVERIFY2(matchedError(profile, fitted, rate) <= 1.5, qPrintable(QString::number(matchedError(profile, fitted, rate))));
+        const FiioProfileFrames high = DacEq::framesFor(model, profile, 96000);
+        for (const double rate : {88200.0, 96000.0})
+            QVERIFY2(matchedError(profile, high, rate) <= 1.5, qPrintable(QString::number(matchedError(profile, high, rate))));
+        QVERIFY(!(fitted == high));
+        const FiioProfileFrames plain = DacEq::framesFor(model, profile, 192000);
+        QCOMPARE(bandOfPayload(plain.bands[9])->freq, 16000.0);
+        QCOMPARE(bandOfPayload(plain.bands[9])->q, 0.92);
+    }
+    model.preampVerified = true;
+    const std::array<double, EqProfile::bandCount> ramp{0, 0, 0, 0, 0, 0, 2, 4, 6, 8};
+    const EqProfile profile = EqProfile::graphic(ramp);
+    const FiioProfileFrames fitted = DacEq::framesFor(model, profile, 48000);
+    for (const double rate : {44100.0, 48000.0})
+        QVERIFY2(matchedError(profile, fitted, rate) <= 1.5, qPrintable(QString::number(matchedError(profile, fitted, rate))));
+    QCOMPARE(DacEq::rateFamily(44100), DacEq::rateFamily(48000));
+    QCOMPARE(DacEq::rateFamily(88200), DacEq::rateFamily(96000));
+    QVERIFY(DacEq::rateFamily(48000) != DacEq::rateFamily(96000));
+    QCOMPARE(DacEq::rateFamily(176400), DacEq::rateFamily(384000));
 }
 
 QTEST_GUILESS_MAIN(DacEqTest)

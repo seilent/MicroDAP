@@ -119,10 +119,11 @@ function fieldText(b, field) {
 
 var dacFields = ["gain", "q", "preamp"]
 
-function dacSuffix(field, value, ranges) {
+function dacSuffix(field, value, ranges, type) {
     if (ranges === null || ranges === undefined || dacFields.indexOf(field) < 0 || ranges[field] === undefined)
         return ""
-    var range = ranges[field]
+    var pass = field === "q" && (type === "lowpass" || type === "highpass") && ranges.qPass !== undefined
+    var range = pass ? ranges.qPass : ranges[field]
     var v = field === "q" ? Number(qText(value)) : Number(signed(value, false))
     var c = Math.min(Number(range[1]), Math.max(Number(range[0]), v))
     if (c === v)

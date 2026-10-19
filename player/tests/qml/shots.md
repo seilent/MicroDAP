@@ -114,6 +114,7 @@
 | eq | `eq-bands`, `eq-bands-one`, `eq-bands-full` | `--size 640x960`, `eq-bands` and `eq-bands-full` also `960x640` | band rows `1` to `n`, ADD BAND below 10, REMOVE BAND with the count above 1 | 2026-10-20 |
 | eq | `eq-custom`, `eq-saved`, `eq-delete`, `eq-rename` | `--size 640x960` and `960x640` | SAVE PRESET on CUSTOM; DELETE PRESET and RENAME PRESET on a saved preset; T13 `delete preset?` with KEEP PRESET focused; keyboard titled `rename preset` with the name | 2026-10-20 |
 | eq | `eq-typed-sheet`, `eq-typed-freq`, `eq-typed-gain` | `--size 640x960` and `960x640` | `type value` sheet titled PREAMP; number keyboard: frequency digits with HZ, gain with `-` and `.` and DB | 2026-10-20 |
+| eq | `eq-graphic`, `eq-graphic-flat`, `eq-graphic-edit` | `--size 640x960` and `960x640` | MODE GRAPHIC; ten bands 31 HZ to 16 KHZ with gains; PRESET FLAT and the read only PREAMP; a band gain in edit mode in the accent | 2026-10-20 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

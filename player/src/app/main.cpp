@@ -293,6 +293,9 @@ int main(int argc, char *argv[])
         QObject::connect(&settings, &microdap::Settings::outputLevelChanged, dac,
                          [&settings, dac] { dac->setLevel(settings.outputLevel()); });
         QObject::connect(&player, &microdap::Player::statusChanged, dac, &microdap::DacEq::onPlayStateChanged);
+        QObject::connect(&player, &microdap::Player::currentChanged, dac, [&player, dac] {
+            dac->setStreamRate(player.current().value(QStringLiteral("sampleRate")).toInt());
+        });
         QObject::connect(control, &microdap::OutputControl::activeOutputChanged, dac,
                          [control, dac] { dac->onActiveOutputChanged(control->activeOutput()); });
         QObject::connect(eqControl.get(), &microdap::EqControl::profileChanged, dac, &microdap::DacEq::onProfileChanged);
@@ -335,6 +338,11 @@ int main(int argc, char *argv[])
     state.load();
     microdap::Mpris mpris(&player, QDBusConnection::sessionBus());
     microdap::PowerBridge power(&player, QDBusConnection::sessionBus());
+    QObject::connect(&power, &microdap::PowerBridge::switchingChanged, eqControl.get(),
+                     [&power, eq = eqControl.get()] {
+                         if (power.switching())
+                             eq->sync();
+                     });
     if (dacEq) {
         QObject::connect(&power, &microdap::PowerBridge::switchingChanged, dacEq.get(),
                          [&power, dac = dacEq.get()] { dac->onSwitchingChanged(power.switching()); });

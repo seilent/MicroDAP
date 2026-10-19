@@ -144,6 +144,11 @@ private slots:
     void deletePresetInUse();
     void renamePreset();
     void typedValues();
+    void graphicProfile();
+    void graphicMode();
+    void graphicDebounce();
+    void graphicPresets();
+    void graphicGestureDebounce();
     void copyOnEdit();
     void steps();
     void stepTypeEight();
@@ -817,6 +822,8 @@ void EqTest::deletePresetInUse()
     QCOMPARE(eq.key(QStringLiteral("speaker")), QStringLiteral("off"));
     QCOMPARE(eq.key(QStringLiteral("headphones")), QStringLiteral("HD600"));
     QCOMPARE(int(eq.sources().size()), 1);
+    QCOMPARE(settings.value(EqFilters::key(QStringLiteral("usb"), QStringLiteral("name"))).toString(), QString());
+    QCOMPARE(settings.value(EqFilters::key(QStringLiteral("speaker"), QStringLiteral("name"))).toString(), QString());
 }
 
 void EqTest::renamePreset()
@@ -899,6 +906,261 @@ void EqTest::typedValues()
     const EqProfile stored = EqStore::read(EqControl::storePath(out));
     QVERIFY(near(stored.bands[1].freq, 20000.0));
     QVERIFY(near(stored.bands[1].q, 0.71));
+}
+
+void EqTest::graphicProfile()
+{
+    const EqProfile flat = EqProfile::graphic({});
+    QCOMPARE(flat.count, 10);
+    QVERIFY(near(flat.preamp, 0.0));
+    for (int i = 0; i < EqProfile::bandCount; ++i) {
+        QCOMPARE(flat.bands[i].type, EqBand::MatchedPeak);
+        QCOMPARE(flat.bands[i].freqIndex, 4 + 6 * i);
+        QVERIFY(near(flat.bands[i].q, 0.92));
+        QVERIFY(flat.bands[i].enabled);
+    }
+    const std::array<std::array<double, 10>, 6> cases{{
+        {12, 12, 12, 12, 12, 12, 12, 12, 12, 12},
+        {0, 0, 0, 0, 12, 0, 0, 0, 0, 0},
+        {12, -24, 12, -24, 12, -24, 12, -24, 12, -24},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 12},
+        {3, -7, 12, -1, 0, 5, -24, 8, 2, -3},
+        {-6, -6, -6, -6, -6, -6, -6, -6, -6, -6},
+    }};
+    const std::array<double, 6> preamps{-23.9, -12.1, -14.7, -12.1, -12.4, 0.0};
+    for (size_t i = 0; i < cases.size(); ++i)
+        QVERIFY2(near(EqProfile::graphic(cases[i]).preamp, preamps[i]),
+                 qPrintable(QString::number(EqProfile::graphic(cases[i]).preamp)));
+    const QStringList items = EqFilters::encode(EqProfile::graphic(cases[3]));
+    QCOMPARE(items.size(), 11);
+    QCOMPARE(items.first(), QStringLiteral("preamp -12.1"));
+    QCOMPARE(items.at(1), QStringLiteral("matchedpeak 31.25 0 0.92"));
+    QCOMPARE(items.at(10), QStringLiteral("matchedpeak 16000 12 0.92"));
+    const EqProfile back = EqFilters::decode(items);
+    QCOMPARE(back.bands[9].type, EqBand::MatchedPeak);
+    QVERIFY(back.bands[0].enabled);
+    QCOMPARE(EqFilters::encode(back), items);
+    QVERIFY(near(EqParser::fallbackPreamp(EqProfile::graphic(cases[1])), -12.0));
+    std::array<double, 10> gains{};
+    gains[2] = -3.5;
+    QVERIFY(EqControl::gainsText(gains).startsWith(QStringLiteral("[General]\ngain1=0.0\ngain2=0.0\ngain3=-3.5\n")));
+    const QString path = m_dir + QStringLiteral("/g.ini");
+    QVERIFY(writeFile(path, EqControl::gainsText(gains)));
+    QVERIFY(EqControl::readGains(path) == std::optional(gains));
+    QVERIFY(writeFile(path, QStringLiteral("[General]\ngain4=40\nfoo=1\n")));
+    QVERIFY(near((*EqControl::readGains(path))[3], 12.0));
+    QVERIFY(writeFile(path, QStringLiteral("[Other]\ngain1=1\n")));
+    QVERIFY(!EqControl::readGains(path));
+}
+
+void EqTest::graphicMode()
+{
+    QVERIFY(writeFile(EqControl::sourceDir() + QStringLiteral("/HD600.txt"), QString::fromUtf8(autoEq)));
+    const QString out = QStringLiteral("headphones");
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    {
+        EqControl eq(&settings);
+        eq.cycleProfile(out, 1);
+        QCOMPARE(eq.key(out), QStringLiteral("HD600"));
+        QVERIFY(!eq.graphic(out));
+        QCOMPARE(eq.profileMap(out).value(QStringLiteral("mode")).toString(), QStringLiteral("parametric"));
+        eq.cycleMode(out, 1);
+        eq.sync();
+        QVERIFY(eq.graphic(out));
+        QCOMPARE(settings.value(QStringLiteral("microdap.eq_mode_headphones")).toString(), QStringLiteral("graphic"));
+        QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("flat"));
+        QCOMPARE(eq.name(out), QStringLiteral("FLAT"));
+        QCOMPARE(eq.profileMap(out).value(QStringLiteral("bands")).toList().size(), 10);
+        QVERIFY(settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());
+        QCOMPARE(settings.value(EqFilters::key(out, QStringLiteral("filters"))).toStringList(),
+                 EqFilters::encode(EqProfile::graphic({})));
+        QCOMPARE(settings.value(EqFilters::key(out, QStringLiteral("name"))).toString(), QStringLiteral("HD600"));
+        eq.cycleGraphic(out, -1);
+        eq.sync();
+        QCOMPARE(eq.key(out), QStringLiteral("off"));
+        QVERIFY(!settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());
+        QVERIFY(eq.profileMap(out).value(QStringLiteral("bands")).toList().isEmpty());
+        eq.cycleGraphic(out, -1);
+        eq.sync();
+        QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("custom"));
+        eq.stepGraphic(out, 2, 1, true);
+        eq.sync();
+        QVERIFY(near(eq.profile(out).bands[2].gain, 1.0));
+        QCOMPARE(settings.value(QStringLiteral("microdap.eq_graphic_headphones")).toStringList().at(2), QStringLiteral("1"));
+        eq.cycleGraphic(out, 1);
+        eq.sync();
+        eq.cycleGraphic(out, 1);
+        eq.sync();
+        QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("flat"));
+        eq.stepGraphic(out, 0, -1);
+        QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("custom"));
+        QVERIFY(near(eq.profile(out).bands[0].gain, -0.1));
+        QVERIFY(near(eq.profile(out).bands[2].gain, 0.0));
+        QVERIFY(eq.setGraphicGain(out, 9, 12.0));
+        QVERIFY(!eq.setGraphicGain(out, 9, 12.5));
+        QVERIFY(near(eq.profile(out).preamp, -12.1));
+        eq.stepPreamp(out, 1);
+        eq.stepBand(out, 0, QStringLiteral("gain"), 1);
+        QVERIFY(!eq.addBand(out));
+        QVERIFY(near(eq.profile(out).bands[0].gain, -0.1));
+        eq.sync();
+    }
+    {
+        EqControl eq(&settings);
+        QVERIFY(eq.graphic(out));
+        QVERIFY(near(eq.profile(out).bands[9].gain, 12.0));
+        QVERIFY(near(eq.profile(out).bands[0].gain, -0.1));
+        const QVariantMap state = eq.snapshot(out);
+        eq.stepGraphic(out, 5, 1, true);
+        eq.cycleMode(out, 1);
+        eq.sync();
+        QVERIFY(!eq.graphic(out));
+        QCOMPARE(eq.key(out), QStringLiteral("HD600"));
+        QVERIFY(settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());
+        QCOMPARE(EqFilters::encode(eq.profile(out)), EqFilters::encode(*EqParser::parse(QString::fromUtf8(autoEq))));
+        eq.restore(out, state);
+        eq.sync();
+        QVERIFY(eq.graphic(out));
+        QVERIFY(near(eq.profile(out).bands[5].gain, 0.0));
+        QVERIFY(near(eq.profile(out).bands[9].gain, 12.0));
+        eq.cycleGraphic(out, 1);
+        eq.sync();
+        QCOMPARE(eq.key(out), QStringLiteral("off"));
+        eq.cycleMode(out, 1);
+        eq.sync();
+        QCOMPARE(eq.key(out), QStringLiteral("HD600"));
+        eq.cycleProfile(out, -1);
+        QCOMPARE(eq.key(out), QStringLiteral("off"));
+        eq.cycleMode(out, 1);
+        eq.sync();
+        eq.cycleMode(out, 1);
+        eq.sync();
+        QCOMPARE(eq.key(out), QStringLiteral("off"));
+        QVERIFY(!settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());
+    }
+}
+
+void EqTest::graphicDebounce()
+{
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    const QString out = QStringLiteral("usb");
+    eq.cycleMode(out, 1);
+    eq.sync();
+    eq.cycleGraphic(out, -1);
+    eq.sync();
+    eq.cycleGraphic(out, -1);
+    eq.sync();
+    QSignalSpy values(&settings, &Settings::valueChanged);
+    const QString filters = EqFilters::key(out, QStringLiteral("filters"));
+    const auto writes = [&values, &filters] {
+        int n = 0;
+        for (const QList<QVariant> &args : values)
+            n += args.first().toString() == filters ? 1 : 0;
+        return n;
+    };
+    for (int i = 0; i < 6; ++i) {
+        eq.stepGraphic(out, 4, 1);
+        QTest::qWait(EqControl::writeDelayMs / 3);
+    }
+    QCOMPARE(writes(), 0);
+    QVERIFY(near(eq.profile(out).bands[4].gain, 0.6));
+    QTRY_COMPARE_WITH_TIMEOUT(writes(), 1, 2000);
+    QTest::qWait(EqControl::writeDelayMs * 2);
+    QCOMPARE(writes(), 1);
+    QCOMPARE(settings.value(filters).toStringList(), EqFilters::encode(eq.profile(out)));
+}
+
+void EqTest::graphicGestureDebounce()
+{
+    for (const QString &name : {QStringLiteral("A"), QStringLiteral("B"), QStringLiteral("C")})
+        QVERIFY(writeFile(EqControl::graphicDir() + QLatin1Char('/') + name + QStringLiteral(".ini"),
+                          QStringLiteral("[General]\ngain1=") + QString::number(name.at(0).unicode() - 64) + QLatin1Char('\n')));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    const QString out = QStringLiteral("usb");
+    const QString filters = EqFilters::key(out, QStringLiteral("filters"));
+    QSignalSpy values(&settings, &Settings::valueChanged);
+    const auto writes = [&values, &filters] {
+        int n = 0;
+        for (const QList<QVariant> &args : values)
+            n += args.first().toString() == filters ? 1 : 0;
+        return n;
+    };
+    eq.cycleMode(out, 1);
+    for (int i = 0; i < 9; ++i)
+        eq.cycleGraphic(out, 1);
+    QCOMPARE(writes(), 0);
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("C"));
+    QVERIFY(eq.profileMap(out).value(QStringLiteral("bands")).toList().size() == 10);
+    QTRY_COMPARE_WITH_TIMEOUT(writes(), 1, 2000);
+    QCOMPARE(settings.value(filters).toStringList(), EqFilters::encode(eq.profile(out)));
+    QVERIFY(settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());
+    const QVariantMap state = eq.snapshot(out);
+    eq.cycleMode(out, 1);
+    eq.cycleMode(out, 1);
+    eq.cycleMode(out, 1);
+    QVERIFY(!eq.graphic(out));
+    eq.restore(out, state);
+    QVERIFY(eq.graphic(out));
+    QTest::qWait(EqControl::writeDelayMs * 3);
+    QCOMPARE(writes(), 1);
+    QCOMPARE(settings.value(filters).toStringList(), EqFilters::encode(eq.profile(out)));
+}
+
+void EqTest::graphicPresets()
+{
+    QVERIFY(writeFile(EqControl::graphicDir() + QStringLiteral("/Warm.ini"),
+                      QStringLiteral("[General]\ngain1=3\ngain10=-2\n")));
+    QVERIFY(writeFile(EqControl::graphicDir() + QStringLiteral("/Flat.ini"), QStringLiteral("[General]\ngain1=5\n")));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    const QString out = QStringLiteral("speaker");
+    eq.cycleMode(out, 1);
+    eq.sync();
+    eq.cycleGraphic(out, 1);
+    eq.sync();
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("WARM"));
+    QVERIFY(eq.saved(out));
+    QCOMPARE(eq.presetName(out), QStringLiteral("Warm"));
+    QVERIFY(near(eq.profile(out).bands[0].gain, 3.0));
+    eq.stepGraphic(out, 1, 1);
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("custom"));
+    QVERIFY(near(eq.profile(out).bands[0].gain, 3.0));
+    QVERIFY(near(eq.profile(out).bands[1].gain, 0.1));
+    QCOMPARE(eq.savePreset(out), QString());
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("PRESET 1"));
+    const QString saved = EqControl::graphicDir() + QStringLiteral("/Preset 1.ini");
+    QVERIFY(readFile(saved).startsWith(QStringLiteral("[General]\ngain1=3.0\ngain2=0.1\n")));
+    QCOMPARE(eq.renameRefusal(out, QStringLiteral("warm")), QStringLiteral("name taken"));
+    QVERIFY(eq.renamePreset(out, QStringLiteral("Bright")));
+    QVERIFY(!QFileInfo::exists(saved));
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("BRIGHT"));
+    eq.cycleMode(QStringLiteral("usb"), 1);
+    eq.sync();
+    eq.cycleGraphic(QStringLiteral("usb"), 1);
+    eq.sync();
+    QCOMPARE(eq.profileMap(QStringLiteral("usb")).value(QStringLiteral("key")).toString(), QStringLiteral("BRIGHT"));
+    QVERIFY(eq.deletePreset(out));
+    QVERIFY(!QFileInfo::exists(EqControl::graphicDir() + QStringLiteral("/Bright.ini")));
+    QCOMPARE(eq.key(out), QStringLiteral("off"));
+    QCOMPARE(eq.key(QStringLiteral("usb")), QStringLiteral("off"));
+    QVERIFY(QFileInfo::exists(EqControl::graphicDir() + QStringLiteral("/Warm.ini")));
+    QVERIFY(QFile::remove(EqControl::graphicDir() + QStringLiteral("/Warm.ini")));
+    eq.cycleGraphic(out, 1);
+    eq.sync();
+    eq.cycleGraphic(out, 1);
+    eq.sync();
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("WARM"));
+    eq.relist();
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("key")).toString(), QStringLiteral("WARM"));
+    QVERIFY(eq.missing(out));
+    QCOMPARE(eq.key(out), QStringLiteral("off"));
+    QVERIFY(!settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());
 }
 
 void EqTest::copyOnEdit()

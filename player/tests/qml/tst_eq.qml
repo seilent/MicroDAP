@@ -45,6 +45,9 @@ TestCase {
         property var preamps: ({})
         property var bandSets: ({})
         property var savedKeys: []
+        property var modes: ({})
+        property var presets: ({})
+        property var gains: ({})
         property bool failNext: false
         property var calls: []
         readonly property var cycle: ["off", "/eq/HD 600.txt", "/eq/Gone.txt", "custom"]
@@ -72,6 +75,79 @@ TestCase {
             fakeEq.calls = []
             fakeEq.savedKeys = []
             fakeEq.failNext = false
+            fakeEq.modes = ({ headphones: "parametric", usb: "parametric", speaker: "parametric" })
+            fakeEq.presets = ({ headphones: "flat", usb: "flat", speaker: "flat" })
+            fakeEq.gains = ({ headphones: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], usb: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                speaker: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] })
+        }
+
+        function graphicMap(output) {
+            const preset = fakeEq.presets[output]
+            const g = preset === "flat" ? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] : fakeEq.gains[output]
+            const bands = []
+            for (let i = 0; i < 10 && preset !== "off"; i++)
+                bands.push({ type: "matchedpeak", freq: 1000 * Math.pow(2, (4 + 6 * i - 34) / 6), freqIndex: 4 + 6 * i, gain: g[i], q: 0.92 })
+            return { mode: "graphic", key: preset, name: preset === "flat" ? "FLAT" : preset, missing: false,
+                preamp: -Math.max(0, Math.max.apply(null, g)), bands: bands, saved: false }
+        }
+
+        function cycleMode(output, delta) {
+            fakeEq.calls = fakeEq.calls.concat([["cycleMode", output, delta]])
+            const m = Object.assign({}, fakeEq.modes)
+            m[output] = m[output] === "graphic" ? "parametric" : "graphic"
+            fakeEq.modes = m
+            fakeEq.profilesChanged()
+        }
+
+        function cycleGraphic(output, delta) {
+            fakeEq.calls = fakeEq.calls.concat([["cycleGraphic", output, delta]])
+            const list = ["off", "flat", "custom"]
+            const p = Object.assign({}, fakeEq.presets)
+            const at = list.indexOf(p[output])
+            p[output] = list[((at + delta) % 3 + 3) % 3]
+            fakeEq.presets = p
+            fakeEq.profilesChanged()
+        }
+
+        function stepGraphic(output, band, delta, coarse) {
+            fakeEq.calls = fakeEq.calls.concat([["stepGraphic", output, band, delta, coarse]])
+            fakeEq.setGain(output, band, Math.round((fakeEq.gains[output][band] + delta * (coarse ? 1 : 0.1)) * 10) / 10)
+        }
+
+        function setGain(output, band, value) {
+            const g = Object.assign({}, fakeEq.gains)
+            const list = fakeEq.presets[output] === "flat" ? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] : g[output].slice()
+            list[band] = value
+            g[output] = list
+            fakeEq.gains = g
+            const p = Object.assign({}, fakeEq.presets)
+            p[output] = "custom"
+            fakeEq.presets = p
+            fakeEq.profilesChanged()
+        }
+
+        function setGraphicGain(output, band, value) {
+            fakeEq.calls = fakeEq.calls.concat([["setGraphicGain", output, band, value]])
+            fakeEq.setGain(output, band, value)
+            return true
+        }
+
+        function snapshot(output) {
+            return { mode: fakeEq.modes[output], preset: fakeEq.presets[output], gains: fakeEq.gains[output].slice() }
+        }
+
+        function restore(output, state) {
+            fakeEq.calls = fakeEq.calls.concat([["restore", output]])
+            const m = Object.assign({}, fakeEq.modes)
+            m[output] = state.mode
+            fakeEq.modes = m
+            const p = Object.assign({}, fakeEq.presets)
+            p[output] = state.preset
+            fakeEq.presets = p
+            const g = Object.assign({}, fakeEq.gains)
+            g[output] = state.gains
+            fakeEq.gains = g
+            fakeEq.profilesChanged()
         }
 
         function savePreset(output) {
@@ -118,6 +194,8 @@ TestCase {
         }
 
         function profileMap(output) {
+            if (fakeEq.modes[output] === "graphic")
+                return fakeEq.graphicMap(output)
             const key = fakeEq.keys[output]
             const name = key === "off" || key === "custom" ? "" : key.substring(key.lastIndexOf("/") + 1).replace(".txt", "")
             return { key: key, name: name, missing: fakeEq.missing[output] === true, preamp: fakeEq.preamps[output], bands: fakeEq.bandSets[output],
@@ -165,6 +243,8 @@ TestCase {
 
         function setBandValue(output, band, field, value) {
             fakeEq.calls = fakeEq.calls.concat([["setBandValue", output, band, field, value]])
+            if (fakeEq.failNext)
+                return false
             const sets = Object.assign({}, fakeEq.bandSets)
             const list = sets[output].slice()
             const b = Object.assign({}, list[band])
@@ -231,7 +311,7 @@ TestCase {
         id: fakeDacEq
 
         property string status: "on"
-        readonly property var ranges: ({ gain: [-12, 12], q: [0.25, 8], preamp: [0, 0] })
+        property var ranges: ({ gain: [-12, 12], q: [0.25, 8], preamp: [0, 0] })
     }
 
     Keyboard {
@@ -280,6 +360,7 @@ TestCase {
         pages.animate = false
         fakeEq.reset()
         fakeDacEq.status = "on"
+        fakeDacEq.ranges = ({ gain: [-12, 12], q: [0.25, 8], preamp: [0, 0] })
         toasts.shown = []
         kb.close()
         kb.complete()
@@ -357,7 +438,7 @@ TestCase {
 
     function test_type_value_band_fields() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         verify(router.dispatch("a", false))
         page.setFocus(tc.at(page, "band0:type"))
         verify(router.dispatch("x", false))
@@ -397,6 +478,37 @@ TestCase {
         verify(router.dispatch("a", false))
     }
 
+    function test_type_value_refused_keeps_keyboard() {
+        const page = open()
+        page.setFocus(3)
+        verify(router.dispatch("a", false))
+        page.setFocus(tc.at(page, "band0:gain"))
+        verify(router.dispatch("x", false))
+        page.sheet.complete()
+        verify(router.dispatch("a", false))
+        compare(kb.shown, true)
+        kb.finish()
+        compare(kb.shown, false)
+        compare(fakeEq.calls.length, 0)
+        verify(router.dispatch("x", false))
+        page.sheet.complete()
+        verify(router.dispatch("a", false))
+        fakeEq.failNext = true
+        kb.entry.erase()
+        kb.entry.type("5")
+        let refusals = []
+        const note = (title, reason) => refusals.push(title + "/" + reason)
+        kb.refused.connect(note)
+        kb.finish()
+        kb.refused.disconnect(note)
+        compare(kb.shown, true)
+        compare(JSON.stringify(refusals), JSON.stringify(["gain/not set"]))
+        fakeEq.failNext = false
+        kb.finish()
+        compare(kb.shown, false)
+        compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["setBandValue", "headphones", 0, "gain", 2.5]))
+    }
+
     function test_type_value_long_press() {
         const page = open()
         const item = tc.rowItem(page.headphonesPane, tc.at(page, "preamp"))
@@ -410,7 +522,7 @@ TestCase {
         compare(page.sheet.title, "preamp")
         page.sheet.close()
         page.sheet.complete()
-        const profile = tc.rowItem(page.headphonesPane, 0)
+        const profile = tc.rowItem(page.headphonesPane, 1)
         mousePress(profile, profile.width / 2, profile.height / 2)
         wait(Ui.seekHoldMs + 150)
         mouseRelease(profile, profile.width / 2, profile.height / 2)
@@ -433,22 +545,113 @@ TestCase {
         compare(page.rows[tc.at(page, "band2")].value, "pk 1.4 khz +1.0 db q 1.00")
     }
 
+    function test_graphic_mode_rows() {
+        const page = open()
+        compare(page.focusedRow.key, "mode")
+        tc.edit(page, 0)
+        verify(router.dispatch("right", false))
+        compare(tc.callAt(0), JSON.stringify(["cycleMode", "headphones", 1]))
+        compare(page.editing, true)
+        compare(page.rows[0].value, "graphic")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["mode", "preset", "graphicPreamp", "gband0", "gband1",
+            "gband2", "gband3", "gband4", "gband5", "gband6", "gband7", "gband8", "gband9"]))
+        compare(page.rows[1].value, "FLAT")
+        compare(page.rows[2].title, "preamp")
+        compare(page.rows[2].value, "0.0 db")
+        compare(page.rows[2].readOnly, true)
+        const titles = page.rows.slice(3).map((r) => r.title)
+        compare(JSON.stringify(titles), JSON.stringify(["31 hz", "63 hz", "125 hz", "250 hz", "500 hz", "1 khz", "2 khz",
+            "4 khz", "8 khz", "16 khz"]))
+        compare(page.rows[5].value, "0.0 db")
+        page.setFocus(2)
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        tc.edit(page, 5)
+        verify(router.dispatch("rb", false))
+        verify(router.dispatch("right", false))
+        compare(tc.callAt(1), JSON.stringify(["stepGraphic", "headphones", 2, 1, true]))
+        compare(tc.callAt(2), JSON.stringify(["stepGraphic", "headphones", 2, 1, false]))
+        compare(page.rows[1].value, "custom")
+        compare(page.rows[tc.at(page, "gband2")].value, "+1.1 db")
+        compare(page.rows[tc.at(page, "graphicPreamp")].value, "-1.1 db")
+        compare(page.focusedRow.key, "gband2")
+        compare(page.rows[2].key, "savePreset")
+        verify(router.dispatch("b", false))
+        compare(page.editing, false)
+        compare(tc.callAt(3), JSON.stringify(["restore", "headphones"]))
+        compare(page.rows[1].value, "FLAT")
+        compare(page.rows[tc.at(page, "gband2")].value, "0.0 db")
+        compare(pages.depth, 2)
+        tc.edit(page, 1)
+        verify(router.dispatch("left", false))
+        compare(tc.callAt(4), JSON.stringify(["cycleGraphic", "headphones", -1]))
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["mode", "preset"]))
+        verify(router.dispatch("a", false))
+    }
+
+    function test_graphic_dac_suffixes() {
+        fakeEq.modes = ({ headphones: "parametric", usb: "graphic", speaker: "parametric" })
+        const g = Object.assign({}, fakeEq.gains)
+        g.usb = [12, 6, 0, -3, -18, 0, 0, 0, 0, 0]
+        fakeEq.gains = g
+        const p = Object.assign({}, fakeEq.presets)
+        p.usb = "custom"
+        fakeEq.presets = p
+        fakeDacEq.ranges = ({ gain: [-12, 0], q: [0.25, 8], qPass: [0.25, 0.7], preamp: [0, 0] })
+        fakeEq.activeOutput = "usb"
+        const page = open({ dacEq: fakeDacEq })
+        compare(page.pivotIndex, 1)
+        compare(page.rows[tc.at(page, "graphicPreamp")].value, "-12.0 db (dac 0.0)")
+        compare(page.rows[tc.at(page, "gband0")].value, "+12.0 db (dac 0.0)")
+        compare(page.rows[tc.at(page, "gband1")].value, "+6.0 db (dac 0.0)")
+        compare(page.rows[tc.at(page, "gband2")].value, "0.0 db")
+        compare(page.rows[tc.at(page, "gband3")].value, "-3.0 db")
+        compare(page.rows[tc.at(page, "gband4")].value, "-18.0 db (dac -12.0)")
+        page.switchPivot(-1)
+        page.completeAll()
+        compare(page.rows[tc.at(page, "graphicPreamp")], undefined)
+    }
+
+    function test_graphic_type_value() {
+        fakeEq.modes = ({ headphones: "graphic", usb: "parametric", speaker: "parametric" })
+        const page = open()
+        page.setFocus(tc.at(page, "graphicPreamp"))
+        verify(router.dispatch("x", false))
+        compare(page.sheet.shown, false)
+        page.setFocus(tc.at(page, "gband4"))
+        verify(router.dispatch("x", false))
+        page.sheet.complete()
+        verify(router.dispatch("a", false))
+        compare(kb.entry.title, "500 hz")
+        compare(kb.entry.text, "0.0")
+        kb.entry.erase()
+        kb.entry.erase()
+        kb.entry.erase()
+        for (const ch of "-4.5")
+            kb.entry.type(ch)
+        kb.finish()
+        compare(tc.callAt(0), JSON.stringify(["setGraphicGain", "headphones", 4, -4.5]))
+        compare(page.rows[tc.at(page, "gband4")].value, "-4.5 db")
+    }
+
     function test_preset_rows() {
         const page = open()
         compare(tc.keys(page).indexOf("savePreset"), -1)
         compare(tc.keys(page).indexOf("deletePreset"), -1)
         fakeEq.makeCustom("headphones")
         fakeEq.profilesChanged()
-        compare(JSON.stringify(tc.keys(page).slice(0, 3)), JSON.stringify(["profile", "savePreset", "preamp"]))
-        compare(page.rows[1].title, "save preset")
-        page.setFocus(1)
+        compare(JSON.stringify(tc.keys(page).slice(1, 4)), JSON.stringify(["profile", "savePreset", "preamp"]))
+        compare(page.rows[2].title, "save preset")
+        page.setFocus(2)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
         compare(tc.callAt(0), JSON.stringify(["savePreset", "headphones"]))
-        compare(page.rows[0].value, "Preset 1")
-        compare(JSON.stringify(tc.keys(page).slice(0, 4)), JSON.stringify(["profile", "deletePreset", "renamePreset", "preamp"]))
-        compare(page.rows[1].title, "delete preset")
-        compare(page.rows[2].title, "rename preset")
+        compare(page.rows[1].value, "Preset 1")
+        compare(JSON.stringify(tc.keys(page).slice(1, 5)), JSON.stringify(["profile", "deletePreset", "renamePreset", "preamp"]))
+        compare(page.rows[2].title, "delete preset")
+        compare(page.rows[3].title, "rename preset")
         compare(page.focusedRow.key, "deletePreset")
     }
 
@@ -456,16 +659,16 @@ TestCase {
         fakeEq.makeCustom("headphones")
         const page = open()
         fakeEq.failNext = true
-        page.setFocus(1)
+        page.setFocus(2)
         verify(router.dispatch("a", false))
         compare(JSON.stringify(toasts.shown), JSON.stringify([["too many presets", ""]]))
-        compare(page.rows[1].key, "savePreset")
+        compare(page.rows[2].key, "savePreset")
     }
 
     function test_delete_preset_confirm() {
         fakeEq.makeCustom("headphones")
         const page = open()
-        page.setFocus(1)
+        page.setFocus(2)
         verify(router.dispatch("a", false))
         page.setFocus(page.indexOfKey("deletePreset"))
         verify(router.dispatch("a", false))
@@ -483,15 +686,15 @@ TestCase {
         verify(router.dispatch("a", false))
         page.deleteDialog.complete()
         compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["deletePreset", "headphones"]))
-        compare(page.rows[0].value, "off")
-        compare(page.rows.length, 1)
-        compare(page.focusIndex, 0)
+        compare(page.rows[1].value, "off")
+        compare(page.rows.length, 2)
+        compare(page.focusIndex, 1)
     }
 
     function test_rename_preset_keyboard() {
         fakeEq.makeCustom("headphones")
         const page = open()
-        page.setFocus(1)
+        page.setFocus(2)
         verify(router.dispatch("a", false))
         page.setFocus(page.indexOfKey("renamePreset"))
         verify(router.dispatch("a", false))
@@ -512,13 +715,13 @@ TestCase {
         kb.finish()
         compare(kb.shown, false)
         compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["renamePreset", "headphones", "Desk"]))
-        compare(page.rows[0].value, "Desk")
+        compare(page.rows[1].value, "Desk")
     }
 
     function test_rename_preset_cancel_and_failure() {
         fakeEq.makeCustom("headphones")
         const page = open()
-        page.setFocus(1)
+        page.setFocus(2)
         verify(router.dispatch("a", false))
         page.setFocus(page.indexOfKey("renamePreset"))
         verify(router.dispatch("a", false))
@@ -541,11 +744,11 @@ TestCase {
         sets.headphones = sets.headphones.slice(0, 3)
         fakeEq.bandSets = sets
         const page = open()
-        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["profile", "preamp", "band0", "band1", "band2", "addBand", "removeBand"]))
-        compare(page.rows[5].title, "add band")
-        compare(page.rows[5].value, "")
-        compare(page.rows[6].value, "3")
-        page.setFocus(5)
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["mode", "profile", "preamp", "band0", "band1", "band2", "addBand", "removeBand"]))
+        compare(page.rows[6].title, "add band")
+        compare(page.rows[6].value, "")
+        compare(page.rows[7].value, "3")
+        page.setFocus(6)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
         compare(tc.callAt(0), JSON.stringify(["addBand", "headphones"]))
@@ -562,7 +765,7 @@ TestCase {
         compare(page.focusedRow.value, "3")
         verify(router.dispatch("a", false))
         verify(router.dispatch("a", false))
-        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["profile", "savePreset", "preamp", "band0", "addBand"]))
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["mode", "profile", "savePreset", "preamp", "band0", "addBand"]))
         compare(page.focusedRow.key, "addBand")
         for (let i = 0; i < 9; i++) {
             page.setFocus(page.indexOfKey("addBand"))
@@ -577,7 +780,7 @@ TestCase {
         const page = open()
         page.switchPivot(1)
         page.completeAll()
-        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["profile"]))
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["mode", "profile"]))
     }
 
     function test_layout_and_rows() {
@@ -587,20 +790,24 @@ TestCase {
         compare(JSON.stringify(page.pivots), JSON.stringify(["headphones", "usb", "speaker"]))
         compare(page.pivotIndex, 0)
         compare(page.headphonesPane.y, Ui.px(128))
-        compare(page.rows.length, 13)
-        compare(page.rows[0].title, "profile")
-        compare(page.rows[0].value, "HD 600")
-        compare(page.rows[1].title, "preamp")
-        compare(page.rows[1].value, "-6.5 db")
-        compare(page.rows[2].title, "1")
-        compare(page.rows[2].value, "ls 105 hz +2.1 db q 0.70")
-        compare(page.rows[3].value, "pk 2.5 khz -3.0 db q 1.40")
-        compare(page.rows[4].value, "off")
-        compare(page.rows[11].title, "10")
-        compare(page.rows[12].key, "removeBand")
-        compare(page.rows[12].title, "remove band")
-        compare(page.rows[12].value, "10")
-        const first = tc.rowItem(page.headphonesPane, 0)
+        compare(page.rows.length, 14)
+        compare(page.rows[1].title, "profile")
+        compare(page.rows[1].value, "HD 600")
+        compare(page.rows[2].title, "preamp")
+        compare(page.rows[2].value, "-6.5 db")
+        compare(page.rows[3].title, "1")
+        compare(page.rows[3].value, "ls 105 hz +2.1 db q 0.70")
+        compare(page.rows[4].value, "pk 2.5 khz -3.0 db q 1.40")
+        compare(page.rows[5].value, "off")
+        compare(page.rows[12].title, "10")
+        compare(page.rows[13].key, "removeBand")
+        compare(page.rows[13].title, "remove band")
+        compare(page.rows[13].value, "10")
+        compare(page.rows[0].key, "mode")
+        compare(page.rows[0].title, "mode")
+        compare(page.rows[0].value, "parametric")
+        page.setFocus(1)
+        const first = tc.rowItem(page.headphonesPane, 1)
         compare(first.height, Ui.px(43))
         compare(first.titleItem.x, Ui.px(20))
         compare(first.titleItem.font.pixelSize, Ui.fontPx(17))
@@ -616,11 +823,11 @@ TestCase {
         compare(slot.clip, true)
         fuzzyCompare(first.titleItem.color.a, 1.0, 1 / 255)
         fuzzyCompare(first.valueItem.color.a, 0.85, 1 / 255)
-        const second = tc.rowItem(page.headphonesPane, 1)
+        const second = tc.rowItem(page.headphonesPane, 2)
         fuzzyCompare(second.titleItem.color.a, 0.6, 1 / 255)
         fuzzyCompare(second.valueItem.color.a, 0.4, 1 / 255)
         compare(page.focusBar.x, Ui.px(12))
-        fuzzyCompare(page.focusBar.y, Ui.px(128), 0.01)
+        fuzzyCompare(page.focusBar.y, Ui.px(128 + 43), 0.01)
         compare(page.focusBar.rowHeight, Ui.px(43))
         compare(page.editing, false)
         tc.setWindow(1920, 1080)
@@ -632,8 +839,8 @@ TestCase {
         const page = open()
         compare(page.pivotIndex, 2)
         compare(page.shownPivot, 2)
-        compare(page.rows.length, 1)
-        compare(page.rows[0].value, "off")
+        compare(page.rows.length, 2)
+        compare(page.rows[1].value, "off")
         fakeEq.activeOutput = "usb"
         compare(page.pivotIndex, 2)
     }
@@ -643,39 +850,39 @@ TestCase {
         compare(router.dispatch("right", false), false)
         compare(router.dispatch("left", false), false)
         compare(fakeEq.calls.length, 0)
-        tc.edit(page, 0)
+        tc.edit(page, 1)
         verify(router.dispatch("right", false))
         compare(tc.callAt(0), JSON.stringify(["cycleProfile", "headphones", 1]))
-        compare(page.rows[0].value, "Gone")
-        compare(page.rows.length, 13)
+        compare(page.rows[1].value, "Gone")
+        compare(page.rows.length, 14)
         verify(router.dispatch("right", false))
-        compare(page.rows[0].value, "custom")
+        compare(page.rows[1].value, "custom")
         verify(router.dispatch("right", false))
-        compare(page.rows[0].value, "off")
-        compare(page.rows.length, 1)
+        compare(page.rows[1].value, "off")
+        compare(page.rows.length, 2)
         compare(page.editing, true)
         verify(router.dispatch("left", false))
         compare(tc.callAt(3), JSON.stringify(["cycleProfile", "headphones", -1]))
-        compare(page.rows[0].value, "custom")
+        compare(page.rows[1].value, "custom")
         verify(router.dispatch("a", false))
         compare(page.editing, false)
-        compare(page.rows[0].value, "custom")
+        compare(page.rows[1].value, "custom")
         compare(fakeEq.calls.length, 4)
     }
 
     function test_profile_cancel_restores() {
         const page = open()
-        tc.edit(page, 0)
+        tc.edit(page, 1)
         router.dispatch("right", false)
         router.dispatch("right", false)
         router.dispatch("right", false)
-        compare(page.rows[0].value, "off")
+        compare(page.rows[1].value, "off")
         verify(router.dispatch("b", false))
         compare(page.editing, false)
         compare(pages.depth, 2)
         compare(fakeEq.keys.headphones, "/eq/HD 600.txt")
-        compare(page.rows[0].value, "HD 600")
-        compare(page.rows.length, 13)
+        compare(page.rows[1].value, "HD 600")
+        compare(page.rows.length, 14)
         compare(fakeEq.calls.length, 6)
         for (let i = 3; i < 6; i++)
             compare(tc.callAt(i), JSON.stringify(["cycleProfile", "headphones", -1]))
@@ -683,7 +890,7 @@ TestCase {
 
     function test_profile_coarse_inert() {
         const page = open()
-        tc.edit(page, 0)
+        tc.edit(page, 1)
         verify(router.dispatch("rb", false))
         verify(router.dispatch("lb", false))
         compare(fakeEq.calls.length, 0)
@@ -696,7 +903,8 @@ TestCase {
     function test_preamp_and_band_rows() {
         const page = open()
         verify(router.dispatch("down", false))
-        compare(page.focusIndex, 1)
+        verify(router.dispatch("down", false))
+        compare(page.focusIndex, 2)
         compare(router.dispatch("left", false), false)
         compare(fakeEq.calls.length, 0)
         verify(router.dispatch("a", false))
@@ -705,7 +913,7 @@ TestCase {
         verify(router.dispatch("left", false))
         compare(tc.callAt(0), JSON.stringify(["stepPreamp", "headphones", -1, false]))
         compare(page.rows[tc.at(page, "preamp")].value, "-6.6 db")
-        compare(page.rows[0].value, "custom")
+        compare(page.rows[1].value, "custom")
         verify(router.dispatch("lb", false))
         compare(tc.callAt(1), JSON.stringify(["stepPreamp", "headphones", -1, true]))
         compare(page.rows[tc.at(page, "preamp")].value, "-7.6 db")
@@ -748,18 +956,18 @@ TestCase {
             "bp 1 khz q 0.71", "lp 105 hz q 0.70", "hp 30 hz q 0.50", "ap 20 khz q 0.25",
             "hs 20 khz -24.0 db q 10.00", "pk 2.5 khz 0.0 db q 1.40"]
         for (let i = 0; i < want.length; i++)
-            compare(page.rows[i + 2].value, want[i])
+            compare(page.rows[i + 3].value, want[i])
         const long = ["off", "peak", "low shelf", "high shelf", "band pass", "low pass", "high pass", "all pass"]
         for (let i = 0; i < long.length; i++) {
             page.headphonesPane.openBand = i
-            tryVerify(() => page.rows[i + 3].key === "band" + i + ":type", 1000)
-            compare(page.rows[i + 3].value, long[i])
+            tryVerify(() => page.rows[i + 4].key === "band" + i + ":type", 1000)
+            compare(page.rows[i + 4].value, long[i])
         }
     }
 
     function test_type_cycle() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         tc.edit(page, tc.at(page, "band0:type"))
         const long = ["low shelf", "high shelf", "band pass", "low pass", "high pass", "all pass", "off", "peak",
@@ -779,7 +987,7 @@ TestCase {
 
     function test_gain_not_used() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         tc.edit(page, tc.at(page, "band0:type"))
         router.dispatch("right", false)
@@ -837,8 +1045,8 @@ TestCase {
         fakeEq.activeOutput = "usb"
         const page = open({ dacEq: fakeDacEq })
         compare(page.pivotIndex, 1)
-        compare(page.rows[1].value, "-6.5 db (dac 0.0)")
-        compare(page.rows[2].value, "pk 1 khz -15.0 db q 10.00")
+        compare(page.rows[2].value, "-6.5 db (dac 0.0)")
+        compare(page.rows[3].value, "pk 1 khz -15.0 db q 10.00")
         const want = [
             ["peak", "1 khz", "-15.0 db (dac -12.0)", "10.00 (dac 8.00)"],
             ["low shelf", "105 hz", "-24.0 db (dac -12.0)", "0.10 (dac 0.25)"],
@@ -851,12 +1059,12 @@ TestCase {
         ]
         for (let i = 0; i < want.length; i++) {
             page.usbPane.openBand = i
-            tryVerify(() => page.rows[i + 3].key === "band" + i + ":type", 1000)
+            tryVerify(() => page.rows[i + 4].key === "band" + i + ":type", 1000)
             for (let f = 0; f < 4; f++)
-                compare(page.rows[i + 3 + f].value, want[i][f])
+                compare(page.rows[i + 4 + f].value, want[i][f])
         }
         page.usbPane.openBand = 1
-        tryVerify(() => page.rows[4].key === "band1:type", 1000)
+        tryVerify(() => page.rows[5].key === "band1:type", 1000)
         const gain = tc.rowItem(page.usbPane, tc.at(page, "band1:gain"))
         compare(gain.modelData.value, "-24.0 db (dac -12.0)")
         compare(gain.valueSlot.x + gain.valueItem.x + gain.valueItem.width, gain.width - Ui.px(Ui.hubEdge))
@@ -877,7 +1085,7 @@ TestCase {
         fakeDacEq.status = "on"
         verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 0)
-        compare(page.rows[1].value, "-6.5 db")
+        compare(page.rows[2].value, "-6.5 db")
         fakeEq.preamps = ({ headphones: -6.5, usb: 0, speaker: 0 })
         fakeEq.profilesChanged()
         verify(router.dispatch("rb", false))
@@ -890,7 +1098,7 @@ TestCase {
         fakeEq.activeOutput = "usb"
         const page = open()
         compare(page.pivotIndex, 1)
-        compare(page.rows[1].value, "-6.5 db")
+        compare(page.rows[2].value, "-6.5 db")
     }
 
     function test_preamp_cancel_restores() {
@@ -899,15 +1107,15 @@ TestCase {
         router.dispatch("left", false)
         router.dispatch("lb", false)
         compare(page.rows[tc.at(page, "preamp")].value, "-7.6 db")
-        compare(page.rows[0].value, "custom")
+        compare(page.rows[1].value, "custom")
         verify(router.dispatch("b", false))
         compare(page.editing, false)
         compare(pages.depth, 2)
         compare(fakeEq.preamps.headphones, -6.5)
         compare(fakeEq.keys.headphones, "/eq/HD 600.txt")
-        compare(page.rows[0].value, "HD 600")
+        compare(page.rows[1].value, "HD 600")
         compare(page.rows[tc.at(page, "preamp")].value, "-6.5 db")
-        compare(page.focusIndex, 1)
+        compare(page.focusIndex, 2)
         compare(fakeEq.calls.length, 6)
         compare(tc.callAt(2), JSON.stringify(["stepPreamp", "headphones", 1, true]))
         compare(tc.callAt(3), JSON.stringify(["stepPreamp", "headphones", 1, false]))
@@ -917,22 +1125,22 @@ TestCase {
 
     function test_sub_rows_open_and_close() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
         compare(page.headphonesPane.openBand, 0)
-        compare(JSON.stringify(tc.keys(page).slice(2, 7)), JSON.stringify(["band0", "band0:type", "band0:freq", "band0:gain", "band0:q"]))
-        compare(page.rows[3].title, "type")
-        compare(page.rows[3].value, "low shelf")
-        compare(page.rows[4].title, "frequency")
-        compare(page.rows[4].value, "105 hz")
-        compare(page.rows[5].title, "gain")
-        compare(page.rows[5].value, "+2.1 db")
-        compare(page.rows[6].title, "q")
-        compare(page.rows[6].value, "0.70")
-        compare(page.rows.length, 17)
-        compare(page.focusIndex, 2)
-        const sub = tc.rowItem(page.headphonesPane, 3)
+        compare(JSON.stringify(tc.keys(page).slice(3, 8)), JSON.stringify(["band0", "band0:type", "band0:freq", "band0:gain", "band0:q"]))
+        compare(page.rows[4].title, "type")
+        compare(page.rows[4].value, "low shelf")
+        compare(page.rows[5].title, "frequency")
+        compare(page.rows[5].value, "105 hz")
+        compare(page.rows[6].title, "gain")
+        compare(page.rows[6].value, "+2.1 db")
+        compare(page.rows[7].title, "q")
+        compare(page.rows[7].value, "0.70")
+        compare(page.rows.length, 18)
+        compare(page.focusIndex, 3)
+        const sub = tc.rowItem(page.headphonesPane, 4)
         compare(sub.sub, true)
         compare(sub.height, Ui.px(43))
         compare(sub.titleItem.x, Ui.px(20))
@@ -942,7 +1150,7 @@ TestCase {
         router.dispatch("down", false)
         router.dispatch("down", false)
         router.dispatch("down", false)
-        compare(page.focusIndex, 5)
+        compare(page.focusIndex, 6)
         compare(router.dispatch("right", false), false)
         compare(fakeEq.calls.length, 0)
         verify(router.dispatch("a", false))
@@ -951,7 +1159,7 @@ TestCase {
         compare(tc.callAt(0), JSON.stringify(["stepBand", "headphones", 0, "gain", 1, false]))
         compare(page.rows[tc.at(page, "band0:gain")].value, "+2.2 db")
         compare(page.focusedRow.key, "band0:gain")
-        compare(page.rows[1].key, "savePreset")
+        compare(page.rows[2].key, "savePreset")
         compare(page.rows[tc.at(page, "band0")].value, "ls 105 hz +2.2 db q 0.70")
         verify(router.dispatch("rb", false))
         compare(tc.callAt(1), JSON.stringify(["stepBand", "headphones", 0, "gain", 1, true]))
@@ -968,16 +1176,16 @@ TestCase {
         compare(page.headphonesPane.openBand, 1)
         compare(page.focusedRow.key, "band1")
         compare(page.rows[page.focusIndex + 1].key, "band1:type")
-        compare(page.rows.length, 18)
+        compare(page.rows.length, 19)
         verify(router.dispatch("a", false))
         compare(page.headphonesPane.openBand, -1)
         compare(page.focusedRow.key, "band1")
-        compare(page.rows.length, 14)
+        compare(page.rows.length, 15)
     }
 
     function test_sub_rows_coarse_steps() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         const fields = ["type", "freq", "gain", "q"]
         for (let f = 0; f < fields.length; f++) {
@@ -1007,7 +1215,7 @@ TestCase {
 
     function test_sub_row_cancel_restores() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         tc.edit(page, tc.at(page, "band0:type"))
         router.dispatch("right", false)
@@ -1023,7 +1231,7 @@ TestCase {
         compare(fakeEq.keys.headphones, "/eq/HD 600.txt")
         compare(page.headphonesPane.openBand, 0)
         compare(page.focusIndex, tc.at(page, "band0:type"))
-        compare(page.rows.length, 17)
+        compare(page.rows.length, 18)
         tc.edit(page, tc.at(page, "band0:gain"))
         router.dispatch("rb", false)
         router.dispatch("rb", false)
@@ -1038,10 +1246,10 @@ TestCase {
 
     function test_edit_keys_ignored() {
         const page = open()
-        tc.edit(page, 1)
+        tc.edit(page, 2)
         for (const name of ["up", "down", "lt", "rt", "x", "y", "start", "back"]) {
             verify(router.dispatch(name, false))
-            compare(page.focusIndex, 1)
+            compare(page.focusIndex, 2)
             compare(page.editing, true)
         }
         compare(page.pivotIndex, 0)
@@ -1060,12 +1268,12 @@ TestCase {
 
     function test_edit_value_color() {
         const page = open()
-        const row = tc.rowItem(page.headphonesPane, 1)
-        tc.edit(page, 1)
+        const row = tc.rowItem(page.headphonesPane, 2)
+        tc.edit(page, 2)
         compare(row.editing, true)
         verify(Qt.colorEqual(row.valueItem.color, Ui.accent))
         fuzzyCompare(row.titleItem.color.a, 1.0, 1 / 255)
-        compare(tc.rowItem(page.headphonesPane, 0).editing, false)
+        compare(tc.rowItem(page.headphonesPane, 1).editing, false)
         router.dispatch("a", false)
         compare(row.editing, false)
         fuzzyCompare(row.valueItem.color.a, 0.85, 1 / 255)
@@ -1089,7 +1297,7 @@ TestCase {
 
     function test_pivot_switch() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         compare(page.headphonesPane.openBand, 0)
         compare(router.dispatch("lb", false), true)
@@ -1099,12 +1307,12 @@ TestCase {
         compare(page.shownPivot, 1)
         compare(page.focusIndex, 0)
         compare(page.headphonesPane.openBand, -1)
-        compare(page.rows.length, 1)
-        compare(page.rows[0].value, "off")
-        tc.edit(page, 0)
+        compare(page.rows.length, 2)
+        compare(page.rows[1].value, "off")
+        tc.edit(page, 1)
         verify(router.dispatch("right", false))
         compare(tc.callAt(0), JSON.stringify(["cycleProfile", "usb", 1]))
-        compare(page.rows.length, 13)
+        compare(page.rows.length, 14)
         router.dispatch("a", false)
         router.dispatch("rb", false)
         compare(page.pivotIndex, 2)
@@ -1113,7 +1321,7 @@ TestCase {
         router.dispatch("lb", false)
         router.dispatch("lb", false)
         compare(page.pivotIndex, 0)
-        compare(page.rows.length, 13)
+        compare(page.rows.length, 14)
     }
 
     function test_pivot_motion_and_screen_off() {
@@ -1122,7 +1330,7 @@ TestCase {
         verify(page.switching)
         compare(page.shownPivot, 0)
         tryCompare(page, "shownPivot", 1, 2000)
-        const row = tc.rowItem(page.usbPane, 0)
+        const row = tc.rowItem(page.usbPane, 1)
         compare(row.shift, 34)
         compare(row.enterDuration, 380)
         tryCompare(row, "enter", 1, 2000)
@@ -1142,36 +1350,37 @@ TestCase {
         gone.headphones = true
         fakeEq.missing = gone
         const page = open()
-        compare(page.rows.length, 1)
-        compare(page.rows[0].title, "profile")
-        compare(page.rows[0].value, "HD 600 (missing)")
+        compare(page.rows.length, 2)
+        compare(page.rows[1].title, "profile")
+        compare(page.rows[1].value, "HD 600 (missing)")
+        verify(router.dispatch("down", false))
         compare(router.dispatch("down", false), false)
         const back = Object.assign({}, fakeEq.missing)
         back.headphones = false
         fakeEq.missing = back
         fakeEq.profilesChanged()
-        compare(page.rows.length, 13)
-        compare(page.rows[0].value, "HD 600")
+        compare(page.rows.length, 14)
+        compare(page.rows[1].value, "HD 600")
     }
 
     function test_null_eq() {
         const page = open({ eq: null })
         compare(page.pivotIndex, 0)
-        compare(page.rows.length, 1)
-        compare(page.rows[0].value, "off")
+        compare(page.rows.length, 2)
+        compare(page.rows[1].value, "off")
         compare(router.dispatch("right", false), false)
         verify(router.dispatch("a", false))
         compare(page.editing, false)
         verify(router.dispatch("rb", false))
         compare(page.pivotIndex, 1)
-        compare(page.rows.length, 1)
+        compare(page.rows.length, 2)
         verify(router.dispatch("b", false))
         compare(pages.depth, 1)
     }
 
     function test_b_pops_with_sub_rows_open() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         compare(page.headphonesPane.openBand, 0)
         verify(router.dispatch("b", false))
@@ -1185,7 +1394,7 @@ TestCase {
 
     function test_page_lt_rt() {
         const page = open()
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         verify(router.dispatch("rt", false))
         verify(page.focusIndex > 2)
@@ -1202,10 +1411,11 @@ TestCase {
     function test_f7_value_swap() {
         const page = open({ animated: true })
         router.dispatch("down", false)
+        router.dispatch("down", false)
         router.dispatch("a", false)
         router.dispatch("left", false)
         const preamp = tc.rowItem(page.headphonesPane, tc.at(page, "preamp"))
-        const profile = tc.rowItem(page.headphonesPane, 0)
+        const profile = tc.rowItem(page.headphonesPane, 1)
         compare(preamp.valueSwapping, true)
         compare(profile.valueSwapping, true)
         compare(preamp.shownValue, "-6.5 db")
@@ -1218,35 +1428,35 @@ TestCase {
     function test_f12_on_sub_rows_and_listing() {
         const page = open({ animated: true })
         tryVerify(function() { return page.headphonesPane.pendingFrom < 0 }, 1000)
-        tryCompare(tc.rowItem(page.headphonesPane, 2), "enter", 1, 2000)
-        page.setFocus(2)
+        tryCompare(tc.rowItem(page.headphonesPane, 3), "enter", 1, 2000)
+        page.setFocus(3)
         router.dispatch("a", false)
-        const sub = tc.rowItem(page.headphonesPane, 3)
+        const sub = tc.rowItem(page.headphonesPane, 4)
         tryVerify(function() { return sub.enter < 1 }, 1000)
         compare(sub.enterDuration, 220)
         compare(sub.shift, Motion.listChangeShift)
         compare(sub.stagger, 0)
-        compare(tc.rowItem(page.headphonesPane, 4).stagger, 50)
-        compare(tc.rowItem(page.headphonesPane, 2).enter, 1)
+        compare(tc.rowItem(page.headphonesPane, 5).stagger, 50)
+        compare(tc.rowItem(page.headphonesPane, 3).enter, 1)
         tryCompare(sub, "enter", 1, 2000)
         router.dispatch("a", false)
-        compare(page.rows.length, 13)
-        compare(tc.rowItem(page.headphonesPane, 3).enter, 1)
-        page.setFocus(0)
+        compare(page.rows.length, 14)
+        compare(tc.rowItem(page.headphonesPane, 4).enter, 1)
+        page.setFocus(1)
         router.dispatch("a", false)
         compare(page.editing, true)
         router.dispatch("right", false)
         router.dispatch("right", false)
         router.dispatch("right", false)
-        compare(page.rows.length, 1)
+        compare(page.rows.length, 2)
         router.dispatch("right", false)
-        compare(page.rows.length, 13)
+        compare(page.rows.length, 14)
         tryVerify(function() {
             const r = page.headphonesPane.rowItem(1)
             return r !== null && r.enter < 1
         }, 1000)
-        compare(tc.rowItem(page.headphonesPane, 1).enterDuration, 220)
-        tryCompare(tc.rowItem(page.headphonesPane, 1), "enter", 1, 2000)
+        compare(tc.rowItem(page.headphonesPane, 2).enterDuration, 220)
+        tryCompare(tc.rowItem(page.headphonesPane, 2), "enter", 1, 2000)
         router.dispatch("a", false)
         compare(page.editing, false)
     }
@@ -1256,7 +1466,7 @@ TestCase {
         pages.push(blankComponent, {})
         const page = pages.push(eqComponent, { animated: true, eq: fakeEq })
         compare(page.arriving, true)
-        const first = tc.rowItem(page.headphonesPane, 0)
+        const first = tc.rowItem(page.headphonesPane, 1)
         compare(first.enter, 0)
         compare(first.shift, Motion.pivotShift)
         fuzzyCompare(first.x, Ui.px(34), 0.01)
@@ -1264,19 +1474,19 @@ TestCase {
         tryCompare(pages, "phase", "idle", 3000)
         compare(page.arriving, false)
         compare(first.enterDuration, 380)
-        compare(first.stagger, 0)
-        compare(tc.rowItem(page.headphonesPane, 3).stagger, 3 * 22)
+        compare(first.stagger, 22)
+        compare(tc.rowItem(page.headphonesPane, 4).stagger, 4 * 22)
         tryCompare(first, "enter", 1, 2000)
-        tryCompare(tc.rowItem(page.headphonesPane, 3), "enter", 1, 2000)
+        tryCompare(tc.rowItem(page.headphonesPane, 4), "enter", 1, 2000)
         fuzzyCompare(first.x, 0, 0.01)
     }
 
     function test_screen_off_lands_rows() {
         const page = open({ animated: true })
-        page.setFocus(2)
+        page.setFocus(3)
         router.dispatch("a", false)
         page.screenOff = true
-        compare(tc.rowItem(page.headphonesPane, 3).enter, 1)
+        compare(tc.rowItem(page.headphonesPane, 4).enter, 1)
     }
 
     function tapAt(item, x, y) {
@@ -1307,8 +1517,8 @@ TestCase {
 
     function test_touch_row_enters_edit() {
         const page = open()
-        tc.tapEqRow(page, 1)
-        compare(page.focusIndex, 1)
+        tc.tapEqRow(page, 2)
+        compare(page.focusIndex, 2)
         compare(page.editing, true)
         compare(page.editKey, "preamp")
     }
@@ -1325,17 +1535,17 @@ TestCase {
 
     function test_touch_band_opens_and_closes() {
         const page = open()
-        tc.tapEqRow(page, 2)
+        tc.tapEqRow(page, 3)
         compare(page.headphonesPane.openBand, 0)
         compare(page.editing, false)
-        tc.tapEqRow(page, 2)
+        tc.tapEqRow(page, 3)
         compare(page.headphonesPane.openBand, -1)
     }
 
     function test_touch_header_reverts_then_pops() {
         const page = open()
-        tc.tapEqRow(page, 1)
-        tc.tapEqRow(page, 1, 0.75)
+        tc.tapEqRow(page, 2)
+        tc.tapEqRow(page, 2, 0.75)
         const n = fakeEq.calls.length
         tc.tapHeaderWord(page)
         compare(page.editing, false)
@@ -1365,11 +1575,11 @@ TestCase {
 
     function test_touch_drag_in_edit_does_nothing() {
         const page = open()
-        tc.tapEqRow(page, 1)
+        tc.tapEqRow(page, 2)
         compare(page.editing, true)
         tc.dragUp(page, page.width / 2, page.height - Ui.px(20), Ui.px(100))
         compare(page.headphonesPane.contentY, 0)
         compare(page.editing, true)
-        compare(page.focusIndex, 1)
+        compare(page.focusIndex, 2)
     }
 }

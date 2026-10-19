@@ -50,6 +50,7 @@ private slots:
     void guard();
     void cookbookProperties();
     void probeVectors();
+    void matchedPeak();
 };
 
 void BiquadTest::unityRules()
@@ -173,6 +174,40 @@ void BiquadTest::probeVectors()
         QVERIFY2(nearVector(coeffs.b, v.b), qPrintable(QStringLiteral("b of type %1").arg(int(v.type))));
         QVERIFY2(nearVector(coeffs.a, v.a), qPrintable(QStringLiteral("a of type %1").arg(int(v.type))));
         QVERIFY(!coeffs.guarded);
+    }
+}
+
+void BiquadTest::matchedPeak()
+{
+    struct Case
+    {
+        double f, g, q, r;
+        std::vector<double> b, a;
+    };
+    const std::vector<Case> cases{
+        {1000, 6, 0.92, 48000, {1.0500760591201, -1.89268729828374, 0.858887996916839}, {1.0, -1.8879020540605, 0.904178811813701}},
+        {31.25, 12, 0.92, 44100, {1.00361820275213, -1.99757216882451, 0.993973765621329}, {1.0, -1.99755762737426, 0.997577426923218}},
+        {16000, -6, 0.92, 44100, {0.665790239053219, 0.213348290890838, 0.11292132547025}, {1.0, -0.0381362163427463, 0.0301960717570538}},
+        {8000, 12, 0.92, 96000, {1.45195915959229, -1.68387858885912, 0.46504943782286}, {1.0, -1.51870360268185, 0.751833611237883}},
+        {125, -24, 0.92, 48000, {0.967576809617855, -1.93058218235136, 0.963263838669057}, {1.0, -1.93138555142044, 0.931644017355994}},
+    };
+    for (const Case &c : cases) {
+        const BiquadCoeffs k = biquadFor(BiquadType::MatchedPeak, c.f, c.g, c.q, c.r);
+        QVERIFY(!k.guarded);
+        QVERIFY2(nearVector(k.b, c.b), qPrintable(QString::number(c.f)));
+        QVERIFY2(nearVector(k.a, c.a), qPrintable(QString::number(c.f)));
+    }
+    QVERIFY(biquadIsUnity(BiquadType::MatchedPeak, 0.0));
+    QCOMPARE(biquadFor(BiquadType::MatchedPeak, 1000, 0.0, 0.92, rate).b, std::vector<double>{1.0});
+    QVERIFY(biquadFor(BiquadType::MatchedPeak, 0.49 * rate, 6.0, 0.92, rate).guarded);
+    for (const double r : {44100.0, 48000.0}) {
+        for (int i = 0; i < 10; ++i) {
+            const double f = 1000.0 * std::pow(2.0, (4 + 6 * i - 34) / 6.0);
+            for (const double g : {12.0, -12.0}) {
+                const double db = 20.0 * std::log10(biquadMagnitude(biquadFor(BiquadType::MatchedPeak, f, g, 0.92, r), f, r));
+                QVERIFY2(std::abs(db - g) < 0.01, qPrintable(QStringLiteral("%1 %2 %3").arg(r).arg(f).arg(db)));
+            }
+        }
     }
 }
 

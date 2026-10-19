@@ -63,6 +63,150 @@
       "label": "Crossfade",
       "ui": {"order": 6, "values": {"0": "off", "1000": "1 s", "2000": "2 s", "3000": "3 s", "5000": "5 s"}}
     },
+    "microdap.eq_mode_headphones": {
+      "type": "s",
+      "default": "parametric",
+      "enum": ["parametric", "graphic"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "EQ mode headphones",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_headphones": {
+      "type": "as",
+      "default": ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
+      "max_items": 10,
+      "max_len": 8,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ headphones",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_preset_headphones": {
+      "type": "s",
+      "default": "flat",
+      "max_len": 256,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ preset headphones",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_parametric_on_headphones": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Parametric EQ on headphones",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_mode_usb": {
+      "type": "s",
+      "default": "parametric",
+      "enum": ["parametric", "graphic"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "EQ mode usb",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_usb": {
+      "type": "as",
+      "default": ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
+      "max_items": 10,
+      "max_len": 8,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ usb",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_preset_usb": {
+      "type": "s",
+      "default": "flat",
+      "max_len": 256,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ preset usb",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_parametric_on_usb": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Parametric EQ on usb",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_mode_speaker": {
+      "type": "s",
+      "default": "parametric",
+      "enum": ["parametric", "graphic"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "EQ mode speaker",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_speaker": {
+      "type": "as",
+      "default": ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
+      "max_items": 10,
+      "max_len": 8,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ speaker",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_preset_speaker": {
+      "type": "s",
+      "default": "flat",
+      "max_len": 256,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ preset speaker",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_parametric_on_speaker": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Parametric EQ on speaker",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_mode_bt": {
+      "type": "s",
+      "default": "parametric",
+      "enum": ["parametric", "graphic"],
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "EQ mode bt",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_bt": {
+      "type": "as",
+      "default": ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
+      "max_items": 10,
+      "max_len": 8,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ bt",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_graphic_preset_bt": {
+      "type": "s",
+      "default": "flat",
+      "max_len": 256,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Graphic EQ preset bt",
+      "ui": {"widget": "none"}
+    },
+    "microdap.eq_parametric_on_bt": {
+      "type": "b",
+      "default": false,
+      "applier": null,
+      "group": "microdap_audio",
+      "label": "Parametric EQ on bt",
+      "ui": {"widget": "none"}
+    },
     "microdap.roots": {
       "type": "as",
       "default": [],

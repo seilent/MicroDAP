@@ -52,7 +52,8 @@ public:
     DacEq(Bounds bounds, Ports ports, QObject *parent = nullptr);
     ~DacEq() override;
 
-    static FiioProfileFrames framesFor(const FiioModel &model, const EqProfile &profile);
+    static FiioProfileFrames framesFor(const FiioModel &model, const EqProfile &profile, int rate = 44100);
+    static int rateFamily(int rate);
 
     void start();
 
@@ -80,6 +81,7 @@ public slots:
     void onGenerationChanged(const QString &id, quint64 generation, bool present);
     void onCardGoneChanged(bool gone);
     void onExHeldChanged(bool held);
+    void setStreamRate(int rate);
 
 signals:
     void statusChanged();
@@ -145,6 +147,7 @@ private:
     QString computeStatus() const;
     QString computeMode() const;
     void log(const QString &text) const;
+    FiioProfileFrames framesCached(const FiioModel &model, const EqProfile &profile) const;
 
     Bounds m_bounds;
     EqControl *m_eq;
@@ -157,6 +160,9 @@ private:
     std::optional<Inflight> m_inflight;
     std::function<void()> m_released;
     QString m_level = QStringLiteral("off");
+    int m_rate = 44100;
+    mutable QString m_framesKey;
+    mutable FiioProfileFrames m_frames;
     QString m_active;
     QString m_cardId;
     int m_cardAlsa = -1;

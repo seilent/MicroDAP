@@ -9,7 +9,12 @@
 #include <QPointer>
 #include <QVariantList>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <numbers>
 #include <utility>
+#include <vector>
 
 namespace microdap {
 
@@ -28,6 +33,253 @@ QString boolText(bool on)
 {
     return on ? QStringLiteral("true") : QStringLiteral("false");
 }
+
+struct DacBand
+{
+    BiquadType type = BiquadType::Peak;
+    double freq = 1000.0;
+    double gain = 0.0;
+    double q = 1.4;
+};
+
+constexpr double passQ = 0.70;
+constexpr double fitFrom = 1500.0;
+constexpr int fitGrid = 64;
+
+std::vector<double> familyRates(int rate)
+{
+    if (rate <= 0 || rate <= 50000)
+        return {44100.0, 48000.0};
+    if (rate <= 100000)
+        return {88200.0, 96000.0};
+    return {};
+}
+
+double bandDb(BiquadType type, double freq, double gain, double q, double f, double rate)
+{
+    return 20.0 * std::log10(std::max(1e-12, biquadMagnitude(biquadFor(type, freq, gain, q, rate), f, rate)));
+}
+
+double cascadePeakDb(const std::vector<DacBand> &bands, double rate)
+{
+    const auto at = [&](double f) {
+        double db = 0.0;
+        for (const DacBand &b : bands)
+            db += bandDb(b.type, b.freq, b.gain, b.q, f, rate);
+        return db;
+    };
+    const double nyquist = rate / 2.0;
+    const double low = 10.0;
+    const int steps = int(std::ceil(24.0 * std::log2(nyquist / low)));
+    const double ratio = std::pow(nyquist / low, 1.0 / steps);
+    double best = -1e9;
+    double bestF = low;
+    double f = low;
+    for (int i = 0; i <= steps; ++i, f *= ratio) {
+        const double v = at(std::min(f, nyquist * 0.999));
+        if (v > best) {
+            best = v;
+            bestF = f;
+        }
+    }
+    for (const DacBand &b : bands) {
+        if (b.freq < nyquist)
+            best = std::max(best, at(b.freq));
+    }
+    double a = bestF / ratio;
+    double c = std::min(bestF * ratio, nyquist * 0.999);
+    for (int i = 0; i < 40; ++i) {
+        const double m1 = a + (c - a) * 0.381966;
+        const double m2 = c - (c - a) * 0.381966;
+        if (at(m1) < at(m2))
+            a = m1;
+        else
+            c = m2;
+    }
+    return std::max(best, at((a + c) / 2.0));
+}
+
+
+struct FitSpace
+{
+    const FiioModel &model;
+    double gainMax;
+    std::vector<double> rates;
+    std::vector<double> grid;
+    std::vector<double> target;
+    size_t count;
+
+    std::array<double, 3> decode(const std::vector<double> &x, size_t i) const
+    {
+        return {std::clamp(std::pow(2.0, x[3 * i]), model.minFreq, model.maxFreq),
+                std::clamp(x[3 * i + 1], model.minGain, gainMax), std::clamp(std::exp(x[3 * i + 2]), model.minQ, model.maxQ)};
+    }
+
+    double power = 0.0;
+    std::vector<double> cw;
+    std::vector<double> c2;
+
+    void prepare()
+    {
+        for (const double rate : rates) {
+            for (const double f : grid) {
+                const double w = 2.0 * std::numbers::pi * f / rate;
+                cw.push_back(std::cos(w));
+                c2.push_back(std::cos(2.0 * w));
+            }
+        }
+    }
+
+    double error(const std::vector<double> &x) const
+    {
+        struct Coeffs
+        {
+            double nb0, nb1, nb2, na0, na1, na2;
+        };
+        std::vector<Coeffs> coeffs(count * rates.size());
+        for (size_t r = 0; r < rates.size(); ++r) {
+            for (size_t i = 0; i < count; ++i) {
+                const auto p = decode(x, i);
+                const double amp = std::pow(10.0, p[1] / 40.0);
+                const double w0 = 2.0 * std::numbers::pi * p[0] / rates[r];
+                const double alpha = std::sin(w0) / (2.0 * p[2]);
+                const double b0 = 1.0 + alpha * amp;
+                const double b2 = 1.0 - alpha * amp;
+                const double a0 = 1.0 + alpha / amp;
+                const double a2 = 1.0 - alpha / amp;
+                const double b1 = -2.0 * std::cos(w0);
+                coeffs[r * count + i] = {b0 * b0 + b1 * b1 + b2 * b2, 2.0 * (b0 * b1 + b1 * b2), 2.0 * b0 * b2,
+                                         a0 * a0 + b1 * b1 + a2 * a2, 2.0 * (a0 * b1 + b1 * a2), 2.0 * a0 * a2};
+            }
+        }
+        double worst = 0.0;
+        double sum = 0.0;
+        size_t k = 0;
+        for (size_t r = 0; r < rates.size(); ++r) {
+            for (size_t g = 0; g < grid.size(); ++g, ++k) {
+                double ratio = 1.0;
+                for (size_t i = 0; i < count; ++i) {
+                    const Coeffs &c = coeffs[r * count + i];
+                    ratio *= (c.nb0 + c.nb1 * cw[k] + c.nb2 * c2[k]) / (c.na0 + c.na1 * cw[k] + c.na2 * c2[k]);
+                }
+                const double e = std::abs(10.0 * std::log10(std::max(1e-24, ratio)) - target[k]);
+                worst = std::max(worst, e);
+                sum += power > 0.0 ? std::pow(e, power) : 0.0;
+            }
+        }
+        return power > 0.0 ? std::pow(sum / double(k), 1.0 / power) : worst;
+    }
+};
+
+std::vector<double> nelderMead(const FitSpace &space, std::vector<double> start, const std::vector<double> &step,
+                               int iterations)
+{
+    const size_t n = start.size();
+    std::vector<std::vector<double>> simplex{start};
+    for (size_t i = 0; i < n; ++i) {
+        std::vector<double> v = start;
+        v[i] += step[i];
+        simplex.push_back(v);
+    }
+    std::vector<double> value;
+    for (const auto &v : simplex)
+        value.push_back(space.error(v));
+    for (int it = 0; it < iterations; ++it) {
+        std::vector<size_t> order(n + 1);
+        for (size_t i = 0; i <= n; ++i)
+            order[i] = i;
+        std::sort(order.begin(), order.end(), [&value](size_t a, size_t b) { return value[a] < value[b]; });
+        const size_t best = order.front();
+        const size_t worst = order.back();
+        const size_t second = order[n - 1];
+        std::vector<double> centre(n, 0.0);
+        for (size_t i = 0; i <= n; ++i) {
+            if (i == worst)
+                continue;
+            for (size_t j = 0; j < n; ++j)
+                centre[j] += simplex[i][j] / double(n);
+        }
+        const auto towards = [&](double t) {
+            std::vector<double> v(n);
+            for (size_t j = 0; j < n; ++j)
+                v[j] = centre[j] + t * (simplex[worst][j] - centre[j]);
+            return v;
+        };
+        const std::vector<double> reflected = towards(-1.0);
+        const double fr = space.error(reflected);
+        if (fr < value[best]) {
+            const std::vector<double> expanded = towards(-2.0);
+            const double fe = space.error(expanded);
+            simplex[worst] = fe < fr ? expanded : reflected;
+            value[worst] = std::min(fe, fr);
+        } else if (fr < value[second]) {
+            simplex[worst] = reflected;
+            value[worst] = fr;
+        } else {
+            const std::vector<double> contracted = towards(0.5);
+            const double fc = space.error(contracted);
+            if (fc < value[worst]) {
+                simplex[worst] = contracted;
+                value[worst] = fc;
+            } else {
+                for (size_t i = 0; i <= n; ++i) {
+                    if (i == best)
+                        continue;
+                    for (size_t j = 0; j < n; ++j)
+                        simplex[i][j] = simplex[best][j] + 0.5 * (simplex[i][j] - simplex[best][j]);
+                    value[i] = space.error(simplex[i]);
+                }
+            }
+        }
+    }
+    size_t best = 0;
+    for (size_t i = 1; i <= n; ++i) {
+        if (value[i] < value[best])
+            best = i;
+    }
+    return simplex[best];
+}
+
+void fitMatched(const FiioModel &model, double gainMax, const std::vector<double> &rates, std::vector<DacBand> &bands,
+                const std::vector<size_t> &matched, const std::vector<EqBand> &source)
+{
+    if (rates.empty() || matched.empty())
+        return;
+    FitSpace space{model, gainMax, rates, {}, {}, matched.size()};
+    for (int i = 0; i < fitGrid; ++i)
+        space.grid.push_back(20.0 * std::pow(1000.0, double(i) / (fitGrid - 1)));
+    space.prepare();
+    for (const double rate : rates) {
+        for (const double f : space.grid) {
+            double db = 0.0;
+            for (size_t k = 0; k < matched.size(); ++k) {
+                const EqBand &b = source[k];
+                db += bandDb(BiquadType::MatchedPeak, b.freq, b.gain, b.q, f, rate);
+            }
+            space.target.push_back(db);
+        }
+    }
+    std::vector<double> x;
+    std::vector<double> step;
+    for (size_t k = 0; k < matched.size(); ++k) {
+        const DacBand &b = bands[matched[k]];
+        x.insert(x.end(), {std::log2(b.freq), b.gain, std::log(b.q)});
+        step.insert(step.end(), {0.15, 1.0, 0.3});
+    }
+    for (const double p : {2.0, 8.0, 0.0}) {
+        space.power = p;
+        x = nelderMead(space, x, step, 500);
+        x = nelderMead(space, x, step, 500);
+    }
+    for (size_t k = 0; k < matched.size(); ++k) {
+        const auto p = space.decode(x, k);
+        DacBand &b = bands[matched[k]];
+        b.freq = std::round(p[0]);
+        b.gain = std::round(p[1] * 10.0) / 10.0;
+        b.q = std::round(p[2] * 100.0) / 100.0;
+    }
+}
+
 
 }
 
@@ -69,23 +321,96 @@ DacEq::DacEq(Bounds bounds, Ports ports, QObject *parent)
 
 DacEq::~DacEq() = default;
 
-FiioProfileFrames DacEq::framesFor(const FiioModel &model, const EqProfile &profile)
+int DacEq::rateFamily(int rate)
 {
-    FiioProfileFrames frames;
+    return rate <= 0 || rate <= 50000 ? 0 : rate <= 100000 ? 1 : 2;
+}
+
+FiioProfileFrames DacEq::framesFor(const FiioModel &model, const EqProfile &profile, int rate)
+{
+    const bool verified = model.preampVerified;
+    const double gainMax = verified ? model.maxGain : 0.0;
     const EqProfile flat = EqProfile::flat();
+    std::vector<DacBand> bands(fiioBandCount);
+    std::vector<size_t> matched;
+    std::vector<EqBand> sources;
     for (int i = 0; i < fiioBandCount; ++i) {
-        const bool listed = i < profile.count;
+        const bool listed = i < profile.count && profile.bands[i].enabled;
         const EqBand &band = listed ? profile.bands[i] : flat.bands[i];
+        DacBand &d = bands[size_t(i)];
+        d.freq = std::clamp(band.freq, model.minFreq, model.maxFreq);
+        d.q = std::clamp(band.q, model.minQ, model.maxQ);
+        if (!listed)
+            continue;
+        d.type = band.type == EqBand::MatchedPeak ? BiquadType::Peak : BiquadType(int(band.type));
+        const bool gainFree = d.type != BiquadType::Peak && d.type != BiquadType::LowShelf
+                              && d.type != BiquadType::HighShelf;
+        d.gain = gainFree ? 0.0 : std::clamp(band.gain, model.minGain, gainMax);
+        if (!verified && (d.type == BiquadType::LowPass || d.type == BiquadType::HighPass))
+            d.q = std::min(d.q, passQ);
+        if (band.type == EqBand::MatchedPeak && band.freq >= fitFrom) {
+            matched.push_back(size_t(i));
+            EqBand source = band;
+            source.gain = d.gain;
+            sources.push_back(source);
+        }
+    }
+    fitMatched(model, gainMax, familyRates(rate), bands, matched, sources);
+    double preamp = 0.0;
+    if (verified) {
+        std::vector<double> rates = familyRates(rate);
+        if (rates.empty())
+            rates = {double(rate)};
+        const auto peakDb = [&] {
+            double peak = -1e9;
+            for (const double r : rates)
+                peak = std::max(peak, cascadePeakDb(bands, r));
+            return peak;
+        };
+        double peak = peakDb();
+        for (int i = 0; i < 48 && peak > -model.minGain; ++i) {
+            for (DacBand &b : bands)
+                b.gain = b.gain > 0.0 ? std::max(0.0, b.gain - 0.5) : b.gain;
+            peak = peakDb();
+        }
+        preamp = peak > 0.0 ? std::max(model.minGain, -std::ceil((peak + 0.05) * 10.0) / 10.0) : 0.0;
+    }
+    FiioProfileFrames frames;
+    for (int i = 0; i < fiioBandCount; ++i) {
+        const DacBand &d = bands[size_t(i)];
         FiioBand out;
         out.index = i;
-        out.gain = listed ? band.gain : 0.0;
-        out.freq = band.freq;
-        out.q = band.q;
-        out.type = int(band.type);
-        out.enabled = listed && band.enabled;
+        out.gain = d.gain;
+        out.freq = d.freq;
+        out.q = d.q;
+        out.type = int(d.type);
+        out.enabled = true;
         frames.bands[i] = bandPayload(model, out);
     }
+    frames.preamp = preampPayload(model, preamp);
     return frames;
+}
+
+FiioProfileFrames DacEq::framesCached(const FiioModel &model, const EqProfile &profile) const
+{
+    const QString key = EqFilters::encode(profile).join(QLatin1Char(';')) + QLatin1Char('|')
+                        + QString::number(profile.count) + QLatin1Char('|') + QString::number(rateFamily(m_rate))
+                        + QLatin1Char('|') + QString::fromUtf8(model.name.data(), qsizetype(model.name.size()));
+    if (key != m_framesKey) {
+        m_framesKey = key;
+        m_frames = framesFor(model, profile, m_rate);
+    }
+    return m_frames;
+}
+
+void DacEq::setStreamRate(int rate)
+{
+    if (rate <= 0)
+        return;
+    const bool changed = rateFamily(rate) != rateFamily(m_rate);
+    m_rate = rate;
+    if (changed)
+        plan();
 }
 
 void DacEq::start()
@@ -128,10 +453,12 @@ QString DacEq::reason() const
 QVariantMap DacEq::ranges() const
 {
     const FiioModel &model = fiioModels().front();
+    const bool verified = model.preampVerified;
     return {
-        {QStringLiteral("gain"), QVariantList{model.minGain, model.maxGain}},
+        {QStringLiteral("gain"), QVariantList{model.minGain, verified ? model.maxGain : 0.0}},
         {QStringLiteral("q"), QVariantList{model.minQ, model.maxQ}},
-        {QStringLiteral("preamp"), QVariantList{0.0, 0.0}},
+        {QStringLiteral("qPass"), QVariantList{model.minQ, verified ? model.maxQ : passQ}},
+        {QStringLiteral("preamp"), QVariantList{verified ? model.minGain : 0.0, 0.0}},
     };
 }
 
@@ -541,8 +868,8 @@ std::optional<DacEq::Want> DacEq::want() const
         const Record *held = find(m_cardId);
         if (held && held->model && !held->wantReset) {
             if (usbParses()) {
-                const FiioProfileFrames frames = framesFor(*held->model, m_eq->profile(usb));
-                if (held->known != Known::Slot || frames.bands != held->frames.bands)
+                const FiioProfileFrames frames = framesCached(*held->model, m_eq->profile(usb));
+                if (held->known != Known::Slot || !(frames == held->frames))
                     return Want{held->known == Known::Slot ? Kind::Update : Kind::Take, held->id, frames, false};
             } else if (held->known != Known::Bypass || held->held) {
                 return Want{Kind::Bypass, held->id, {}, false};
@@ -570,7 +897,7 @@ void DacEq::plan()
     if (m_inflight) {
         const Want &current = m_inflight->want;
         const bool same = next && next->kind == current.kind && next->id == current.id
-                          && (!framed(next->kind) || next->frames.bands == current.frames.bands);
+                          && (!framed(next->kind) || next->frames == current.frames);
         if (current.kind == Kind::Bypass || current.kind == Kind::Reset || same || !next
             || (current.kind == Kind::Force && next->kind == Kind::Force)) {
             refresh();

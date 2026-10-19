@@ -57,7 +57,11 @@ Page {
     }
 
     function buildRows(p: var, openBand: int, ranges: var): var {
-        const out = [page.entry("row", "profile", "profile", EqFormat.profileText(p), -1, "")]
+        const graphic = p !== null && p !== undefined && p.mode === "graphic"
+        const out = [page.entry("row", "mode", "mode", graphic ? "graphic" : "parametric", -1, "")]
+        if (graphic)
+            return page.graphicRows(p, out, ranges)
+        out.push(page.entry("row", "profile", "profile", EqFormat.profileText(p), -1, ""))
         if (!EqFormat.listed(p))
             return out
         if (EqFormat.key(p) === "custom")
@@ -76,7 +80,7 @@ Page {
             for (let f = 0; f < EqFormat.fields.length; f++) {
                 const field = EqFormat.fields[f]
                 const inert = EqFormat.fieldInert(bands[i], field)
-                const dac = inert || String(bands[i].type) === "off" ? "" : EqFormat.dacSuffix(field, bands[i][field], ranges)
+                const dac = inert || String(bands[i].type) === "off" ? "" : EqFormat.dacSuffix(field, bands[i][field], ranges, String(bands[i].type))
                 const sub = page.entry("sub", "band" + i + ":" + field, EqFormat.fieldTitles[f],
                     EqFormat.fieldText(bands[i], field) + dac, i, field)
                 sub.readOnly = inert
@@ -87,6 +91,27 @@ Page {
             out.push(page.entry("row", "addBand", "add band", "", -1, ""))
         if (bands.length > 1)
             out.push(page.entry("row", "removeBand", "remove band", String(bands.length), -1, ""))
+        return out
+    }
+
+    function graphicRows(p: var, out: var, ranges: var): var {
+        out.push(page.entry("row", "preset", "preset", EqFormat.profileText(p), -1, ""))
+        if (!EqFormat.listed(p))
+            return out
+        if (EqFormat.key(p) === "custom")
+            out.push(page.entry("row", "savePreset", "save preset", "", -1, ""))
+        if (p.saved === true) {
+            out.push(page.entry("row", "deletePreset", "delete preset", "", -1, ""))
+            out.push(page.entry("row", "renamePreset", "rename preset", "", -1, ""))
+        }
+        const automatic = p.preamp === undefined ? 0 : p.preamp
+        const preamp = page.entry("row", "graphicPreamp", "preamp", EqFormat.preampText(automatic) + EqFormat.dacSuffix("preamp", automatic, ranges), -1, "")
+        preamp.readOnly = true
+        out.push(preamp)
+        const bands = p.bands === undefined || p.bands === null ? [] : p.bands
+        for (let i = 0; i < bands.length; i++)
+            out.push(page.entry("graphic", "gband" + i, EqFormat.freqText(bands[i].freq, bands[i].freqIndex),
+                EqFormat.gainText(bands[i].gain) + EqFormat.dacSuffix("gain", bands[i].gain, ranges), i, "gain"))
         return out
     }
 
@@ -131,7 +156,7 @@ Page {
     function typable(r: var): bool {
         if (r === null || r === undefined || r.readOnly === true)
             return false
-        return r.key === "preamp" || (r.kind === "sub" && r.field !== "type")
+        return r.key === "preamp" || r.kind === "graphic" || (r.kind === "sub" && r.field !== "type")
     }
 
     function openTypeSheet(): bool {
@@ -153,20 +178,26 @@ Page {
         const value = field === "preamp" ? p.preamp : p.bands[r.band][field]
         d.typeOutput = page.activePane.output
         d.typeBand = r.band
-        d.typeField = field
+        d.typeField = r.kind === "graphic" ? "graphicGain" : field
         d.kbTarget = "type"
-        page.keyboard.validator = null
-        page.keyboard.open(EqFormat.typedRequest(field, r.title, value))
+        const request = EqFormat.typedRequest(field, r.title, value)
+        request.validator = (text) => page.applyTyped(text)
+        d.typeInitial = request.text
+        page.keyboard.open(request)
     }
 
-    function typeDone(text: string): void {
+    function applyTyped(text: string): string {
+        if (text === d.typeInitial)
+            return ""
         const value = Number(text)
-        if (d.typeField === "preamp") {
-            if (page.canCall("setPreamp"))
-                page.eq.setPreamp(d.typeOutput, value)
-        } else if (page.canCall("setBandValue")) {
-            page.eq.setBandValue(d.typeOutput, d.typeBand, d.typeField, value)
-        }
+        let set = false
+        if (d.typeField === "preamp")
+            set = page.canCall("setPreamp") && page.eq.setPreamp(d.typeOutput, value) === true
+        else if (d.typeField === "graphicGain")
+            set = page.canCall("setGraphicGain") && page.eq.setGraphicGain(d.typeOutput, d.typeBand, value) === true
+        else
+            set = page.canCall("setBandValue") && page.eq.setBandValue(d.typeOutput, d.typeBand, d.typeField, value) === true
+        return set ? "" : "not set"
     }
 
     function openRename(): void {
@@ -250,6 +281,12 @@ Page {
     function invoke(s: var): void {
         if (s.method === "cycleProfile")
             page.eq.cycleProfile(s.output, s.delta)
+        else if (s.method === "cycleMode")
+            page.eq.cycleMode(s.output, s.delta)
+        else if (s.method === "cycleGraphic")
+            page.eq.cycleGraphic(s.output, s.delta)
+        else if (s.method === "stepGraphic")
+            page.eq.stepGraphic(s.output, s.band, s.delta, s.coarse)
         else if (s.method === "stepPreamp")
             page.eq.stepPreamp(s.output, s.delta, s.coarse)
         else
@@ -261,6 +298,12 @@ Page {
             return { method: "stepBand", output: output, band: r.band, field: r.field, delta: delta, coarse: coarse }
         if (r.key === "profile")
             return coarse ? null : { method: "cycleProfile", output: output, delta: delta, coarse: false }
+        if (r.key === "mode")
+            return coarse ? null : { method: "cycleMode", output: output, delta: delta, coarse: false }
+        if (r.key === "preset")
+            return coarse ? null : { method: "cycleGraphic", output: output, delta: delta, coarse: false }
+        if (r.kind === "graphic")
+            return { method: "stepGraphic", output: output, band: r.band, delta: delta, coarse: coarse }
         if (r.key === "preamp")
             return { method: "stepPreamp", output: output, delta: delta, coarse: coarse }
         return null
@@ -281,7 +324,8 @@ Page {
     }
 
     function editable(r: var): bool {
-        return r !== null && r.readOnly !== true && (r.kind === "sub" || r.key === "profile" || r.key === "preamp")
+        return r !== null && r.readOnly !== true && (r.kind === "sub" || r.kind === "graphic" || r.key === "profile"
+            || r.key === "preamp" || r.key === "mode" || r.key === "preset")
     }
 
     function beginEdit(): void {
@@ -291,6 +335,8 @@ Page {
         d.steps = []
         page.editOutput = page.activePane.output
         page.editProfileKey = page.profileKey(page.editOutput)
+        d.state = page.canCall("snapshot") ? page.eq.snapshot(page.editOutput) : null
+        d.whole = r.key === "mode" || r.key === "preset" || r.kind === "graphic"
         page.editKey = r.key
         page.editing = true
     }
@@ -318,7 +364,13 @@ Page {
         const steps = d.steps
         const output = page.editOutput
         const key = page.editProfileKey
+        const state = d.state
+        const whole = d.whole
         page.confirmEdit()
+        if (whole && state !== null && page.canCall("restore")) {
+            page.eq.restore(output, state)
+            return
+        }
         for (let i = steps.length - 1; i >= 0; i--) {
             const s = Object.assign({}, steps[i])
             s.delta = -s.delta
@@ -613,9 +665,12 @@ Page {
         property string renameOutput: ""
         property string renameName: ""
         property string kbTarget: ""
+        property var state: null
+        property bool whole: false
         property string typeOutput: ""
         property int typeBand: -1
         property string typeField: ""
+        property string typeInitial: ""
     }
 
     Connections {
@@ -628,8 +683,6 @@ Page {
             d.kbTarget = ""
             if (target === "rename")
                 page.renameDone(text)
-            else
-                page.typeDone(text)
         }
 
         function onCanceled() {

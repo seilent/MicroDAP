@@ -30,6 +30,7 @@ struct EqBand
         LowPass = 4,
         HighPass = 5,
         AllPass = 6,
+        MatchedPeak = 7,
     };
 
     bool enabled = true;
@@ -49,11 +50,15 @@ static_assert(int(EqBand::BandPass) == int(BiquadType::BandPass));
 static_assert(int(EqBand::LowPass) == int(BiquadType::LowPass));
 static_assert(int(EqBand::HighPass) == int(BiquadType::HighPass));
 static_assert(int(EqBand::AllPass) == int(BiquadType::AllPass));
+static_assert(int(EqBand::MatchedPeak) == int(BiquadType::MatchedPeak));
 
 struct EqProfile
 {
     static constexpr int bandCount = 10;
     static constexpr int freshIndex = 34;
+    static constexpr double graphicQ = 0.92;
+    static constexpr std::array<double, 18> boostRates{8000,  11025, 12000, 16000,  22050,  24000,  32000,  44100,  48000,
+                                                       64000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000};
 
     double preamp = 0.0;
     std::array<EqBand, bandCount> bands;
@@ -63,6 +68,8 @@ struct EqProfile
     static EqProfile off();
     static EqProfile fresh();
     static EqBand freshBand();
+    static EqProfile graphic(const std::array<double, bandCount> &gains);
+    double boostPeak() const;
     double preampVolume() const;
     QVariantMap toMap() const;
     void trim();
@@ -152,6 +159,10 @@ public:
     static QString storePath(const QString &output);
     static QString displayName(const QString &path);
     static QString presetDir();
+    static QString graphicDir();
+    static QString settingKey(const QString &name, const QString &output);
+    static QString gainsText(const std::array<double, EqProfile::bandCount> &gains);
+    static std::optional<std::array<double, EqProfile::bandCount>> readGains(const QString &path);
     static bool nameOk(const QString &name);
     static bool nameLess(const QString &a, const QString &b);
     static QString autoEqText(const EqProfile &profile);
@@ -184,6 +195,13 @@ public:
     Q_INVOKABLE QString renameRefusal(const QString &output, const QString &name) const;
     Q_INVOKABLE bool renamePreset(const QString &output, const QString &name);
     Q_INVOKABLE QVariantMap profileMap(const QString &output) const;
+    Q_INVOKABLE bool graphic(const QString &output) const;
+    Q_INVOKABLE void cycleMode(const QString &output, int direction);
+    Q_INVOKABLE void cycleGraphic(const QString &output, int direction);
+    Q_INVOKABLE void stepGraphic(const QString &output, int band, int direction, bool coarse = false);
+    Q_INVOKABLE bool setGraphicGain(const QString &output, int band, double value);
+    Q_INVOKABLE QVariantMap snapshot(const QString &output) const;
+    Q_INVOKABLE void restore(const QString &output, const QVariantMap &state);
     Q_INVOKABLE void relist();
     Q_INVOKABLE void cycleProfile(const QString &output, int direction);
     Q_INVOKABLE void stepPreamp(const QString &output, int direction, bool coarse = false);
@@ -211,7 +229,21 @@ private:
     std::optional<EqProfile> fileProfile(const QString &path) const;
     EqProfile restored(const QString &output) const;
     QString pathOf(const QString &key) const;
-    bool listedName(const QString &name, const QString &except = {}) const;
+    QString paramKey(const QString &output) const;
+    QVariant stored(const QString &key) const;
+    void store(const QString &key, const QVariant &value);
+    QString graphicPreset(const QString &output) const;
+    std::array<double, EqProfile::bandCount> customGains(const QString &output) const;
+    QString graphicPathOf(const QString &name) const;
+    bool graphicMissing(const QString &output) const;
+    EqProfile graphicProfile(const QString &output) const;
+    void applyGraphic(const QString &output, bool now);
+    void leaveGraphic(const QString &output);
+    void defer(const QString &output, bool enabled);
+    bool beginGraphicEdit(const QString &output);
+    const QStringList &paths(bool graphicList) const;
+    QString pathOfName(const QString &name, bool graphicList) const;
+    QString entryName(const QString &path, bool graphicList) const;
     EqProfile &custom(const QString &output) const;
     bool on(const QString &output) const;
     QString storedName(const QString &output) const;
@@ -238,6 +270,10 @@ private:
     QString m_activeOutput;
     QVariantList m_sources;
     QStringList m_sourcePaths;
+    QStringList m_graphicPaths;
+    mutable QHash<QString, std::array<double, EqProfile::bandCount>> m_gains;
+    QSet<QString> m_gainsDirty;
+    QHash<QString, bool> m_pendingOn;
     QVariantMap m_local;
     mutable QHash<QString, EqProfile> m_custom;
     mutable QHash<QString, EqProfile> m_live;

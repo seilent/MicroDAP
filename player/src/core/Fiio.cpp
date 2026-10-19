@@ -405,7 +405,7 @@ const std::vector<FiioModel> &fiioModels()
 {
     static const std::vector<FiioModel> models{
         {0x2972, 0x0149, "FiiO SNOWSKY TINY B", 0, 0x05, 0x86, fiioReportId, 162, -12.0, 12.0, 20.0, 20000.0, 0.25,
-         8.0, "1.3.0"},
+         8.0, "1.3.0", false},
     };
     return models;
 }
@@ -731,7 +731,7 @@ bool validFrames(const FiioProfileFrames &frames)
         if (frames.bands[i].size() != std::size_t(fiioBandPayloadSize) || frames.bands[i][0] != i)
             return false;
     }
-    return true;
+    return frames.preamp.empty() || frames.preamp.size() == 2;
 }
 
 struct Run
@@ -1268,7 +1268,7 @@ FiioResult take(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths, 
             return r;
         mirror.preset = slot;
     }
-    const std::vector<uint8_t> preamp = preampPayload(model, 0.0);
+    const std::vector<uint8_t> preamp = frames.preamp.empty() ? preampPayload(model, 0.0) : frames.preamp;
     if ((r = run.set(fiioCmdPreamp, preamp)).reason != FiioReason::None)
         return r;
     mirror.preamp = preamp;
@@ -1300,6 +1300,15 @@ FiioResult update(FiioDevice &device, FiioMirror &mirror, const FiioPaths &paths
     if (mirror.preset != slot || !mirror.valid)
         return take(device, mirror, paths, frames, abandoned, deadline);
     int sets = 0;
+    const std::vector<uint8_t> preamp = frames.preamp.empty() ? preampPayload(device.model(), 0.0) : frames.preamp;
+    if (preamp != mirror.preamp) {
+        if ((r = run.set(fiioCmdPreamp, preamp)).reason != FiioReason::None) {
+            mirror.valid = false;
+            return r;
+        }
+        mirror.preamp = preamp;
+        ++sets;
+    }
     for (int i = 0; i < fiioBandCount; ++i) {
         if (frames.bands[i] == mirror.bands[i])
             continue;

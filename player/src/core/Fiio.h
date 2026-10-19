@@ -40,6 +40,7 @@ struct FiioModel
     double minQ;
     double maxQ;
     std::string_view firmware;
+    bool preampVerified;
 };
 
 struct FiioBand
@@ -278,6 +279,9 @@ struct FiioMirror
 struct FiioProfileFrames
 {
     std::array<std::vector<uint8_t>, fiioBandCount> bands;
+    std::vector<uint8_t> preamp;
+
+    bool operator==(const FiioProfileFrames &) const = default;
 };
 
 namespace FiioBatch {

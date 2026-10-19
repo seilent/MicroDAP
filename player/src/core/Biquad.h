@@ -12,6 +12,7 @@ enum class BiquadType {
     LowPass = 4,
     HighPass = 5,
     AllPass = 6,
+    MatchedPeak = 7,
 };
 
 struct BiquadCoeffs

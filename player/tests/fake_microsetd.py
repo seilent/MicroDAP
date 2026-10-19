@@ -69,6 +69,10 @@ for slot in ('headphones', 'speaker', 'usb', 'bt'):
     KEYS['audio.eq.%s.name' % slot] = ('s', '', {})
     KEYS['audio.eq.%s.filters' % slot] = ('as', ['preamp 0'], {})
     KEYS['audio.balance.%s' % slot] = ('i', 0, {'enum': list(range(-20, 21))})
+    KEYS['microdap.eq_mode_%s' % slot] = ('s', 'parametric', {'enum': ['parametric', 'graphic']})
+    KEYS['microdap.eq_graphic_%s' % slot] = ('as', ['0'] * 10, {})
+    KEYS['microdap.eq_graphic_preset_%s' % slot] = ('s', 'flat', {})
+    KEYS['microdap.eq_parametric_on_%s' % slot] = ('b', False, {})
 for slot in ('headphones', 'usb'):
     KEYS['audio.crossfeed.%s' % slot] = ('s', 'off', {'enum': ['off', 'default', 'chuMoy', 'janMeier']})
 

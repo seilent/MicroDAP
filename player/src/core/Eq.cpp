@@ -61,7 +61,7 @@ constexpr std::array<FilterCode, 11> filterCodes{{
     {"ap", EqBand::AllPass, false, true},
 }};
 
-constexpr std::array<std::pair<EqBand::Type, const char *>, 7> typeKeys{{
+constexpr std::array<std::pair<EqBand::Type, const char *>, 8> typeKeys{{
     {EqBand::Peak, "peak"},
     {EqBand::LowShelf, "lowshelf"},
     {EqBand::HighShelf, "highshelf"},
@@ -69,6 +69,7 @@ constexpr std::array<std::pair<EqBand::Type, const char *>, 7> typeKeys{{
     {EqBand::LowPass, "lowpass"},
     {EqBand::HighPass, "highpass"},
     {EqBand::AllPass, "allpass"},
+    {EqBand::MatchedPeak, "matchedpeak"},
 }};
 
 const FilterCode *codeFor(const QString &code)
@@ -109,7 +110,8 @@ std::optional<EqBand::Type> typeOfKey(const QString &key)
 
 bool gainFree(EqBand::Type type)
 {
-    return type != EqBand::Peak && type != EqBand::LowShelf && type != EqBand::HighShelf;
+    return type != EqBand::Peak && type != EqBand::LowShelf && type != EqBand::HighShelf
+           && type != EqBand::MatchedPeak;
 }
 
 QString formatNumber(double value)
@@ -178,6 +180,79 @@ bool EqProfile::operator==(const EqProfile &other) const
             return false;
     }
     return true;
+}
+
+EqProfile EqProfile::graphic(const std::array<double, bandCount> &gains)
+{
+    EqProfile profile = flat();
+    for (int i = 0; i < bandCount; ++i) {
+        profile.bands[i].type = EqBand::MatchedPeak;
+        profile.bands[i].q = graphicQ;
+        profile.bands[i].gain = gains[i];
+    }
+    const double peak = profile.boostPeak();
+    profile.preamp = peak > 0.0 ? qMax(EqParser::minPreamp, -std::ceil((peak + 0.05) * 10.0) / 10.0) : 0.0;
+    return profile;
+}
+
+double EqProfile::boostPeak() const
+{
+    double peak = 1.0;
+    for (const double rate : boostRates) {
+        std::vector<BiquadCoeffs> coeffs;
+        std::vector<double> centres;
+        for (int i = 0; i < count; ++i) {
+            const EqBand &band = bands[i];
+            if (!band.enabled || band.gain <= 0.0 || gainFree(band.type))
+                continue;
+            const BiquadCoeffs c = biquadFor(BiquadType(int(band.type)), band.freq, band.gain, band.q, rate);
+            if (c.b.size() < 3 || c.guarded)
+                continue;
+            coeffs.push_back(c);
+            centres.push_back(band.freq);
+        }
+        if (coeffs.empty())
+            continue;
+        const auto at = [&](double f) {
+            double m = 1.0;
+            for (const BiquadCoeffs &c : coeffs) {
+                const double v = biquadMagnitude(c, f, rate);
+                m *= v * v;
+            }
+            return m;
+        };
+        const double nyquist = rate / 2.0;
+        const double low = 10.0;
+        const int steps = int(std::ceil(24.0 * std::log2(nyquist / low)));
+        const double ratio = std::pow(nyquist / low, 1.0 / steps);
+        double best = 1.0;
+        double bestF = 0.0;
+        double f = low;
+        for (int i = 0; i <= steps; ++i, f *= ratio) {
+            const double m = at(std::min(f, nyquist));
+            if (m > best) {
+                best = m;
+                bestF = f;
+            }
+        }
+        for (const double centre : centres)
+            best = std::max(best, at(centre));
+        if (bestF > 0.0) {
+            double a = bestF / ratio;
+            double b = std::min(bestF * ratio, nyquist);
+            for (int i = 0; i < 40; ++i) {
+                const double m1 = a + (b - a) * 0.381966;
+                const double m2 = b - (b - a) * 0.381966;
+                if (at(m1) < at(m2))
+                    a = m1;
+                else
+                    b = m2;
+            }
+            best = std::max(best, at((a + b) / 2.0));
+        }
+        peak = std::max(peak, best);
+    }
+    return 10.0 * std::log10(peak);
 }
 
 EqProfile EqProfile::off()
@@ -601,6 +676,59 @@ QString EqControl::presetDir()
     return sourceDir() + QStringLiteral("/presets");
 }
 
+QString EqControl::graphicDir()
+{
+    return sourceDir() + QStringLiteral("/graphic");
+}
+
+QString EqControl::settingKey(const QString &name, const QString &output)
+{
+    return QStringLiteral("microdap.") + name + QLatin1Char('_') + output;
+}
+
+QString EqControl::gainsText(const std::array<double, EqProfile::bandCount> &gains)
+{
+    QString out = QStringLiteral("[General]\n");
+    for (int i = 0; i < EqProfile::bandCount; ++i)
+        out += QStringLiteral("gain") + QString::number(i + 1) + QLatin1Char('=') + QString::number(gains[i], 'f', 1)
+               + QLatin1Char('\n');
+    return out;
+}
+
+std::optional<std::array<double, EqProfile::bandCount>> EqControl::readGains(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return std::nullopt;
+    std::array<double, EqProfile::bandCount> gains{};
+    bool general = false;
+    bool any = false;
+    for (const QString &raw : QString::fromUtf8(file.read(64 * 1024)).split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (line.startsWith(QLatin1Char('['))) {
+            general = line.compare(QLatin1StringView("[general]"), Qt::CaseInsensitive) == 0;
+            continue;
+        }
+        const qsizetype eq = line.indexOf(QLatin1Char('='));
+        if (!general || eq < 0)
+            continue;
+        const QString key = line.left(eq).trimmed().toLower();
+        if (!key.startsWith(QLatin1StringView("gain")))
+            continue;
+        bool okIndex = false;
+        bool okValue = false;
+        const int index = key.mid(4).toInt(&okIndex);
+        const double value = line.mid(eq + 1).trimmed().toDouble(&okValue);
+        if (!okIndex || !okValue || index < 1 || index > EqProfile::bandCount || !std::isfinite(value))
+            continue;
+        gains[index - 1] = qBound(EqParser::minGain, std::round(value * 10.0) / 10.0, EqParser::maxGain);
+        any = true;
+    }
+    if (!any)
+        return std::nullopt;
+    return gains;
+}
+
 bool EqControl::nameOk(const QString &name)
 {
     const QByteArray bytes = name.toUtf8();
@@ -877,39 +1005,61 @@ int EqControl::revision() const
     return m_revision;
 }
 
+QVariant EqControl::stored(const QString &key) const
+{
+    return m_settings ? m_settings->value(key) : m_local.value(key);
+}
+
+void EqControl::store(const QString &key, const QVariant &value)
+{
+    if (m_settings) {
+        m_settings->setValue(key, value);
+        return;
+    }
+    if (m_local.value(key) == value)
+        return;
+    m_local.insert(key, value);
+    onValueChanged(key);
+}
+
 bool EqControl::on(const QString &output) const
 {
-    const QString k = EqFilters::key(output, QStringLiteral("on"));
-    return m_settings ? m_settings->value(k).toBool() : m_local.value(k).toBool();
+    const auto pending = m_pendingOn.constFind(output);
+    if (pending != m_pendingOn.constEnd())
+        return *pending;
+    return stored(EqFilters::key(output, QStringLiteral("on"))).toBool();
 }
 
 QString EqControl::storedName(const QString &output) const
 {
-    const QString k = EqFilters::key(output, QStringLiteral("name"));
-    return m_settings ? m_settings->value(k).toString() : m_local.value(k).toString();
+    return stored(EqFilters::key(output, QStringLiteral("name"))).toString();
 }
 
 QStringList EqControl::storedFilters(const QString &output) const
 {
-    const QString k = EqFilters::key(output, QStringLiteral("filters"));
-    return m_settings ? m_settings->value(k).toStringList() : m_local.value(k).toStringList();
+    return stored(EqFilters::key(output, QStringLiteral("filters"))).toStringList();
 }
 
 void EqControl::put(const QString &output, const QString &field, const QVariant &value)
 {
-    const QString k = EqFilters::key(output, field);
-    if (m_settings) {
-        m_settings->setValue(k, value);
-        return;
-    }
-    if (m_local.value(k) == value)
-        return;
-    m_local.insert(k, value);
-    onValueChanged(k);
+    store(EqFilters::key(output, field), value);
 }
 
 void EqControl::onValueChanged(const QString &key)
 {
+    for (const QString &output : outputs()) {
+        for (const QString &name : {QStringLiteral("eq_mode"), QStringLiteral("eq_graphic"),
+                                    QStringLiteral("eq_graphic_preset"), QStringLiteral("eq_parametric_on")}) {
+            if (key != settingKey(name, output))
+                continue;
+            if (name == QLatin1StringView("eq_graphic") && !m_gainsDirty.contains(output))
+                m_gains.remove(output);
+            if (graphic(output) && !m_unwritten.contains(output))
+                m_live.remove(output);
+            changed(output);
+            return;
+        }
+    }
     const QStringList parts = key.split(QLatin1Char('.'));
     if (parts.size() != 4 || parts.at(0) != QLatin1StringView("audio") || parts.at(1) != QLatin1StringView("eq")
         || !outputs().contains(parts.at(2)))
@@ -923,7 +1073,7 @@ void EqControl::onValueChanged(const QString &key)
         if (live != m_live.constEnd() && EqFilters::encode(*live) == filters)
             return;
         m_live.insert(output, EqFilters::decode(filters));
-        if (on(output) && storedName(output).isEmpty()) {
+        if (!graphic(output) && on(output) && storedName(output).isEmpty()) {
             m_custom.insert(output, m_live.value(output));
             m_dirty.insert(output);
             if (m_settings)
@@ -940,13 +1090,13 @@ EqProfile EqControl::profile(const QString &output) const
         return EqProfile::off();
     auto it = m_live.constFind(output);
     if (it == m_live.constEnd())
-        it = m_live.insert(output, restored(output));
+        it = m_live.insert(output, graphic(output) ? graphicProfile(output) : restored(output));
     return *it;
 }
 
 EqProfile EqControl::restored(const QString &output) const
 {
-    const QStringList stored = storedFilters(output);
+    const QStringList filters = storedFilters(output);
     const QString storedLabel = storedName(output);
     const auto sound = [](QStringList items) {
         static const QRegularExpression flat(QStringLiteral("^peak \\S+ 0 \\S+$"));
@@ -956,18 +1106,18 @@ EqProfile EqControl::restored(const QString &output) const
     };
     if (storedLabel.isEmpty()) {
         const EqProfile &c = custom(output);
-        if (sound(EqFilters::encode(c)) == sound(stored))
+        if (sound(EqFilters::encode(c)) == sound(filters))
             return c;
     } else {
         for (const QString &path : m_sourcePaths) {
             if (displayName(path) != storedLabel)
                 continue;
             const std::optional<EqProfile> file = fileProfile(path);
-            if (file && EqFilters::encode(*file) == stored)
+            if (file && EqFilters::encode(*file) == filters)
                 return *file;
         }
     }
-    return EqFilters::decode(stored);
+    return EqFilters::decode(filters);
 }
 
 void EqControl::setCustom(const QString &output, const EqProfile &profile)
@@ -981,27 +1131,43 @@ void EqControl::setCustom(const QString &output, const EqProfile &profile)
         m_syncTimer.start();
 }
 
+QString EqControl::paramKey(const QString &output) const
+{
+    if (!outputs().contains(output))
+        return QStringLiteral("off");
+    const bool enabled = graphic(output) ? stored(settingKey(QStringLiteral("eq_parametric_on"), output)).toBool()
+                                         : on(output);
+    if (!enabled)
+        return QStringLiteral("off");
+    const QString name = storedName(output);
+    return name.isEmpty() ? QStringLiteral("custom") : name;
+}
+
 QString EqControl::key(const QString &output) const
 {
-    if (!outputs().contains(output) || !on(output))
+    if (!graphic(output))
+        return paramKey(output);
+    const QString preset = graphicPreset(output);
+    if (preset == QLatin1StringView("off") || graphicMissing(output))
         return QStringLiteral("off");
-    const QString stored = storedName(output);
-    return stored.isEmpty() ? QStringLiteral("custom") : stored;
+    return QStringLiteral("graphic:") + preset;
 }
 
 QString EqControl::name(const QString &output) const
 {
-    const QString k = key(output);
+    const QString k = graphic(output) ? graphicPreset(output) : paramKey(output);
     if (k == QLatin1StringView("off"))
         return QStringLiteral("OFF");
     if (k == QLatin1StringView("custom"))
         return QStringLiteral("CUSTOM");
+    if (k == QLatin1StringView("flat"))
+        return QStringLiteral("FLAT");
     return k;
 }
 
-bool EqControl::missing(const QString &) const
+bool EqControl::missing(const QString &output) const
 {
-    return false;
+    return graphic(output) && graphicMissing(output);
 }
 
 bool EqControl::editable(const QString &output) const
@@ -1012,77 +1178,106 @@ bool EqControl::editable(const QString &output) const
 QVariantMap EqControl::profileMap(const QString &output) const
 {
     QVariantMap map = profile(output).toMap();
-    map.insert(QStringLiteral("key"), key(output));
+    const bool g = graphic(output);
+    if (g && (graphicPreset(output) == QLatin1StringView("off") || graphicMissing(output)))
+        map.insert(QStringLiteral("bands"), QVariantList());
+    map.insert(QStringLiteral("mode"), g ? QStringLiteral("graphic") : QStringLiteral("parametric"));
+    map.insert(QStringLiteral("key"), g ? graphicPreset(output) : paramKey(output));
     map.insert(QStringLiteral("name"), name(output));
-    map.insert(QStringLiteral("missing"), false);
+    map.insert(QStringLiteral("missing"), missing(output));
     map.insert(QStringLiteral("editable"), editable(output));
     map.insert(QStringLiteral("saved"), saved(output));
     return map;
 }
 
-QString EqControl::pathOf(const QString &key) const
+const QStringList &EqControl::paths(bool graphicList) const
 {
-    for (const QString &path : m_sourcePaths) {
-        if (displayName(path) == key)
+    return graphicList ? m_graphicPaths : m_sourcePaths;
+}
+
+QString EqControl::entryName(const QString &path, bool graphicList) const
+{
+    return graphicList ? QFileInfo(path).completeBaseName().toUpper().left(nameMax) : displayName(path);
+}
+
+QString EqControl::pathOfName(const QString &name, bool graphicList) const
+{
+    for (const QString &path : paths(graphicList)) {
+        if (entryName(path, graphicList) == name)
             return path;
     }
     return {};
 }
 
-bool EqControl::listedName(const QString &name, const QString &except) const
+QString EqControl::pathOf(const QString &key) const
 {
-    for (const QString &path : m_sourcePaths) {
-        if (path != except && displayName(path) == name)
-            return true;
-    }
-    return false;
+    return pathOfName(key, false);
+}
+
+QString EqControl::graphicPathOf(const QString &name) const
+{
+    return pathOfName(name, true);
 }
 
 bool EqControl::saved(const QString &output) const
 {
-    const QString k = key(output);
-    if (k == QLatin1StringView("off") || k == QLatin1StringView("custom"))
+    const bool g = graphic(output);
+    const QString k = g ? graphicPreset(output) : paramKey(output);
+    if (k == QLatin1StringView("off") || k == QLatin1StringView("custom") || k == QLatin1StringView("flat"))
         return false;
-    const QString path = pathOf(k);
-    return !path.isEmpty() && QFileInfo(path).absolutePath() == QDir::cleanPath(presetDir());
+    const QString path = pathOfName(k, g);
+    return !path.isEmpty() && QFileInfo(path).absolutePath() == QDir::cleanPath(g ? graphicDir() : presetDir());
 }
 
 QString EqControl::presetName(const QString &output) const
 {
-    return saved(output) ? QFileInfo(pathOf(key(output))).completeBaseName() : QString();
+    if (!saved(output))
+        return {};
+    const bool g = graphic(output);
+    return QFileInfo(pathOfName(g ? graphicPreset(output) : paramKey(output), g)).completeBaseName();
 }
 
 QString EqControl::savePreset(const QString &output)
 {
-    if (key(output) != QLatin1StringView("custom"))
+    const bool g = graphic(output);
+    if ((g ? graphicPreset(output) : paramKey(output)) != QLatin1StringView("custom"))
         return QStringLiteral("preset not saved");
+    const QString dir = g ? graphicDir() : presetDir();
+    const QString suffix = g ? QStringLiteral(".ini") : QStringLiteral(".txt");
     int count = 0;
-    for (const QString &path : std::as_const(m_sourcePaths)) {
-        if (QFileInfo(path).absolutePath() == QDir::cleanPath(presetDir()))
+    for (const QString &path : paths(g)) {
+        if (QFileInfo(path).absolutePath() == QDir::cleanPath(dir))
             ++count;
     }
     if (count >= presetsMax)
         return QStringLiteral("too many presets");
     QString path;
     for (int n = 1;; ++n) {
-        path = presetDir() + QStringLiteral("/Preset ") + QString::number(n) + QStringLiteral(".txt");
-        if (!listedName(displayName(path)) && !QFileInfo::exists(path))
+        path = QDir::cleanPath(dir + QStringLiteral("/Preset ") + QString::number(n) + suffix);
+        bool taken = QFileInfo::exists(path);
+        for (const QString &listed : paths(g))
+            taken = taken || entryName(listed, g) == entryName(path, g);
+        if (!taken)
             break;
     }
-    const EqProfile current = profile(output);
-    QDir().mkpath(presetDir());
+    const QString text = g ? gainsText(customGains(output)) : autoEqText(profile(output));
+    QDir().mkpath(dir);
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(autoEqText(current).toUtf8()) < 0
-        || !file.commit()) {
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(text.toUtf8()) < 0 || !file.commit()) {
         qWarning() << "microdap eq: cannot write preset" << path;
         return QStringLiteral("preset not saved");
     }
     qInfo() << "microdap eq: preset saved" << path;
     relist();
-    const std::optional<EqProfile> stored = fileProfile(QDir::cleanPath(path));
-    if (!stored)
+    if (g) {
+        store(settingKey(QStringLiteral("eq_graphic_preset"), output), entryName(path, true));
+        applyGraphic(output, true);
+        return {};
+    }
+    const std::optional<EqProfile> parsed = fileProfile(path);
+    if (!parsed)
         return QStringLiteral("preset not saved");
-    select(output, true, displayName(path), *stored);
+    select(output, true, displayName(path), *parsed);
     return {};
 }
 
@@ -1090,30 +1285,45 @@ bool EqControl::deletePreset(const QString &output)
 {
     if (!saved(output))
         return false;
-    const QString k = key(output);
-    const QString path = pathOf(k);
+    const bool g = graphic(output);
+    const QString k = g ? graphicPreset(output) : paramKey(output);
+    const QString path = pathOfName(k, g);
     if (!QFile::remove(path)) {
         qWarning() << "microdap eq: cannot remove preset" << path;
         return false;
     }
     qInfo() << "microdap eq: preset deleted" << path;
-    for (const QString &o : outputs()) {
-        if (key(o) == k)
-            select(o, false, storedName(o), profile(o));
-    }
     relist();
+    for (const QString &o : outputs()) {
+        if (g && graphicPreset(o) == k) {
+            store(settingKey(QStringLiteral("eq_graphic_preset"), o), QStringLiteral("off"));
+            if (graphic(o))
+                applyGraphic(o, true);
+        } else if (!g && paramKey(o) == k) {
+            if (graphic(o)) {
+                store(settingKey(QStringLiteral("eq_parametric_on"), o), false);
+                put(o, QStringLiteral("name"), QString());
+            } else {
+                select(o, false, QString(), profile(o));
+            }
+        }
+    }
     return true;
 }
 
 QString EqControl::renameRefusal(const QString &output, const QString &name) const
 {
-    if (!saved(output))
+    if (!saved(output) || !nameOk(name))
         return QStringLiteral("name not allowed");
-    if (!nameOk(name))
-        return QStringLiteral("name not allowed");
-    const QString old = pathOf(key(output));
-    const QString path = QDir::cleanPath(presetDir() + QLatin1Char('/') + name + QStringLiteral(".txt"));
-    if (listedName(displayName(path), old) || (path != old && QFileInfo::exists(path)))
+    const bool g = graphic(output);
+    const QString old = pathOfName(g ? graphicPreset(output) : paramKey(output), g);
+    const QString path = QDir::cleanPath((g ? graphicDir() : presetDir()) + QLatin1Char('/') + name
+                                         + (g ? QStringLiteral(".ini") : QStringLiteral(".txt")));
+    for (const QString &listed : paths(g)) {
+        if (listed != old && entryName(listed, g) == entryName(path, g))
+            return QStringLiteral("name taken");
+    }
+    if (path != old && QFileInfo::exists(path))
         return QStringLiteral("name taken");
     return {};
 }
@@ -1122,9 +1332,11 @@ bool EqControl::renamePreset(const QString &output, const QString &name)
 {
     if (!renameRefusal(output, name).isEmpty())
         return false;
-    const QString k = key(output);
-    const QString old = pathOf(k);
-    const QString path = QDir::cleanPath(presetDir() + QLatin1Char('/') + name + QStringLiteral(".txt"));
+    const bool g = graphic(output);
+    const QString k = g ? graphicPreset(output) : paramKey(output);
+    const QString old = pathOfName(k, g);
+    const QString path = QDir::cleanPath((g ? graphicDir() : presetDir()) + QLatin1Char('/') + name
+                                         + (g ? QStringLiteral(".ini") : QStringLiteral(".txt")));
     if (path == old)
         return true;
     QFile source(old);
@@ -1142,13 +1354,218 @@ bool EqControl::renamePreset(const QString &output, const QString &name)
     if (!QFile::remove(old))
         qWarning() << "microdap eq: cannot remove preset" << old;
     qInfo() << "microdap eq: preset renamed" << old << "to" << path;
-    relist();
-    const QString renamed = displayName(path);
+    const QString renamed = entryName(path, g);
     for (const QString &o : outputs()) {
-        if (key(o) == k)
+        if (g && graphicPreset(o) == k)
+            store(settingKey(QStringLiteral("eq_graphic_preset"), o), renamed);
+        else if (!g && paramKey(o) == k)
             put(o, QStringLiteral("name"), renamed);
     }
+    relist();
     return true;
+}
+
+bool EqControl::graphic(const QString &output) const
+{
+    return stored(settingKey(QStringLiteral("eq_mode"), output)).toString() == QLatin1StringView("graphic");
+}
+
+QString EqControl::graphicPreset(const QString &output) const
+{
+    const QString preset = stored(settingKey(QStringLiteral("eq_graphic_preset"), output)).toString();
+    return preset.isEmpty() ? QStringLiteral("flat") : preset;
+}
+
+std::array<double, EqProfile::bandCount> EqControl::customGains(const QString &output) const
+{
+    auto it = m_gains.constFind(output);
+    if (it != m_gains.constEnd())
+        return *it;
+    std::array<double, EqProfile::bandCount> gains{};
+    const QStringList items = stored(settingKey(QStringLiteral("eq_graphic"), output)).toStringList();
+    for (int i = 0; i < EqProfile::bandCount && i < items.size(); ++i) {
+        bool ok = false;
+        const double v = items.at(i).toDouble(&ok);
+        gains[i] = ok ? qBound(EqParser::minGain, std::round(v * 10.0) / 10.0, EqParser::maxGain) : 0.0;
+    }
+    m_gains.insert(output, gains);
+    return gains;
+}
+
+bool EqControl::graphicMissing(const QString &output) const
+{
+    const QString preset = graphicPreset(output);
+    if (preset == QLatin1StringView("off") || preset == QLatin1StringView("flat")
+        || preset == QLatin1StringView("custom"))
+        return false;
+    const QString path = graphicPathOf(preset);
+    return path.isEmpty() || !readGains(path);
+}
+
+EqProfile EqControl::graphicProfile(const QString &output) const
+{
+    const QString preset = graphicPreset(output);
+    if (preset == QLatin1StringView("off"))
+        return EqProfile::off();
+    if (preset == QLatin1StringView("flat"))
+        return EqProfile::graphic({});
+    if (preset == QLatin1StringView("custom"))
+        return EqProfile::graphic(customGains(output));
+    const QString path = graphicPathOf(preset);
+    const std::optional<std::array<double, EqProfile::bandCount>> gains = path.isEmpty() ? std::nullopt : readGains(path);
+    return gains ? EqProfile::graphic(*gains) : EqProfile::off();
+}
+
+void EqControl::applyGraphic(const QString &output, bool now)
+{
+    const EqProfile p = graphicProfile(output);
+    m_live.insert(output, p);
+    const bool enabled = graphicPreset(output) != QLatin1StringView("off") && !graphicMissing(output);
+    if (!now) {
+        defer(output, enabled);
+        return;
+    }
+    m_writeTimer.stop();
+    writeFilters();
+    put(output, QStringLiteral("filters"), EqFilters::encode(p));
+    put(output, QStringLiteral("on"), enabled);
+    changed(output);
+}
+
+void EqControl::cycleMode(const QString &output, int direction)
+{
+    if (!outputs().contains(output) || sign(direction) == 0)
+        return;
+    if (!graphic(output)) {
+        store(settingKey(QStringLiteral("eq_parametric_on"), output), on(output));
+        store(settingKey(QStringLiteral("eq_mode"), output), QStringLiteral("graphic"));
+        applyGraphic(output, false);
+        return;
+    }
+    leaveGraphic(output);
+}
+
+void EqControl::leaveGraphic(const QString &output)
+{
+    const bool enabled = stored(settingKey(QStringLiteral("eq_parametric_on"), output)).toBool();
+    const QString label = storedName(output);
+    store(settingKey(QStringLiteral("eq_mode"), output), QStringLiteral("parametric"));
+    std::optional<EqProfile> p = label.isEmpty() ? std::optional<EqProfile>(custom(output)) : std::nullopt;
+    if (!label.isEmpty() && !pathOf(label).isEmpty())
+        p = fileProfile(pathOf(label));
+    m_live.insert(output, p.value_or(EqProfile::off()));
+    defer(output, enabled && p.has_value());
+}
+
+void EqControl::defer(const QString &output, bool enabled)
+{
+    m_pendingOn.insert(output, enabled);
+    m_unwritten.insert(output);
+    if (m_settings)
+        m_writeTimer.start();
+    else
+        writeFilters();
+    changed(output);
+}
+
+void EqControl::cycleGraphic(const QString &output, int direction)
+{
+    const int s = sign(direction);
+    if (!outputs().contains(output) || s == 0 || !graphic(output))
+        return;
+    QStringList list{QStringLiteral("off"), QStringLiteral("flat")};
+    for (const QString &path : std::as_const(m_graphicPaths))
+        list.append(entryName(path, true));
+    list.append(QStringLiteral("custom"));
+    const qsizetype at = list.indexOf(graphicPreset(output));
+    const qsizetype n = list.size();
+    const qsizetype next = at < 0 ? (s > 0 ? 0 : n - 1) : ((at + s) % n + n) % n;
+    store(settingKey(QStringLiteral("eq_graphic_preset"), output), list.at(next));
+    applyGraphic(output, false);
+}
+
+bool EqControl::beginGraphicEdit(const QString &output)
+{
+    if (!graphic(output))
+        return false;
+    const QString preset = graphicPreset(output);
+    if (preset == QLatin1StringView("off") || graphicMissing(output))
+        return false;
+    if (preset == QLatin1StringView("custom"))
+        return true;
+    std::array<double, EqProfile::bandCount> gains{};
+    if (preset != QLatin1StringView("flat")) {
+        if (const auto file = readGains(graphicPathOf(preset)))
+            gains = *file;
+    }
+    m_gains.insert(output, gains);
+    m_gainsDirty.insert(output);
+    store(settingKey(QStringLiteral("eq_graphic_preset"), output), QStringLiteral("custom"));
+    return true;
+}
+
+void EqControl::stepGraphic(const QString &output, int band, int direction, bool coarse)
+{
+    if (sign(direction) == 0 || band < 0 || band >= EqProfile::bandCount || !beginGraphicEdit(output))
+        return;
+    std::array<double, EqProfile::bandCount> gains = customGains(output);
+    gains[band] = qBound(EqParser::minGain, stepGrid(gains[band], coarse ? gainCoarse : gainFine, direction, 10.0),
+                         EqParser::maxGain);
+    m_gains.insert(output, gains);
+    m_gainsDirty.insert(output);
+    applyGraphic(output, false);
+}
+
+bool EqControl::setGraphicGain(const QString &output, int band, double value)
+{
+    if (!std::isfinite(value) || value < EqParser::minGain || value > EqParser::maxGain || band < 0
+        || band >= EqProfile::bandCount || !beginGraphicEdit(output))
+        return false;
+    std::array<double, EqProfile::bandCount> gains = customGains(output);
+    gains[band] = std::round(value * 10.0) / 10.0;
+    m_gains.insert(output, gains);
+    m_gainsDirty.insert(output);
+    applyGraphic(output, false);
+    return true;
+}
+
+QVariantMap EqControl::snapshot(const QString &output) const
+{
+    QVariantList gains;
+    for (const double g : customGains(output))
+        gains.append(g);
+    return {
+        {QStringLiteral("mode"), graphic(output) ? QStringLiteral("graphic") : QStringLiteral("parametric")},
+        {QStringLiteral("preset"), graphicPreset(output)},
+        {QStringLiteral("gains"), gains},
+        {QStringLiteral("parametricOn"), graphic(output)
+                                             ? stored(settingKey(QStringLiteral("eq_parametric_on"), output)).toBool()
+                                             : on(output)},
+    };
+}
+
+void EqControl::restore(const QString &output, const QVariantMap &state)
+{
+    if (!outputs().contains(output) || state.isEmpty())
+        return;
+    const bool wantGraphic = state.value(QStringLiteral("mode")).toString() == QLatin1StringView("graphic");
+    const bool wasGraphic = graphic(output);
+    std::array<double, EqProfile::bandCount> gains{};
+    const QVariantList list = state.value(QStringLiteral("gains")).toList();
+    for (int i = 0; i < EqProfile::bandCount && i < list.size(); ++i)
+        gains[i] = list.at(i).toDouble();
+    if (gains != customGains(output)) {
+        m_gains.insert(output, gains);
+        m_gainsDirty.insert(output);
+    }
+    store(settingKey(QStringLiteral("eq_graphic_preset"), output), state.value(QStringLiteral("preset")).toString());
+    if (wantGraphic) {
+        store(settingKey(QStringLiteral("eq_parametric_on"), output), state.value(QStringLiteral("parametricOn")));
+        store(settingKey(QStringLiteral("eq_mode"), output), QStringLiteral("graphic"));
+        applyGraphic(output, false);
+    } else if (wasGraphic) {
+        leaveGraphic(output);
+    }
 }
 
 void EqControl::relist()
@@ -1179,14 +1596,33 @@ void EqControl::relist()
             }
         }
     }
-    qInfo() << "microdap eq: listed" << paths.size() << "profiles";
+    QStringList graphicPaths;
+    if (m_settings) {
+        QFileInfoList entries = QDir(graphicDir()).entryInfoList({QStringLiteral("*.ini")}, QDir::Files | QDir::Readable);
+        std::sort(entries.begin(), entries.end(), [](const QFileInfo &a, const QFileInfo &b) {
+            return nameLess(a.fileName(), b.fileName());
+        });
+        for (const QFileInfo &entry : entries) {
+            const QString path = QDir::cleanPath(entry.absoluteFilePath());
+            const QString folded = entry.completeBaseName().toLower();
+            const bool builtIn = folded == QLatin1StringView("off") || folded == QLatin1StringView("flat")
+                                 || folded == QLatin1StringView("custom");
+            if (!builtIn && graphicPaths.size() < presetsMax && readGains(path))
+                graphicPaths.append(path);
+        }
+    }
+    qInfo() << "microdap eq: listed" << paths.size() << "profiles" << graphicPaths.size() << "graphic presets";
+    m_graphicPaths = graphicPaths;
     if (paths != m_sourcePaths) {
         m_sourcePaths = paths;
         m_sources = list;
         emit sourcesChanged();
     }
-    for (const QString &output : outputs())
+    for (const QString &output : outputs()) {
+        if (graphic(output) && m_live.contains(output) && !(m_live.value(output) == graphicProfile(output)))
+            applyGraphic(output, true);
         changed(output);
+    }
 }
 
 void EqControl::cycleProfile(const QString &output, int direction)
@@ -1196,7 +1632,7 @@ void EqControl::cycleProfile(const QString &output, int direction)
         return;
     const int n = static_cast<int>(m_sourcePaths.size()) + 2;
     int i = 0;
-    const QString k = key(output);
+    const QString k = paramKey(output);
     if (k == QLatin1StringView("custom")) {
         i = n - 1;
     } else if (k != QLatin1StringView("off")) {
@@ -1341,9 +1777,9 @@ EqProfile &EqControl::custom(const QString &output) const
 
 EqProfile *EqControl::beginEdit(const QString &output)
 {
-    if (!outputs().contains(output))
+    if (!outputs().contains(output) || graphic(output))
         return nullptr;
-    const QString k = key(output);
+    const QString k = paramKey(output);
     if (k == QLatin1StringView("off"))
         return nullptr;
     if (k != QLatin1StringView("custom") || !(custom(output) == profile(output))) {
@@ -1379,8 +1815,18 @@ void EqControl::endEdit(const QString &output)
 void EqControl::writeFilters()
 {
     const QSet<QString> unwritten = std::exchange(m_unwritten, {});
+    const QHash<QString, bool> pendingOn = std::exchange(m_pendingOn, {});
     for (const QString &output : unwritten)
         put(output, QStringLiteral("filters"), EqFilters::encode(m_live.value(output)));
+    for (auto it = pendingOn.cbegin(); it != pendingOn.cend(); ++it)
+        put(it.key(), QStringLiteral("on"), it.value());
+    for (const QString &output : QSet<QString>(m_gainsDirty)) {
+        QStringList items;
+        for (const double g : customGains(output))
+            items.append(EqFilters::number(g));
+        store(settingKey(QStringLiteral("eq_graphic"), output), items);
+        m_gainsDirty.remove(output);
+    }
 }
 
 void EqControl::changed(const QString &output)

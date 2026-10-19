@@ -134,6 +134,10 @@ QMetaType::Type typeOf(const QString &key)
         return entry->type;
     if (key.startsWith(balancePrefix))
         return QMetaType::Int;
+    if (key.startsWith(QLatin1StringView("microdap.eq_graphic_")) && !key.startsWith(QLatin1StringView("microdap.eq_graphic_preset_")))
+        return QMetaType::QStringList;
+    if (key.startsWith(QLatin1StringView("microdap.eq_parametric_on_")))
+        return QMetaType::Bool;
     if (key.endsWith(QLatin1StringView(".on")))
         return QMetaType::Bool;
     if (key.endsWith(QLatin1StringView(".filters")))
@@ -201,6 +205,10 @@ QVariantMap defaults()
         out.insert(EqFilters::key(slot, QStringLiteral("name")), QString());
         out.insert(EqFilters::key(slot, QStringLiteral("filters")), QStringList{QStringLiteral("preamp 0")});
         out.insert(Settings::balanceKey(slot), 0);
+        out.insert(EqControl::settingKey(QStringLiteral("eq_mode"), slot), QStringLiteral("parametric"));
+        out.insert(EqControl::settingKey(QStringLiteral("eq_graphic"), slot), QStringList(EqProfile::bandCount, QStringLiteral("0")));
+        out.insert(EqControl::settingKey(QStringLiteral("eq_graphic_preset"), slot), QStringLiteral("flat"));
+        out.insert(EqControl::settingKey(QStringLiteral("eq_parametric_on"), slot), false);
     }
     for (const QString &slot : Settings::crossfeedSlots())
         out.insert(Settings::crossfeedKey(slot), QStringLiteral("off"));

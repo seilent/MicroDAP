@@ -17,6 +17,7 @@ Item {
     readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end" || root.openShot !== null
     readonly property var bandShots: ({ "eq-bands": 3, "eq-bands-one": 1, "eq-bands-full": 10 })
     readonly property int bandShot: root.bandShots[root.fixture] === undefined ? 0 : root.bandShots[root.fixture]
+    readonly property bool graphicShot: root.fixture.startsWith("eq-graphic")
     readonly property bool typeShot: root.fixture.startsWith("eq-typed-")
     readonly property bool customShot: root.fixture === "eq-custom"
     readonly property bool savedShot: root.fixture === "eq-saved" || root.fixture === "eq-delete" || root.fixture === "eq-rename"
@@ -91,7 +92,21 @@ Item {
             return true
         }
 
+        readonly property var curve: [3, 4.5, 2, 0, -1.5, -3, -1, 2.5, 5, 6]
+
+        function graphicMap() {
+            const flat = root.fixture === "eq-graphic-flat"
+            const bands = []
+            for (let i = 0; i < 10; i++)
+                bands.push({ type: "matchedpeak", freq: 1000 * Math.pow(2, (4 + 6 * i - 34) / 6), freqIndex: 4 + 6 * i,
+                    gain: flat ? 0 : sampleEq.curve[i], q: 0.92 })
+            return { mode: "graphic", key: flat ? "flat" : "custom", name: flat ? "FLAT" : "", missing: false,
+                preamp: flat ? 0 : -8.4, bands: bands, saved: false }
+        }
+
         function profileMap(output) {
+            if (output === "headphones" && root.graphicShot)
+                return sampleEq.graphicMap()
             if (output === "headphones")
                 return sampleEq.headphones
             if (output === "usb" && root.dacShot)
@@ -146,6 +161,13 @@ Item {
                 if (root.openShot.edit)
                     screen.activate()
                 Qt.callLater(() => screen.activePane.ensureVisible(screen.indexOfKey(band + ":q"), 0))
+                return
+            }
+            if (root.graphicShot) {
+                screen.focusIndex = screen.indexOfKey(root.fixture === "eq-graphic-flat" ? "preset" : "gband8")
+                if (root.fixture === "eq-graphic-edit")
+                    screen.activate()
+                Qt.callLater(() => screen.activePane.ensureVisible(screen.focusIndex, 0))
                 return
             }
             if (root.typeShot) {
