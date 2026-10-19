@@ -40,4 +40,4 @@ Builds the builder image (Fedora 44), then in it MicroSET from `MICROSET_SRC` (d
 
 ## License
 
-GPL-2.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later. See [LICENSE](LICENSE).
