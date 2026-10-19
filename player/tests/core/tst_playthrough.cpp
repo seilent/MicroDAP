@@ -120,10 +120,10 @@ void PlayThroughTest::foldersAcrossRoots()
 
 void PlayThroughTest::nameOrder()
 {
-    QVERIFY(PlayThrough::nameLess(QStringLiteral("apple"), QStringLiteral("Banana")));
-    QVERIFY(PlayThrough::nameLess(QStringLiteral("B"), QStringLiteral("b")));
-    QVERIFY(!PlayThrough::nameLess(QStringLiteral("b"), QStringLiteral("B")));
     const QStringList roots{QStringLiteral("/m")};
+    QVERIFY(PlayThrough::dirBefore(QStringLiteral("/m/apple"), QStringLiteral("/m/Banana"), roots));
+    QVERIFY(PlayThrough::dirBefore(QStringLiteral("/m/B"), QStringLiteral("/m/b"), roots));
+    QVERIFY(!PlayThrough::dirBefore(QStringLiteral("/m/b"), QStringLiteral("/m/B"), roots));
     QVERIFY(PlayThrough::dirBefore(QStringLiteral("/m/a/deep"), QStringLiteral("/m/a"), roots));
     QVERIFY(PlayThrough::dirBefore(QStringLiteral("/m/a"), QStringLiteral("/m/B"), roots));
 }

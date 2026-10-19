@@ -1,5 +1,6 @@
 #include "PlayThrough.h"
 
+#include "HubModels.h"
 #include "Library.h"
 #include "Models.h"
 #include "Settings.h"
@@ -42,12 +43,6 @@ bool PlayThrough::due(const Queue &queue, const QString &mode)
            && queue.repeat() == Queue::Off && queue.currentIndex() >= 0 && queue.nextIndex(false) < 0;
 }
 
-bool PlayThrough::nameLess(const QString &a, const QString &b)
-{
-    const int folded = a.compare(b, Qt::CaseInsensitive);
-    return folded != 0 ? folded < 0 : a < b;
-}
-
 bool PlayThrough::dirBefore(const QString &a, const QString &b, const QStringList &roots)
 {
     const int ra = rootOf(a, roots);
@@ -59,7 +54,7 @@ bool PlayThrough::dirBefore(const QString &a, const QString &b, const QStringLis
     const QStringList pb = b.mid(base.size()).split(QLatin1Char('/'), Qt::SkipEmptyParts);
     for (qsizetype i = 0; i < std::min(pa.size(), pb.size()); ++i) {
         if (pa.at(i) != pb.at(i))
-            return nameLess(pa.at(i), pb.at(i));
+            return FolderModel::folderLess(pa.at(i), pb.at(i));
     }
     return pa.size() > pb.size();
 }
@@ -127,7 +122,7 @@ QList<QueueEntry> PlayThrough::nextFolder(const QString &path) const
     if (next.isEmpty())
         return {};
     QList<std::pair<QString, qint64>> files = songs.value(next);
-    std::sort(files.begin(), files.end(), [](const auto &a, const auto &b) { return nameLess(a.first, b.first); });
+    std::sort(files.begin(), files.end(), [](const auto &a, const auto &b) { return FolderModel::folderLess(a.first, b.first); });
     QVariantList ids;
     for (const auto &file : std::as_const(files))
         ids.append(file.second);

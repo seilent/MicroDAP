@@ -20,7 +20,6 @@ public:
     PlayThrough(Queue *queue, Library *library, AlbumsModel *albums, QObject *parent = nullptr);
 
     static bool due(const Queue &queue, const QString &mode);
-    static bool nameLess(const QString &a, const QString &b);
     static bool dirBefore(const QString &a, const QString &b, const QStringList &roots);
     static QString nextDir(const QStringList &dirs, const QStringList &roots, const QString &dir);
 
