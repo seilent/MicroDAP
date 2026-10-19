@@ -59,7 +59,7 @@ Page {
         out.push(page.entry("row", "preamp", "preamp", EqFormat.preampText(preamp) + EqFormat.dacSuffix("preamp", preamp, ranges), -1, ""))
         const bands = p.bands === undefined || p.bands === null ? [] : p.bands
         for (let i = 0; i < bands.length; i++) {
-            out.push(page.entry("row", "band" + i, "band " + (i + 1), EqFormat.bandText(bands[i]), i, ""))
+            out.push(page.entry("row", "band" + i, String(i + 1), EqFormat.bandText(bands[i]), i, ""))
             if (i !== openBand)
                 continue
             for (let f = 0; f < EqFormat.fields.length; f++) {
@@ -72,7 +72,34 @@ Page {
                 out.push(sub)
             }
         }
+        if (bands.length < EqFormat.maxBands)
+            out.push(page.entry("row", "addBand", "add band", "", -1, ""))
+        if (bands.length > 1)
+            out.push(page.entry("row", "removeBand", "remove band", String(bands.length), -1, ""))
         return out
+    }
+
+    function addBand(): void {
+        const pane = page.activePane
+        const at = pane.rows.filter((r) => r.kind === "row" && r.band >= 0).length
+        if (!page.canCall("addBand") || !page.eq.addBand(pane.output))
+            return
+        pane.openBand = at
+        page.focusIndex = Math.max(0, page.indexOfKey("band" + at))
+        pane.ensureVisible(page.focusIndex, Motion.scroll)
+        pane.refreshFrom(page.focusIndex)
+    }
+
+    function removeBand(): void {
+        const pane = page.activePane
+        if (!page.canCall("removeBand") || !page.eq.removeBand(pane.output))
+            return
+        const count = pane.rows.filter((r) => r.kind === "row" && r.band >= 0).length
+        if (pane.openBand >= count)
+            pane.openBand = -1
+        const remove = page.indexOfKey("removeBand")
+        page.focusIndex = Math.max(0, remove >= 0 ? remove : page.indexOfKey("addBand"))
+        pane.ensureVisible(page.focusIndex, Motion.scroll)
     }
 
     function indexOfKey(key: string): int {
@@ -249,6 +276,14 @@ Page {
             return
         if (r.kind === "row" && r.band >= 0) {
             page.toggleBand(r.band)
+            return
+        }
+        if (r.key === "addBand") {
+            page.addBand()
+            return
+        }
+        if (r.key === "removeBand") {
+            page.removeBand()
             return
         }
         page.beginEdit()

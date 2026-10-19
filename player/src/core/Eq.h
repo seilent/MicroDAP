@@ -53,16 +53,21 @@ static_assert(int(EqBand::AllPass) == int(BiquadType::AllPass));
 struct EqProfile
 {
     static constexpr int bandCount = 10;
+    static constexpr int freshIndex = 34;
 
     double preamp = 0.0;
     std::array<EqBand, bandCount> bands;
+    int count = bandCount;
 
     static EqProfile flat();
     static EqProfile off();
+    static EqProfile fresh();
+    static EqBand freshBand();
     double preampVolume() const;
     QVariantMap toMap() const;
+    void trim();
 
-    bool operator==(const EqProfile &other) const = default;
+    bool operator==(const EqProfile &other) const;
 };
 
 }
@@ -176,6 +181,8 @@ public:
     Q_INVOKABLE void stepQ(const QString &output, int band, int direction, bool coarse = false);
     Q_INVOKABLE void stepBand(const QString &output, int band, const QString &field, int direction,
                               bool coarse = false);
+    Q_INVOKABLE bool addBand(const QString &output);
+    Q_INVOKABLE bool removeBand(const QString &output);
     Q_INVOKABLE void sync();
 
 signals:
@@ -188,6 +195,7 @@ signals:
 
 private:
     std::optional<EqProfile> fileProfile(const QString &path) const;
+    EqProfile restored(const QString &output) const;
     EqProfile &custom(const QString &output) const;
     bool on(const QString &output) const;
     QString storedName(const QString &output) const;

@@ -105,6 +105,30 @@ TestCase {
             fakeEq.profilesChanged()
         }
 
+        function addBand(output) {
+            fakeEq.calls = fakeEq.calls.concat([["addBand", output]])
+            const sets = Object.assign({}, fakeEq.bandSets)
+            if (fakeEq.keys[output] === "off" || sets[output].length >= 10)
+                return false
+            sets[output] = sets[output].concat([{ type: "peak", freq: 1000, gain: 0, q: 1.4 }])
+            fakeEq.bandSets = sets
+            fakeEq.makeCustom(output)
+            fakeEq.profilesChanged()
+            return true
+        }
+
+        function removeBand(output) {
+            fakeEq.calls = fakeEq.calls.concat([["removeBand", output]])
+            const sets = Object.assign({}, fakeEq.bandSets)
+            if (fakeEq.keys[output] === "off" || sets[output].length <= 1)
+                return false
+            sets[output] = sets[output].slice(0, sets[output].length - 1)
+            fakeEq.bandSets = sets
+            fakeEq.makeCustom(output)
+            fakeEq.profilesChanged()
+            return true
+        }
+
         function stepBand(output, band, field, delta, coarse) {
             fakeEq.calls = fakeEq.calls.concat([["stepBand", output, band, field, delta, coarse]])
             const sets = Object.assign({}, fakeEq.bandSets)
@@ -199,6 +223,50 @@ TestCase {
         compare(page.editKey, page.rows[index].key)
     }
 
+    function test_band_list_add_remove() {
+        const sets = Object.assign({}, fakeEq.bandSets)
+        sets.headphones = sets.headphones.slice(0, 3)
+        fakeEq.bandSets = sets
+        const page = open()
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["profile", "preamp", "band0", "band1", "band2", "addBand", "removeBand"]))
+        compare(page.rows[5].title, "add band")
+        compare(page.rows[5].value, "")
+        compare(page.rows[6].value, "3")
+        page.setFocus(5)
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(tc.callAt(0), JSON.stringify(["addBand", "headphones"]))
+        compare(page.headphonesPane.openBand, 3)
+        compare(page.focusedRow.key, "band3")
+        compare(page.rows[page.focusIndex + 1].key, "band3:type")
+        compare(page.rows[page.focusIndex].title, "4")
+        compare(page.rows[page.rows.length - 1].value, "4")
+        page.setFocus(page.indexOfKey("removeBand"))
+        verify(router.dispatch("a", false))
+        compare(tc.callAt(1), JSON.stringify(["removeBand", "headphones"]))
+        compare(page.headphonesPane.openBand, -1)
+        compare(page.focusedRow.key, "removeBand")
+        compare(page.focusedRow.value, "3")
+        verify(router.dispatch("a", false))
+        verify(router.dispatch("a", false))
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["profile", "preamp", "band0", "addBand"]))
+        compare(page.focusedRow.key, "addBand")
+        for (let i = 0; i < 9; i++) {
+            page.setFocus(page.indexOfKey("addBand"))
+            verify(router.dispatch("a", false))
+        }
+        compare(page.rows.filter((r) => r.band >= 0 && r.kind === "row").length, 10)
+        compare(page.indexOfKey("addBand"), -1)
+        compare(page.indexOfKey("removeBand") >= 0, true)
+    }
+
+    function test_band_list_hidden_when_off() {
+        const page = open()
+        page.switchPivot(1)
+        page.completeAll()
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["profile"]))
+    }
+
     function test_layout_and_rows() {
         const page = open()
         compare(page.pageId, 0)
@@ -206,16 +274,19 @@ TestCase {
         compare(JSON.stringify(page.pivots), JSON.stringify(["headphones", "usb", "speaker"]))
         compare(page.pivotIndex, 0)
         compare(page.headphonesPane.y, Ui.px(128))
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         compare(page.rows[0].title, "profile")
         compare(page.rows[0].value, "HD 600")
         compare(page.rows[1].title, "preamp")
         compare(page.rows[1].value, "-6.5 db")
-        compare(page.rows[2].title, "band 1")
+        compare(page.rows[2].title, "1")
         compare(page.rows[2].value, "ls 105 hz +2.1 db q 0.70")
         compare(page.rows[3].value, "pk 2.5 khz -3.0 db q 1.40")
         compare(page.rows[4].value, "off")
-        compare(page.rows[11].title, "band 10")
+        compare(page.rows[11].title, "10")
+        compare(page.rows[12].key, "removeBand")
+        compare(page.rows[12].title, "remove band")
+        compare(page.rows[12].value, "10")
         const first = tc.rowItem(page.headphonesPane, 0)
         compare(first.height, Ui.px(43))
         compare(first.titleItem.x, Ui.px(20))
@@ -263,7 +334,7 @@ TestCase {
         verify(router.dispatch("right", false))
         compare(tc.callAt(0), JSON.stringify(["cycleProfile", "headphones", 1]))
         compare(page.rows[0].value, "Gone")
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         verify(router.dispatch("right", false))
         compare(page.rows[0].value, "custom")
         verify(router.dispatch("right", false))
@@ -291,7 +362,7 @@ TestCase {
         compare(pages.depth, 2)
         compare(fakeEq.keys.headphones, "/eq/HD 600.txt")
         compare(page.rows[0].value, "HD 600")
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         compare(fakeEq.calls.length, 6)
         for (let i = 3; i < 6; i++)
             compare(tc.callAt(i), JSON.stringify(["cycleProfile", "headphones", -1]))
@@ -546,7 +617,7 @@ TestCase {
         compare(page.rows[5].value, "+2.1 db")
         compare(page.rows[6].title, "q")
         compare(page.rows[6].value, "0.70")
-        compare(page.rows.length, 16)
+        compare(page.rows.length, 17)
         compare(page.focusIndex, 2)
         const sub = tc.rowItem(page.headphonesPane, 3)
         compare(sub.sub, true)
@@ -584,11 +655,11 @@ TestCase {
         compare(page.focusIndex, 3)
         compare(page.rows[3].key, "band1")
         compare(page.rows[4].key, "band1:type")
-        compare(page.rows.length, 16)
+        compare(page.rows.length, 17)
         verify(router.dispatch("a", false))
         compare(page.headphonesPane.openBand, -1)
         compare(page.focusIndex, 3)
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
     }
 
     function test_sub_rows_coarse_steps() {
@@ -639,7 +710,7 @@ TestCase {
         compare(fakeEq.keys.headphones, "/eq/HD 600.txt")
         compare(page.headphonesPane.openBand, 0)
         compare(page.focusIndex, 3)
-        compare(page.rows.length, 16)
+        compare(page.rows.length, 17)
         tc.edit(page, 5)
         router.dispatch("rb", false)
         router.dispatch("rb", false)
@@ -720,7 +791,7 @@ TestCase {
         tc.edit(page, 0)
         verify(router.dispatch("right", false))
         compare(tc.callAt(0), JSON.stringify(["cycleProfile", "usb", 1]))
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         router.dispatch("a", false)
         router.dispatch("rb", false)
         compare(page.pivotIndex, 2)
@@ -729,7 +800,7 @@ TestCase {
         router.dispatch("lb", false)
         router.dispatch("lb", false)
         compare(page.pivotIndex, 0)
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
     }
 
     function test_pivot_motion_and_screen_off() {
@@ -766,7 +837,7 @@ TestCase {
         back.headphones = false
         fakeEq.missing = back
         fakeEq.profilesChanged()
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         compare(page.rows[0].value, "HD 600")
     }
 
@@ -846,7 +917,7 @@ TestCase {
         compare(tc.rowItem(page.headphonesPane, 2).enter, 1)
         tryCompare(sub, "enter", 1, 2000)
         router.dispatch("a", false)
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         compare(tc.rowItem(page.headphonesPane, 3).enter, 1)
         page.setFocus(0)
         router.dispatch("a", false)
@@ -856,7 +927,7 @@ TestCase {
         router.dispatch("right", false)
         compare(page.rows.length, 1)
         router.dispatch("right", false)
-        compare(page.rows.length, 12)
+        compare(page.rows.length, 13)
         tryVerify(function() {
             const r = page.headphonesPane.rowItem(1)
             return r !== null && r.enter < 1

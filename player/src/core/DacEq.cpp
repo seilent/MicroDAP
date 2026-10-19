@@ -72,15 +72,17 @@ DacEq::~DacEq() = default;
 FiioProfileFrames DacEq::framesFor(const FiioModel &model, const EqProfile &profile)
 {
     FiioProfileFrames frames;
+    const EqProfile flat = EqProfile::flat();
     for (int i = 0; i < fiioBandCount; ++i) {
-        const EqBand &band = profile.bands[i];
+        const bool listed = i < profile.count;
+        const EqBand &band = listed ? profile.bands[i] : flat.bands[i];
         FiioBand out;
         out.index = i;
-        out.gain = band.gain;
+        out.gain = listed ? band.gain : 0.0;
         out.freq = band.freq;
         out.q = band.q;
         out.type = int(band.type);
-        out.enabled = band.enabled;
+        out.enabled = listed && band.enabled;
         frames.bands[i] = bandPayload(model, out);
     }
     return frames;

@@ -15,6 +15,8 @@ Item {
     })
     readonly property var openShot: root.openShots[root.fixture] === undefined ? null : root.openShots[root.fixture]
     readonly property bool typesShot: root.fixture === "eq-types" || root.fixture === "eq-types-end" || root.openShot !== null
+    readonly property var bandShots: ({ "eq-bands": 3, "eq-bands-one": 1, "eq-bands-full": 10 })
+    readonly property int bandShot: root.bandShots[root.fixture] === undefined ? 0 : root.bandShots[root.fixture]
     readonly property bool dacShot: root.fixture === "eq-dac-range" || root.fixture === "eq-dac-preamp" || root.fixture === "eq-dac-long"
 
     Rectangle {
@@ -32,7 +34,7 @@ Item {
             name: "Sennheiser HD 600 ParametricEQ",
             missing: false,
             preamp: -6.5,
-            bands: root.typesShot ? sampleEq.types : sampleEq.autoEq
+            bands: root.typesShot ? sampleEq.types : root.bandShot > 0 ? sampleEq.autoEq.slice(0, root.bandShot) : sampleEq.autoEq
         })
         readonly property var types: [
             { type: "off", freq: 1000, gain: 3, q: 1.4 },
@@ -117,6 +119,11 @@ Item {
                 if (root.openShot.edit)
                     screen.activate()
                 Qt.callLater(() => screen.activePane.ensureVisible(screen.indexOfKey(band + ":q"), 0))
+                return
+            }
+            if (root.bandShot > 0) {
+                screen.focusIndex = screen.indexOfKey(root.bandShot === 10 ? "removeBand" : "addBand")
+                Qt.callLater(() => screen.activePane.ensureVisible(screen.focusIndex, 0))
                 return
             }
             if (root.typesShot) {

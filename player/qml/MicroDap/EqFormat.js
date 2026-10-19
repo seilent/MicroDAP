@@ -1,6 +1,7 @@
 .pragma library
 
 var outputs = ["headphones", "usb", "speaker"]
+var maxBands = 10
 var fields = ["type", "freq", "gain", "q"]
 var fieldTitles = ["type", "frequency", "gain", "q"]
 

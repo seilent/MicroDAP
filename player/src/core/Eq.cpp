@@ -141,6 +141,44 @@ EqProfile EqProfile::flat()
     return profile;
 }
 
+EqProfile EqProfile::fresh()
+{
+    EqProfile profile = flat();
+    profile.bands[0] = freshBand();
+    profile.count = 1;
+    return profile;
+}
+
+EqBand EqProfile::freshBand()
+{
+    EqBand band;
+    band.freqIndex = freshIndex;
+    band.freq = EqGrid::frequency(freshIndex);
+    return band;
+}
+
+void EqProfile::trim()
+{
+    int last = 0;
+    for (int i = 0; i < bandCount; ++i) {
+        const EqBand &band = bands[i];
+        if (band.enabled && (gainFree(band.type) || band.gain != 0.0))
+            last = i + 1;
+    }
+    count = qMax(1, last);
+}
+
+bool EqProfile::operator==(const EqProfile &other) const
+{
+    if (preamp != other.preamp || count != other.count)
+        return false;
+    for (int i = 0; i < count; ++i) {
+        if (!(bands[i] == other.bands[i]))
+            return false;
+    }
+    return true;
+}
+
 EqProfile EqProfile::off()
 {
     EqProfile profile = flat();
@@ -157,7 +195,8 @@ double EqProfile::preampVolume() const
 QVariantMap EqProfile::toMap() const
 {
     QVariantList list;
-    for (const EqBand &band : bands) {
+    for (int i = 0; i < count; ++i) {
+        const EqBand &band = bands[i];
         list.append(QVariantMap{
             {QStringLiteral("enabled"), band.enabled},
             {QStringLiteral("type"), band.enabled ? typeKey(band.type) : QStringLiteral("off")},
@@ -170,6 +209,7 @@ QVariantMap EqProfile::toMap() const
     return {
         {QStringLiteral("preamp"), preamp},
         {QStringLiteral("bands"), list},
+        {QStringLiteral("count"), count},
     };
 }
 
@@ -275,6 +315,7 @@ std::optional<EqProfile> EqParser::parse(const QString &text, QString *error)
     }
     for (int i = count; i < EqProfile::bandCount; ++i)
         profile.bands[i].enabled = false;
+    profile.count = count;
     profile.preamp = havePreamp ? clampLogged(preamp, minPreamp, maxPreamp, "preamp") : fallbackPreamp(profile);
     if (error)
         error->clear();
@@ -299,7 +340,8 @@ std::optional<EqProfile> EqParser::parseFile(const QString &path, QString *error
 double EqParser::fallbackPreamp(const EqProfile &profile)
 {
     double sum = 0.0;
-    for (const EqBand &band : profile.bands) {
+    for (int i = 0; i < profile.count; ++i) {
+        const EqBand &band = profile.bands[i];
         if (!band.enabled)
             continue;
         if (!gainFree(band.type) && band.gain > 0.0)
@@ -317,9 +359,11 @@ QString EqStore::typeName(const EqBand &band)
 
 QString EqStore::text(const EqProfile &profile)
 {
-    QString out = QStringLiteral("[General]\npreamp=") + formatNumber(profile.preamp) + QLatin1Char('\n');
+    QString out = QStringLiteral("[General]\npreamp=") + formatNumber(profile.preamp) + QStringLiteral("\nbands=")
+                  + QString::number(profile.count) + QLatin1Char('\n');
+    const EqProfile flatBands = EqProfile::off();
     for (int i = 0; i < EqProfile::bandCount; ++i) {
-        const EqBand &band = profile.bands[i];
+        const EqBand &band = i < profile.count ? profile.bands[i] : flatBands.bands[i];
         out += QStringLiteral("\n[band") + QString::number(i + 1) + QStringLiteral("]\n");
         out += QStringLiteral("type=") + typeName(band) + QLatin1Char('\n');
         if (band.freqIndex >= 0)
@@ -335,21 +379,27 @@ QString EqStore::text(const EqProfile &profile)
 EqProfile EqStore::read(const QString &path)
 {
     if (!QFileInfo::exists(path))
-        return EqProfile::flat();
+        return EqProfile::fresh();
     QSettings settings(path, QSettings::IniFormat);
     if (settings.status() != QSettings::NoError) {
         qWarning() << "microdap eq: cannot parse" << path;
-        return EqProfile::flat();
+        return EqProfile::fresh();
     }
-    EqProfile profile;
+    EqProfile profile = EqProfile::flat();
     bool ok = false;
     profile.preamp = qBound(EqParser::minPreamp, settings.value(QStringLiteral("preamp")).toDouble(&ok),
                             EqParser::maxPreamp);
     if (!ok) {
         qWarning() << "microdap eq: no preamp in" << path;
-        return EqProfile::flat();
+        return EqProfile::fresh();
     }
-    for (int i = 0; i < EqProfile::bandCount; ++i) {
+    const bool counted = settings.contains(QStringLiteral("bands"));
+    const int count = counted ? settings.value(QStringLiteral("bands")).toInt(&ok) : EqProfile::bandCount;
+    if (!ok || count < 1 || count > EqProfile::bandCount) {
+        qWarning() << "microdap eq: band count unreadable in" << path;
+        return EqProfile::fresh();
+    }
+    for (int i = 0; i < count; ++i) {
         settings.beginGroup(QStringLiteral("band") + QString::number(i + 1));
         EqBand band;
         const QString type = settings.value(QStringLiteral("type")).toString().toLower();
@@ -375,10 +425,13 @@ EqProfile EqStore::read(const QString &path)
         settings.endGroup();
         if (!valid) {
             qWarning() << "microdap eq: band" << i + 1 << "unreadable in" << path;
-            return EqProfile::flat();
+            return EqProfile::fresh();
         }
         profile.bands[i] = band;
     }
+    profile.count = count;
+    if (!counted)
+        profile.trim();
     return profile;
 }
 
@@ -420,7 +473,7 @@ QStringList EqFilters::encode(const EqProfile &profile)
     QStringList items{QStringLiteral("preamp ")
                       + number(qBound(EqParser::minPreamp, profile.preamp, EqParser::maxPreamp))};
     int last = -1;
-    for (int i = 0; i < EqProfile::bandCount; ++i) {
+    for (int i = 0; i < profile.count; ++i) {
         if (profile.bands[i].enabled)
             last = i;
     }
@@ -474,6 +527,7 @@ EqProfile EqFilters::decode(const QStringList &items)
             }
         }
     }
+    profile.count = qMax(1, index);
     return profile;
 }
 
@@ -809,8 +863,34 @@ EqProfile EqControl::profile(const QString &output) const
         return EqProfile::off();
     auto it = m_live.constFind(output);
     if (it == m_live.constEnd())
-        it = m_live.insert(output, EqFilters::decode(storedFilters(output)));
+        it = m_live.insert(output, restored(output));
     return *it;
+}
+
+EqProfile EqControl::restored(const QString &output) const
+{
+    const QStringList stored = storedFilters(output);
+    const QString storedLabel = storedName(output);
+    const auto sound = [](QStringList items) {
+        static const QRegularExpression flat(QStringLiteral("^peak \\S+ 0 \\S+$"));
+        while (items.size() > 1 && flat.match(items.last()).hasMatch())
+            items.removeLast();
+        return items;
+    };
+    if (storedLabel.isEmpty()) {
+        const EqProfile &c = custom(output);
+        if (sound(EqFilters::encode(c)) == sound(stored))
+            return c;
+    } else {
+        for (const QString &path : m_sourcePaths) {
+            if (displayName(path) != storedLabel)
+                continue;
+            const std::optional<EqProfile> file = fileProfile(path);
+            if (file && EqFilters::encode(*file) == stored)
+                return *file;
+        }
+    }
+    return EqFilters::decode(stored);
 }
 
 void EqControl::setCustom(const QString &output, const EqProfile &profile)
@@ -987,7 +1067,7 @@ void EqControl::stepFrequency(const QString &output, int band, int direction, bo
 
 void EqControl::stepGain(const QString &output, int band, int direction, bool coarse)
 {
-    if (sign(direction) == 0 || band < 0 || band >= EqProfile::bandCount)
+    if (sign(direction) == 0 || band < 0 || band >= profile(output).count)
         return;
     const EqBand current = profile(output).bands[band];
     if (current.enabled && gainFree(current.type))
@@ -1055,7 +1135,7 @@ EqProfile *EqControl::beginEdit(const QString &output)
     const QString k = key(output);
     if (k == QLatin1StringView("off"))
         return nullptr;
-    if (k != QLatin1StringView("custom")) {
+    if (k != QLatin1StringView("custom") || !(custom(output) == profile(output))) {
         m_custom.insert(output, profile(output));
         qInfo() << "microdap eq:" << output << "copied" << k << "into" << storePath(output);
         put(output, QStringLiteral("name"), QString());
@@ -1065,7 +1145,7 @@ EqProfile *EqControl::beginEdit(const QString &output)
 
 EqBand *EqControl::beginBandEdit(const QString &output, int band)
 {
-    if (band < 0 || band >= EqProfile::bandCount)
+    if (band < 0 || band >= profile(output).count)
         return nullptr;
     EqProfile *profile = beginEdit(output);
     return profile ? &profile->bands[band] : nullptr;
@@ -1100,6 +1180,30 @@ void EqControl::changed(const QString &output)
     emit profileChanged(output);
     if (output == m_activeOutput)
         emit activeProfileChanged();
+}
+
+bool EqControl::addBand(const QString &output)
+{
+    if (!editable(output) || profile(output).count >= EqProfile::bandCount)
+        return false;
+    EqProfile *p = beginEdit(output);
+    if (!p)
+        return false;
+    p->bands[p->count++] = EqProfile::freshBand();
+    endEdit(output);
+    return true;
+}
+
+bool EqControl::removeBand(const QString &output)
+{
+    if (!editable(output) || profile(output).count <= 1)
+        return false;
+    EqProfile *p = beginEdit(output);
+    if (!p)
+        return false;
+    p->count--;
+    endEdit(output);
+    return true;
 }
 
 void EqControl::stepBand(const QString &output, int band, const QString &field, int direction, bool coarse)

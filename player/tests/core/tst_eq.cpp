@@ -134,6 +134,11 @@ private slots:
     void clamps();
     void grid();
     void storeRoundTrip();
+    void bandCount();
+    void oldStoreRestart();
+    void liveCountEdit();
+    void liveSameCountEdit();
+    void addRemoveBand();
     void copyOnEdit();
     void steps();
     void stepTypeEight();
@@ -391,6 +396,7 @@ void EqTest::autoEqUnchanged()
         want.bands[i] = bands[i];
     for (int i = 5; i < EqProfile::bandCount; ++i)
         want.bands[i].enabled = false;
+    want.count = 5;
     QVERIFY(*profile == want);
 }
 
@@ -431,7 +437,7 @@ void EqTest::storeUnknownTypeFlat()
     QString text = readFile(path);
     text.replace(QStringLiteral("[band3]\ntype=peak\n"), QStringLiteral("[band3]\ntype=notch\n"));
     QVERIFY(writeFile(path, text));
-    QVERIFY(EqStore::read(path) == EqProfile::flat());
+    QVERIFY(EqStore::read(path) == EqProfile::fresh());
 }
 
 void EqTest::preampResonance()
@@ -532,6 +538,7 @@ void EqTest::storeRoundTrip()
     profile.bands[5].freq = EqGrid::frequency(40);
     profile.bands[5].enabled = true;
     profile.bands[5].gain = -1.5;
+    profile.count = 6;
     const QString path = m_dir + QStringLiteral("/store/eq-usb.ini");
     QVERIFY(EqStore::write(path, profile));
     QVERIFY(!QFileInfo::exists(path + QStringLiteral(".tmp")));
@@ -541,9 +548,170 @@ void EqTest::storeRoundTrip()
     QVERIFY(text.contains(QStringLiteral("[band6]\ntype=peak\nfreqIndex=40\n")));
     QVERIFY(EqStore::read(path) == profile);
 
-    QVERIFY(EqStore::read(m_dir + QStringLiteral("/none.ini")) == EqProfile::flat());
+    QVERIFY(text.contains(QStringLiteral("bands=6\n")));
+    QVERIFY(text.contains(QStringLiteral("[band7]\ntype=off\n")));
+    QVERIFY(text.contains(QStringLiteral("[band10]\ntype=off\n")));
+
+    QVERIFY(EqStore::read(m_dir + QStringLiteral("/none.ini")) == EqProfile::fresh());
     QVERIFY(writeFile(m_dir + QStringLiteral("/bad.ini"), QStringLiteral("[General]\npreamp=x\n")));
-    QVERIFY(EqStore::read(m_dir + QStringLiteral("/bad.ini")) == EqProfile::flat());
+    QVERIFY(EqStore::read(m_dir + QStringLiteral("/bad.ini")) == EqProfile::fresh());
+    QVERIFY(writeFile(m_dir + QStringLiteral("/count.ini"), QStringLiteral("[General]\npreamp=0\nbands=11\n")));
+    QVERIFY(EqStore::read(m_dir + QStringLiteral("/count.ini")) == EqProfile::fresh());
+}
+
+void EqTest::bandCount()
+{
+    const EqProfile fresh = EqProfile::fresh();
+    QCOMPARE(fresh.count, 1);
+    QCOMPARE(fresh.bands[0].freqIndex, 34);
+    QVERIFY(near(fresh.bands[0].freq, 1000.0));
+    QVERIFY(fresh.bands[0].enabled);
+    QCOMPARE(fresh.bands[0].type, EqBand::Peak);
+    QCOMPARE(EqParser::parse(QString::fromUtf8(autoEq))->count, 5);
+    QCOMPARE(EqParser::parse(filters(12))->count, 10);
+    QCOMPARE(EqFilters::decode({QStringLiteral("preamp -1"), QStringLiteral("peak 100 1 1"),
+                                QStringLiteral("peak 200 2 1")}).count, 2);
+    EqProfile three = EqProfile::flat();
+    three.count = 3;
+    three.bands[1].gain = 2.0;
+    three.bands[5].gain = 9.0;
+    QCOMPARE(EqFilters::encode(three), (QStringList{QStringLiteral("preamp 0"), QStringLiteral("peak 31.25 0 1.4"),
+                                                    QStringLiteral("peak 62.5 2 1.4"), QStringLiteral("peak 125 0 1.4")}));
+    QCOMPARE(three.toMap().value(QStringLiteral("bands")).toList().size(), 3);
+    QCOMPARE(three.toMap().value(QStringLiteral("count")).toInt(), 3);
+    EqProfile other = three;
+    other.bands[5].gain = -4.0;
+    QVERIFY(other == three);
+
+    EqProfile old = EqProfile::flat();
+    old.bands[2].gain = 3.0;
+    old.bands[6].type = EqBand::LowPass;
+    QString text = EqStore::text(old);
+    text.replace(QStringLiteral("bands=10\n"), QString());
+    const QString path = m_dir + QStringLiteral("/store/eq-old.ini");
+    QVERIFY(writeFile(path, text));
+    const EqProfile trimmed = EqStore::read(path);
+    QCOMPARE(trimmed.count, 7);
+    EqProfile sound = old;
+    sound.count = 7;
+    QVERIFY(trimmed == sound);
+    old.bands[6].type = EqBand::Peak;
+    text = EqStore::text(old);
+    text.replace(QStringLiteral("bands=10\n"), QString());
+    const QString shelfless = m_dir + QStringLiteral("/store/eq-old3.ini");
+    QVERIFY(writeFile(shelfless, text));
+    QCOMPARE(EqStore::read(shelfless).count, 3);
+    const QString flatPath = m_dir + QStringLiteral("/store/eq-oldflat.ini");
+    QVERIFY(writeFile(flatPath, EqStore::text(EqProfile::flat()).replace(QStringLiteral("bands=10\n"), QString())));
+    QCOMPARE(EqStore::read(flatPath).count, 1);
+}
+
+void EqTest::oldStoreRestart()
+{
+    const QString out = QStringLiteral("usb");
+    EqProfile old = EqProfile::flat();
+    old.bands[2].gain = 3.0;
+    old.preamp = -3.0;
+    QString text = EqStore::text(old);
+    text.replace(QStringLiteral("bands=10\n"), QString());
+    QVERIFY(writeFile(EqControl::storePath(out), text));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    const QStringList oldFilters = EqFilters::encode(old);
+    QCOMPARE(oldFilters.size(), 11);
+    settings.setValue(EqFilters::key(out, QStringLiteral("filters")), oldFilters);
+    settings.setValue(EqFilters::key(out, QStringLiteral("name")), QString());
+    settings.setValue(EqFilters::key(out, QStringLiteral("on")), true);
+    EqControl eq(&settings);
+    QCOMPARE(eq.key(out), QStringLiteral("custom"));
+    QCOMPARE(eq.profile(out).count, 3);
+    QCOMPARE(eq.profileMap(out).value(QStringLiteral("bands")).toList().size(), 3);
+    eq.stepGain(out, 2, 1);
+    QCOMPARE(eq.profile(out).count, 3);
+    QVERIFY(near(eq.profile(out).bands[2].gain, 3.1));
+    eq.sync();
+    QCOMPARE(settings.value(EqFilters::key(out, QStringLiteral("filters"))).toStringList().size(), 4);
+}
+
+void EqTest::liveSameCountEdit()
+{
+    const QString out = QStringLiteral("speaker");
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    EqProfile stale = EqProfile::fresh();
+    stale.bands[0].gain = -1.0;
+    eq.setCustom(out, stale);
+    eq.sync();
+    settings.setValue(EqFilters::key(out, QStringLiteral("on")), false);
+    settings.setValue(EqFilters::key(out, QStringLiteral("filters")),
+                      QStringList{QStringLiteral("preamp 0"), QStringLiteral("peak 500 -4 1")});
+    settings.setValue(EqFilters::key(out, QStringLiteral("on")), true);
+    QVERIFY(near(eq.profile(out).bands[0].gain, -4.0));
+    eq.stepGain(out, 0, 1);
+    QVERIFY(near(eq.profile(out).bands[0].gain, -3.9));
+    QVERIFY(near(eq.profile(out).bands[0].freq, 500.0));
+}
+
+void EqTest::liveCountEdit()
+{
+    const QString out = QStringLiteral("speaker");
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    eq.setCustom(out, EqProfile::fresh());
+    settings.setValue(EqFilters::key(out, QStringLiteral("filters")),
+                      QStringList{QStringLiteral("preamp 0"), QStringLiteral("peak 100 1 1"), QStringLiteral("peak 200 2 1"),
+                                  QStringLiteral("peak 300 3 1")});
+    QCOMPARE(eq.profile(out).count, 3);
+    eq.stepGain(out, 2, 1);
+    QCOMPARE(eq.profile(out).count, 3);
+    QVERIFY(near(eq.profile(out).bands[2].gain, 3.1));
+    QVERIFY(near(eq.profile(out).bands[0].gain, 1.0));
+}
+
+void EqTest::addRemoveBand()
+{
+    const QString file = EqControl::sourceDir() + QStringLiteral("/HD600 ParametricEQ.txt");
+    QVERIFY(writeFile(file, QString::fromUtf8(autoEq)));
+    const QString out = QStringLiteral("headphones");
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    {
+        EqControl eq(&settings);
+        QVERIFY(!eq.addBand(out));
+        QVERIFY(!eq.removeBand(out));
+        eq.cycleProfile(out, 1);
+        QCOMPARE(eq.key(out), QStringLiteral("HD600"));
+        QCOMPARE(eq.profile(out).count, 5);
+        QVERIFY(eq.addBand(out));
+        QCOMPARE(eq.key(out), QStringLiteral("custom"));
+        const EqProfile added = eq.profile(out);
+        QCOMPARE(added.count, 6);
+        QVERIFY(added.bands[5] == EqProfile::freshBand());
+        QVERIFY(near(added.bands[0].gain, 6.3));
+        QVERIFY(eq.removeBand(out));
+        QVERIFY(eq.removeBand(out));
+        QCOMPARE(eq.profile(out).count, 4);
+        while (eq.removeBand(out)) {
+        }
+        QCOMPARE(eq.profile(out).count, 1);
+        while (eq.addBand(out)) {
+        }
+        QCOMPARE(eq.profile(out).count, EqProfile::bandCount);
+        QVERIFY(!eq.addBand(out));
+        while (eq.profile(out).count > 3)
+            QVERIFY(eq.removeBand(out));
+        eq.stepType(out, 2, -1);
+        QVERIFY(!eq.profile(out).bands[2].enabled);
+        eq.stepBand(out, 3, QStringLiteral("gain"), 1);
+        QCOMPARE(eq.profile(out).count, 3);
+        eq.sync();
+    }
+    EqControl eq(&settings);
+    QCOMPARE(eq.key(out), QStringLiteral("custom"));
+    QCOMPARE(eq.profile(out).count, 3);
+    QVERIFY(!eq.profile(out).bands[2].enabled);
 }
 
 void EqTest::copyOnEdit()
@@ -794,7 +962,7 @@ void EqTest::cycleProfile()
     QCOMPARE(eq.key(out), QStringLiteral("B"));
     eq.cycleProfile(out, 1);
     QCOMPARE(eq.key(out), QStringLiteral("custom"));
-    QVERIFY(eq.profile(out) == EqProfile::flat() || eq.profile(out) == EqFilters::decode(EqFilters::encode(EqProfile::flat())));
+    QVERIFY(eq.profile(out) == EqProfile::fresh());
     eq.cycleProfile(out, 1);
     QCOMPARE(eq.key(out), QStringLiteral("off"));
     QVERIFY(!settings.value(EqFilters::key(out, QStringLiteral("on"))).toBool());

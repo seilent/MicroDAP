@@ -16,6 +16,7 @@
 #include <QTimer>
 
 #include <cerrno>
+#include <cmath>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -355,6 +356,7 @@ class DacEqTest : public QObject
     Q_OBJECT
 
 private slots:
+    void framesBandCount();
     void startLevelOffForces();
     void startLevelSetWaitsForResolve();
     void startLevelSetIgnoresWordApplied();
@@ -1664,6 +1666,41 @@ void DacEqTest::gateRetriesWhilePending()
     QVERIFY(rig.idle(600));
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Open), opens);
     QCOMPARE(rig.fake->count(FakeUsbIo::Op::Reset), 1);
+}
+
+void DacEqTest::framesBandCount()
+{
+    EqProfile profile = EqProfile::flat();
+    profile.count = 3;
+    profile.bands[0].gain = 3.0;
+    profile.bands[1].type = EqBand::LowShelf;
+    profile.bands[1].gain = -2.0;
+    profile.bands[2].gain = 4.0;
+    profile.bands[5].gain = 9.0;
+    const FiioModel &model = fiioModels().front();
+    const EqProfile flat = EqProfile::flat();
+    FiioProfileFrames frames = DacEq::framesFor(model, profile);
+    QCOMPARE(bandOfPayload(frames.bands[0])->gain, 3.0);
+    QCOMPARE(bandOfPayload(frames.bands[1])->gain, -2.0);
+    QCOMPARE(bandOfPayload(frames.bands[1])->type, int(EqBand::LowShelf));
+    QCOMPARE(bandOfPayload(frames.bands[2])->gain, 4.0);
+    for (int i = 3; i < fiioBandCount; ++i) {
+        const std::optional<FiioBand> band = bandOfPayload(frames.bands[i]);
+        QVERIFY(band);
+        QCOMPARE(band->index, i);
+        QCOMPARE(band->gain, 0.0);
+        QCOMPARE(band->type, 0);
+        QCOMPARE(band->freq, std::round(flat.bands[i].freq));
+        QCOMPARE(band->q, flat.bands[i].q);
+    }
+    profile.bands[2].enabled = false;
+    frames = DacEq::framesFor(model, profile);
+    QCOMPARE(bandOfPayload(frames.bands[2])->gain, 0.0);
+    profile.count = 1;
+    frames = DacEq::framesFor(model, profile);
+    QCOMPARE(bandOfPayload(frames.bands[0])->gain, 3.0);
+    QCOMPARE(bandOfPayload(frames.bands[1])->gain, 0.0);
+    QCOMPARE(bandOfPayload(frames.bands[1])->type, 0);
 }
 
 QTEST_GUILESS_MAIN(DacEqTest)
