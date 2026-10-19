@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import "GlyphPaths.js" as GlyphPaths
 
 Page {
     id: np
@@ -113,6 +114,12 @@ Page {
     readonly property bool lyricsPending: np.lyricsMatch && np.lyrics.pending === true
     readonly property bool hasLyrics: np.lyricsMatch && !np.lyricsPending && (d.lines.length > 0 || d.plain.length > 0)
     readonly property bool lyricsToggling: lyricsFade.running
+    readonly property bool markShown: !np.shownVariant && !np.lyricsShown && np.hasLyrics
+    readonly property real markBox: Ui.capHeight * Ui.npNext.size * GlyphPaths.box
+        / (GlyphPaths.micInk.bottom - GlyphPaths.micInk.top)
+    readonly property real markRight: Ui.px(Ui.canvasW - Ui.edge)
+    readonly property real markLeft: np.markRight
+        - Ui.px(np.markBox) * (GlyphPaths.micInk.right - GlyphPaths.micInk.left) / GlyphPaths.box
     readonly property real lyricsTop: Ui.landscape ? Ui.npArtistBaselineLandscape : Ui.npTextTop
     readonly property real lyricsBottom: (Ui.landscape ? Ui.npNextBaselineLandscape : Ui.npTitleY + Ui.npNextPitch)
         + Ui.npNextPitch * (Ui.npNextCount - 1)
@@ -149,6 +156,7 @@ Page {
     property alias lyricsFadeAnimation: lyricsFade
     property alias lyricsSlideAnimation: slideAnim
     property alias lyricsDueTimer: dueTimer
+    property alias lyricsMark: lyricsMark
 
     signal openQueue()
     signal trackInfo(int id)
@@ -1224,12 +1232,27 @@ Page {
                     required property int index
                     required property var modelData
 
+                    readonly property bool marked: nextText.index === 0 && np.markShown
+
                     x: np.textX + Ui.px(Ui.npNextIndent)
                     y: np.nextBaseline + Ui.px(Ui.npNextPitch) * nextText.index - nextText.baselineOffset
+                    width: nextText.marked ? Math.max(0, np.markLeft - Ui.px(Ui.statusGap) - nextText.x) : nextText.implicitWidth
+                    clip: nextText.marked
                     text: nextText.modelData
                     color: Ui.white(Ui.npNext.alpha)
                     font: Ui.font(Ui.npNext)
                 }
+            }
+
+            Glyph {
+                id: lyricsMark
+
+                x: np.markRight - Ui.px(np.markBox) * GlyphPaths.micInk.right / GlyphPaths.box
+                y: np.nextBaseline - Ui.px(np.markBox) * GlyphPaths.micInk.bottom / GlyphPaths.box
+                visible: np.markShown
+                name: "mic"
+                size: np.markBox
+                color: Ui.white(Ui.npNext.alpha)
             }
 
             LyricsColumn {

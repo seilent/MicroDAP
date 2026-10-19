@@ -110,6 +110,7 @@
 | settings | `crossfade-sheet` | `--size 640x960` and `960x640` | CROSSFADE sheet 5 S, 3 S, 2 S, 1 S, OFF, 3 S marked in the accent | 2026-10-20 |
 | settings | `crossfade-bit-perfect` | `--size 640x960` and `960x640` | REPLAYGAIN and CROSSFADE read BIT PERFECT, read only | 2026-10-20 |
 | nowplaying | `lyrics-short`, `lyrics-long`, `lyrics-cjk`, `lyrics-before`, `lyrics-none`, `lyrics-plain`, `lyrics-pending`, `lyricslide-<short or long>-<t>` | `--size 640x960` and `960x640` (slides 640x960) | lyrics mode: previous 0.4, current 26 u, upcoming 0.6, shade 0.55, no art, title or progress; long current wraps; title and next track with no lyrics; plain text 20 u mixed case; blank while pending; F13 frames | 2026-10-20 |
+| nowplaying | `mark`, `mark-longnext`, `mark-nonext`, `mark-pending` | `--size 640x960`, `mark` and `mark-longnext` also `960x640` | mic glyph at the first next row end at 0.6, the row clipped 8 u before it, shown with no next track, hidden while pending | 2026-10-20 |
 
 `ctest -R screenshot-orientation` turns the `--orientation landscape` settings render back by L and gates it
 against the `--size 960x640` render: at most 2% of pixels differ by more than 32 in a channel (0.52% measured

@@ -1305,6 +1305,64 @@ TestCase {
         compare(page.lyricsShade, 0)
     }
 
+    function test_lyrics_mark() {
+        const page = open()
+        compare(page.lyricsMark.visible, false)
+        const first = page.nextRepeater.itemAt(0)
+        compare(first.clip, false)
+        fakeLyrics.set(tc.sampleLines())
+        compare(page.markShown, true)
+        const mark = page.lyricsMark
+        compare(mark.visible, true)
+        compare(mark.name, "mic")
+        verify(mark.known)
+        verify(mark.filled)
+        const box = 13 * 0.7 * 32 / 27
+        fuzzyCompare(mark.width, Ui.px(box), 1e-6)
+        fuzzyCompare(mark.x + mark.width * 24 / 32, Ui.px(320 - 16), 1e-6)
+        fuzzyCompare(mark.y + mark.height * 30 / 32, Ui.px(362 + 18), 1e-6)
+        fuzzyCompare(mark.y + mark.height * 3 / 32, Ui.px(362 + 18 - 9.1), 1e-6)
+        verify(Qt.colorEqual(mark.color, Ui.white(0.6)))
+        compare(first.clip, true)
+        fuzzyCompare(first.x + first.width, page.markLeft - Ui.px(8), 1e-6)
+        fuzzyCompare(page.markLeft, Ui.px(320 - 16) - Ui.px(box) * 16 / 32, 1e-6)
+        compare(page.nextRepeater.itemAt(1).clip, false)
+        fakeLyrics.set([], ["Plain"])
+        compare(mark.visible, true)
+        fakeLyrics.pending = true
+        fakeLyrics.changed()
+        compare(mark.visible, false)
+        fakeLyrics.set([], [])
+        compare(mark.visible, false)
+        fakeLyrics.set(tc.sampleLines())
+        verify(router.dispatch("y", false))
+        compare(page.lyricsShown, true)
+        compare(mark.visible, false)
+        verify(router.dispatch("y", false))
+        compare(mark.visible, true)
+        fakeBluez.activate()
+        compare(page.shownVariant, true)
+        compare(mark.visible, false)
+    }
+
+    function test_lyrics_mark_without_next_track() {
+        fakeQueue.fill(1)
+        fakePlayer.select(0)
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        compare(page.nextRepeater.count, 0)
+        compare(page.lyricsMark.visible, true)
+    }
+
+    function test_lyrics_mark_landscape() {
+        tc.setWindow(960, 640)
+        fakeLyrics.set(tc.sampleLines())
+        const page = open()
+        const mark = page.lyricsMark
+        fuzzyCompare(mark.x + mark.width * 24 / 32, Ui.px(480 - 16), 1e-6)
+        fuzzyCompare(mark.y + mark.height * 30 / 32, Ui.px(Ui.npNextBaselineLandscape), 1e-6)
+    }
+
     function test_touch_art_does_nothing() {
         const page = open()
         tc.tapAt(page.artItem)

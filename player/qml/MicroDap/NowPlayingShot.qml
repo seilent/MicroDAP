@@ -6,9 +6,11 @@ Item {
 
     property string fixture: "browse"
     readonly property bool lyricsFixture: root.fixture.startsWith("lyrics") || root.fixture.startsWith("lyricslide")
+    readonly property bool markFixture: root.fixture.startsWith("mark")
     readonly property var slideParts: root.fixture.startsWith("lyricslide-") ? root.fixture.split("-") : []
     readonly property string lyricsKind: root.slideParts.length === 3 ? root.slideParts[1]
-        : root.fixture.startsWith("lyrics-") ? root.fixture.substring(7) : ""
+        : root.fixture.startsWith("lyrics-") ? root.fixture.substring(7)
+        : root.fixture === "mark-pending" ? "pending" : ""
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
 
     Rectangle {
@@ -28,13 +30,14 @@ Item {
     QtObject {
         id: sampleQueue
 
-        readonly property var rows: [
+        readonly property var all: [
             { id: 1, title: "This Could Be Our Day", artist: "Addison Road", album: "Addison Road", artPath: "", durationMs: 233000 },
-            { id: 2, title: "All That Matters", artist: "Addison Road", album: "Addison Road", artPath: "", durationMs: 221000 },
+            { id: 2, title: root.fixture === "mark-longnext" ? "All That Matters When The Lights Go Down Over The City" : "All That Matters", artist: "Addison Road", album: "Addison Road", artPath: "", durationMs: 221000 },
             { id: 3, title: "Sticking With You", artist: "Addison Road", album: "Addison Road", artPath: "", durationMs: 198000 },
             { id: 4, title: "Hope Now", artist: "Addison Road", album: "Addison Road", artPath: "", durationMs: 245000 },
             { id: 5, title: "Casimir Pulaski Day", artist: "Sufjan Stevens", album: "Illinois", artPath: "", durationMs: 356000 }
         ]
+        readonly property var rows: root.fixture === "mark-nonext" ? sampleQueue.all.slice(0, 1) : sampleQueue.all
         readonly property int count: sampleQueue.rows.length
         readonly property int index: 0
         readonly property bool shuffle: false
@@ -115,7 +118,7 @@ Item {
         player: samplePlayer
         bluez: root.contextBluez
         status: sampleStatus
-        lyrics: root.lyricsFixture ? sampleLyrics : null
+        lyrics: root.lyricsFixture || root.markFixture ? sampleLyrics : null
 
         Component.onCompleted: {
             screen.completeAll()

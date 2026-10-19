@@ -469,7 +469,7 @@ TestCase {
 
     function test_glyph_names() {
         const names = ["back", "play", "pause", "next", "previous", "shuffle", "repeat", "repeatOne",
-                       "heart", "bluetooth", "battery", "plus", "minus", "search", "power"]
+                       "heart", "bluetooth", "battery", "plus", "minus", "search", "power", "mic"]
         for (const n of names) {
             glyph.name = n
             verify(glyph.known, n)

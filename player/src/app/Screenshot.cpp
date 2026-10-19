@@ -235,6 +235,10 @@ const QStringList &states()
         QStringLiteral("lyrics-none"),
         QStringLiteral("lyrics-plain"),
         QStringLiteral("lyrics-pending"),
+        QStringLiteral("mark"),
+        QStringLiteral("mark-longnext"),
+        QStringLiteral("mark-nonext"),
+        QStringLiteral("mark-pending"),
     };
     return names;
 }

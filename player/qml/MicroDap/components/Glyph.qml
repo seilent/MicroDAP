@@ -27,6 +27,7 @@ Item {
             strokeColor: root.filled ? "transparent" : root.color
             strokeWidth: root.strokeWidth
             fillColor: root.filled ? root.color : "transparent"
+            fillRule: ShapePath.WindingFill
             capStyle: ShapePath.FlatCap
             joinStyle: ShapePath.MiterJoin
 
