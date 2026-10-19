@@ -121,7 +121,7 @@ Player::Player(Library *library, QObject *parent)
         if (m_audioSinkEnv.isNull() && qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
             m_audioSinkEnv = QLatin1String("");
         m_exclusiveEnv = qEnvironmentVariable("MICRODAP_EXCLUSIVE_SINK");
-        configure(OutputChain::Pw);
+        configure(OutputChain::Pw, false);
         m_bus = gst_element_get_bus(m_pipeline);
         GPollFD fd;
         gst_bus_get_pollfd(m_bus, &fd);
@@ -337,7 +337,7 @@ void Player::bindBitPerfect(GstElement *sink)
     gst_object_unref(pulse);
 }
 
-bool Player::configure(OutputChain chain)
+bool Player::configure(OutputChain chain, bool dsd)
 {
     const bool exclusive = chain == OutputChain::Ex && m_policy;
     const QString card = exclusive ? m_policy->exclusiveCard() : QString();
@@ -345,7 +345,7 @@ bool Player::configure(OutputChain chain)
     const QString description = sinkDescription(chain, m_audioSinkEnv, m_exclusiveEnv,
                                                 exclusive ? m_policy->exclusiveSink() : QString(), card);
     if (m_configChain != OutputChain::None && chain == m_configChain && description == m_configSink
-        && card == m_configCard && rate == m_configRate)
+        && card == m_configCard && rate == m_configRate && dsd == m_configDsd)
         return true;
     GstElement *sink = parseBin(description, "audio sink");
     GstElement *filter = nullptr;
@@ -360,17 +360,19 @@ bool Player::configure(OutputChain chain)
         m_configSink.clear();
         m_configCard.clear();
         m_configRate = 0;
+        m_configDsd = false;
         return false;
     }
     m_configChain = chain;
     m_configSink = description;
     m_configCard = card;
     m_configRate = rate;
+    m_configDsd = dsd;
     if (chain == OutputChain::Pw)
         filter = pwFilter(rate);
     if (chain == OutputChain::Bp && sink)
         bindBitPerfect(sink);
-    m_deck = std::make_unique<Deck>(chain);
+    m_deck = std::make_unique<Deck>(chain, dsd);
     m_tail = std::make_unique<Tail>(filter, sink);
     m_sink = sink;
     m_filter = filter;
@@ -382,6 +384,7 @@ bool Player::configure(OutputChain chain)
         m_configSink.clear();
         m_configCard.clear();
         m_configRate = 0;
+        m_configDsd = false;
         return false;
     }
     gst_bin_add_many(GST_BIN(m_pipeline), m_deck->element(), m_tail->element(), nullptr);
@@ -413,6 +416,17 @@ Player::OutputChain Player::builtChain() const
 bool Player::parked() const
 {
     return m_parked;
+}
+
+bool Player::dsd() const
+{
+    return m_dsd;
+}
+
+bool Player::isDsd(const QString &path)
+{
+    return path.endsWith(QLatin1String(".dsf"), Qt::CaseInsensitive)
+           || path.endsWith(QLatin1String(".dff"), Qt::CaseInsensitive);
 }
 
 std::optional<Player::PendingBuild> Player::pendingBuild() const
@@ -554,7 +568,9 @@ void Player::resumeFrom()
 {
     if (!m_pipeline || m_status != Paused)
         return;
-    const OutputChain wanted = m_policy ? m_policy->chainFor(GST_STATE_PLAYING) : OutputChain::Pw;
+    OutputChain wanted = m_policy ? m_policy->chainFor(GST_STATE_PLAYING) : OutputChain::Pw;
+    if (wanted == OutputChain::Bp && m_dsd)
+        wanted = OutputChain::Pw;
     if (!m_parked && !m_pending && m_builtChain == wanted) {
         resumeNow();
         return;
@@ -649,6 +665,11 @@ QString Player::nextPath()
     if (next < 0 || next >= chain.entries.size())
         return {};
     const QString path = chain.entries.at(next).path;
+    if (chain.last >= 0 && chain.last < chain.entries.size()
+        && isDsd(path) != isDsd(chain.entries.at(chain.last).path)) {
+        chain.held = true;
+        return {};
+    }
     chain.last = next;
     chain.pending.append(next);
     return path;
@@ -765,14 +786,17 @@ void Player::setNull()
             gst_message_unref(message);
     }
     m_builtChain = OutputChain::None;
+    m_dsd = false;
     m_parked = false;
     setFormats({}, {});
     QMutexLocker lock(&m_chainMutex);
     m_chain.pending.clear();
     m_chain.stale = false;
+    m_chain.held = false;
     m_prerolled = false;
     m_pendingSeek = -1;
     m_playAfterSeek = false;
+    m_startHeld = false;
 }
 
 void Player::startAt(int index, GstState target, qint64 positionMs, bool sameListen)
@@ -820,7 +844,10 @@ void Player::hold(int index, const PendingBuild &pending)
 void Player::build(int index, const PendingBuild &pending, OutputChain chain, bool guard)
 {
     setNull();
-    if (!configure(chain)) {
+    const bool dsd = isDsd(pending.entry.path);
+    if (chain == OutputChain::Bp && dsd)
+        chain = OutputChain::Pw;
+    if (!configure(chain, dsd)) {
         if (m_deck && !m_deck->element()) {
             deckFailed(index, pending);
             return;
@@ -832,12 +859,13 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
             return;
         }
         chain = OutputChain::Pw;
-        if (!configure(chain)) {
+        if (!configure(chain, dsd)) {
             deckFailed(index, pending);
             return;
         }
     }
     m_builtChain = chain;
+    m_dsd = dsd;
     m_sameListen = pending.sameListen && m_listenStarted;
     m_listenCounted = m_historyCounted;
     m_listenStarted = m_sameListen;
@@ -1227,6 +1255,16 @@ void Player::handleStreamStart()
 
 void Player::handleEos()
 {
+    bool held = false;
+    {
+        QMutexLocker lock(&m_chainMutex);
+        held = std::exchange(m_chain.held, false);
+    }
+    const int following = held ? m_queue->nextIndex(false) : -1;
+    if (following >= 0) {
+        startAt(following, m_status == Playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
+        return;
+    }
     setNull();
     setStatus(Stopped);
     setPosition(0);
@@ -1273,6 +1311,8 @@ void Player::handleError(GstMessage *message)
     qWarning() << "microdap player:" << text << (debug ? debug : "");
     g_clear_error(&err);
     g_free(debug);
+    if (text == QLatin1StringView(Deck::dsdRefused))
+        emit notice(text);
     skipBroken(text);
 }
 
@@ -1322,13 +1362,21 @@ void Player::pollBus()
             handleEos();
             break;
         case GST_MESSAGE_STREAM_START:
-            if (fromPipeline)
+            if (!fromPipeline)
+                break;
+            if (m_deck && !m_deck->rateAccepted())
+                m_startHeld = true;
+            else
                 handleStreamStart();
             break;
         case GST_MESSAGE_ELEMENT:
             if (m_deck && GST_MESSAGE_SRC(message) == GST_OBJECT_CAST(m_deck->element())
                 && gst_message_has_name(message, Deck::switched))
                 m_deck->reap();
+            if (m_startHeld && gst_message_has_name(message, Deck::dsdAccepted)) {
+                m_startHeld = false;
+                handleStreamStart();
+            }
             break;
         case GST_MESSAGE_STATE_CHANGED:
             if (fromPipeline) {

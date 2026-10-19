@@ -382,6 +382,11 @@ QString OutputMode::bitPerfectSink() const
     return m_card.sink.isEmpty() ? m_usbSink : m_card.sink;
 }
 
+Player::OutputChain OutputMode::routed(Player::OutputChain chain) const
+{
+    return chain == Player::OutputChain::Bp && m_ports.player->dsd() ? Player::OutputChain::Pw : chain;
+}
+
 Player::OutputChain OutputMode::bitPerfectChain() const
 {
     if (!bitPerfectSink().isEmpty()) {
@@ -1315,17 +1320,17 @@ void OutputMode::reconcile()
         if (m_state == State::ExHeld)
             return;
         if (playing) {
-            if (built != chainFor(GST_STATE_PLAYING))
+            if (built != routed(chainFor(GST_STATE_PLAYING)))
                 driveRebuild(position, GST_STATE_PLAYING);
         } else if (blocked()) {
-            if (parked || built != bitPerfectChain())
+            if (parked || built != routed(bitPerfectChain()))
                 driveRebuild(position, GST_STATE_PAUSED);
         } else if (!parked) {
             drivePark(position);
         }
         return;
     }
-    const Player::OutputChain chain = chainFor(GST_STATE_PLAYING);
+    const Player::OutputChain chain = routed(chainFor(GST_STATE_PLAYING));
     if (parked || built != chain || (chain == Player::OutputChain::Pw && fixedRate() != m_builtRate))
         driveRebuild(position, playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
 }
@@ -1407,11 +1412,13 @@ QString OutputMode::computeStatus() const
         return word;
     const bool ex = m_level == exclusiveLevel;
     const bool held = m_state == State::ExHeld;
-    Player::OutputChain wanted = bitPerfectChain();
+    Player::OutputChain wanted = routed(bitPerfectChain());
     if (ex && (held || m_state == State::ExAcquiring))
         wanted = Player::OutputChain::Ex;
     if (m_ports.player->builtChain() != wanted || m_r.running)
         return suffixed(QStringLiteral("pending"));
+    if (m_ports.player->dsd())
+        return suffixed(QStringLiteral("converted"));
     if (!held && m_volumeBlock)
         return suffixed(QStringLiteral("volume"));
     const QVariantMap source = m_ports.player->sourceFormat();

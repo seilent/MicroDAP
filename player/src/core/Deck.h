@@ -8,6 +8,7 @@
 
 #include <gst/gst.h>
 
+#include <atomic>
 #include <functional>
 
 namespace microdap {
@@ -17,12 +18,15 @@ class Deck
 public:
     using Next = std::function<QString()>;
 
-    explicit Deck(PlayerPort::OutputChain chain);
+    Deck(PlayerPort::OutputChain chain, bool dsd);
     ~Deck();
     Deck(const Deck &) = delete;
     Deck &operator=(const Deck &) = delete;
 
     static bool available();
+    static int dsdPcmRateFor(int decodedRate);
+    static constexpr const char *dsdRefused = "dsd128 and up not supported";
+    static constexpr const char *dsdAccepted = "microdap-dsd-accepted";
     static constexpr const char *switched = "microdap-deck-switched";
 
     void setNext(Next next);
@@ -34,6 +38,7 @@ public:
     GstElement *volume() const;
     GstElement *cueProbe() const;
     GstPad *decodedPad() const;
+    bool rateAccepted() const;
 
 private:
     struct Item {
@@ -46,12 +51,19 @@ private:
     static void padAdded(GstElement *decoder, GstPad *pad, gpointer data);
     static void drained(GstElement *decoder, gpointer data);
     static void activePad(GObject *join, GParamSpec *pspec, gpointer data);
+    static GstPadProbeReturn capsProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
+    void accept();
 
     GstElement *m_bin = nullptr;
     GstElement *m_join = nullptr;
     GstElement *m_entry = nullptr;
     GstElement *m_volume = nullptr;
     GstElement *m_cueProbe = nullptr;
+    GstElement *m_dsdRate = nullptr;
+    bool m_pw = false;
+    bool m_dsd = false;
+    enum class Rate { Unknown, Accepted, Refused };
+    std::atomic<Rate> m_rate{Rate::Unknown};
     QMutex m_lock;
     QList<Item> m_items;
     bool m_open = false;

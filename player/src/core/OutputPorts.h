@@ -96,6 +96,7 @@ public:
     virtual QVariantMap sinkFormat() const = 0;
     virtual OutputChain builtChain() const = 0;
     virtual bool parked() const = 0;
+    virtual bool dsd() const = 0;
 };
 
 class DacEqPort

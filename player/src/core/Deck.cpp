@@ -1,5 +1,6 @@
 #include "Deck.h"
 
+#include <QByteArray>
 #include <QDebug>
 #include <QFile>
 
@@ -9,10 +10,18 @@ namespace microdap {
 
 namespace {
 
-constexpr const char *pwDeck = "concat name=join ! audioconvert name=entry "
-                               "! capsfilter caps=audio/x-raw,format=F32LE ! volume name=volume ! identity name=cueprobe";
-constexpr const char *plainDeck = "concat name=join ! identity name=cueprobe";
+constexpr const char *pcmJoin = "concat name=join ! ";
+constexpr const char *dsdJoin = "concat name=join ! dsdconvert name=entry "
+                                "! capsfilter caps=audio/x-dsd,format=DSDU8,layout=interleaved,reversed-bytes=false "
+                                "! avdec_dsd_msbf ! audioresample name=resample ! capsfilter name=dsdrate ! ";
+constexpr const char *pwStage = "audioconvert name=convert ! capsfilter caps=audio/x-raw,format=F32LE "
+                                "! volume name=volume ! ";
+constexpr const char *probeStage = "identity name=cueprobe";
 constexpr const char *pcmCaps = "audio/x-raw(ANY)";
+constexpr const char *dsdCaps = "audio/x-raw(ANY);audio/x-dsd";
+constexpr int dsd64DecodedRate = 352800;
+constexpr int dsd64PcmRate = 88200;
+constexpr int dsdPcmRate = 176400;
 
 void release(GstElement *bin)
 {
@@ -35,11 +44,15 @@ GstElement *child(GstElement *bin, const char *name)
 
 }
 
-Deck::Deck(PlayerPort::OutputChain chain)
+Deck::Deck(PlayerPort::OutputChain chain, bool dsd)
 {
     const bool pw = chain == PlayerPort::OutputChain::Pw;
+    QByteArray description = dsd ? dsdJoin : pcmJoin;
+    if (pw)
+        description += pwStage;
+    description += probeStage;
     GError *err = nullptr;
-    GstElement *bin = gst_parse_bin_from_description(pw ? pwDeck : plainDeck, FALSE, &err);
+    GstElement *bin = gst_parse_bin_from_description(description.constData(), FALSE, &err);
     if (!bin) {
         qWarning() << "microdap player: deck" << (err ? err->message : "failed");
         g_clear_error(&err);
@@ -50,8 +63,19 @@ Deck::Deck(PlayerPort::OutputChain chain)
     gst_object_set_name(GST_OBJECT(m_bin), "deck");
     m_join = child(m_bin, "join");
     m_cueProbe = child(m_bin, "cueprobe");
-    m_entry = pw ? child(m_bin, "entry") : m_cueProbe;
+    m_entry = dsd ? child(m_bin, "entry") : pw ? child(m_bin, "convert") : m_cueProbe;
     m_volume = pw ? child(m_bin, "volume") : nullptr;
+    m_pw = pw;
+    m_dsd = dsd;
+    if (dsd) {
+        m_dsdRate = child(m_bin, "dsdrate");
+        GstPad *sink = gst_element_get_static_pad(child(m_bin, "resample"), "sink");
+        gst_pad_add_probe(sink,
+                          static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_BUFFER
+                                                       | GST_PAD_PROBE_TYPE_BUFFER_LIST),
+                          &Deck::capsProbe, this, nullptr);
+        gst_object_unref(sink);
+    }
     GstPad *src = gst_element_get_static_pad(m_cueProbe, "src");
     gst_element_add_pad(m_bin, gst_ghost_pad_new("src", src));
     gst_object_unref(src);
@@ -146,7 +170,7 @@ bool Deck::append(const QString &path)
         return false;
     }
     gst_object_ref_sink(decoder);
-    GstCaps *caps = gst_caps_from_string(pcmCaps);
+    GstCaps *caps = gst_caps_from_string(m_dsd ? dsdCaps : pcmCaps);
     g_object_set(decoder, "uri", uri, "caps", caps, "async-handling", TRUE, nullptr);
     gst_caps_unref(caps);
     g_free(uri);
@@ -187,6 +211,50 @@ void Deck::activePad(GObject *, GParamSpec *, gpointer data)
                              gst_message_new_element(GST_OBJECT(self->m_bin), gst_structure_new_empty(switched)));
 }
 
+int Deck::dsdPcmRateFor(int decodedRate)
+{
+    return decodedRate <= dsd64DecodedRate ? dsd64PcmRate : dsdPcmRate;
+}
+
+void Deck::accept()
+{
+    m_rate = Rate::Accepted;
+    gst_element_post_message(m_bin, gst_message_new_element(GST_OBJECT(m_bin), gst_structure_new_empty(dsdAccepted)));
+}
+
+GstPadProbeReturn Deck::capsProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    auto *self = static_cast<Deck *>(data);
+    if (GST_PAD_PROBE_INFO_TYPE(info) & (GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_BUFFER_LIST)) {
+        if (self->m_rate == Rate::Unknown)
+            self->accept();
+        return GST_PAD_PROBE_OK;
+    }
+    GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+    if (GST_EVENT_TYPE(event) == GST_EVENT_STREAM_START)
+        self->m_rate = Rate::Unknown;
+    if (GST_EVENT_TYPE(event) != GST_EVENT_CAPS)
+        return GST_PAD_PROBE_OK;
+    GstCaps *caps = nullptr;
+    gst_event_parse_caps(event, &caps);
+    gint rate = 0;
+    if (!caps || gst_caps_get_size(caps) == 0
+        || !gst_structure_get_int(gst_caps_get_structure(caps, 0), "rate", &rate))
+        return GST_PAD_PROBE_OK;
+    if (self->m_pw && rate > dsd64DecodedRate) {
+        self->m_rate = Rate::Refused;
+        GError *err = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_FORMAT, dsdRefused);
+        gst_element_post_message(self->m_bin, gst_message_new_error(GST_OBJECT(self->m_bin), err, nullptr));
+        g_error_free(err);
+        return GST_PAD_PROBE_OK;
+    }
+    GstCaps *filter = gst_caps_new_simple("audio/x-raw", "rate", G_TYPE_INT, dsdPcmRateFor(rate), nullptr);
+    g_object_set(self->m_dsdRate, "caps", filter, nullptr);
+    gst_caps_unref(filter);
+    self->accept();
+    return GST_PAD_PROBE_OK;
+}
+
 GstElement *Deck::element() const
 {
     return m_bin;
@@ -205,6 +273,11 @@ GstElement *Deck::cueProbe() const
 GstPad *Deck::decodedPad() const
 {
     return m_entry ? gst_element_get_static_pad(m_entry, "sink") : nullptr;
+}
+
+bool Deck::rateAccepted() const
+{
+    return !m_pw || !m_dsdRate || m_rate == Rate::Accepted;
 }
 
 void Deck::padAdded(GstElement *, GstPad *pad, gpointer data)

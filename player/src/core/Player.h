@@ -59,6 +59,7 @@ public:
                                    const QString &exclusiveEnv, const QString &policyExclusive,
                                    const QString &cardId = {});
     static QString bitPerfectProperties(const QString &target, int rate);
+    static bool isDsd(const QString &path);
 
     explicit Player(Library *library = nullptr, QObject *parent = nullptr);
     ~Player() override;
@@ -85,6 +86,7 @@ public:
     void setPolicy(OutputPolicy *policy);
     OutputChain builtChain() const override;
     bool parked() const override;
+    bool dsd() const override;
     std::optional<PendingBuild> pendingBuild() const;
     QVariantMap sourceFormat() const override;
     QVariantMap sinkFormat() const override;
@@ -125,6 +127,7 @@ signals:
     void trackStarted(int index);
     void endOfStream();
     void error(const QString &message);
+    void notice(const QString &text);
     void added(int count);
     void localPlayRequested();
 
@@ -139,6 +142,7 @@ private:
         int last = -1;
         QList<int> pending;
         bool stale = false;
+        bool held = false;
     };
 
     struct BitPerfectBinding
@@ -151,7 +155,7 @@ private:
     static GstPadProbeReturn bitPerfectProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static void setStreamProperties(GstElement *element, const QString &text);
 
-    bool configure(OutputChain chain);
+    bool configure(OutputChain chain, bool dsd);
     GstElement *pwFilter(int rate);
     void bindBitPerfect(GstElement *sink);
     void build(int index, const PendingBuild &pending, OutputChain chain, bool guard);
@@ -210,10 +214,13 @@ private:
     QString m_configSink;
     QString m_configCard;
     int m_configRate = 0;
+    bool m_configDsd = false;
     OutputChain m_builtChain = OutputChain::None;
     bool m_parked = false;
+    bool m_dsd = false;
     bool m_outputErrorSent = false;
     bool m_playAfterSeek = false;
+    bool m_startHeld = false;
     bool m_sameListen = false;
     bool m_listenCounted = false;
     bool m_listenStarted = false;

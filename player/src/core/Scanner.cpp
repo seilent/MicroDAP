@@ -1,6 +1,9 @@
 #include "Scanner.h"
 
+#include <taglib/apeproperties.h>
 #include <taglib/audioproperties.h>
+#include <taglib/dsdiffproperties.h>
+#include <taglib/dsfproperties.h>
 #include <taglib/fileref.h>
 #include <taglib/flacproperties.h>
 #include <taglib/mp4properties.h>
@@ -45,8 +48,9 @@ struct Picture
 const QSet<QString> &extensions()
 {
     static const QSet<QString> set{
-        QStringLiteral("flac"), QStringLiteral("mp3"),  QStringLiteral("m4a"),
-        QStringLiteral("ogg"),  QStringLiteral("opus"), QStringLiteral("wav"),
+        QStringLiteral("flac"), QStringLiteral("mp3"), QStringLiteral("m4a"),  QStringLiteral("mp4"),
+        QStringLiteral("ogg"),  QStringLiteral("oga"), QStringLiteral("opus"), QStringLiteral("wav"),
+        QStringLiteral("ape"),  QStringLiteral("dsf"), QStringLiteral("dff"),
     };
     return set;
 }
@@ -109,6 +113,12 @@ int bitDepthOf(const TagLib::AudioProperties *audio)
         return mp4->bitsPerSample();
     if (const auto *wav = dynamic_cast<const TagLib::RIFF::WAV::Properties *>(audio))
         return wav->bitsPerSample();
+    if (const auto *ape = dynamic_cast<const TagLib::APE::Properties *>(audio))
+        return ape->bitsPerSample();
+    if (const auto *dsf = dynamic_cast<const TagLib::DSF::Properties *>(audio))
+        return dsf->bitsPerSample();
+    if (const auto *dff = dynamic_cast<const TagLib::DSDIFF::Properties *>(audio))
+        return dff->bitsPerSample();
     return 0;
 }
 

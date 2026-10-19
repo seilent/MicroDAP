@@ -441,6 +441,7 @@ private slots:
     void newerReader();
     void trackTags();
     void trackArtFirst();
+    void newFormats();
 
 private:
     bool scan(int &added, int &updated, int &removed);
@@ -2804,6 +2805,51 @@ void LibraryTest::trackTags()
     QVERIFY(QFileInfo::exists(artA));
     QVERIFY(QFileInfo::exists(artB));
     QVERIFY(!scalar(db, QStringLiteral("SELECT art_path FROM albums WHERE title = 'Tagged'")).isNull());
+}
+
+void LibraryTest::newFormats()
+{
+    for (const char *suffix : {"ape", "APE", "dsf", "dff", "mp4", "oga"})
+        QVERIFY(Scanner::isAudioFile(QStringLiteral("/m/a.") + QLatin1String(suffix)));
+
+    const QString music = m_dir.path() + QStringLiteral("/formats");
+    QVERIFY(copyTree(QStringLiteral(MICRODAP_FIXTURE_FORMATS), music));
+    Library library(m_dir.path() + QStringLiteral("/formats.db"), m_dir.path() + QStringLiteral("/formats-art"));
+    QVERIFY(library.isOpen());
+    QSignalSpy spy(&library, &Library::scanned);
+    library.rescan({music});
+    QVERIFY(spy.wait(scanTimeoutMs));
+    QCOMPARE(spy.takeFirst().at(0).toInt(), 4);
+    const QSqlDatabase db = library.database();
+    const auto row = [&db, &music](const QString &file) {
+        QSqlQuery query(db);
+        query.prepare(QStringLiteral("SELECT t.title, t.artist, a.title, t.track_no, t.sample_rate, t.bit_depth, "
+                                     "t.duration_ms FROM tracks t JOIN albums a ON a.id = t.album_id "
+                                     "WHERE t.path = ?"));
+        query.addBindValue(music + QLatin1Char('/') + file);
+        QStringList values;
+        if (query.exec() && query.next()) {
+            for (int i = 0; i < 6; ++i)
+                values.append(query.value(i).toString());
+            values.append(query.value(6).toLongLong() > 0 ? QStringLiteral("timed") : QStringLiteral("untimed"));
+        }
+        return values;
+    };
+    QCOMPARE(row(QStringLiteral("dsd64.dsf")),
+             (QStringList{QStringLiteral("DSF"), QStringLiteral("Format Band"), QStringLiteral("Formats"),
+                          QStringLiteral("1"), QStringLiteral("2822400"), QStringLiteral("1"),
+                          QStringLiteral("timed")}));
+    QCOMPARE(row(QStringLiteral("dsd64.dff")),
+             (QStringList{QStringLiteral("DFF"), QStringLiteral("Format Band"), QStringLiteral("Formats"),
+                          QStringLiteral("1"), QStringLiteral("2822400"), QStringLiteral("1"),
+                          QStringLiteral("timed")}));
+    const QStringList oga = row(QStringLiteral("vorbis.oga"));
+    QCOMPARE(oga.mid(0, 5), (QStringList{QStringLiteral("OGA"), QStringLiteral("Format Band"),
+                                         QStringLiteral("Formats"), QStringLiteral("1"), QStringLiteral("44100")}));
+    const QStringList mp4 = row(QStringLiteral("aac.mp4"));
+    QCOMPARE(mp4.mid(0, 5), (QStringList{QStringLiteral("MP4"), QStringLiteral("Format Band"),
+                                         QStringLiteral("Formats"), QStringLiteral("1"), QStringLiteral("44100")}));
+    QCOMPARE(mp4.last(), QStringLiteral("timed"));
 }
 
 void LibraryTest::trackArtFirst()

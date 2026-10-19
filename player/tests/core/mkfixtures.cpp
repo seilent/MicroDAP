@@ -1,5 +1,6 @@
 #include <gst/gst.h>
 
+#include <taglib/fileref.h>
 #include <taglib/flacfile.h>
 #include <taglib/flacpicture.h>
 #include <taglib/mpegfile.h>
@@ -8,6 +9,7 @@
 #include <taglib/tstring.h>
 #include <taglib/tstringlist.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -163,6 +165,114 @@ bool writeCover(const fs::path &path)
     return out.good();
 }
 
+constexpr std::uint32_t dsd64Rate = 2822400;
+constexpr std::uint32_t dsfBlock = 4096;
+constexpr std::uint64_t dsdBytesPerChannel = dsd64Rate / 8;
+constexpr char dsdSilence = 0x69;
+
+void put(std::string &out, std::uint64_t value, int bytes, bool big)
+{
+    for (int i = 0; i < bytes; ++i) {
+        const int shift = big ? (bytes - 1 - i) * 8 : i * 8;
+        out.push_back(static_cast<char>((value >> shift) & 0xff));
+    }
+}
+
+bool writeBytes(const fs::path &path, const std::string &bytes)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return out.good();
+}
+
+bool writeDsf(const fs::path &path)
+{
+    const std::uint64_t blocks = (dsdBytesPerChannel + dsfBlock - 1) / dsfBlock;
+    const std::uint64_t data = blocks * dsfBlock * 2;
+    std::string out = "DSD ";
+    put(out, 28, 8, false);
+    put(out, 28 + 52 + 12 + data, 8, false);
+    put(out, 0, 8, false);
+    out += "fmt ";
+    put(out, 52, 8, false);
+    put(out, 1, 4, false);
+    put(out, 0, 4, false);
+    put(out, 2, 4, false);
+    put(out, 2, 4, false);
+    put(out, dsd64Rate, 4, false);
+    put(out, 1, 4, false);
+    put(out, dsdBytesPerChannel * 8, 8, false);
+    put(out, dsfBlock, 4, false);
+    put(out, 0, 4, false);
+    out += "data";
+    put(out, 12 + data, 8, false);
+    out.append(data, dsdSilence);
+    return writeBytes(path, out);
+}
+
+bool writeDff(const fs::path &path)
+{
+    const std::string compression = "not compressed";
+    std::string prop = "SND ";
+    prop += "FS  ";
+    put(prop, 4, 8, true);
+    put(prop, dsd64Rate, 4, true);
+    prop += "CHNL";
+    put(prop, 10, 8, true);
+    put(prop, 2, 2, true);
+    prop += "SLFTSRGT";
+    prop += "CMPR";
+    put(prop, 4 + 1 + compression.size() + 1, 8, true);
+    prop += "DSD ";
+    put(prop, compression.size(), 1, true);
+    prop += compression;
+    prop.push_back('\0');
+    const std::uint64_t data = dsdBytesPerChannel * 2;
+    std::string body = "DSD ";
+    body += "FVER";
+    put(body, 4, 8, true);
+    put(body, 0x01050000, 4, true);
+    body += "PROP";
+    put(body, prop.size(), 8, true);
+    body += prop;
+    body += "DSD ";
+    put(body, data, 8, true);
+    body.append(data, dsdSilence);
+    std::string out = "FRM8";
+    put(out, body.size(), 8, true);
+    out += body;
+    return writeBytes(path, out);
+}
+
+bool tagAny(const fs::path &path, const std::string &title)
+{
+    TagLib::FileRef file(path.c_str());
+    if (file.isNull()) {
+        std::fprintf(stderr, "mkfixtures: taglib cannot open %s\n", path.c_str());
+        return false;
+    }
+    TagLib::PropertyMap props;
+    props["TITLE"] = TagLib::StringList(utf8(title));
+    props["ARTIST"] = TagLib::StringList(utf8("Format Band"));
+    props["ALBUM"] = TagLib::StringList(utf8("Formats"));
+    props["TRACKNUMBER"] = TagLib::StringList(TagLib::String(std::to_string(1)));
+    file.setProperties(props);
+    return file.save();
+}
+
+bool writeFormats(const fs::path &root)
+{
+    fs::create_directories(root);
+    const std::string tone = "audiotestsrc num-buffers=" + std::to_string(buffersFor2s)
+                             + " wave=sine freq=440 ! audioconvert ! audioresample ! ";
+    return writeDsf(root / "dsd64.dsf") && tagAny(root / "dsd64.dsf", "DSF")
+           && writeDff(root / "dsd64.dff") && tagAny(root / "dsd64.dff", "DFF")
+           && runPipeline(tone + "vorbisenc ! oggmux ! filesink location=\"" + (root / "vorbis.oga").string() + "\"")
+           && tagAny(root / "vorbis.oga", "OGA")
+           && runPipeline(tone + "avenc_aac ! mp4mux ! filesink location=\"" + (root / "aac.mp4").string() + "\"")
+           && tagAny(root / "aac.mp4", "MP4");
+}
+
 bool writeAlbum(const fs::path &root, const Album &album)
 {
     const fs::path dir = root / album.dir;
@@ -184,7 +294,7 @@ bool writeAlbum(const fs::path &root, const Album &album)
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: mkfixtures OUTDIR\n");
+        std::fprintf(stderr, "usage: mkfixtures OUTDIR [FORMATSDIR]\n");
         return 2;
     }
     const fs::path root = argv[1];
@@ -205,6 +315,8 @@ int main(int argc, char *argv[])
         if (!writeAlbum(root, album))
             return 1;
     }
+    if (argc > 2 && !writeFormats(argv[2]))
+        return 1;
     std::printf("mkfixtures: wrote %s\n", root.c_str());
     return 0;
 }

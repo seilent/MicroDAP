@@ -100,6 +100,7 @@ public:
     QString exclusiveCard() const override;
     QString bitPerfectSink() const override;
     Player::OutputChain bitPerfectChain() const;
+    Player::OutputChain routed(Player::OutputChain chain) const;
     int fixedRate() const override;
     void outputError(int code) override;
 

@@ -1,3 +1,4 @@
+#include "Deck.h"
 #include "FakeBluezModel.h"
 #include "Library.h"
 #include "Player.h"
@@ -14,6 +15,8 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QRandomGenerator>
+#include <QRegularExpression>
+#include <QScopeGuard>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -191,6 +194,10 @@ private slots:
     void gaplessPerChain();
     void gaplessRealTime();
     void cueProbeUntouched();
+    void dsdRoutes();
+    void dsdBoundary();
+    void deckMissing();
+    void dsd128Refused();
 
 private:
     int historyCount() const;
@@ -2569,6 +2576,130 @@ void PlayerTest::cueProbeUntouched()
         QVERIFY(captured.buffers.size() > 20);
         if (chain == Chain::Ex)
             QVERIFY(sunk > 20);
+    }
+}
+
+void PlayerTest::dsdRoutes()
+{
+    QVERIFY(Player::isDsd(QStringLiteral("/m/a.DSF")));
+    QVERIFY(Player::isDsd(QStringLiteral("/m/a.dff")));
+    QVERIFY(!Player::isDsd(QStringLiteral("/m/a.flac")));
+    const QList<std::pair<Chain, Chain>> routes{{Chain::Pw, Chain::Pw}, {Chain::Bp, Chain::Pw}, {Chain::Ex, Chain::Ex}};
+    for (const auto &[asked, built] : routes) {
+        for (const char *file : {"dsd64.dsf", "dsd64.dff"}) {
+            auto player = exclusivePlayer();
+            FakePolicy policy;
+            policy.chain = asked;
+            player->setPolicy(&policy);
+            QueueEntry entry;
+            entry.path = QStringLiteral(MICRODAP_FIXTURE_FORMATS "/") + QLatin1String(file);
+            entry.title = QLatin1String(file);
+            player->restore({entry}, 0, 0);
+            QVERIFY2(prerolled(*player), file);
+            QCOMPARE(player->builtChain(), built);
+            QVERIFY(player->dsd());
+            QCOMPARE(player->sourceFormat().value(QStringLiteral("format")).toString(), QStringLiteral("DSDU8"));
+            QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 88200);
+            player->stop();
+            QVERIFY(!player->dsd());
+        }
+    }
+    QCOMPARE(Deck::dsdPcmRateFor(352800), 88200);
+    QCOMPARE(Deck::dsdPcmRateFor(705600), 176400);
+    QCOMPARE(Deck::dsdPcmRateFor(1411200), 176400);
+}
+
+void PlayerTest::dsdBoundary()
+{
+    QueueEntry dsd;
+    dsd.path = QStringLiteral(MICRODAP_FIXTURE_FORMATS "/dsd64.dff");
+    dsd.title = QStringLiteral("DFF");
+    for (const QList<QueueEntry> &entries : {QList<QueueEntry>{m_tracks.at(0), dsd, dsd},
+                                             QList<QueueEntry>{dsd, m_tracks.at(0)}}) {
+        Player player;
+        FakePolicy policy;
+        player.setPolicy(&policy);
+        QSignalSpy started(&player, &Player::trackStarted);
+        QSignalSpy eos(&player, &Player::endOfStream);
+        QSignalSpy errors(&player, &Player::error);
+        player.play(entries, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+        QCOMPARE(startedIndexes(started).size(), entries.size());
+        QCOMPARE(errors.count(), 0);
+        QCOMPARE(policy.admitted.size(), 2);
+        QCOMPARE(policy.admitted.at(1).entry.path, entries.at(1).path);
+        QCOMPARE(player.status(), Player::Stopped);
+    }
+}
+
+void PlayerTest::deckMissing()
+{
+    GstRegistry *registry = gst_registry_get();
+    GstElementFactory *factory = gst_element_factory_find("dsdconvert");
+    QVERIFY(factory);
+    gst_registry_remove_feature(registry, GST_PLUGIN_FEATURE(factory));
+    const auto restore = qScopeGuard([registry, factory] {
+        gst_registry_add_feature(registry, GST_PLUGIN_FEATURE(factory));
+        gst_object_unref(factory);
+    });
+    QueueEntry dsd;
+    dsd.path = QStringLiteral(MICRODAP_FIXTURE_FORMATS "/dsd64.dff");
+    dsd.title = QStringLiteral("DFF");
+    auto player = syncPlayer();
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy errors(player.get(), &Player::error);
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("microdap player: deck")));
+    player->play({dsd, m_long}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(errors.count(), 1, playTimeoutMs);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+    QCOMPARE(startedIndexes(started), QList<int>({1}));
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QCOMPARE(player->status(), Player::Playing);
+    player->stop();
+}
+
+void PlayerTest::dsd128Refused()
+{
+    QByteArray data;
+    {
+        QFile file(QStringLiteral(MICRODAP_FIXTURE_FORMATS "/dsd64.dff"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        data = file.readAll();
+    }
+    const qsizetype fs = data.indexOf("FS  ");
+    QVERIFY(fs > 0);
+    const quint32 rate = 5644800;
+    for (int i = 0; i < 4; ++i)
+        data[fs + 12 + i] = static_cast<char>((rate >> ((3 - i) * 8)) & 0xff);
+    QueueEntry dsd;
+    dsd.path = m_dir.path() + QStringLiteral("/dsd128.dff");
+    dsd.title = QStringLiteral("DSD128");
+    {
+        QFile file(dsd.path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(file.write(data), data.size());
+    }
+    for (const Chain chain : {Chain::Pw, Chain::Ex}) {
+        auto player = exclusivePlayer(QByteArrayLiteral("fakesink sync=true name=microdap-ex"));
+        FakePolicy policy;
+        policy.chain = chain;
+        player->setPolicy(&policy);
+        QSignalSpy started(player.get(), &Player::trackStarted);
+        QSignalSpy notices(player.get(), &Player::notice);
+        if (chain == Chain::Pw)
+            QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dsd128 and up not supported")));
+        player->play({dsd, m_tracks.at(0)}, 0);
+        if (chain == Chain::Pw) {
+            QTRY_COMPARE_WITH_TIMEOUT(notices.count(), 1, playTimeoutMs);
+            QCOMPARE(notices.first().at(0).toString(), QStringLiteral("dsd128 and up not supported"));
+            QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+            QCOMPARE(startedIndexes(started), QList<int>({1}));
+        } else {
+            QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
+            QCOMPARE(startedIndexes(started), QList<int>({0}));
+            QCOMPARE(notices.count(), 0);
+        }
+        player->stop();
     }
 }
 

@@ -344,6 +344,11 @@ public:
         return isParked;
     }
 
+    bool dsd() const override
+    {
+        return isDsd;
+    }
+
     void play(qint64 id)
     {
         request(id, GST_STATE_PLAYING, 0);
@@ -404,6 +409,7 @@ public:
     std::optional<Player::PendingBuild> pending;
     QVariantMap source;
     QVariantMap sink;
+    bool isDsd = false;
     PlayState status = PlayState::Stopped;
     OutputChain chain = OutputChain::None;
     qint64 position = 0;

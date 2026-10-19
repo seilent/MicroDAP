@@ -780,6 +780,10 @@ Window {
         target: root.player
         ignoreUnknownSignals: true
 
+        function onNotice(text) {
+            overlays.toast.show("", text)
+        }
+
         function onCurrentChanged() {
             root.trackChangedWhileHidden()
         }

@@ -294,6 +294,7 @@ private slots:
     void readyFalseNoAcquire();
     void dapStartAdoptsWritesNothing();
     void entryUnmutesOnce();
+    void bpDsdConverted();
     void replugWritesOwnedStep();
     void rowChangeAdoptsHardwareStep();
     void otherDacAfterUnplugIsEffective();
@@ -1582,6 +1583,19 @@ void OutputModeTest::entryUnmutesOnce()
     QCOMPARE(countOf(rig.dac.calls, QStringLiteral("unmute ")), 1);
     QCOMPARE(rig.mode->levelStatus(), QStringLiteral("on"));
     QCOMPARE(countOf(rig.dac.calls, QStringLiteral("sink volume ")), 0);
+}
+
+void OutputModeTest::bpDsdConverted()
+{
+    Rig rig;
+    QVERIFY(rig.enter(QStringLiteral("bitperfect")));
+    rig.player.play(1);
+    QCOMPARE(rig.player.chain, Chain::Bp);
+    QCOMPARE(rig.mode->levelStatus(), QStringLiteral("on"));
+    rig.player.isDsd = true;
+    rig.player.chain = Chain::Pw;
+    rig.mode->onFormatChanged();
+    QCOMPARE(rig.mode->levelStatus(), QStringLiteral("on (converted)"));
 }
 
 void OutputModeTest::replugWritesOwnedStep()
