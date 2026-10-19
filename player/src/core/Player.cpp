@@ -1,10 +1,10 @@
 #include "Player.h"
 
 #include "BluezModel.h"
+#include "Deck.h"
 #include "Library.h"
 
 #include <QDebug>
-#include <QFile>
 #include <QMutexLocker>
 #include <QRandomGenerator>
 #include <QSocketNotifier>
@@ -20,7 +20,6 @@ namespace {
 constexpr int positionIntervalMs = 250;
 constexpr int phoneHoldMs = 1000;
 constexpr qint64 restartThresholdMs = 3000;
-constexpr guint audioOnlyFlags = 0x2;
 constexpr const char *bitPerfectFilter = "audioconvert ! capsfilter caps=audio/x-raw,format=F32LE";
 
 GstElement *parseBin(const QString &description, const char *what)
@@ -114,23 +113,20 @@ Player::Player(Library *library, QObject *parent)
     , m_library(library)
     , m_queue(new Queue(this))
 {
-    m_playbin = gst_element_factory_make("playbin", "microdap");
-    if (!m_playbin) {
-        qWarning() << "microdap player: playbin not available";
+    if (!Deck::available()) {
+        qWarning() << "microdap player: uridecodebin or concat not available";
     } else {
-        g_object_set(m_playbin, "flags", audioOnlyFlags, nullptr);
+        m_pipeline = gst_pipeline_new("microdap");
         m_audioSinkEnv = qEnvironmentVariable("MICRODAP_AUDIO_SINK");
         if (m_audioSinkEnv.isNull() && qEnvironmentVariableIsSet("MICRODAP_AUDIO_SINK"))
             m_audioSinkEnv = QLatin1String("");
         m_exclusiveEnv = qEnvironmentVariable("MICRODAP_EXCLUSIVE_SINK");
         configure(OutputChain::Pw);
-        m_bus = gst_element_get_bus(m_playbin);
+        m_bus = gst_element_get_bus(m_pipeline);
         GPollFD fd;
         gst_bus_get_pollfd(m_bus, &fd);
         m_busNotifier = new QSocketNotifier(fd.fd, QSocketNotifier::Read, this);
         connect(m_busNotifier, &QSocketNotifier::activated, this, &Player::pollBus);
-        m_aboutToFinishId = g_signal_connect(m_playbin, "about-to-finish",
-                                             G_CALLBACK(&Player::aboutToFinish), this);
     }
 
     m_positionTimer.setInterval(positionIntervalMs);
@@ -159,17 +155,18 @@ Player::~Player()
     delete m_busNotifier;
     m_busNotifier = nullptr;
     m_positionTimer.stop();
-    if (m_playbin) {
-        if (m_aboutToFinishId)
-            g_signal_handler_disconnect(m_playbin, m_aboutToFinishId);
-        gst_element_set_state(m_playbin, GST_STATE_NULL);
-    }
+    if (m_deck)
+        m_deck->close();
+    if (m_pipeline)
+        gst_element_set_state(m_pipeline, GST_STATE_NULL);
     if (m_bus) {
         gst_bus_set_flushing(m_bus, TRUE);
         gst_object_unref(m_bus);
     }
-    if (m_playbin)
-        gst_object_unref(m_playbin);
+    m_tail.reset();
+    m_deck.reset();
+    if (m_pipeline)
+        gst_object_unref(m_pipeline);
 }
 
 Player::Status Player::status() const
@@ -197,10 +194,10 @@ qint64 Player::positionMs() const
 
 qint64 Player::position() const
 {
-    if (m_positionPoll || !m_playbin || m_status != Playing || m_playAfterSeek)
+    if (m_positionPoll || !m_pipeline || m_status != Playing || m_playAfterSeek)
         return m_position;
     gint64 position = 0;
-    if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position) && position >= 0)
+    if (gst_element_query_position(m_pipeline, GST_FORMAT_TIME, &position) && position >= 0)
         return position / GST_MSECOND;
     return m_position;
 }
@@ -238,7 +235,7 @@ Library *Player::library() const
 
 bool Player::isValid() const
 {
-    return m_playbin != nullptr;
+    return m_pipeline != nullptr;
 }
 
 QString Player::sinkDescription(OutputChain chain, const QString &audioSinkEnv,
@@ -369,16 +366,27 @@ bool Player::configure(OutputChain chain)
     m_configSink = description;
     m_configCard = card;
     m_configRate = rate;
-    if (sink || m_sink) {
-        g_object_set(m_playbin, "audio-sink", sink, nullptr);
-        m_sink = sink;
-    }
     if (chain == OutputChain::Pw)
         filter = pwFilter(rate);
     if (chain == OutputChain::Bp && sink)
         bindBitPerfect(sink);
-    g_object_set(m_playbin, "audio-filter", filter, nullptr);
+    m_deck = std::make_unique<Deck>(chain);
+    m_tail = std::make_unique<Tail>(filter, sink);
+    m_sink = sink;
     m_filter = filter;
+    if (!m_deck->element()) {
+        m_tail.reset();
+        m_sink = nullptr;
+        m_filter = nullptr;
+        m_configChain = OutputChain::None;
+        m_configSink.clear();
+        m_configCard.clear();
+        m_configRate = 0;
+        return false;
+    }
+    gst_bin_add_many(GST_BIN(m_pipeline), m_deck->element(), m_tail->element(), nullptr);
+    gst_element_link(m_deck->element(), m_tail->element());
+    m_deck->setNext([this] { return nextPath(); });
     return true;
 }
 
@@ -433,13 +441,8 @@ void Player::setFormats(const QVariantMap &source, const QVariantMap &sink)
 
 void Player::readFormats()
 {
-    GstPad *audio = nullptr;
-    if (g_signal_lookup("get-audio-pad", G_OBJECT_TYPE(m_playbin))) {
-        gint current = 0;
-        g_object_get(m_playbin, "current-audio", &current, nullptr);
-        g_signal_emit_by_name(m_playbin, "get-audio-pad", qMax(0, current), &audio);
-    }
-    setFormats(padFormat(audio), padFormat(m_sink ? gst_element_get_static_pad(m_sink, "sink") : nullptr));
+    setFormats(padFormat(m_deck ? m_deck->decodedPad() : nullptr),
+               padFormat(m_sink ? gst_element_get_static_pad(m_sink, "sink") : nullptr));
 }
 
 BluezModel *Player::bluez() const
@@ -549,7 +552,7 @@ void Player::cancelHold()
 
 void Player::resumeFrom()
 {
-    if (!m_playbin || m_status != Paused)
+    if (!m_pipeline || m_status != Paused)
         return;
     const OutputChain wanted = m_policy ? m_policy->chainFor(GST_STATE_PLAYING) : OutputChain::Pw;
     if (!m_parked && !m_pending && m_builtChain == wanted) {
@@ -573,7 +576,7 @@ void Player::rebuildAt(qint64 positionMs, GstState state)
 void Player::park(qint64 positionMs)
 {
     const int index = m_queue->currentIndex();
-    if (!m_playbin || m_status == Stopped || index < 0 || index >= m_queue->count())
+    if (!m_pipeline || m_status == Stopped || index < 0 || index >= m_queue->count())
         return;
     cancelHold();
     m_pending.reset();
@@ -589,7 +592,7 @@ void Player::buildPending(OutputChain chain)
         return;
     PendingBuild pending = *std::exchange(m_pending, std::nullopt);
     const int index = m_queue->currentIndex();
-    if (!m_playbin || index < 0 || index >= m_queue->count()) {
+    if (!m_pipeline || index < 0 || index >= m_queue->count()) {
         stop();
         return;
     }
@@ -604,10 +607,10 @@ void Player::buildPending(OutputChain chain)
 
 void Player::resumeNow()
 {
-    if (!m_playbin || m_status != Paused)
+    if (!m_pipeline || m_status != Paused)
         return;
     m_resumeOnReady = false;
-    gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+    gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
     setStatus(Playing);
     if (!m_historyCounted)
         addHistoryNow();
@@ -637,26 +640,18 @@ void Player::onTransportActiveChanged()
     setTransportActive(m_bluez && m_bluez->transportActive());
 }
 
-void Player::aboutToFinish(GstElement *element, gpointer data)
+QString Player::nextPath()
 {
-    auto *self = static_cast<Player *>(data);
-    QString path;
-    {
-        QMutexLocker lock(&self->m_chainMutex);
-        Chain &chain = self->m_chain;
-        const int next = Queue::nextOf(chain.last, static_cast<int>(chain.entries.size()), chain.order,
-                                       chain.slot, chain.shuffle, chain.repeat, false);
-        if (next < 0 || next >= chain.entries.size())
-            return;
-        path = chain.entries.at(next).path;
-        chain.last = next;
-        chain.pending.append(next);
-    }
-    gchar *uri = gst_filename_to_uri(QFile::encodeName(path).constData(), nullptr);
-    if (!uri)
-        return;
-    g_object_set(element, "uri", uri, nullptr);
-    g_free(uri);
+    QMutexLocker lock(&m_chainMutex);
+    Chain &chain = m_chain;
+    const int next = Queue::nextOf(chain.last, static_cast<int>(chain.entries.size()), chain.order, chain.slot,
+                                   chain.shuffle, chain.repeat, false);
+    if (next < 0 || next >= chain.entries.size())
+        return {};
+    const QString path = chain.entries.at(next).path;
+    chain.last = next;
+    chain.pending.append(next);
+    return path;
 }
 
 void Player::syncChain()
@@ -758,22 +753,13 @@ void Player::onRowsMoved(const QModelIndex &, int start, int end, const QModelIn
     syncChain();
 }
 
-void Player::setUri(const QString &path)
-{
-    gchar *uri = gst_filename_to_uri(QFile::encodeName(path).constData(), nullptr);
-    if (!uri) {
-        qWarning() << "microdap player: bad path" << path;
-        return;
-    }
-    g_object_set(m_playbin, "uri", uri, nullptr);
-    g_free(uri);
-}
-
 void Player::setNull()
 {
     m_positionTimer.stop();
-    if (m_playbin)
-        gst_element_set_state(m_playbin, GST_STATE_NULL);
+    if (m_deck)
+        m_deck->close();
+    if (m_pipeline)
+        gst_element_set_state(m_pipeline, GST_STATE_NULL);
     if (m_bus) {
         while (GstMessage *message = gst_bus_pop(m_bus))
             gst_message_unref(message);
@@ -791,7 +777,7 @@ void Player::setNull()
 
 void Player::startAt(int index, GstState target, qint64 positionMs, bool sameListen)
 {
-    if (!m_playbin || index < 0 || index >= m_queue->count()) {
+    if (!m_pipeline || index < 0 || index >= m_queue->count()) {
         stop();
         return;
     }
@@ -835,6 +821,10 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
 {
     setNull();
     if (!configure(chain)) {
+        if (m_deck && !m_deck->element()) {
+            deckFailed(index, pending);
+            return;
+        }
         if (chain == OutputChain::Ex && m_policy) {
             hold(index, pending);
             qWarning() << "microdap player: output error" << int(GST_RESOURCE_ERROR_FAILED) << "exclusive sink";
@@ -842,7 +832,10 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
             return;
         }
         chain = OutputChain::Pw;
-        configure(chain);
+        if (!configure(chain)) {
+            deckFailed(index, pending);
+            return;
+        }
     }
     m_builtChain = chain;
     m_sameListen = pending.sameListen && m_listenStarted;
@@ -860,15 +853,29 @@ void Player::build(int index, const PendingBuild &pending, OutputChain chain, bo
         target = GST_STATE_PAUSED;
     m_historyCounted = true;
     setPosition(0);
-    setUri(pending.entry.path);
+    m_deck->start(pending.entry.path);
     m_playAfterSeek = target == GST_STATE_PLAYING && pending.positionMs > 0;
-    gst_element_set_state(m_playbin, m_playAfterSeek ? GST_STATE_PAUSED : target);
+    gst_element_set_state(m_pipeline, m_playAfterSeek ? GST_STATE_PAUSED : target);
     setStatus(target == GST_STATE_PLAYING ? Playing : Paused);
     emit currentChanged();
     if (pending.positionMs > 0) {
         m_pendingSeek = pending.positionMs;
         setPosition(pending.positionMs);
     }
+}
+
+void Player::deckFailed(int index, const PendingBuild &pending)
+{
+    m_queue->setCurrentIndex(index);
+    setStatus(pending.target == GST_STATE_PLAYING ? Playing : Paused);
+    emit currentChanged();
+    QMetaObject::invokeMethod(
+        this,
+        [this, index] {
+            if (m_deck && !m_deck->element() && m_queue->currentIndex() == index)
+                skipBroken(QStringLiteral("playback error"));
+        },
+        Qt::QueuedConnection);
 }
 
 void Player::play(const QList<QueueEntry> &entries, int start)
@@ -1005,7 +1012,7 @@ void Player::playPause()
 
 void Player::resume()
 {
-    if (!m_playbin)
+    if (!m_pipeline)
         return;
     switch (m_status) {
     case Playing:
@@ -1028,11 +1035,11 @@ void Player::pause()
         park(m_pending->positionMs);
         return;
     }
-    if (!m_playbin || m_status != Playing)
+    if (!m_pipeline || m_status != Playing)
         return;
     pollPosition();
     m_playAfterSeek = false;
-    gst_element_set_state(m_playbin, GST_STATE_PAUSED);
+    gst_element_set_state(m_pipeline, GST_STATE_PAUSED);
     setStatus(Paused);
 }
 
@@ -1068,7 +1075,7 @@ void Player::previous()
 bool Player::doSeek(qint64 ms)
 {
     const auto flags = static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT);
-    const bool ok = gst_element_seek_simple(m_playbin, GST_FORMAT_TIME, flags, ms * GST_MSECOND);
+    const bool ok = gst_element_seek_simple(m_pipeline, GST_FORMAT_TIME, flags, ms * GST_MSECOND);
     if (!ok)
         qWarning() << "microdap player: seek failed" << ms;
     setPosition(ms);
@@ -1077,7 +1084,7 @@ bool Player::doSeek(qint64 ms)
 
 void Player::seek(qint64 ms)
 {
-    if (!m_playbin || m_status == Stopped)
+    if (!m_pipeline || m_status == Stopped)
         return;
     const qint64 target = qMax<qint64>(0, ms);
     if (m_pending) {
@@ -1160,10 +1167,10 @@ void Player::setPosition(qint64 ms)
 
 void Player::updateDuration()
 {
-    if (!m_playbin)
+    if (!m_pipeline)
         return;
     gint64 duration = 0;
-    if (!gst_element_query_duration(m_playbin, GST_FORMAT_TIME, &duration) || duration < 0)
+    if (!gst_element_query_duration(m_pipeline, GST_FORMAT_TIME, &duration) || duration < 0)
         return;
     const qint64 ms = duration / GST_MSECOND;
     if (ms == m_duration)
@@ -1174,10 +1181,10 @@ void Player::updateDuration()
 
 void Player::pollPosition()
 {
-    if (!m_playbin || m_status != Playing || m_playAfterSeek)
+    if (!m_pipeline || m_status != Playing || m_playAfterSeek)
         return;
     gint64 position = 0;
-    if (gst_element_query_position(m_playbin, GST_FORMAT_TIME, &position) && position >= 0)
+    if (gst_element_query_position(m_pipeline, GST_FORMAT_TIME, &position) && position >= 0)
         setPosition(position / GST_MSECOND);
 }
 
@@ -1238,7 +1245,7 @@ void Player::handleAsyncDone()
             return;
     }
     if (std::exchange(m_playAfterSeek, false))
-        gst_element_set_state(m_playbin, GST_STATE_PLAYING);
+        gst_element_set_state(m_pipeline, GST_STATE_PLAYING);
     updateDuration();
     if (!seeking)
         readFormats();
@@ -1266,6 +1273,11 @@ void Player::handleError(GstMessage *message)
     qWarning() << "microdap player:" << text << (debug ? debug : "");
     g_clear_error(&err);
     g_free(debug);
+    skipBroken(text);
+}
+
+void Player::skipBroken(const QString &text)
+{
     emit error(text);
 
     ++m_errorStreak;
@@ -1295,13 +1307,13 @@ void Player::handleError(GstMessage *message)
 
 void Player::pollBus()
 {
-    if (!m_bus || !m_playbin)
+    if (!m_bus || !m_pipeline)
         return;
     const auto types = static_cast<GstMessageType>(
         GST_MESSAGE_ERROR | GST_MESSAGE_EOS | GST_MESSAGE_STATE_CHANGED | GST_MESSAGE_STREAM_START
-        | GST_MESSAGE_DURATION_CHANGED | GST_MESSAGE_ASYNC_DONE);
+        | GST_MESSAGE_DURATION_CHANGED | GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ELEMENT);
     while (GstMessage *message = gst_bus_pop_filtered(m_bus, types)) {
-        const bool fromPlaybin = GST_MESSAGE_SRC(message) == GST_OBJECT_CAST(m_playbin);
+        const bool fromPipeline = GST_MESSAGE_SRC(message) == GST_OBJECT_CAST(m_pipeline);
         switch (GST_MESSAGE_TYPE(message)) {
         case GST_MESSAGE_ERROR:
             handleError(message);
@@ -1310,11 +1322,16 @@ void Player::pollBus()
             handleEos();
             break;
         case GST_MESSAGE_STREAM_START:
-            if (fromPlaybin)
+            if (fromPipeline)
                 handleStreamStart();
             break;
+        case GST_MESSAGE_ELEMENT:
+            if (m_deck && GST_MESSAGE_SRC(message) == GST_OBJECT_CAST(m_deck->element())
+                && gst_message_has_name(message, Deck::switched))
+                m_deck->reap();
+            break;
         case GST_MESSAGE_STATE_CHANGED:
-            if (fromPlaybin) {
+            if (fromPipeline) {
                 GstState newState = GST_STATE_VOID_PENDING;
                 gst_message_parse_state_changed(message, nullptr, &newState, nullptr);
                 if (newState == GST_STATE_PAUSED || newState == GST_STATE_PLAYING)
@@ -1325,7 +1342,7 @@ void Player::pollBus()
             updateDuration();
             break;
         case GST_MESSAGE_ASYNC_DONE:
-            if (fromPlaybin)
+            if (fromPipeline)
                 handleAsyncDone();
             break;
         default:

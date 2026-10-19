@@ -12,6 +12,7 @@
 
 #include <gst/gst.h>
 
+#include <memory>
 #include <optional>
 
 class QSocketNotifier;
@@ -19,8 +20,10 @@ class QSocketNotifier;
 namespace microdap {
 
 class BluezModel;
+class Deck;
 class Library;
 class OutputPolicy;
+class Tail;
 
 void initGStreamer(int &argc, char **argv);
 
@@ -144,7 +147,7 @@ private:
         QString target;
     };
 
-    static void aboutToFinish(GstElement *element, gpointer data);
+    QString nextPath();
     static GstPadProbeReturn bitPerfectProbe(GstPad *pad, GstPadProbeInfo *info, gpointer data);
     static void setStreamProperties(GstElement *element, const QString &text);
 
@@ -152,6 +155,7 @@ private:
     GstElement *pwFilter(int rate);
     void bindBitPerfect(GstElement *sink);
     void build(int index, const PendingBuild &pending, OutputChain chain, bool guard);
+    void deckFailed(int index, const PendingBuild &pending);
     void request(int index, GstState target, qint64 positionMs, bool guard, bool sameListen);
     void hold(int index, const PendingBuild &pending);
     void readFormats();
@@ -161,9 +165,9 @@ private:
     void handleStreamStart();
     void handleEos();
     void handleError(GstMessage *message);
+    void skipBroken(const QString &text);
     void handleAsyncDone();
     void startAt(int index, GstState target, qint64 positionMs = 0, bool sameListen = false);
-    void setUri(const QString &path);
     void setNull();
     bool doSeek(qint64 ms);
     void setStatus(Status status);
@@ -194,7 +198,9 @@ private:
     bool m_playPending = false;
     bool m_resumeOnReady = false;
     QTimer m_holdTimer;
-    GstElement *m_playbin = nullptr;
+    GstElement *m_pipeline = nullptr;
+    std::unique_ptr<Deck> m_deck;
+    std::unique_ptr<Tail> m_tail;
     GstElement *m_filter = nullptr;
     GstElement *m_sink = nullptr;
     QString m_audioSinkEnv;
@@ -215,7 +221,6 @@ private:
     QVariantMap m_sourceFormat;
     QVariantMap m_sinkFormat;
     GstBus *m_bus = nullptr;
-    gulong m_aboutToFinishId = 0;
     QSocketNotifier *m_busNotifier = nullptr;
     QTimer m_positionTimer;
     bool m_positionPoll = true;

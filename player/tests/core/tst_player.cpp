@@ -27,6 +27,7 @@
 #include <ctime>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -187,6 +188,9 @@ private slots:
     void guardBeforeAdmit();
     void rateTailNoWarnings();
     void resumeSeeksBeforeAudio();
+    void gaplessPerChain();
+    void gaplessRealTime();
+    void cueProbeUntouched();
 
 private:
     int historyCount() const;
@@ -329,26 +333,59 @@ GstElement *pipelineOf(GstElement *element)
     return GST_ELEMENT(top);
 }
 
-GstElement *builtFilter(Player &player)
+GstElement *tailChild(Player &player, const char *name)
 {
     GstElement *top = pipelineOf(player.audioSink());
-    GstElement *filter = nullptr;
-    g_object_get(top, "audio-filter", &filter, nullptr);
+    GstElement *tail = gst_bin_get_by_name(GST_BIN(top), "tail");
     gst_object_unref(top);
-    if (filter)
-        gst_object_unref(filter);
-    return filter;
+    if (!tail)
+        return nullptr;
+    GstElement *element = gst_bin_get_by_name(GST_BIN(tail), name);
+    gst_object_unref(tail);
+    if (element)
+        gst_object_unref(element);
+    return element;
+}
+
+GstElement *builtFilter(Player &player)
+{
+    return tailChild(player, "filter");
 }
 
 GstElement *builtSink(Player &player)
 {
-    GstElement *top = pipelineOf(player.audioSink());
-    GstElement *sink = nullptr;
-    g_object_get(top, "audio-sink", &sink, nullptr);
-    gst_object_unref(top);
-    if (sink)
-        gst_object_unref(sink);
-    return sink;
+    return tailChild(player, "sink");
+}
+
+struct Capture
+{
+    std::mutex lock;
+    std::map<GstClockTime, QByteArray> buffers;
+
+    void add(GstBuffer *buffer)
+    {
+        if (!buffer || !GST_BUFFER_PTS_IS_VALID(buffer))
+            return;
+        GstMapInfo map;
+        if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
+            return;
+        const QByteArray bytes(reinterpret_cast<const char *>(map.data), qsizetype(map.size));
+        gst_buffer_unmap(buffer, &map);
+        std::lock_guard guard(lock);
+        buffers.emplace(GST_BUFFER_PTS(buffer), bytes);
+    }
+
+    std::size_t size()
+    {
+        std::lock_guard guard(lock);
+        return buffers.size();
+    }
+};
+
+GstPadProbeReturn captureProbe(GstPad *, GstPadProbeInfo *info, gpointer data)
+{
+    static_cast<Capture *>(data)->add(GST_PAD_PROBE_INFO_BUFFER(info));
+    return GST_PAD_PROBE_OK;
 }
 
 QStringList factories(GstElement *bin, bool recurse)
@@ -2401,6 +2438,138 @@ void PlayerTest::rateTailNoWarnings()
     QVERIFY(source > 0);
     QCOMPARE(fixed, 96000);
     QCOMPARE(glibWarnings.loadRelaxed(), 0);
+}
+
+void PlayerTest::gaplessPerChain()
+{
+    for (const Chain chain : {Chain::Pw, Chain::Bp, Chain::Ex}) {
+        auto player = exclusivePlayer();
+        FakePolicy policy;
+        policy.chain = chain;
+        player->setPolicy(&policy);
+        QSignalSpy started(player.get(), &Player::trackStarted);
+        QSignalSpy eos(player.get(), &Player::endOfStream);
+        QSignalSpy errors(player.get(), &Player::error);
+        player->play(m_tracks, 0);
+        QCOMPARE(player->builtChain(), chain);
+        QTRY_COMPARE_WITH_TIMEOUT(started.count(), 3, playTimeoutMs);
+        QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2}));
+        QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+        QCOMPARE(errors.count(), 0);
+        QCOMPARE(policy.admitted.size(), 1);
+        QCOMPARE(player->status(), Player::Stopped);
+    }
+}
+
+void PlayerTest::gaplessRealTime()
+{
+    QList<QueueEntry> entries;
+    for (int i = 0; i < 3; ++i) {
+        QueueEntry entry;
+        entry.id = 100 + i;
+        entry.title = QStringLiteral("real %1").arg(i);
+        entry.path = m_dir.path() + QStringLiteral("/real%1.flac").arg(i);
+        entry.durationMs = 2000;
+        QVERIFY(encodeSine(entry.path, 2));
+        entries.append(entry);
+    }
+    auto player = syncPlayer();
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    QElapsedTimer clock;
+    clock.start();
+    player->play(entries, 0);
+    QCOMPARE(player->builtChain(), Chain::Pw);
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 2, 3 * playTimeoutMs);
+    const qint64 joined = clock.elapsed();
+    QVERIFY2(joined >= 1800, qPrintable(QString::number(joined)));
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QTest::qWait(300);
+    QVERIFY(player->position() < 1000);
+
+    player->seek(1000);
+    QElapsedTimer afterSeek;
+    afterSeek.start();
+    QTRY_VERIFY_WITH_TIMEOUT(player->position() >= 1100, 1000);
+    QCOMPARE(player->queue()->currentIndex(), 1);
+    QVERIFY2(player->position() < 1800, qPrintable(QString::number(player->position())));
+    QTRY_COMPARE_WITH_TIMEOUT(started.count(), 3, 3 * playTimeoutMs);
+    const qint64 third = afterSeek.elapsed();
+    QVERIFY2(third >= 800, qPrintable(QString::number(third)));
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, 3 * playTimeoutMs);
+    const qint64 end = afterSeek.elapsed();
+    QVERIFY2(end >= 2700, qPrintable(QString::number(end)));
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1, 2}));
+    QCOMPARE(errors.count(), 0);
+}
+
+void PlayerTest::cueProbeUntouched()
+{
+    for (const Chain chain : {Chain::Bp, Chain::Ex}) {
+        const QByteArray description = QByteArrayLiteral("appsink name=microdap-cue sync=false max-buffers=1");
+        auto player = chain == Chain::Ex ? exclusivePlayer(description) : withEnv("MICRODAP_AUDIO_SINK", description);
+        FakePolicy policy;
+        policy.chain = chain;
+        player->setPolicy(&policy);
+        player->restore({m_long}, 0, 0);
+        QVERIFY(prerolled(*player));
+        QCOMPARE(player->builtChain(), chain);
+
+        GstElement *top = pipelineOf(player->audioSink());
+        GstElement *cue = gst_bin_get_by_name(GST_BIN(top), "cueprobe");
+        gst_object_unref(top);
+        QVERIFY(cue);
+        std::unique_ptr<GstElement, void (*)(GstElement *)> cueRef(cue, [](GstElement *e) { gst_object_unref(e); });
+        GstElement *sink = gst_bin_get_by_name(GST_BIN(player->audioSink()), "microdap-cue");
+        QVERIFY(sink);
+        std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+
+        Capture in;
+        Capture out;
+        Capture captured;
+        GstPad *cueSink = gst_element_get_static_pad(cue, "sink");
+        GstPad *cueSrc = gst_element_get_static_pad(cue, "src");
+        const gulong inProbe = gst_pad_add_probe(cueSink, GST_PAD_PROBE_TYPE_BUFFER, captureProbe, &in, nullptr);
+        const gulong outProbe = gst_pad_add_probe(cueSrc, GST_PAD_PROBE_TYPE_BUFFER, captureProbe, &out, nullptr);
+        std::jthread puller([&](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                GstSample *sample = nullptr;
+                g_signal_emit_by_name(sink, "try-pull-sample", GstClockTime(200 * GST_MSECOND), &sample);
+                if (!sample)
+                    continue;
+                captured.add(gst_sample_get_buffer(sample));
+                gst_sample_unref(sample);
+            }
+        });
+        player->resume();
+        QTRY_VERIFY_WITH_TIMEOUT(out.size() > 20, playTimeoutMs);
+        player->stop();
+        puller.request_stop();
+        puller.join();
+        gst_pad_remove_probe(cueSink, inProbe);
+        gst_pad_remove_probe(cueSrc, outProbe);
+        gst_object_unref(cueSink);
+        gst_object_unref(cueSrc);
+
+        int same = 0;
+        int sunk = 0;
+        for (const auto &[pts, bytes] : out.buffers) {
+            const auto before = in.buffers.find(pts);
+            QVERIFY(before != in.buffers.end());
+            QCOMPARE(before->second, bytes);
+            ++same;
+            const auto after = captured.buffers.find(pts);
+            if (chain == Chain::Ex && after != captured.buffers.end()) {
+                QCOMPARE(after->second, bytes);
+                ++sunk;
+            }
+        }
+        QVERIFY(same > 20);
+        QVERIFY(captured.buffers.size() > 20);
+        if (chain == Chain::Ex)
+            QVERIFY(sunk > 20);
+    }
 }
 
 QTEST_GUILESS_MAIN(PlayerTest)

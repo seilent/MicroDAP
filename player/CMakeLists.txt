@@ -45,6 +45,8 @@ add_library(microdapcore STATIC
     src/core/DacEq.h
     src/core/DbusPad.cpp
     src/core/DbusPad.h
+    src/core/Deck.cpp
+    src/core/Deck.h
     src/core/DeviceReservation.cpp
     src/core/DeviceReservation.h
     src/core/Eq.cpp
