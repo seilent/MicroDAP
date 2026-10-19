@@ -12,12 +12,14 @@
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <memory>
 
 using namespace microdap;
 
@@ -137,7 +139,97 @@ private slots:
     void outsideEditKept();
     void cardPlaylists();
     void favoriteOrder();
+    void favoritesToggle();
+    void favoritesCards();
+    void favoritesCardPulled();
+    void favoritesMigration();
+    void favoritesRetry();
+    void favoritesNotScanned();
 };
+
+namespace {
+
+QString musicHome()
+{
+    return QDir::cleanPath(QStandardPaths::writableLocation(QStandardPaths::MusicLocation));
+}
+
+struct Rig
+{
+    QTemporaryDir dir;
+    QString base;
+    QString card;
+    std::unique_ptr<Library> library;
+
+    Rig()
+    {
+        QDir(musicHome()).removeRecursively();
+        base = dir.filePath(QStringLiteral("media"));
+        card = base + QStringLiteral("/micro/CARD");
+        fakeDevice = dir.filePath(QStringLiteral("dev"));
+        writeBytes(fakeDevice, QByteArray());
+        qputenv("MICRODAP_MEDIA_ROOT", QFile::encodeName(base));
+        Scanner::setMountCheck(fakeMountCheck);
+        Scanner::setDeviceCheck(fakeDeviceCheck);
+        fakeMount = card;
+        copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Single"), musicHome() + QStringLiteral("/Single"));
+        copyTree(QStringLiteral(MICRODAP_FIXTURE_MUSIC "/Album One"), card + QStringLiteral("/Music/Album One"));
+        library = std::make_unique<Library>(dir.filePath(QStringLiteral("library.db")), dir.filePath(QStringLiteral("art")));
+    }
+
+    ~Rig()
+    {
+        library.reset();
+        Scanner::setMountCheck(nullptr);
+        Scanner::setDeviceCheck(nullptr);
+        qunsetenv("MICRODAP_MEDIA_ROOT");
+        fakeMount.clear();
+        QDir(musicHome()).removeRecursively();
+    }
+
+    bool scan()
+    {
+        QSignalSpy spy(library.get(), &Library::scanned);
+        library->rescan({musicHome(), card + QStringLiteral("/Music")});
+        return spy.wait(scanTimeoutMs) && spy.takeFirst().at(3).toBool();
+    }
+
+    qint64 id(const QString &path) const
+    {
+        return scalar(library->database(), QStringLiteral("SELECT id FROM tracks WHERE path = ?"), {path}).toLongLong();
+    }
+
+    QString internalFile() const
+    {
+        return musicHome() + QStringLiteral("/Playlists/favorites.m3u8");
+    }
+
+    QString cardFile() const
+    {
+        return card + QStringLiteral("/Playlists/favorites.m3u8");
+    }
+
+    QString single() const
+    {
+        return musicHome() + QStringLiteral("/Single/01 Single.mp3");
+    }
+
+    QString cardTrack(int n) const
+    {
+        static const char *const names[] = {"01 One.flac", "02 Two.flac", "03 Three.flac", "04 Four.flac"};
+        return card + QStringLiteral("/Music/Album One/") + QLatin1String(names[n]);
+    }
+};
+
+QStringList titles(const Favorites &favorites)
+{
+    QStringList out;
+    for (const QueueEntry &entry : favorites.entries())
+        out.append(QFileInfo(entry.path).fileName());
+    return out;
+}
+
+}
 
 void PlaylistsTest::roundTrip()
 {
@@ -488,6 +580,172 @@ void PlaylistsTest::favoriteOrder()
                                    QStringLiteral("CARD:../d.flac")}));
     QCOMPARE(Favorites::order({}), QList<qsizetype>());
     QCOMPARE(Favorites::order({-1, -1, -1}), (QList<qsizetype>{0, 1, 2}));
+}
+
+void PlaylistsTest::favoritesToggle()
+{
+    Rig rig;
+    QVERIFY(rig.library->isOpen());
+    QVERIFY(rig.scan());
+    Favorites favorites(rig.library.get());
+    QCOMPARE(favorites.media(), (QStringList{QStringLiteral("internal"), QStringLiteral("CARD")}));
+    QCOMPARE(favorites.count(), 0);
+    QVERIFY(!QFileInfo::exists(rig.internalFile()));
+    QSignalSpy notices(&favorites, &Favorites::notice);
+
+    const qint64 single = rig.id(rig.single());
+    QVERIFY(single > 0);
+    favorites.toggle(single);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("added to favorites"));
+    QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n../Single/01 Single.mp3\n"));
+    QVERIFY(favorites.contains(single));
+    QCOMPARE(favorites.count(), 1);
+
+    const qint64 one = rig.id(rig.cardTrack(0));
+    favorites.toggle(one);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("added to favorites"));
+    QCOMPARE(readBytes(rig.cardFile()), QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n"));
+    QCOMPARE(titles(favorites), (QStringList{QStringLiteral("01 One.flac"), QStringLiteral("01 Single.mp3")}));
+
+    favorites.toggle(single);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("removed from favorites"));
+    QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n"));
+    QVERIFY(!favorites.contains(single));
+    QCOMPARE(rig.library->rating(single), 0);
+    QVERIFY(rig.library->favoriteStamps(QStringLiteral("internal")).isEmpty());
+
+    QVERIFY(writeBytes(rig.internalFile(), QByteArray(PlaylistStore::maxBytes + 1, 'a')));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("favorites.m3u8")));
+    favorites.toggle(single);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("favorites not readable"));
+}
+
+void PlaylistsTest::favoritesCards()
+{
+    Rig rig;
+    const QByteArray flatdap = "\xEF\xBB\xBF#EXTM3U\r\n# from the card\r\n#EXTINF:2,A - Two\r\n"
+                               "../Music/album one/02 two.flac\r\n../Music/Gone/x.flac\r\n";
+    QVERIFY(writeBytes(rig.cardFile(), flatdap));
+    QVERIFY(rig.scan());
+    Favorites favorites(rig.library.get());
+    QCOMPARE(titles(favorites), (QStringList{QStringLiteral("02 Two.flac")}));
+    QCOMPARE(readBytes(rig.cardFile()), flatdap);
+    QSignalSpy notices(&favorites, &Favorites::notice);
+
+    const qint64 three = rig.id(rig.cardTrack(2));
+    favorites.toggle(three);
+    QCOMPARE(readBytes(rig.cardFile()),
+             QByteArray("\xEF\xBB\xBF#EXTM3U\r\n# from the card\r\n../Music/Album One/03 Three.flac\r\n"
+                        "#EXTINF:2,A - Two\r\n../Music/album one/02 two.flac\r\n../Music/Gone/x.flac\r\n"));
+    QCOMPARE(titles(favorites), (QStringList{QStringLiteral("03 Three.flac"), QStringLiteral("02 Two.flac")}));
+    favorites.toggle(three);
+    QCOMPARE(readBytes(rig.cardFile()), flatdap);
+    const qint64 two = rig.id(rig.cardTrack(1));
+    QVERIFY(favorites.contains(two));
+    notices.clear();
+
+    fakeMount.clear();
+    favorites.reload();
+    QCOMPARE(favorites.media(), QStringList{QStringLiteral("internal")});
+    QCOMPARE(favorites.count(), 0);
+    QVERIFY(rig.id(rig.cardTrack(1)) > 0);
+    favorites.toggle(two);
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("card not available"));
+    QCOMPARE(readBytes(rig.cardFile()), flatdap);
+
+    fakeMount = rig.card;
+    favorites.reload();
+    QCOMPARE(titles(favorites), (QStringList{QStringLiteral("02 Two.flac")}));
+}
+
+void PlaylistsTest::favoritesCardPulled()
+{
+    Rig rig;
+    QVERIFY(rig.scan());
+    Favorites favorites(rig.library.get());
+    QCOMPARE(favorites.media(), (QStringList{QStringLiteral("internal"), QStringLiteral("CARD")}));
+    const QString dir = rig.card + QStringLiteral("/Playlists");
+    const bool hadDir = QFileInfo::exists(dir);
+    const QByteArray before = readBytes(rig.cardFile());
+    QSignalSpy notices(&favorites, &Favorites::notice);
+
+    fakeMount.clear();
+    favorites.toggle(rig.id(rig.cardTrack(0)));
+    QCOMPARE(notices.takeFirst().at(0).toString(), QStringLiteral("card not available"));
+    QCOMPARE(QFileInfo::exists(dir), hadDir);
+    QCOMPARE(readBytes(rig.cardFile()), before);
+    QCOMPARE(favorites.media(), QStringList{QStringLiteral("internal")});
+}
+
+void PlaylistsTest::favoritesMigration()
+{
+    Rig rig;
+    QVERIFY(rig.scan());
+    const qint64 single = rig.id(rig.single());
+    const qint64 one = rig.id(rig.cardTrack(0));
+    const qint64 two = rig.id(rig.cardTrack(1));
+    const qint64 four = rig.id(rig.cardTrack(3));
+    for (qint64 id : {single, one, two, four})
+        rig.library->setRating(id, 1);
+    rig.library->addHistory(two, QDateTime::fromSecsSinceEpoch(1000));
+    rig.library->addHistory(one, QDateTime::fromSecsSinceEpoch(2000));
+    QVERIFY(writeBytes(rig.cardFile(), "#EXTM3U\n../Music/Album One/04 Four.flac\n"));
+
+    {
+        Favorites favorites(rig.library.get());
+        QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n../Single/01 Single.mp3\n"));
+        QCOMPARE(readBytes(rig.cardFile()), QByteArray("#EXTM3U\n../Music/Album One/01 One.flac\n"
+                                                       "../Music/Album One/02 Two.flac\n"
+                                                       "../Music/Album One/04 Four.flac\n"));
+        QCOMPARE(rig.library->metaValue(QStringLiteral("favorites_migrated:internal")), QStringLiteral("1"));
+        QCOMPARE(rig.library->metaValue(QStringLiteral("favorites_migrated:CARD")), QStringLiteral("1"));
+        QCOMPARE(titles(favorites), (QStringList{QStringLiteral("01 One.flac"), QStringLiteral("02 Two.flac"),
+                                                 QStringLiteral("04 Four.flac"), QStringLiteral("01 Single.mp3")}));
+    }
+    const QByteArray card = readBytes(rig.cardFile());
+    QSqlQuery unset(rig.library->database());
+    QVERIFY(unset.exec(QStringLiteral("DELETE FROM meta WHERE key = 'favorites_migrated:CARD'")));
+    Favorites again(rig.library.get());
+    QCOMPARE(readBytes(rig.cardFile()), card);
+    QCOMPARE(again.count(), 4);
+    for (qint64 id : {single, one, two, four})
+        QCOMPARE(rig.library->rating(id), 1);
+}
+
+void PlaylistsTest::favoritesRetry()
+{
+    Rig rig;
+    QVERIFY(rig.scan());
+    const qint64 single = rig.id(rig.single());
+    rig.library->setRating(single, 1);
+    QVERIFY(writeBytes(musicHome() + QStringLiteral("/Playlists"), "not a folder"));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("microdap playlists: cannot")));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("migration not written")));
+    {
+        Favorites favorites(rig.library.get());
+        QVERIFY(rig.library->metaValue(QStringLiteral("favorites_migrated:internal")).isEmpty());
+        QCOMPARE(favorites.count(), 0);
+    }
+    QVERIFY(QFile::remove(musicHome() + QStringLiteral("/Playlists")));
+    Favorites favorites(rig.library.get());
+    QCOMPARE(rig.library->metaValue(QStringLiteral("favorites_migrated:internal")), QStringLiteral("1"));
+    QCOMPARE(readBytes(rig.internalFile()), QByteArray("#EXTM3U\n../Single/01 Single.mp3\n"));
+    QVERIFY(favorites.contains(single));
+}
+
+void PlaylistsTest::favoritesNotScanned()
+{
+    Rig rig;
+    QVERIFY(Scanner::isFavoritesFile(QStringLiteral("/m/playlists/Favorites.M3U8")));
+    QVERIFY(!Scanner::isFavoritesFile(QStringLiteral("/m/favorites.m3u8")));
+    QVERIFY(!Scanner::isFavoritesFile(QStringLiteral("/m/Playlists/mix.m3u8")));
+    QVERIFY(writeBytes(rig.cardFile(), "../Music/Album One/01 One.flac\n"));
+    QVERIFY(writeBytes(rig.card + QStringLiteral("/Playlists/mix.m3u8"), "../Music/Album One/01 One.flac\n"));
+    QVERIFY(writeBytes(rig.internalFile(), "../Single/01 Single.mp3\n"));
+    QVERIFY(rig.scan());
+    const QSqlDatabase db = rig.library->database();
+    QCOMPARE(scalar(db, QStringLiteral("SELECT COUNT(*) FROM playlists")).toInt(), 1);
+    QCOMPARE(scalar(db, QStringLiteral("SELECT name FROM playlists")).toString(), QStringLiteral("mix"));
 }
 
 QTEST_GUILESS_MAIN(PlaylistsTest)

@@ -82,6 +82,7 @@ public:
 
     static bool isAudioFile(const QString &path);
     static bool isPlaylistFile(const QString &path);
+    static bool isFavoritesFile(const QString &path);
     static QString albumKey(const QString &album, const QString &albumArtist);
     static QString mediaBase();
     static FileStamp stampOf(const QFileInfo &info);

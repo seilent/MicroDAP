@@ -223,6 +223,13 @@ bool Scanner::isPlaylistFile(const QString &path)
     return suffix == QLatin1StringView("m3u") || suffix == QLatin1StringView("m3u8");
 }
 
+bool Scanner::isFavoritesFile(const QString &path)
+{
+    const QFileInfo info(path);
+    return info.fileName().compare(QLatin1StringView("favorites.m3u8"), Qt::CaseInsensitive) == 0
+           && QFileInfo(info.path()).fileName().compare(QLatin1StringView("playlists"), Qt::CaseInsensitive) == 0;
+}
+
 QString Scanner::albumKey(const QString &album, const QString &albumArtist)
 {
     return album + QLatin1Char('\n') + albumArtist;
@@ -393,7 +400,7 @@ ScanResult Scanner::scan(const QStringList &roots, const QHash<QString, FileStam
     QStringList absent;
     const auto takePlaylist = [&](const QFileInfo &info) {
         const QString path = info.absoluteFilePath();
-        if (seenPlaylists.contains(path))
+        if (seenPlaylists.contains(path) || isFavoritesFile(path))
             return;
         seenPlaylists.insert(path);
         const FileStamp stamp = stampOf(info);

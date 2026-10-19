@@ -943,6 +943,25 @@ bool Library::applyPlaylists(const QList<PlaylistFile> &playlists, bool &changed
     return true;
 }
 
+QString Library::metaValue(const QString &key) const
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT value FROM meta WHERE key = ?"));
+    query.addBindValue(key);
+    if (!query.exec() || !query.next())
+        return {};
+    return query.value(0).toString();
+}
+
+bool Library::setMetaValue(const QString &key, const QString &value)
+{
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)"));
+    query.addBindValue(key);
+    query.addBindValue(value);
+    return run(query);
+}
+
 QString Library::favoriteKey(const QString &relPath, int cue)
 {
     return relPath + QLatin1Char('\n') + QString::number(cue);

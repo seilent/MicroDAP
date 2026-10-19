@@ -9,6 +9,7 @@ Page {
     property var songsModel: null
     property var genresModel: null
     property var playlistsModel: null
+    property QtObject favorites: null
     property var foldersModel: null
     property QtObject player: null
     property QtObject library: null
@@ -113,6 +114,8 @@ Page {
 
     function buildPlaylists(): var {
         const rows = [{ kind: "nowplaying", id: -1, title: "now playing", subtitle: hub.countLabel(hub.queueCount), artPath: "", letter: "", row: -1, number: "" }]
+        if (hub.favorites !== null)
+            rows.push({ kind: "favorites", id: 0, title: "favorites", subtitle: hub.countLabel(hub.favorites.count), artPath: "", letter: "", row: -1, number: "" })
         const n = hub.modelCount(hub.playlistsModel)
         for (let i = 0; i < n; i++) {
             const e = hub.entryOf(hub.playlistsModel.get(i), "playlist")
@@ -473,6 +476,7 @@ Page {
             break
         case "genre":
         case "playlist":
+        case "favorites":
             hub.playCollection(t.kind, t.id)
             break
         case "nowplaying":
@@ -505,7 +509,7 @@ Page {
     function sheetItemsFor(kind: string, id: int): var {
         if (kind === "genre")
             return ["play", "add to queue"]
-        if (kind === "folder")
+        if (kind === "folder" || kind === "favorites")
             return ["play", "play next", "add to queue", "shuffle"]
         if (kind === "song")
             return ["play", "play next", "add to queue", hub.pinLabel(kind, id)]
@@ -521,7 +525,7 @@ Page {
             hub.playFolderSong(t)
         else if (action === "play" && t.kind === "song")
             hub.playSong(t)
-        else if (action === "play" && (t.kind === "genre" || t.kind === "playlist"))
+        else if (action === "play" && (t.kind === "genre" || t.kind === "playlist" || t.kind === "favorites"))
             hub.playCollection(t.kind, t.id)
         else
             hub.sheetAction(action, t.kind, t.id)
@@ -894,6 +898,16 @@ Page {
     }
 
     Connections {
+        target: hub.favorites
+        ignoreUnknownSignals: true
+
+        function onChanged() {
+            hub.syncPlaylists()
+            hub.rowsUpdated(4)
+        }
+    }
+
+    Connections {
         target: hub.playlistsModel
         ignoreUnknownSignals: true
 
@@ -1066,9 +1080,10 @@ Page {
             visible: !row.divider && !row.pathLine
             width: row.width
             number: row.kind === "song" ? row.number : ""
-            bold: row.kind === "genre" || row.kind === "playlist" || row.kind === "nowplaying" || row.kind === "folder"
+            bold: row.kind === "genre" || row.kind === "playlist" || row.kind === "favorites" || row.kind === "nowplaying"
+                || row.kind === "folder"
             countLine: row.kind === "artist"
-            ring: row.kind === "playlist" || row.kind === "nowplaying"
+            ring: row.kind === "playlist" || row.kind === "favorites" || row.kind === "nowplaying"
             ringGlyph: "play"
             primary: row.divider || row.pathLine ? "" : row.title
             secondary: row.divider ? "" : row.subtitle

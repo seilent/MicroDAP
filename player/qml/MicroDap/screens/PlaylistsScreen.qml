@@ -5,6 +5,7 @@ Page {
     id: page
 
     property var playlistsModel: null
+    property QtObject favorites: null
     property QtObject player: null
     property QtObject library: null
     property bool animated: true
@@ -17,6 +18,8 @@ Page {
     readonly property bool arriving: !page.arrived && page.live && page.stackAnimates
     readonly property int queueCount: page.player !== null && page.player.queue !== undefined && page.player.queue !== null
         ? page.player.queue.count : 0
+    readonly property int favoritesCount: page.favorites !== null && page.favorites.count !== undefined
+        ? page.favorites.count : 0
     readonly property int savedCount: page.modelCount(page.playlistsModel)
     readonly property string countLine: page.savedCount === 1 ? "1 playlist" : page.savedCount + " playlists"
     readonly property var focusedRow: page.rows[page.focusIndex] === undefined ? null : page.rows[page.focusIndex]
@@ -49,6 +52,8 @@ Page {
 
     function buildRows(): var {
         const out = [{ kind: "nowplaying", id: -1, title: "now playing", subtitle: page.songsLabel(page.queueCount) }]
+        if (page.favorites !== null)
+            out.push({ kind: "favorites", id: 0, title: "favorites", subtitle: page.songsLabel(page.favoritesCount) })
         const n = page.modelCount(page.playlistsModel)
         for (let i = 0; i < n; i++) {
             const e = page.playlistsModel.get(i)
@@ -99,10 +104,10 @@ Page {
             return
         }
         if (page.player !== null && typeof page.player.playSource === "function") {
-            page.player.playSource("playlist", r.id, "play", -1)
+            page.player.playSource(r.kind, r.id, "play", -1)
             return
         }
-        page.play("playlist", r.id)
+        page.play(r.kind, r.id)
     }
 
     function pinLabel(id: int): string {
@@ -113,11 +118,12 @@ Page {
 
     function openSheet(): bool {
         const r = page.focusedRow
-        if (r === null || r.kind !== "playlist")
+        if (r === null || (r.kind !== "playlist" && r.kind !== "favorites"))
             return false
         page.sheetRow = r
         sheet.title = r.title
-        sheet.items = ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id)]
+        sheet.items = r.kind === "favorites" ? ["play", "play next", "add to queue", "shuffle"]
+            : ["play", "play next", "add to queue", "shuffle", page.pinLabel(r.id)]
         sheet.open()
         return true
     }
@@ -130,7 +136,7 @@ Page {
         if (action === "play")
             page.playRow(r)
         else
-            page.sheetAction(action, "playlist", r.id)
+            page.sheetAction(action, r.kind, r.id)
     }
 
     function keepFocusVisible(): void {
@@ -159,8 +165,8 @@ Page {
                 page.openSheet()
             return true
         case "y":
-            if (!repeat && page.focusedRow !== null && page.focusedRow.kind === "playlist")
-                page.sheetAction("add to queue", "playlist", page.focusedRow.id)
+            if (!repeat && page.focusedRow !== null && page.focusedRow.kind !== "nowplaying")
+                page.sheetAction("add to queue", page.focusedRow.kind, page.focusedRow.id)
             return true
         default:
             return page.baseAction(name, repeat)
@@ -196,6 +202,7 @@ Page {
 
     onPlaylistsModelChanged: page.reload()
     onQueueCountChanged: page.rebuild()
+    onFavoritesCountChanged: page.rebuild()
     onCountLineChanged: page.swapCount()
 
     onEntered: (first, kind) => {

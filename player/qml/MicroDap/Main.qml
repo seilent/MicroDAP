@@ -27,6 +27,7 @@ Window {
     readonly property var genres: typeof Genres === "undefined" ? null : Genres
     readonly property var pins: typeof Pins === "undefined" ? null : Pins
     readonly property var playlists: typeof Playlists === "undefined" ? null : Playlists
+    readonly property var favorites: typeof Favorites === "undefined" ? null : Favorites
     property var library: root.screenshot || typeof Library === "undefined" ? null : Library
     property var settings: root.screenshot || typeof Settings === "undefined" ? null : Settings
     property var audioInfo: root.screenshot || typeof AudioInfo === "undefined" ? null : AudioInfo
@@ -635,6 +636,8 @@ Window {
             return root.infoField("artistInfo", id, "name")
         case "playlist":
             return root.infoField("playlistInfo", id, "name")
+        case "favorites":
+            return "favorites"
         case "genre":
             return root.modelTitle(root.genres, id)
         case "folder":
@@ -769,6 +772,15 @@ Window {
 
     Connections {
         target: typeof OutputMode === "undefined" ? null : OutputMode
+        ignoreUnknownSignals: true
+
+        function onNotice(text) {
+            overlays.toast.show("", text)
+        }
+    }
+
+    Connections {
+        target: root.favorites
         ignoreUnknownSignals: true
 
         function onNotice(text) {
@@ -1142,6 +1154,7 @@ Window {
             songsModel: root.songsHub
             genresModel: root.genresHub
             playlistsModel: root.playlists
+            favorites: root.favorites
             foldersModel: root.foldersHub
             player: root.player
             library: root.library
@@ -1160,6 +1173,7 @@ Window {
             animated: !root.hidden
             screenOff: root.off
             playlistsModel: root.playlists
+            favorites: root.favorites
             player: root.player
             library: root.library
             onNowPlaying: root.openNowPlaying()

@@ -6,6 +6,7 @@
 #include <QList>
 #include <QMutex>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QTimer>
 #include <QVariantMap>
@@ -21,6 +22,7 @@ namespace microdap {
 
 class BluezModel;
 class Deck;
+class Favorites;
 class Library;
 class OutputPolicy;
 class Tail;
@@ -73,6 +75,7 @@ public:
     bool isValid() const;
     BluezModel *bluez() const;
     void setBluez(BluezModel *bluez);
+    void setFavorites(Favorites *favorites);
     bool transportActive() const;
     void setTransportActive(bool active);
     bool transportReady() const;
@@ -197,6 +200,7 @@ private:
     Library *m_library;
     Queue *m_queue;
     BluezModel *m_bluez = nullptr;
+    QPointer<Favorites> m_favorites;
     bool m_transportActive = false;
     bool m_transportReady = true;
     bool m_playPending = false;

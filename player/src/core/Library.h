@@ -77,6 +77,8 @@ public:
     Q_INVOKABLE bool unpin(const QString &kind, qint64 refId);
     Q_INVOKABLE bool isPinned(const QString &kind, qint64 refId) const;
 
+    QString metaValue(const QString &key) const;
+    bool setMetaValue(const QString &key, const QString &value);
     static QString favoriteKey(const QString &relPath, int cue);
     bool stampFavorites(const QString &medium, const QList<std::pair<QString, int>> &entries);
     bool dropFavoriteStamp(const QString &medium, const QString &relPath, int cue);

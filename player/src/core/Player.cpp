@@ -2,6 +2,7 @@
 
 #include "BluezModel.h"
 #include "Deck.h"
+#include "Favorites.h"
 #include "Library.h"
 
 #include <QDebug>
@@ -212,7 +213,7 @@ QVariantMap Player::current() const
     QVariantMap map = m_queue->get(m_queue->currentIndex());
     if (m_library && !map.isEmpty()) {
         const qint64 id = map.value(QStringLiteral("id")).toLongLong();
-        map.insert(QStringLiteral("rating"), m_library->rating(id));
+        map.insert(QStringLiteral("rating"), m_favorites ? int(m_favorites->contains(id)) : m_library->rating(id));
         const QVariantList rows = m_library->trackRows({id});
         if (!rows.isEmpty()) {
             const QVariantMap row = rows.first().toMap();
@@ -462,6 +463,15 @@ void Player::readFormats()
 BluezModel *Player::bluez() const
 {
     return m_bluez;
+}
+
+void Player::setFavorites(Favorites *favorites)
+{
+    if (m_favorites)
+        disconnect(m_favorites, nullptr, this, nullptr);
+    m_favorites = favorites;
+    if (m_favorites)
+        connect(m_favorites, &Favorites::changed, this, &Player::currentChanged);
 }
 
 void Player::setBluez(BluezModel *bluez)
@@ -923,6 +933,8 @@ int Player::playSource(const QString &kind, qint64 id, const QString &mode, qint
 {
     if (!m_library || !knownMode(mode))
         return 0;
+    if (kind == QLatin1String("favorites"))
+        return m_favorites ? playList(m_favorites->entries(), mode, startId) : 0;
     return playList(kind == QLatin1String("song") ? m_library->queueEntries({QVariant(id)})
                                                    : m_library->entriesFor(kind, id),
                     mode, startId);
@@ -1159,7 +1171,10 @@ void Player::rate()
     const qint64 id = m_queue->entry(m_queue->currentIndex()).id;
     if (id <= 0)
         return;
-    m_library->setRating(id, m_library->rating(id) ? 0 : 1);
+    if (m_favorites)
+        m_favorites->toggle(id);
+    else
+        m_library->setRating(id, m_library->rating(id) ? 0 : 1);
     emit currentChanged();
 }
 

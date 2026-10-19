@@ -5,6 +5,7 @@
 #include "DbusPad.h"
 #include "DeviceReservation.h"
 #include "Eq.h"
+#include "Favorites.h"
 #include "Gamescope.h"
 #include "GuideKey.h"
 #include "HubModels.h"
@@ -297,6 +298,9 @@ int main(int argc, char *argv[])
         qWarning() << "microdap overlay: another player owns net.seilent.MicroDap.Player, exiting";
         return 0;
     }
+    microdap::Favorites favorites(&library);
+    QObject::connect(&library, &microdap::Library::scanned, &favorites, &microdap::Favorites::reload);
+    player.setFavorites(&favorites);
     if (!overlayMode) {
         microdap::Keep::clear();
         power.setSettings(&settings);
@@ -454,6 +458,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("FoldersHub"), &foldersHub);
     engine.rootContext()->setContextProperty(QStringLiteral("AlbumsGrid"), &albumsGrid);
     engine.rootContext()->setContextProperty(QStringLiteral("Playlists"), &playlists);
+    engine.rootContext()->setContextProperty(QStringLiteral("Favorites"), &favorites);
     engine.rootContext()->setContextProperty(QStringLiteral("AudioInfo"), &audioInfo);
     engine.rootContext()->setContextProperty(QStringLiteral("OutputControl"),
                                              static_cast<QObject *>(outputControl.get()));
