@@ -11,6 +11,8 @@
 
 #include <functional>
 
+class QSocketNotifier;
+
 namespace microdap {
 
 class OutputControl : public QObject, public HeldOutputPort
@@ -38,11 +40,13 @@ public:
     static QStringList parseSinks(const QString &text);
     static QString usbSinkIn(const QStringList &sinks);
     static bool parseJack(const QString &text);
+    static QString jackDeviceName();
     static QString outputOf(const QString &sink);
 
     QString output() const;
     QString activeOutput() const;
     bool jackPresent() const;
+    bool jackEvents() const;
     QString usbSink() const;
     bool usbPresent() const;
     bool busy() const;
@@ -70,6 +74,7 @@ signals:
     void firstApplied(bool ok);
     void cardGone(int index);
     void sinksRead(const QString &usbSink, quint64 read);
+    void routeLost(const QString &output);
 
 private:
     using Handler = std::function<void(bool ok, const QByteArray &out)>;
@@ -87,6 +92,10 @@ private:
     void setActiveOutput(const QString &output);
     void updateBusy();
     void checkWatchedCard();
+    void openJack();
+    void closeJack();
+    void drainJack();
+    bool readJackSwitch(bool &present) const;
 
     QString m_output;
     QString m_activeOutput;
@@ -111,6 +120,11 @@ private:
     QProcess *m_jack = nullptr;
     QProcess *m_sinkList = nullptr;
     QProcess *m_default = nullptr;
+    QString m_devRoot;
+    QString m_sysRoot;
+    int m_jackFd = -1;
+    QSocketNotifier *m_jackNotifier = nullptr;
+    bool m_jackLogged = false;
 };
 
 }

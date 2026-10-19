@@ -3,8 +3,18 @@
 #include "AudioInfo.h"
 
 #include <QDebug>
+#include <QDir>
 #include <QFile>
 #include <QRegularExpression>
+#include <QSocketNotifier>
+
+#include <cerrno>
+#include <cstring>
+
+#include <fcntl.h>
+#include <linux/input.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 namespace microdap {
 
@@ -13,6 +23,7 @@ namespace {
 constexpr int pollMs = 2000;
 constexpr int processTimeoutMs = 5000;
 constexpr int settleMs = 400;
+constexpr int jackBatch = 16;
 
 QString binary(const char *env, const QString &fallback)
 {
@@ -25,16 +36,21 @@ QString binary(const char *env, const QString &fallback)
 OutputControl::OutputControl(QObject *parent)
     : QObject(parent)
     , m_output(QStringLiteral("auto"))
+    , m_devRoot(binary("MICRODAP_DEV_INPUT", QStringLiteral("/dev/input")))
+    , m_sysRoot(binary("MICRODAP_SYS_INPUT", QStringLiteral("/sys/class/input")))
 {
     m_pollTimer.setInterval(pollMs);
     connect(&m_pollTimer, &QTimer::timeout, this, &OutputControl::refresh);
     m_settleTimer.setSingleShot(true);
     m_settleTimer.setInterval(settleMs);
     connect(&m_settleTimer, &QTimer::timeout, this, [this] { readAll([this] { finish(!m_defaultSink.isEmpty()); }); });
+    openJack();
 }
 
 OutputControl::~OutputControl()
 {
+    if (m_jackFd >= 0)
+        ::close(m_jackFd);
     drop(m_jack);
     drop(m_sinkList);
     drop(m_default);
@@ -106,6 +122,11 @@ bool OutputControl::parseJack(const QString &text)
     return match.hasMatch() && match.captured(1) == QLatin1StringView("on");
 }
 
+QString OutputControl::jackDeviceName()
+{
+    return binary("MICRODAP_JACK_NAME", QStringLiteral("PocketMICRO2 Headset Jack"));
+}
+
 QString OutputControl::outputOf(const QString &sink)
 {
     if (sink.isEmpty())
@@ -132,6 +153,11 @@ QString OutputControl::activeOutput() const
 bool OutputControl::jackPresent() const
 {
     return m_jackPresent;
+}
+
+bool OutputControl::jackEvents() const
+{
+    return m_jackFd >= 0;
 }
 
 QString OutputControl::usbSink() const
@@ -227,6 +253,99 @@ void OutputControl::checkWatchedCard()
     m_watchGone = true;
     qInfo() << "microdap output: card gone" << m_watchIndex << m_watchId << "reads" << id;
     emit cardGone(m_watchIndex);
+    if (m_held != HeldState::None)
+        emit routeLost(QStringLiteral("usb"));
+}
+
+void OutputControl::openJack()
+{
+    if (m_jackFd >= 0)
+        return;
+    const QString name = jackDeviceName();
+    QString path;
+    const QStringList events =
+        QDir(m_devRoot).entryList({QStringLiteral("event*")}, QDir::System | QDir::Files, QDir::Name);
+    for (const QString &event : events) {
+        QFile file(m_sysRoot + QLatin1Char('/') + event + QStringLiteral("/device/name"));
+        if (file.open(QIODevice::ReadOnly) && QString::fromUtf8(file.readAll()).trimmed() == name) {
+            path = m_devRoot + QLatin1Char('/') + event;
+            break;
+        }
+    }
+    const int fd = path.isEmpty() ? -1 : ::open(QFile::encodeName(path).constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) {
+        if (!m_jackLogged) {
+            if (path.isEmpty())
+                qInfo().noquote() << "microdap output:" << name << "not found, jack from amixer";
+            else
+                qWarning().noquote() << "microdap output: cannot open" << path << std::strerror(errno);
+            m_jackLogged = true;
+        }
+        return;
+    }
+    m_jackFd = fd;
+    m_jackLogged = false;
+    m_jackNotifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
+    connect(m_jackNotifier, &QSocketNotifier::activated, this, &OutputControl::drainJack);
+    qInfo().noquote() << "microdap output:" << name << "on" << path;
+    bool present = false;
+    if (readJackSwitch(present))
+        setJackPresent(present);
+}
+
+void OutputControl::closeJack()
+{
+    if (m_jackNotifier) {
+        m_jackNotifier->setEnabled(false);
+        m_jackNotifier->deleteLater();
+        m_jackNotifier = nullptr;
+    }
+    if (m_jackFd >= 0) {
+        ::close(m_jackFd);
+        m_jackFd = -1;
+    }
+    qInfo().noquote() << "microdap output:" << jackDeviceName() << "closed";
+}
+
+void OutputControl::drainJack()
+{
+    input_event events[jackBatch];
+    while (m_jackFd >= 0) {
+        const ssize_t got = ::read(m_jackFd, events, sizeof(events));
+        if (got < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return;
+            qWarning().noquote() << "microdap output: jack read failed" << std::strerror(errno);
+            closeJack();
+            return;
+        }
+        if (got == 0) {
+            closeJack();
+            return;
+        }
+        const qsizetype count = qsizetype(got) / qsizetype(sizeof(input_event));
+        const bool before = m_jackPresent;
+        for (qsizetype i = 0; i < count; ++i) {
+            if (events[i].type == EV_SW && events[i].code == SW_HEADPHONE_INSERT)
+                setJackPresent(events[i].value != 0);
+        }
+        if (m_jackPresent != before && m_active)
+            refresh();
+    }
+}
+
+bool OutputControl::readJackSwitch(bool &present) const
+{
+    if (m_jackFd < 0)
+        return false;
+    unsigned long bits[(SW_MAX + 1 + 8 * sizeof(unsigned long) - 1) / (8 * sizeof(unsigned long))]{};
+    if (::ioctl(m_jackFd, EVIOCGSW(sizeof(bits)), bits) < 0)
+        return false;
+    const unsigned long word = 8 * sizeof(unsigned long);
+    present = (bits[SW_HEADPHONE_INSERT / word] >> (SW_HEADPHONE_INSERT % word)) & 1UL;
+    return true;
 }
 
 void OutputControl::apply(const QString &output)
@@ -254,6 +373,7 @@ void OutputControl::apply(const QString &output)
 void OutputControl::refresh()
 {
     checkWatchedCard();
+    openJack();
     if (m_applying || m_reading) {
         m_reread = true;
         return;
@@ -281,6 +401,12 @@ void OutputControl::readAll(std::function<void()> done)
 
 void OutputControl::readJack(Handler done)
 {
+    bool present = false;
+    if (readJackSwitch(present)) {
+        setJackPresent(present);
+        done(true, {});
+        return;
+    }
     run(m_jack, amixerPath(), {QStringLiteral("-c0"), QStringLiteral("contents")},
         [this, done](bool ok, const QByteArray &out) {
         if (ok)
@@ -295,7 +421,14 @@ void OutputControl::readSinks(Handler done)
     run(m_sinkList, pactlPath(), {QStringLiteral("list"), QStringLiteral("sinks"), QStringLiteral("short")},
         [this, done, read](bool ok, const QByteArray &out) {
         if (ok) {
-            m_sinks = parseSinks(QString::fromUtf8(out));
+            QStringList sinks = parseSinks(QString::fromUtf8(out));
+            const QString lost = outputOf(m_defaultSink);
+            if (m_held == HeldState::None && (lost == QLatin1StringView("usb") || lost == QLatin1StringView("bt"))
+                && m_activeOutput == lost && m_sinks.contains(m_defaultSink) && !sinks.contains(m_defaultSink)) {
+                qInfo() << "microdap output: route lost" << m_defaultSink;
+                emit routeLost(lost);
+            }
+            m_sinks = std::move(sinks);
             const QString usb = usbSinkIn(m_sinks);
             if (!usb.isEmpty() || m_held == HeldState::None)
                 setUsbSink(usb);
@@ -403,6 +536,10 @@ void OutputControl::setJackPresent(bool present)
         return;
     m_jackPresent = present;
     emit jackPresentChanged();
+    if (!present && m_held == HeldState::None && m_activeOutput == QLatin1StringView("headphones")) {
+        qInfo() << "microdap output: route lost, jack out";
+        emit routeLost(m_activeOutput);
+    }
 }
 
 void OutputControl::setUsbSink(const QString &sink)

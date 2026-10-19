@@ -112,6 +112,7 @@ public:
     Q_INVOKABLE void playPause();
     Q_INVOKABLE void resume();
     Q_INVOKABLE void pause();
+    void outputLost();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void next();
     Q_INVOKABLE void previous();

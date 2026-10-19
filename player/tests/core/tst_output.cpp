@@ -6,9 +6,15 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+
+#include <fcntl.h>
+#include <linux/input.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 using namespace microdap;
 
@@ -99,6 +105,8 @@ private slots:
     void eqFailedResolveLoadsSinkDefault();
     void eqMissingPactlLoadsSpeaker();
     void eqHangingSinkLoadsSpeaker();
+    void jackEventLosesRoute();
+    void usbSinkLosesRoute();
 
 private:
     int count(const QString &line) const;
@@ -150,6 +158,8 @@ void OutputTest::initTestCase()
     qputenv("MICRODAP_PACTL_BIN", (m_bin + QStringLiteral("/pactl")).toUtf8());
     qputenv("MICRODAP_AMIXER_BIN", (m_bin + QStringLiteral("/amixer")).toUtf8());
     qputenv("MICRODAP_ASOUND_DIR", (m_dir.path() + QStringLiteral("/asound")).toUtf8());
+    qputenv("MICRODAP_DEV_INPUT", QFile::encodeName(m_dir.path() + QStringLiteral("/dev")));
+    qputenv("MICRODAP_SYS_INPUT", QFile::encodeName(m_dir.path() + QStringLiteral("/sys")));
     QCOMPARE(OutputControl::pactlPath(), m_bin + QStringLiteral("/pactl"));
     QCOMPARE(OutputControl::amixerPath(), m_bin + QStringLiteral("/amixer"));
 }
@@ -598,6 +608,83 @@ void OutputTest::eqHangingSinkLoadsSpeaker()
     QTest::qWait(300);
     QCOMPARE(loads, QStringList({QStringLiteral("speaker")}));
     QCOMPARE(count(QStringLiteral("pactl get-default-sink\n")), 1);
+}
+
+void OutputTest::jackEventLosesRoute()
+{
+    const QString sys = m_dir.path() + QStringLiteral("/sys/event7/device");
+    QVERIFY(QDir().mkpath(sys));
+    QVERIFY(writeFile(sys + QStringLiteral("/name"), OutputControl::jackDeviceName() + QStringLiteral("\n")));
+    QVERIFY(QDir().mkpath(m_dir.path() + QStringLiteral("/dev")));
+    const QString fifo = m_dir.path() + QStringLiteral("/dev/event7");
+    QCOMPARE(::mkfifo(QFile::encodeName(fifo).constData(), 0600), 0);
+    const int writer = ::open(QFile::encodeName(fifo).constData(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    QVERIFY(writer >= 0);
+    const auto cleanup = qScopeGuard([writer, fifo, sys] {
+        ::close(writer);
+        QFile::remove(fifo);
+        QDir(QFileInfo(sys).absolutePath()).removeRecursively();
+    });
+    const auto send = [writer](int value) {
+        input_event events[2]{};
+        events[0].type = EV_SW;
+        events[0].code = SW_HEADPHONE_INSERT;
+        events[0].value = value;
+        events[1].type = EV_SYN;
+        events[1].code = SYN_REPORT;
+        return ::write(writer, events, sizeof(events)) == ssize_t(sizeof(events));
+    };
+
+    QVERIFY(setDefaultSink(OutputControl::headphonesSink()));
+    OutputControl control;
+    QVERIFY(control.jackEvents());
+    QSignalSpy lost(&control, &OutputControl::routeLost);
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QVERIFY(control.jackPresent());
+    QCOMPARE(control.activeOutput(), QStringLiteral("headphones"));
+
+    QFile::remove(m_log);
+    QElapsedTimer clock;
+    clock.start();
+    QVERIFY(send(0));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.jackPresent(), waitMs);
+    QVERIFY(clock.elapsed() < 1000);
+    QCOMPARE(lost.count(), 1);
+    QCOMPARE(lost.at(0).at(0).toString(), QStringLiteral("headphones"));
+    QCOMPARE(count(QStringLiteral("amixer")), 0);
+
+    QVERIFY(send(1));
+    QTRY_VERIFY_WITH_TIMEOUT(control.jackPresent(), waitMs);
+    QVERIFY(setDefaultSink(OutputControl::speakerSink()));
+    control.refresh();
+    QTRY_COMPARE_WITH_TIMEOUT(control.activeOutput(), QStringLiteral("speaker"), waitMs);
+    QVERIFY(send(0));
+    QTRY_VERIFY_WITH_TIMEOUT(!control.jackPresent(), waitMs);
+    QCOMPARE(lost.count(), 1);
+}
+
+void OutputTest::usbSinkLosesRoute()
+{
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksUsb)));
+    QVERIFY(setDefaultSink(QString::fromUtf8(usbName)));
+    OutputControl control;
+    QSignalSpy lost(&control, &OutputControl::routeLost);
+    QSignalSpy applied(&control, &OutputControl::applied);
+    control.apply(QStringLiteral("auto"));
+    QTRY_COMPARE_WITH_TIMEOUT(applied.count(), 1, waitMs);
+    QCOMPARE(control.activeOutput(), QStringLiteral("usb"));
+
+    QVERIFY(writeFile(m_sinksFile, QString::fromUtf8(sinksBuiltIn)));
+    QVERIFY(setDefaultSink(OutputControl::speakerSink()));
+    control.refresh();
+    QTRY_COMPARE_WITH_TIMEOUT(control.activeOutput(), QStringLiteral("speaker"), waitMs);
+    QCOMPARE(lost.count(), 1);
+    QCOMPARE(lost.at(0).at(0).toString(), QStringLiteral("usb"));
+    control.refresh();
+    QTest::qWait(300);
+    QCOMPARE(lost.count(), 1);
 }
 
 QTEST_GUILESS_MAIN(OutputTest)

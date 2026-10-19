@@ -198,6 +198,7 @@ private slots:
     void dsdBoundary();
     void deckMissing();
     void dsd128Refused();
+    void outputLostPauses();
 
 private:
     int historyCount() const;
@@ -2701,6 +2702,28 @@ void PlayerTest::dsd128Refused()
         }
         player->stop();
     }
+}
+
+void PlayerTest::outputLostPauses()
+{
+    auto player = syncPlayer();
+    player->play({m_long}, 0);
+    QTRY_COMPARE_WITH_TIMEOUT(player->status(), Player::Playing, playTimeoutMs);
+    player->outputLost();
+    QCOMPARE(player->status(), Player::Paused);
+
+    FakeBluezModel fake;
+    player->setBluez(&fake);
+    fake.clearCommands();
+    player->outputLost();
+    QVERIFY(fake.commands().isEmpty());
+    QVERIFY(fake.applyPreset(QStringLiteral("active")));
+    fake.clearCommands();
+    player->outputLost();
+    QCOMPARE(fake.commands(), QStringList({QStringLiteral("pause")}));
+    QCOMPARE(player->status(), Player::Paused);
+    player->setBluez(nullptr);
+    player->stop();
 }
 
 QTEST_GUILESS_MAIN(PlayerTest)

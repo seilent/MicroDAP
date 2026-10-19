@@ -1083,6 +1083,13 @@ void Player::pause()
     setStatus(Paused);
 }
 
+void Player::outputLost()
+{
+    pause();
+    if (m_bluez && m_bluez->transportActive())
+        m_bluez->pause();
+}
+
 void Player::stop()
 {
     cancelHold();
