@@ -36,6 +36,7 @@ public:
     };
 
     static QStringList pivots();
+    static QStringList linkPivots();
     static QStringList types();
     static QStringList kinds();
     static const QList<Row> &all();

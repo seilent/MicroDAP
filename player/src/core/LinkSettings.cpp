@@ -121,7 +121,7 @@ bool LinkSettings::shown(const QString &rule) const
 QList<LinkSettingRow> LinkSettings::rows() const
 {
     QList<LinkSettingRow> out;
-    for (const QString &pivot : SettingsRows::pivots()) {
+    for (const QString &pivot : SettingsRows::linkPivots()) {
         for (const SettingsRows::Row &r : SettingsRows::all()) {
             if (r.pivot != pivot || !shown(r.shown))
                 continue;

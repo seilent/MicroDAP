@@ -49,8 +49,6 @@ TestCase {
         property int balance: 0
         property string crossfeed: "off"
         property string rgb: "system"
-        property string btCodec: "auto"
-        property string btCodecHeadphones: "auto"
         property var roots: ["/home/micro/Music"]
         property var defaultList: []
         property int accentHue: 350
@@ -310,14 +308,14 @@ TestCase {
 
     readonly property var expectedPivots: ["output", "library", "display", "power", "system"]
     readonly property var expectedKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["brightness", "accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "artistPhoto", "rgb", "toasts"],
         ["screenOff", "suspend", "sleep", "wifi"],
         ["boot", "phoneApp", "about"]
     ]
     readonly property var overlayKeys: [
-        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
+        ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
         ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "artistPhoto", "toasts"],
         ["screenOff", "suspend", "wifi"],
@@ -353,8 +351,6 @@ TestCase {
         fakeSettings.balance = 0
         fakeSettings.crossfeed = "off"
         fakeSettings.rgb = "system"
-        fakeSettings.btCodec = "auto"
-        fakeSettings.btCodecHeadphones = "auto"
         fakeSettings.roots = ["/home/micro/Music"]
         fakeSettings.defaultList = []
         fakeSettings.accentHue = 350
@@ -1107,8 +1103,8 @@ TestCase {
     }
 
     function test_value_sheet_keys_ignored() {
-        const page = open({btRole: "headphones"})
-        tc.sheetOpen(page, "codec")
+        const page = open()
+        tc.sheetOpen(page, "output")
         const at = page.focusIndex
         const contentY = page.flick.contentY
         for (const name of ["left", "right", "lt", "rt", "x", "y", "lb", "rb"]) {
@@ -1119,7 +1115,7 @@ TestCase {
         }
         compare(page.pivotIndex, 0)
         compare(page.flick.contentY, contentY)
-        compare(fakeSettings.btCodecHeadphones, "auto")
+        compare(fakeSettings.output, "auto")
         verify(router.dispatch("a", true))
         compare(page.valueOpen, true)
         verify(router.dispatch("b", true))
@@ -1167,24 +1163,18 @@ TestCase {
     }
 
     function test_value_sheet_outside_change_closes() {
-        const page = open({btRole: "headphones"})
+        const page = open()
         tc.sheetOpen(page, "volumeStep")
         router.dispatch("up", false)
         compare(fakeSettings.volumeStep, 10)
         fakeSettings.volumeStep = 2
         compare(page.valueOpen, false)
         compare(fakeSettings.volumeStep, 2)
-        tc.sheetOpen(page, "codec")
+        tc.sheetOpen(page, "output")
         router.dispatch("down", false)
-        fakeSettings.btCodecHeadphones = "sbc"
+        fakeSettings.output = "headphones"
         compare(page.valueOpen, false)
-        compare(fakeSettings.btCodecHeadphones, "sbc")
-        tc.sheetOpen(page, "codec")
-        page.btRole = "receiver"
-        compare(page.valueOpen, false)
-        compare(fakeSettings.btCodecHeadphones, "sbc")
-        compare(fakeSettings.btCodec, "auto")
-        page.btRole = "headphones"
+        compare(fakeSettings.output, "headphones")
         tc.edit(page, "accent")
         router.dispatch("right", false)
         compare(fakeSettings.accentHue, 0)
@@ -1194,8 +1184,8 @@ TestCase {
     }
 
     function test_value_sheet_drafts_apply_only_on_a() {
-        const page = open({btRole: "headphones"})
-        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "codec", "level", "rate", "replaygain", "crossfade", "crossfeed", "orientation", "scale", "boot"]) {
+        const page = open()
+        for (const key of ["output", "hpGain", "hpAmp", "spkGain", "maxVolume", "powerOnVolume", "level", "rate", "replaygain", "crossfade", "crossfeed", "orientation", "scale", "boot"]) {
             verify(tc.rowOf(page, key).spec.draft, key)
             const before = String(page.currentOf(key))
             tc.sheetOpen(page, key)
@@ -1342,79 +1332,21 @@ TestCase {
         compare(tc.rowOf(page, "hpGain").readOnly, false)
     }
 
-    function test_codec_cycles() {
-        const page = open({btRole: "headphones"})
-        compare(tc.rowOf(page, "codec").title, "bluetooth codec")
-        compare(tc.rowOf(page, "codec").value, "auto")
-        compare(tc.rowOf(page, "codec").readOnly, false)
-        tc.sheetOpen(page, "codec")
-        compare(tc.items(page), JSON.stringify(["auto", "ldac", "aptx hd", "aptx", "aac", "sbc"]))
-        for (let i = 0; i < 5; i++)
-            verify(router.dispatch("down", false))
-        compare(tc.focused(page), "sbc")
-        verify(router.dispatch("down", true))
-        compare(tc.focused(page), "sbc")
-        verify(router.dispatch("down", false))
-        compare(tc.focused(page), "auto")
-        verify(router.dispatch("down", false))
-        verify(router.dispatch("down", false))
-        compare(fakeSettings.btCodecHeadphones, "auto")
-        verify(router.dispatch("a", false))
-        compare(fakeSettings.btCodecHeadphones, "aptx_hd")
-        compare(fakeSettings.btCodec, "auto")
-        compare(tc.itemOf(page, "codec").valueItem.text, "aptx hd")
-        compare(tc.itemOf(page, "codec").valueItem.font.capitalization, Font.AllUppercase)
-    }
-
-    function test_codec_receiver_draft() {
-        fakeSettings.btCodec = "aac"
-        fakeSettings.btCodecHeadphones = "ldac"
+    function test_no_codec_row() {
         const page = open()
-        compare(tc.rowOf(page, "codec").readOnly, false)
-        compare(tc.rowOf(page, "codec").value, "aac (pending)")
-        tc.sheetOpen(page, "codec")
-        compare(tc.items(page), JSON.stringify(["auto", "aptx", "aac", "sbc"]))
-        compare(tc.focused(page), "aac")
-        verify(router.dispatch("down", false))
-        compare(tc.focused(page), "sbc")
-        compare(fakeSettings.btCodec, "aac")
-        page.btApplied = "aac"
-        compare(page.valueOpen, true)
-        compare(tc.rowOf(page, "codec").value, "aac")
-        verify(router.dispatch("a", false))
-        compare(page.valueOpen, false)
-        compare(fakeSettings.btCodec, "sbc")
-        compare(fakeSettings.btCodecHeadphones, "ldac")
-        compare(tc.rowOf(page, "codec").value, "sbc (pending)")
-        page.btApplied = "sbc"
-        compare(tc.rowOf(page, "codec").value, "sbc")
-        fakeSettings.btCodec = "auto"
-        compare(tc.rowOf(page, "codec").value, "auto (pending)")
-        page.btApplied = "auto"
-        compare(tc.rowOf(page, "codec").value, "auto")
-    }
-
-    function test_codec_headphones_pending() {
-        fakeSettings.btCodecHeadphones = "ldac"
-        const page = open({btRole: "headphones", btApplied: "aac"})
-        compare(tc.rowOf(page, "codec").value, "ldac (pending)")
-        fakeSettings.btCodecHeadphones = "auto"
-        compare(tc.rowOf(page, "codec").value, "auto (pending)")
-        fakeSettings.btCodecHeadphones = "aac"
-        compare(tc.rowOf(page, "codec").value, "aac")
-        fakeSettings.btCodecHeadphones = "sbc"
-        compare(tc.rowOf(page, "codec").value, "sbc")
-        fakeSettings.btCodecHeadphones = "ldac"
-        page.btApplied = "auto"
-        compare(tc.rowOf(page, "codec").value, "ldac")
-        fakeSettings.btCodecHeadphones = "auto"
-        compare(tc.rowOf(page, "codec").value, "auto")
+        compare(JSON.stringify(page.strip.labels), JSON.stringify(tc.expectedPivots))
+        compare(page.pivotOfKey("codec"), -1)
+        for (let p = 0; p < page.pivots.length; p++) {
+            page.pivotIndex = p
+            page.completeAll()
+            compare(page.indexOfKey("codec"), -1)
+        }
     }
 
     function test_mixer_rows_order() {
         const page = open()
         const output = tc.keyIndex(page, "output")
-        compare(JSON.stringify(tc.keys(page).slice(output, output + 9)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec"]))
+        compare(JSON.stringify(tc.keys(page).slice(output, output + 9)), JSON.stringify(["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "level"]))
         compare(tc.rowOf(page, "hpGain").title, "headphone gain")
         compare(tc.rowOf(page, "hpGain").value, "normal")
         compare(tc.rowOf(page, "hpAmp").title, "headphone amp")
@@ -1804,7 +1736,7 @@ TestCase {
 
     function test_bit_perfect_rows_order() {
         const page = open()
-        compare(tc.keyIndex(page, "level"), tc.keyIndex(page, "codec") + 1)
+        compare(tc.keyIndex(page, "level"), tc.keyIndex(page, "balance") + 1)
         compare(tc.keyIndex(page, "rate"), tc.keyIndex(page, "level") + 1)
         compare(tc.keyIndex(page, "replaygain"), tc.keyIndex(page, "rate") + 1)
         compare(tc.rowOf(page, "level").title, "bit perfect")

@@ -183,6 +183,18 @@ TestCase {
     }
 
     QtObject {
+        id: fakeSettings
+
+        property string btCodec: "auto"
+        property string btCodecHeadphones: "auto"
+
+        function reset() {
+            fakeSettings.btCodec = "auto"
+            fakeSettings.btCodecHeadphones = "auto"
+        }
+    }
+
+    QtObject {
         id: counters
 
         property int nowPlayingOpens: 0
@@ -200,6 +212,7 @@ TestCase {
 
         Bluetooth {
             bluez: fake
+            settings: fakeSettings
             onOpenNowPlaying: counters.nowPlayingOpens++
             onToast: (first, second) => counters.toasts = counters.toasts.concat([first + "/" + second])
         }
@@ -212,6 +225,7 @@ TestCase {
         pages.animate = false
         fake.reset()
         fakeEq.reset()
+        fakeSettings.reset()
         counters.nowPlayingOpens = 0
         counters.toasts = []
     }
@@ -225,7 +239,7 @@ TestCase {
         const page = open()
         compare(pages.depth, 2)
         compare(page.header.text, "bluetooth")
-        compare(page.strip.labels, ["phone", "pairing", "headphones", "eq"])
+        compare(page.strip.labels, ["phone", "pairing", "headphones", "eq", "settings"])
         compare(page.strip.activeIndex, 0)
         compare(page.pivotIndex, 0)
         compare(page.shownPivot, 0)
@@ -339,6 +353,12 @@ TestCase {
         compare(page.eqPage.visible, true)
         compare(page.headphonesPage.visible, false)
         verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 4)
+        compare(page.settingsPage.visible, true)
+        compare(page.eqPage.visible, false)
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 4)
+        verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 3)
         verify(router.dispatch("lb", false))
         compare(page.pivotIndex, 2)
@@ -891,6 +911,177 @@ TestCase {
         compare(page.shownPivot, 1)
         tc.tapAt(page.pairingRing)
         compare(fake.calls, ["startPairing 120"])
+    }
+
+    function codecSheet(page) {
+        verify(router.dispatch("a", false))
+        compare(page.codecOpen, true)
+        compare(page.sheet.shown, true)
+        compare(page.sheet.title, "codec")
+        page.sheet.complete()
+    }
+
+    function focusedItem(page) {
+        return page.sheet.items[page.sheet.focusIndex]
+    }
+
+    function test_settings_pivot_row() {
+        const page = open({ animated: false, eq: fakeEq })
+        page.switchPivot(3)
+        verify(router.dispatch("rb", false))
+        compare(page.pivotIndex, 4)
+        compare(page.shownPivot, 4)
+        const row = page.codecItem
+        compare(row.y, Ui.px(tc.contentTop))
+        compare(row.height, Ui.px(Ui.settingsPitch))
+        compare(row.titleItem.text, "codec")
+        compare(row.titleItem.x, Ui.px(Ui.hubEdge))
+        compare(row.titleItem.font.pixelSize, Ui.font(Ui.settingsItem).pixelSize)
+        compare(row.titleItem.font.capitalization, Font.AllUppercase)
+        compare(row.valueItem.text, "auto")
+        compare(row.valueItem.font.pixelSize, Ui.font(Ui.settingsValue).pixelSize)
+        fuzzyCompare(row.valueItem.x + row.valueItem.width, page.width - Ui.px(Ui.hubEdge), 0.5)
+        fuzzyCompare(row.valueItem.color.a, Ui.settingsValueFocused, 1 / 255)
+        verify(row.titleItem.x + row.titleItem.width <= row.valueItem.x - Ui.px(Ui.gutter) + 0.5)
+        compare(page.settingsFocusBar.visible, true)
+        fuzzyCompare(page.settingsFocusBar.y, row.y, 0.01)
+        compare(page.settingsFocusBar.height, row.height)
+    }
+
+    function test_settings_codec_receiver() {
+        fakeSettings.btCodec = "aac"
+        fakeSettings.btCodecHeadphones = "ldac"
+        const page = open({ animated: false, pivotIndex: 4 })
+        compare(page.codecItem.valueItem.text, "aac (pending)")
+        tc.codecSheet(page)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["auto", "aptx", "aac", "sbc"]))
+        compare(page.sheet.mark, 2)
+        compare(tc.focusedItem(page), "aac")
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("down", false))
+        compare(tc.focusedItem(page), "auto")
+        compare(fakeSettings.btCodec, "aac")
+        page.btApplied = "aac"
+        compare(page.codecOpen, true)
+        compare(page.codecItem.valueItem.text, "aac")
+        verify(router.dispatch("up", false))
+        compare(tc.focusedItem(page), "sbc")
+        verify(router.dispatch("a", false))
+        compare(page.codecOpen, false)
+        compare(fakeSettings.btCodec, "sbc")
+        compare(fakeSettings.btCodecHeadphones, "ldac")
+        compare(page.codecItem.valueItem.text, "sbc (pending)")
+        page.btApplied = "sbc"
+        compare(page.codecItem.valueItem.text, "sbc")
+        tc.codecSheet(page)
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("b", false))
+        compare(page.codecOpen, false)
+        compare(page.sheet.shown, false)
+        compare(fakeSettings.btCodec, "sbc")
+        compare(pages.depth, 2)
+        fakeSettings.btCodec = "auto"
+        compare(page.codecItem.valueItem.text, "auto (pending)")
+        page.btApplied = "auto"
+        compare(page.codecItem.valueItem.text, "auto")
+    }
+
+    function test_settings_codec_headphones() {
+        fake.activeRole = "headphones"
+        fakeSettings.btCodecHeadphones = "ldac"
+        const page = open({ animated: false, pivotIndex: 4, btApplied: "aac" })
+        compare(page.codecItem.valueItem.text, "ldac (pending)")
+        fakeSettings.btCodecHeadphones = "auto"
+        compare(page.codecItem.valueItem.text, "auto (pending)")
+        fakeSettings.btCodecHeadphones = "aac"
+        compare(page.codecItem.valueItem.text, "aac")
+        fakeSettings.btCodecHeadphones = "sbc"
+        compare(page.codecItem.valueItem.text, "sbc")
+        page.btApplied = "auto"
+        fakeSettings.btCodecHeadphones = "ldac"
+        compare(page.codecItem.valueItem.text, "ldac")
+        tc.codecSheet(page)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["auto", "ldac", "aptx hd", "aptx", "aac", "sbc"]))
+        for (let i = 0; i < 4; i++)
+            verify(router.dispatch("down", false))
+        compare(tc.focusedItem(page), "sbc")
+        verify(router.dispatch("down", true))
+        compare(tc.focusedItem(page), "sbc")
+        verify(router.dispatch("down", false))
+        compare(tc.focusedItem(page), "auto")
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("down", false))
+        compare(fakeSettings.btCodecHeadphones, "ldac")
+        verify(router.dispatch("a", false))
+        compare(fakeSettings.btCodecHeadphones, "aptx_hd")
+        compare(fakeSettings.btCodec, "auto")
+        compare(page.codecItem.valueItem.text, "aptx hd")
+        compare(page.codecItem.valueItem.font.capitalization, Font.AllUppercase)
+    }
+
+    function test_settings_codec_sheet_closes() {
+        const page = open({ animated: false, pivotIndex: 4 })
+        tc.codecSheet(page)
+        verify(router.dispatch("down", false))
+        fake.activeRole = "headphones"
+        compare(page.codecOpen, false)
+        compare(page.sheet.shown, false)
+        compare(fakeSettings.btCodec, "auto")
+        compare(fakeSettings.btCodecHeadphones, "auto")
+        compare(page.codecItem.valueItem.text, "auto")
+        tc.codecSheet(page)
+        compare(JSON.stringify(page.sheet.items), JSON.stringify(["auto", "ldac", "aptx hd", "aptx", "aac", "sbc"]))
+        verify(router.dispatch("down", false))
+        fakeSettings.btCodecHeadphones = "aac"
+        compare(page.codecOpen, false)
+        compare(fakeSettings.btCodecHeadphones, "aac")
+        tc.codecSheet(page)
+        verify(router.dispatch("down", false))
+        page.screenOff = true
+        compare(page.codecOpen, false)
+        compare(fakeSettings.btCodecHeadphones, "aac")
+        page.screenOff = false
+        tc.codecSheet(page)
+        verify(router.dispatch("down", false))
+        page.revertOrConfirmForRotation()
+        compare(page.codecOpen, false)
+        compare(fakeSettings.btCodecHeadphones, "aac")
+        tc.codecSheet(page)
+        verify(router.dispatch("down", false))
+        pages.push(baseComponent)
+        compare(page.codecOpen, false)
+        compare(fakeSettings.btCodecHeadphones, "aac")
+    }
+
+    function test_settings_codec_blocked_while_switching() {
+        fake.switching = true
+        const page = open({ animated: false, pivotIndex: 4 })
+        verify(router.dispatch("a", false))
+        compare(page.codecOpen, false)
+        compare(page.sheet.shown, false)
+        fake.switching = false
+        tc.tapAt(page.codecItem, page.codecItem.width / 2, page.codecItem.height / 2)
+        compare(page.codecOpen, true)
+        verify(router.dispatch("b", false))
+        compare(page.codecOpen, false)
+    }
+
+    function test_settings_codec_rise_holds() {
+        const page = open({ animated: true, pivotIndex: 4 })
+        page.completeAll()
+        verify(router.dispatch("a", false))
+        compare(page.codecOpen, true)
+        verify(page.sheet.animating)
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("a", false))
+        compare(page.codecOpen, true)
+        compare(page.sheet.focusIndex, 0)
+        tryCompare(page.sheet, "animating", false, 2000)
+        compare(page.sheet.focusIndex, 1)
+        compare(fakeSettings.btCodec, "auto")
+        verify(router.dispatch("b", false))
+        compare(page.codecOpen, false)
+        compare(fakeSettings.btCodec, "auto")
     }
 
     function test_touch_pivot_by_tap() {

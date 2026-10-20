@@ -47,8 +47,9 @@ Window {
     readonly property bool autoRotate: root.settings !== null && root.settings.autoRotate === true
     readonly property bool autoFollow: root.autoRotate && root.sensor !== null && root.sensor.supported === true
     readonly property bool sensorWanted: root.autoRotate && Ui.orientationActive && !root.off
-    readonly property bool settingsEditing: pages.currentItem !== null && pages.currentItem.objectName === "settings"
-        && (pages.currentItem.editing === true || pages.currentItem.valueOpen === true)
+    readonly property bool settingsEditing: pages.currentItem !== null
+        && (pages.currentItem.objectName === "settings" && (pages.currentItem.editing === true || pages.currentItem.valueOpen === true)
+            || pages.currentItem.objectName === "bluetooth" && pages.currentItem.codecOpen === true)
     property int sensorTurn: -1
     property int pinnedTurn: -1
     property string pinnedRaw: ""
@@ -1363,6 +1364,8 @@ Window {
             animated: !root.hidden
             overlay: root.overlay
             bluez: root.bluez
+            settings: root.settings
+            btApplied: root.btOffer !== null ? String(root.btOffer.applied) : "auto"
             eq: root.eq
             dacEq: root.dacEq
             keyboard: keyboard
@@ -1496,8 +1499,6 @@ Window {
             screenOff: root.off
             folders: root.settings !== null && typeof root.settings.candidateRoots === "function" ? root.settings.candidateRoots() : []
             overlay: root.overlay
-            btRole: root.bluez !== null && root.bluez.activeRole !== undefined ? String(root.bluez.activeRole) : "receiver"
-            btApplied: root.btOffer !== null ? String(root.btOffer.applied) : "auto"
             settings: root.settings
             power: root.power
             player: root.player

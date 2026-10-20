@@ -50,6 +50,11 @@ QVariantList Env::settingsRows() const
     return SettingsRows::maps();
 }
 
+QStringList Env::settingsPivots() const
+{
+    return SettingsRows::pivots();
+}
+
 QString Env::fitPath(const QStringList &parts, const QFont &font, qreal width) const
 {
     const QFontMetricsF metrics(font);

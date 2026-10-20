@@ -18,8 +18,6 @@ Page {
     property QtObject dacEq: null
     property var eq: null
     property bool overlay: false
-    property string btRole: "receiver"
-    property string btApplied: "auto"
     property bool animated: true
     property bool screenOff: false
     property bool foldersOpen: false
@@ -39,10 +37,9 @@ Page {
     readonly property bool usbPresent: page.outputControl !== null && page.outputControl.usbPresent === true
     readonly property bool usbActive: page.outputControl !== null && page.outputControl.activeOutput === "usb"
     readonly property var table: Env.settingsRows
-    readonly property var pivots: page.buildPivots()
+    readonly property var pivots: Env.settingsPivots
     readonly property string shownName: page.pivots[page.shownPivot] === undefined ? "" : page.pivots[page.shownPivot]
     readonly property var outputs: page.usbPresent ? page.valuesOf("output") : page.valuesOf("output").filter((v) => v !== "usb")
-    readonly property var codecs: page.valuesOf("codec")
     readonly property var hpGains: page.valuesOf("hpGain")
     readonly property var hpAmps: page.valuesOf("hpAmp")
     readonly property var spkGainSteps: page.valuesOf("spkGain")
@@ -57,13 +54,6 @@ Page {
     readonly property var builtInRates: page.valuesOf("rate").slice(1).map((r) => Number(r))
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
-    readonly property bool sourceRole: page.btRole === "headphones"
-    readonly property string codec: page.sourceRole
-        ? (page.settings !== null && page.settings.btCodecHeadphones !== undefined ? String(page.settings.btCodecHeadphones) : "auto")
-        : (page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto")
-    readonly property bool codecPending: page.sourceRole
-        ? page.btApplied !== "auto" && page.codec !== page.btApplied && page.codec !== "sbc"
-        : page.codec !== page.btApplied
     readonly property string hpGain: page.settings !== null && page.settings.hpGain !== undefined ? String(page.settings.hpGain) : "normal"
     readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
     readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
@@ -320,18 +310,7 @@ Page {
 
     function valuesOf(key: string): var {
         const r = page.tableRow(key)
-        if (r === null)
-            return []
-        return page.sourceRole && r.headphonesSetting !== "" ? r.headphonesValues : r.values
-    }
-
-    function buildPivots(): var {
-        const out = []
-        for (const r of page.table) {
-            if (out.indexOf(r.pivot) < 0)
-                out.push(r.pivot)
-        }
-        return out
+        return r === null ? [] : r.values
     }
 
     function ruleOn(rule: string): bool {
@@ -398,8 +377,6 @@ Page {
             return page.balanceText(page.balance) + (page.outputSlot === "" ? "" : page.chainNote)
         case "crossfeed":
             return !page.crossfeedSlot ? "headphones only" : page.crossfeedWord(page.crossfeed) + page.chainNote
-        case "codec":
-            return page.wordOf("codec", page.codec) + (page.codecPending ? " (pending)" : "")
         case "level":
             return page.levelValue
         case "rate":
@@ -793,8 +770,6 @@ Page {
             return page.spkGainText(Number(value))
         case "volumeStep":
             return value + "%"
-        case "codec":
-            return String(value).replace("_", " ")
         case "brightness":
             return page.percentText(Number(value))
         case "level":
@@ -981,9 +956,7 @@ Page {
 
     function settingOf(key: string): string {
         const r = page.tableRow(key)
-        if (r === null)
-            return ""
-        return page.sourceRole && r.headphonesSetting !== "" ? r.headphonesSetting : r.setting
+        return r === null ? "" : r.setting
     }
 
     function currentOf(key: string): var {
@@ -1006,8 +979,6 @@ Page {
             return page.balance
         case "crossfeed":
             return page.crossfeed
-        case "codec":
-            return page.codec
         case "level":
             return page.outputLevel
         case "rate":

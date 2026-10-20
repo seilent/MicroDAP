@@ -203,9 +203,13 @@ const QStringList &states()
         QStringLiteral("brightness-sheet"),
         QStringLiteral("brightness-step-sheet"),
         QStringLiteral("brightness-floor-sheet"),
-        QStringLiteral("codec"),
-        QStringLiteral("codec-headphones"),
-        QStringLiteral("codec-headphones-sheet"),
+        QStringLiteral("settings"),
+        QStringLiteral("settings-sheet"),
+        QStringLiteral("settings-pending"),
+        QStringLiteral("settings-headphones"),
+        QStringLiteral("settings-headphones-sheet"),
+        QStringLiteral("settings-headphones-pending"),
+        QStringLiteral("settings-headphones-long"),
         QStringLiteral("photo"),
         QStringLiteral("photo-focus"),
         QStringLiteral("photo-sheet"),
@@ -320,6 +324,8 @@ QString bluezForState(const QString &state)
         return QStringLiteral("appcode");
     if (state == QLatin1StringView("app-off"))
         return QStringLiteral("appoff");
+    if (state.startsWith(QLatin1StringView("settings-headphones")))
+        return QStringLiteral("headphones");
     return QStringLiteral("off");
 }
 

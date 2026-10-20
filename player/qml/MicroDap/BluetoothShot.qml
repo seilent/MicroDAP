@@ -7,6 +7,7 @@ Item {
     property string fixture: "browse"
     readonly property var contextBluez: typeof BluezModel === "undefined" ? null : BluezModel
     readonly property bool eqShot: root.fixture.startsWith("bt-eq")
+    readonly property bool settingsShot: root.fixture.startsWith("settings")
     readonly property bool pairingPreset: root.contextBluez !== null && root.contextBluez.pairing === true
 
     Rectangle {
@@ -29,14 +30,24 @@ Item {
         }
     }
 
+    QtObject {
+        id: sampleSettings
+
+        property string btCodec: root.fixture === "settings-pending" || root.fixture === "settings-sheet" ? "aptx" : "auto"
+        property string btCodecHeadphones: root.fixture === "settings-headphones-pending" ? "ldac"
+            : root.fixture === "settings-headphones-long" ? "aptx_hd" : "aac"
+    }
+
     Bluetooth {
         id: screen
 
         anchors.fill: parent
         animated: false
         bluez: root.contextBluez
+        settings: sampleSettings
+        btApplied: root.fixture === "settings-headphones-pending" || root.fixture === "settings-headphones-long" ? "aac" : "auto"
         eq: root.eqShot ? sampleEq : null
-        pivotIndex: root.eqShot ? 3 : root.pairingPreset ? 1 : 0
+        pivotIndex: root.settingsShot ? 4 : root.eqShot ? 3 : root.pairingPreset ? 1 : 0
         onToast: (first, second) => toast.show(first, second)
 
         Component.onCompleted: {
@@ -47,6 +58,11 @@ Item {
                 screen.eqPage.headphonesPane.openBand = 0
                 screen.eqPage.focusIndex = screen.eqPage.indexOfKey("band0:gain")
                 Qt.callLater(() => screen.eqPage.activePane.ensureVisible(screen.eqPage.focusIndex, 0))
+            }
+            if (root.fixture.endsWith("-sheet") && root.settingsShot) {
+                screen.openCodec()
+                screen.sheet.handleAction("down", false)
+                screen.sheet.complete()
             }
             if (root.fixture === "hp-sheet") {
                 screen.headphonesList.snapTo(2)

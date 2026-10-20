@@ -632,7 +632,7 @@ void SettingsTest::rowTable()
     for (const SettingsRows::Row &row : SettingsRows::all()) {
         QVERIFY2(!keys.contains(row.key), qPrintable(row.key));
         keys.insert(row.key);
-        QVERIFY2(SettingsRows::pivots().contains(row.pivot), qPrintable(row.key));
+        QVERIFY2(SettingsRows::linkPivots().contains(row.pivot), qPrintable(row.key));
         QVERIFY2(SettingsRows::types().contains(row.type), qPrintable(row.key));
         QVERIFY2(SettingsRows::kinds().contains(row.kind), qPrintable(row.key));
         QVERIFY2(!row.title.isEmpty(), qPrintable(row.key));
@@ -738,6 +738,12 @@ void SettingsTest::rowTable()
     const SettingsRows::Row *codec = SettingsRows::find(QStringLiteral("codec"));
     QVERIFY(codec && codec->draft && !codec->bounded);
     QCOMPARE(codec->kind, QStringLiteral("sheet"));
+    QCOMPARE(codec->pivot, QStringLiteral("bluetooth"));
+    QCOMPARE(codec->title, QStringLiteral("codec"));
+    QCOMPARE(SettingsRows::pivots(), QStringList({QStringLiteral("output"), QStringLiteral("library"),
+                                                  QStringLiteral("display"), QStringLiteral("power"),
+                                                  QStringLiteral("system")}));
+    QCOMPARE(SettingsRows::linkPivots(), SettingsRows::pivots() << QStringLiteral("bluetooth"));
     QCOMPARE(codec->setting, QStringLiteral("btCodec"));
     QVERIFY(codec->readOnly.isEmpty());
     QCOMPARE(strings(codec->values), Settings::codecs());

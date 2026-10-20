@@ -1876,13 +1876,14 @@ void LinkTest::schemaAfterHello()
         if (f.type != proto::msg::SCHEMA)
             continue;
         const fd::LinkBody b = body(f);
-        QCOMPARE(b.u("pivotCount"), 5u);
+        QCOMPARE(b.u("pivotCount"), 6u);
         QVERIFY(f.body.size() <= size_t(proto::maxPayload) * proto::pageFillPct / 100);
         const QString pivot = QString::fromStdString(b.str("pivot"));
         if (!pivots.contains(pivot))
             pivots.push_back(pivot);
     }
-    QCOMPARE(pivots, SettingsRows::pivots());
+    QCOMPARE(pivots, SettingsRows::linkPivots());
+    QCOMPARE(pivots.constLast(), QStringLiteral("bluetooth"));
     const fd::LinkFrame *settings = find(frames, proto::msg::SETTINGS);
     QVERIFY(settings);
     QCOMPARE(body(*settings).u("rev"), settingsRev);
@@ -1918,6 +1919,15 @@ void LinkTest::schemaAfterHello()
                                                          QString::number(proto::val::ROW_FLAG::boardOnly)}));
     const fd::LinkField *codec = schemaRow(frames, "btCodec");
     QVERIFY(codec && recordList(codec, "flag").contains(QString::number(proto::val::ROW_FLAG::restart)));
+    QCOMPARE(recordList(codec, "pivot"), QStringList({QStringLiteral("bluetooth")}));
+    QCOMPARE(recordList(codec, "label"), QStringList({QStringLiteral("CODEC")}));
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type != proto::msg::SCHEMA || body(f).str("pivot") != "bluetooth")
+            continue;
+        const fd::LinkBody b = body(f);
+        QCOMPARE(b.u("pivotIndex"), 5u);
+        QCOMPARE(b.all("row").size(), size_t(1));
+    }
     QVERIFY(schemaRow(frames, "companionPair"));
     QVERIFY(!schemaRow(frames, "closePlayer"));
     rig.server.poll();

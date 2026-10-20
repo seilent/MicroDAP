@@ -5,6 +5,8 @@ Page {
     id: page
 
     property QtObject bluez: null
+    property QtObject settings: null
+    property string btApplied: "auto"
     property var eq: null
     property QtObject dacEq: null
     property Item keyboard: null
@@ -17,15 +19,27 @@ Page {
     property int searchTimeout: 120
     property var sheetRow: null
     property string shownState: ""
+    property string shownCodec: ""
     property bool ready: false
     property bool companion: false
 
     readonly property bool live: page.animated && !page.screenOff
-    readonly property var pivots: ["phone", "pairing", "headphones", "eq"]
+    readonly property var pivots: ["phone", "pairing", "headphones", "eq", "settings"]
     readonly property int eqIndex: 3
+    readonly property int settingsIndex: 4
     readonly property string role: page.bluez !== null && page.bluez.activeRole !== undefined ? String(page.bluez.activeRole) : "receiver"
     readonly property bool sourceRole: page.role === "headphones"
     readonly property bool roleSwitching: page.bluez !== null && page.bluez.switching === true
+    readonly property var codecRow: Env.settingsRows.find((r) => r.key === "codec") ?? null
+    readonly property var codecs: page.codecRow === null ? [] : page.sourceRole ? page.codecRow.headphonesValues : page.codecRow.values
+    readonly property string codec: page.settings === null ? "auto"
+        : page.sourceRole ? (page.settings.btCodecHeadphones !== undefined ? String(page.settings.btCodecHeadphones) : "auto")
+        : (page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto")
+    readonly property bool codecPending: page.sourceRole
+        ? page.btApplied !== "auto" && page.codec !== page.btApplied && page.codec !== "sbc"
+        : page.codec !== page.btApplied
+    readonly property string codecValue: page.codecWord(page.codec) + (page.codecPending ? " (pending)" : "")
+    readonly property bool codecOpen: d.codecOpen
     readonly property string eqSlot: page.sourceRole ? "bt"
         : page.eq !== null && page.eq.activeOutput !== undefined && String(page.eq.activeOutput) !== ""
         ? String(page.eq.activeOutput) : "speaker"
@@ -92,6 +106,9 @@ Page {
     property alias hpFocusBar: hpFocusBar
     property alias sheet: sheet
     property alias guardTimer: guardTimer
+    property alias settingsPage: settingsPage
+    property alias codecItem: codecItem
+    property alias settingsFocusBar: settingsFocusBar
 
     signal openNowPlaying()
     signal toast(string first, string second)
@@ -111,7 +128,61 @@ Page {
     }
 
     function contentAt(index: int): Item {
-        return index === 0 ? phonePage : index === 1 ? pairingPage : index === 2 ? headphonesPage : eqPage
+        return [phonePage, pairingPage, headphonesPage, eqPage, settingsPage][index]
+    }
+
+    function codecWord(value: string): string {
+        return value.replace("_", " ")
+    }
+
+    function openCodec(): void {
+        if (page.settings === null || page.codecs.length === 0)
+            return
+        const mark = page.codecs.indexOf(page.codec)
+        page.sheetRow = null
+        d.codecOpen = true
+        d.riseKept = ""
+        sheet.title = "codec"
+        sheet.items = page.codecs.map((v) => page.codecWord(v))
+        sheet.open()
+        sheet.mark = mark
+        sheet.wrap = !page.codecRow.bounded
+        sheet.focusIndex = Math.max(0, mark)
+    }
+
+    function closeCodec(): void {
+        if (!d.codecOpen)
+            return
+        d.codecOpen = false
+        d.riseKept = ""
+        if (sheet.shown)
+            sheet.close()
+    }
+
+    function acceptCodec(index: int): void {
+        const value = page.codecs[index]
+        const headphones = page.sourceRole
+        page.closeCodec()
+        if (value === undefined || page.settings === null)
+            return
+        if (headphones)
+            page.settings.btCodecHeadphones = value
+        else
+            page.settings.btCodec = value
+    }
+
+    function revertOrConfirmForRotation(): void {
+        page.closeCodec()
+    }
+
+    function holdRise(name: string, repeat: bool): bool {
+        if (repeat)
+            return true
+        if (name === "b" || name === "back" || name === "start")
+            d.riseKept = name
+        else if ((name === "up" || name === "down") && d.riseKept === "")
+            d.riseKept = name
+        return true
     }
 
     function resetEq(): void {
@@ -123,7 +194,7 @@ Page {
 
     function landPivot() {
         pivotAnim.stop()
-        for (const item of [phonePage, pairingPage, headphonesPage, eqPage]) {
+        for (const item of [phonePage, pairingPage, headphonesPage, eqPage, settingsPage]) {
             item.x = 0
             item.opacity = 1
         }
@@ -137,6 +208,7 @@ Page {
         if (pivotAnim.running)
             page.landPivot()
         const dir = target > page.pivotIndex ? 1 : -1
+        page.closeCodec()
         page.resetEq()
         d.internal = true
         page.pivotIndex = target
@@ -159,6 +231,10 @@ Page {
             stateSwap.stop()
         stateText.opacity = 1
         page.shownState = page.stateLine
+        if (codecSwap.running)
+            codecSwap.stop()
+        codecValueText.opacity = 1
+        page.shownCodec = page.codecValue
         pairingPage.complete()
     }
 
@@ -177,6 +253,7 @@ Page {
         switch (kind) {
         case "row":
         case "ring":
+        case "setrow":
             return "a"
         case "hprow":
             headphonesList.touchFocus(index)
@@ -332,12 +409,19 @@ Page {
     }
 
     function handleAction(name: string, repeat: bool): bool {
+        if (sheet.shown && d.codecOpen && sheet.animating)
+            return page.holdRise(name, repeat)
         if (sheet.shown)
             return sheet.handleAction(name, repeat)
         if (page.roleSwitching && (name === "a" || name === "x" || name === "start"))
             return true
         if (page.pivotIndex === page.eqIndex && page.eqAction(name, repeat))
             return true
+        if (page.pivotIndex === page.settingsIndex && name === "a") {
+            if (!repeat)
+                page.openCodec()
+            return true
+        }
         if (page.pivotIndex === 2 && page.headphonesAction(name, repeat))
             return true
         switch (name) {
@@ -424,7 +508,29 @@ Page {
         page.call("setReceiverScope", held)
     }
 
-    onSourceRoleChanged: page.holdScope(!page.sourceRole)
+    onSourceRoleChanged: {
+        page.closeCodec()
+        page.holdScope(!page.sourceRole)
+    }
+
+    onCodecChanged: page.closeCodec()
+
+    onCodecValueChanged: {
+        if (page.ready && page.live)
+            codecSwap.restart()
+        else
+            page.shownCodec = page.codecValue
+    }
+
+    onScreenOffChanged: {
+        if (page.screenOff)
+            page.closeCodec()
+    }
+
+    onActiveChanged: {
+        if (!page.active)
+            page.closeCodec()
+    }
 
     Component.onDestruction: page.holdScope(false)
 
@@ -436,6 +542,7 @@ Page {
         page.resetEq()
         page.shownPivot = page.pivotIndex
         page.shownState = page.stateLine
+        page.shownCodec = page.codecValue
         page.ready = true
     }
 
@@ -444,6 +551,8 @@ Page {
 
         property bool internal: false
         property bool scopeHeld: false
+        property bool codecOpen: false
+        property string riseKept: ""
     }
 
     Timer {
@@ -625,17 +734,55 @@ Page {
         onToast: (first, second) => page.toast(first, second)
     }
 
-    Sheet {
-        id: sheet
+    Item {
+        id: settingsPage
 
-        anchors.fill: parent
-        screenOff: page.screenOff
-        animated: page.live
-        onAccepted: (index) => {
-            page.runSheet(index)
-            sheet.close()
+        width: page.width
+        height: page.height
+        visible: page.shownPivot === page.settingsIndex
+
+        Item {
+            id: codecItem
+
+            readonly property string touchKind: "setrow"
+            readonly property Item titleItem: codecTitle
+            readonly property Item valueItem: codecValueText
+
+            y: Ui.px(Ui.contentTop)
+            width: page.width
+            height: Ui.px(Ui.settingsPitch)
+
+            Text {
+                id: codecTitle
+
+                x: Ui.px(Ui.hubEdge)
+                y: (codecItem.height - codecTitle.height) / 2
+                width: codecValueText.x - Ui.px(Ui.gutter) - codecTitle.x
+                text: "codec"
+                color: Ui.white(Ui.settingsItem.alpha)
+                font: Ui.font(Ui.settingsItem)
+                clip: true
+            }
+
+            Text {
+                id: codecValueText
+
+                x: codecItem.width - Ui.px(Ui.hubEdge) - codecValueText.width
+                anchors.baseline: codecTitle.baseline
+                text: page.shownCodec
+                color: Ui.white(Ui.settingsValueFocused)
+                font: Ui.font(Ui.settingsValue)
+            }
         }
-        onRejected: page.sheetRow = null
+
+        FocusBar {
+            id: settingsFocusBar
+
+            rowY: codecItem.y
+            rowHeight: codecItem.height
+            opacity: page.focusOpacity
+            animated: page.live
+        }
     }
 
     CroppedHeader {
@@ -653,6 +800,35 @@ Page {
         labels: page.pivots
         activeIndex: page.pivotIndex
         animated: page.live
+    }
+
+    Sheet {
+        id: sheet
+
+        anchors.fill: parent
+        screenOff: page.screenOff
+        animated: page.live
+        onAccepted: (index) => {
+            if (d.codecOpen) {
+                page.acceptCodec(index)
+                return
+            }
+            page.runSheet(index)
+            sheet.close()
+        }
+        onRejected: {
+            d.codecOpen = false
+            d.riseKept = ""
+            page.sheetRow = null
+        }
+        onAnimatingChanged: {
+            if (sheet.animating || d.riseKept === "")
+                return
+            const kept = d.riseKept
+            d.riseKept = ""
+            if (sheet.shown && d.codecOpen)
+                sheet.handleAction(kept, false)
+        }
     }
 
     SequentialAnimation {
@@ -706,6 +882,28 @@ Page {
                 easing.type: Motion.bezier
                 easing.bezierCurve: Motion.strip
             }
+        }
+    }
+
+    SequentialAnimation {
+        id: codecSwap
+
+        NumberAnimation {
+            target: codecValueText
+            property: "opacity"
+            to: Motion.valueDip
+            duration: Motion.valueChange
+            easing.type: Motion.linear
+        }
+        ScriptAction {
+            script: page.shownCodec = page.codecValue
+        }
+        NumberAnimation {
+            target: codecValueText
+            property: "opacity"
+            to: 1
+            duration: Motion.valueChange
+            easing.type: Motion.linear
         }
     }
 
