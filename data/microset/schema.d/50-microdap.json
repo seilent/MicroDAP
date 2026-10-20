@@ -8,7 +8,7 @@
       "applier": null,
       "group": "microdap_audio",
       "label": "Bit perfect",
-      "ui": {"order": 0, "values": {"bitperfect": "on"}}
+      "ui": {"order": 0, "values": {"bitperfect": "on"}, "apply": "confirm"}
     },
     "microdap.sample_rate": {
       "type": "s",
@@ -17,7 +17,7 @@
       "applier": null,
       "group": "microdap_audio",
       "label": "Sample rate",
-      "ui": {"order": 1}
+      "ui": {"order": 1, "apply": "confirm"}
     },
     "microdap.play_through": {
       "type": "s",
@@ -52,7 +52,7 @@
       "applier": null,
       "group": "microdap_audio",
       "label": "ReplayGain",
-      "ui": {"order": 5}
+      "ui": {"order": 5, "apply": "confirm"}
     },
     "microdap.crossfade_ms": {
       "type": "u",
@@ -61,7 +61,7 @@
       "applier": null,
       "group": "microdap_audio",
       "label": "Crossfade",
-      "ui": {"order": 6, "values": {"0": "off", "1000": "1 s", "2000": "2 s", "3000": "3 s", "5000": "5 s"}}
+      "ui": {"order": 6, "values": {"0": "off", "1000": "1 s", "2000": "2 s", "3000": "3 s", "5000": "5 s"}, "apply": "confirm"}
     },
     "microdap.eq_mode_headphones": {
       "type": "s",
@@ -243,7 +243,7 @@
       "applier": null,
       "group": "microdap_display",
       "label": "Scale",
-      "ui": {"order": 3, "step": 0.1}
+      "ui": {"order": 3, "step": 0.1, "apply": "confirm", "bounded": true}
     },
     "microdap.saver_seconds": {
       "type": "u",
