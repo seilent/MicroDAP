@@ -1495,6 +1495,7 @@ Window {
             screenOff: root.off
             folders: root.settings !== null && typeof root.settings.candidateRoots === "function" ? root.settings.candidateRoots() : []
             overlay: root.overlay
+            btRole: root.bluez !== null && root.bluez.activeRole !== undefined ? String(root.bluez.activeRole) : "receiver"
             settings: root.settings
             power: root.power
             player: root.player

@@ -39,6 +39,7 @@ const QString keyVolumeStep = QStringLiteral("audio.volume_step");
 const QString keyMaxVolume = QStringLiteral("audio.max_volume");
 const QString keyPowerOnVolume = QStringLiteral("audio.power_on_volume");
 const QString keyBtCodec = QStringLiteral("audio.bt_codec");
+const QString keyBtCodecHeadphones = QStringLiteral("audio.bt_codec_headphones");
 const QString keyOrientation = QStringLiteral("display.orientation");
 const QString keyAutoRotate = QStringLiteral("display.auto_rotate");
 const QString keyBootSession = QStringLiteral("session.default");
@@ -78,6 +79,7 @@ constexpr Key keys[] = {
     {"audio.max_volume", QMetaType::UInt, &Settings::maxVolumeChanged},
     {"audio.power_on_volume", QMetaType::UInt, &Settings::powerOnVolumeChanged},
     {"audio.bt_codec", QMetaType::QString, &Settings::btCodecChanged},
+    {"audio.bt_codec_headphones", QMetaType::QString, &Settings::btCodecHeadphonesChanged},
     {"display.orientation", QMetaType::QString, &Settings::orientationChanged},
     {"display.auto_rotate", QMetaType::Bool, &Settings::autoRotateChanged},
     {"session.default", QMetaType::QString, &Settings::bootSessionChanged},
@@ -183,6 +185,7 @@ QVariantMap defaults()
         {keyMaxVolume, 100u},
         {keyPowerOnVolume, 0u},
         {keyBtCodec, QStringLiteral("auto")},
+        {keyBtCodecHeadphones, QStringLiteral("auto")},
         {keyOrientation, QStringLiteral("portrait")},
         {keyAutoRotate, true},
         {keyBootSession, QStringLiteral("steam")},
@@ -319,6 +322,12 @@ QStringList Settings::codecs()
 {
     return {QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"),
             QStringLiteral("ldac"), QStringLiteral("sbc")};
+}
+
+QStringList Settings::headphoneCodecs()
+{
+    return {QStringLiteral("auto"), QStringLiteral("ldac"), QStringLiteral("aptx_hd"), QStringLiteral("aptx"),
+            QStringLiteral("aac"), QStringLiteral("sbc")};
 }
 
 int Settings::normalizeHue(int hue)
@@ -533,8 +542,8 @@ QVariantMap Settings::legacyValues(const QString &path)
         put(keySpkGain, ini.value(QStringLiteral("spkGain")).toInt());
     if (has("volumeStep") && volumeSteps().contains(ini.value(QStringLiteral("volumeStep")).toInt()))
         put(keyVolumeStep, ini.value(QStringLiteral("volumeStep")).toInt());
-    if (has("btCodec") && codecs().contains(text("btCodec")))
-        put(keyBtCodec, text("btCodec"));
+    if (has("btCodec") && headphoneCodecs().contains(text("btCodec")))
+        put(keyBtCodecHeadphones, text("btCodec"));
     const QString orientation = ini.value(QStringLiteral("orientation")).toString();
     if (orientations().contains(orientation))
         put(keyOrientation, orientation);
@@ -827,6 +836,17 @@ void Settings::setBtCodec(const QString &codec)
 {
     if (codecs().contains(codec.toLower()))
         store(keyBtCodec, codec.toLower());
+}
+
+QString Settings::btCodecHeadphones() const
+{
+    return pick(m_values.value(keyBtCodecHeadphones).toString(), headphoneCodecs(), headphoneCodecs().first());
+}
+
+void Settings::setBtCodecHeadphones(const QString &codec)
+{
+    if (headphoneCodecs().contains(codec.toLower()))
+        store(keyBtCodecHeadphones, codec.toLower());
 }
 
 bool Settings::overlayToasts() const

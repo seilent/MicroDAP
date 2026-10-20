@@ -38,6 +38,15 @@ Item {
                 screen.sheetAction("up", false)
             return
         }
+        if (root.fixture.startsWith("codec")) {
+            screen.focusKey("codec")
+            screen.keepFocusVisible()
+            if (root.fixture.endsWith("-sheet")) {
+                screen.activate()
+                screen.sheet.handleAction("down", false)
+            }
+            return
+        }
         if (root.fixture.startsWith("sleep")) {
             screen.focusKey("sleep")
             screen.keepFocusVisible()
@@ -155,7 +164,8 @@ Item {
         property int balance: root.chainShot ? -7 : 0
         property string crossfeed: root.chainShot ? "janMeier" : "off"
         property string rgb: "accent"
-        property string btCodec: "auto"
+        property string btCodec: root.fixture === "codec" ? "aac" : "auto"
+        property string btCodecHeadphones: root.fixture.startsWith("codec-headphones") ? "aptx_hd" : "auto"
         property var roots: ["/home/micro/Music", "/run/media/micro/SD"]
         property int accentHue: 350
         property bool accentFromArt: false
@@ -294,6 +304,7 @@ Item {
         dacEq: root.dacShot ? sampleDacEq : null
         sensor: sampleSensor
         folders: ["/home/micro/Music", "/run/media/micro/SD"]
+        btRole: root.fixture.startsWith("codec-headphones") ? "headphones" : "receiver"
 
         Component.onCompleted: {
             screen.completeAll()

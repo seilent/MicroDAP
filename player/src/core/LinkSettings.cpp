@@ -47,6 +47,8 @@ QString word(const QString &key, const QString &v)
         return v == QLatin1StringView("bitperfect") ? QStringLiteral("on") : v;
     if (key == QLatin1StringView("orientation"))
         return QString(v).replace(QLatin1Char('-'), QLatin1Char(' '));
+    if (key == QLatin1StringView("codec"))
+        return QString(v).replace(QLatin1Char('_'), QLatin1Char(' '));
     if (key == QLatin1StringView("saver"))
         return minutes(n);
     if (key == QLatin1StringView("screenOff"))
@@ -83,9 +85,10 @@ bool clean(const QString &line)
 
 }
 
-LinkSettings::LinkSettings(Settings *settings, QString version)
+LinkSettings::LinkSettings(Settings *settings, QString version, QString role)
     : m_settings(settings)
     , m_version(std::move(version))
+    , m_headphones(role == QLatin1StringView("headphones"))
 {
 }
 
@@ -99,6 +102,8 @@ bool LinkSettings::readOnlyRule(const QString &rule) const
         return m_settings->outputSlot().isEmpty();
     if (rule == QLatin1StringView("crossfeed"))
         return !Settings::crossfeedSlots().contains(m_settings->outputSlot());
+    if (rule == QLatin1StringView("codecRole"))
+        return !m_headphones;
     if (rule == QLatin1StringView("brightness"))
         return m_settings->brightnessSteps().isEmpty();
     return false;
@@ -125,6 +130,8 @@ QList<LinkSettingRow> LinkSettings::rows() const
             lr.key = r.linkKey;
             lr.label = r.title.toUpper();
             lr.pivot = r.pivot;
+            const bool headphones = m_headphones && !r.headphonesSetting.isEmpty();
+            lr.setting = headphones ? r.headphonesSetting : r.setting;
             lr.readOnly = readOnlyRule(r.readOnly);
             QStringList values;
             if (r.type == QLatin1StringView("toggle") || boolRow(r)) {
@@ -133,7 +140,8 @@ QList<LinkSettingRow> LinkSettings::rows() const
             } else if (r.type == QLatin1StringView("choice")) {
                 lr.kind = kind::choice;
                 const QVariantList list = r.key == QLatin1StringView("boot") ? QVariant(m_settings->bootSessions()).toList()
-                                                                            : r.values;
+                                          : headphones                       ? r.headphonesValues
+                                                                             : r.values;
                 for (const QVariant &v : list)
                     values.push_back(v.toString());
             } else if (r.type == QLatin1StringView("steps")) {
@@ -167,7 +175,7 @@ QList<LinkSettingRow> LinkSettings::rows() const
                 lr.readOnly = true;
                 lr.boardOnly = true;
             }
-            lr.restart = r.key == QLatin1StringView("codec");
+            lr.restart = r.key == QLatin1StringView("codec") && !headphones;
             out.push_back(lr);
         }
     }
@@ -176,7 +184,7 @@ QList<LinkSettingRow> LinkSettings::rows() const
 
 QString LinkSettings::wire(const LinkSettingRow &row) const
 {
-    const QVariant v = m_settings->property(row.row->setting.toLatin1().constData());
+    const QVariant v = m_settings->property(row.setting.toLatin1().constData());
     if (row.kind == kind::toggle)
         return v.toBool() ? QStringLiteral("on") : QStringLiteral("off");
     if (row.row->key == QLatin1StringView("crossfade"))
@@ -267,7 +275,7 @@ uint8_t LinkSettings::set(const QString &text, QStringList &kept, QStringList &r
         if (row->row->key == QLatin1StringView("brightness"))
             m_settings->confirmBrightness(v.toInt());
         else
-            m_settings->setProperty(row->row->setting.toLatin1().constData(), v);
+            m_settings->setProperty(row->setting.toLatin1().constData(), v);
     }
     return 0;
 }

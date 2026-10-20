@@ -33,6 +33,7 @@ KEYS = {
     'audio.max_volume': ('u', 100, {'enum': list(range(50, 101, 5))}),
     'audio.power_on_volume': ('u', 0, {'enum': [0] + list(range(10, 101, 5))}),
     'audio.bt_codec': ('s', 'auto', {'enum': ['auto', 'aptx', 'aac', 'ldac', 'sbc']}),
+    'audio.bt_codec_headphones': ('s', 'auto', {'enum': ['auto', 'aptx', 'aptx_hd', 'aac', 'ldac', 'sbc']}),
     'display.orientation': ('s', 'portrait', {}),
     'display.auto_rotate': ('b', True, {}),
     'display.rotation': ('s', 'portrait', {'live': True, 'writable': False}),

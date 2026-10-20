@@ -196,6 +196,7 @@ private:
     Peer *askPeer(uint8_t type) const;
     Peer *peer(quint32 gen) const;
     bool phone() const;
+    QString btRole() const;
     int cap() const;
     void setPairWindow(bool on);
     void closeWindow(bool stop);

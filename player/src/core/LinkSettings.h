@@ -19,6 +19,7 @@ struct LinkSettingRow
     QString key;
     QString label;
     QString pivot;
+    QString setting;
     uint8_t kind = 0;
     QStringList values;
     QStringList words;
@@ -33,7 +34,7 @@ struct LinkSettingRow
 class LinkSettings
 {
 public:
-    explicit LinkSettings(Settings *settings, QString version = {});
+    explicit LinkSettings(Settings *settings, QString version = {}, QString role = {});
 
     QList<LinkSettingRow> rows() const;
     QString text() const;
@@ -47,6 +48,7 @@ private:
 
     Settings *m_settings;
     QString m_version;
+    bool m_headphones;
 };
 
 }

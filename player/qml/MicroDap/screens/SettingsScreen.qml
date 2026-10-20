@@ -18,6 +18,7 @@ Page {
     property QtObject dacEq: null
     property var eq: null
     property bool overlay: false
+    property string btRole: "receiver"
     property bool animated: true
     property bool screenOff: false
     property bool foldersOpen: false
@@ -55,7 +56,10 @@ Page {
     readonly property var builtInRates: page.valuesOf("rate").slice(1).map((r) => Number(r))
     readonly property var roots: page.settings !== null && page.settings.roots !== undefined ? page.settings.roots : []
     readonly property string output: page.settings !== null && page.settings.output !== undefined ? String(page.settings.output) : "auto"
-    readonly property string codec: page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto"
+    readonly property bool sourceRole: page.btRole === "headphones"
+    readonly property string codec: page.sourceRole
+        ? (page.settings !== null && page.settings.btCodecHeadphones !== undefined ? String(page.settings.btCodecHeadphones) : "auto")
+        : (page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto")
     readonly property string hpGain: page.settings !== null && page.settings.hpGain !== undefined ? String(page.settings.hpGain) : "normal"
     readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
     readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
@@ -312,7 +316,9 @@ Page {
 
     function valuesOf(key: string): var {
         const r = page.tableRow(key)
-        return r === null ? [] : r.values
+        if (r === null)
+            return []
+        return page.sourceRole && r.headphonesSetting !== "" ? r.headphonesValues : r.values
     }
 
     function buildPivots(): var {
@@ -340,6 +346,8 @@ Page {
             return !page.sensorSupported
         case "rgb":
             return !page.rgbSupported
+        case "codecRole":
+            return !page.sourceRole
         case "boot":
             return page.bootReadOnly
         case "slot":
@@ -389,7 +397,7 @@ Page {
         case "crossfeed":
             return !page.crossfeedSlot ? "headphones only" : page.crossfeedWord(page.crossfeed) + page.chainNote
         case "codec":
-            return page.codec
+            return page.wordOf("codec", page.codec) + (page.sourceRole ? "" : " (not applied)")
         case "level":
             return page.levelValue
         case "rate":
@@ -783,6 +791,8 @@ Page {
             return page.spkGainText(Number(value))
         case "volumeStep":
             return value + "%"
+        case "codec":
+            return String(value).replace("_", " ")
         case "brightness":
             return page.percentText(Number(value))
         case "level":
@@ -969,7 +979,9 @@ Page {
 
     function settingOf(key: string): string {
         const r = page.tableRow(key)
-        return r === null ? "" : r.setting
+        if (r === null)
+            return ""
+        return page.sourceRole && r.headphonesSetting !== "" ? r.headphonesSetting : r.setting
     }
 
     function currentOf(key: string): var {

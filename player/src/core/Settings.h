@@ -29,6 +29,7 @@ class Settings : public QObject
     Q_PROPERTY(int suspendMinutes READ suspendMinutes WRITE setSuspendMinutes NOTIFY suspendMinutesChanged)
     Q_PROPERTY(bool wifiOffScreenOff READ wifiOffScreenOff WRITE setWifiOffScreenOff NOTIFY wifiOffScreenOffChanged)
     Q_PROPERTY(QString btCodec READ btCodec WRITE setBtCodec NOTIFY btCodecChanged)
+    Q_PROPERTY(QString btCodecHeadphones READ btCodecHeadphones WRITE setBtCodecHeadphones NOTIFY btCodecHeadphonesChanged)
     Q_PROPERTY(bool overlayToasts READ overlayToasts WRITE setOverlayToasts NOTIFY overlayToastsChanged)
     Q_PROPERTY(QString hpGain READ hpGain WRITE setHpGain NOTIFY hpGainChanged)
     Q_PROPERTY(QString hpAmp READ hpAmp WRITE setHpAmp NOTIFY hpAmpChanged)
@@ -78,6 +79,7 @@ public:
     static QVariantMap legacyValues(const QString &path);
     static QStringList outputs();
     static QStringList codecs();
+    static QStringList headphoneCodecs();
     static int normalizeHue(int hue);
     static int hueFromColor(const QString &color);
     static QStringList hpGains();
@@ -136,6 +138,8 @@ public:
     void setWifiOffScreenOff(bool on);
     QString btCodec() const;
     void setBtCodec(const QString &codec);
+    QString btCodecHeadphones() const;
+    void setBtCodecHeadphones(const QString &codec);
     bool overlayToasts() const;
     void setOverlayToasts(bool on);
     QString hpGain() const;
@@ -212,6 +216,7 @@ signals:
     void suspendMinutesChanged();
     void wifiOffScreenOffChanged();
     void btCodecChanged();
+    void btCodecHeadphonesChanged();
     void overlayToastsChanged();
     void hpGainChanged();
     void hpAmpChanged();

@@ -520,6 +520,7 @@ private slots:
     void schemaAfterHello();
     void setKeptAndRefused();
     void draftRefused();
+    void codecPerRole();
     void profileRegisters();
     void profileBackoffOnNotPermitted();
     void profileAlreadyExistsIsOurs();
@@ -1995,6 +1996,47 @@ void LinkTest::draftRefused()
     phone.send(proto::msg::DRAFT, draft);
     rig.server.poll();
     QCOMPARE(errorCode(phone.frames(), proto::msg::DRAFT), uint64_t(proto::err::refused));
+}
+
+void LinkTest::codecPerRole()
+{
+    Rig rig;
+    rig.settings.setBtCodec(QStringLiteral("aac"));
+    Phone phone;
+    std::vector<fd::LinkFrame> frames = rig.connect(phone);
+    const QString readOnly = QString::number(proto::val::ROW_FLAG::readOnly);
+    const QString restart = QString::number(proto::val::ROW_FLAG::restart);
+    const fd::LinkField *receiver = schemaRow(frames, "btCodec");
+    QVERIFY(receiver);
+    QCOMPARE(recordList(receiver, "value"), Settings::codecs());
+    QVERIFY(recordList(receiver, "flag").contains(readOnly));
+    QVERIFY(recordList(receiver, "flag").contains(restart));
+    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=aac\n")));
+    fd::LinkWriter refused;
+    refused.str(proto::tag::SET::text, "btCodec=sbc\n");
+    phone.send(proto::msg::SET, refused);
+    rig.server.poll();
+    QCOMPARE(errorCode(phone.frames(), proto::msg::SET), uint64_t(proto::err::refused));
+    QCOMPARE(rig.settings.btCodec(), QStringLiteral("aac"));
+
+    rig.bluez.setRole(QStringLiteral("headphones"));
+    QCOMPARE(rig.bluez.activeRole(), QStringLiteral("headphones"));
+    rig.server.poll();
+    frames = phone.frames();
+    const fd::LinkField *headphones = schemaRow(frames, "btCodec");
+    QVERIFY(headphones);
+    QCOMPARE(recordList(headphones, "value"), Settings::headphoneCodecs());
+    QVERIFY(recordList(headphones, "word").contains(QStringLiteral("APTX HD")));
+    QVERIFY(recordList(headphones, "flag").isEmpty());
+    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=auto\n")));
+    fd::LinkWriter set;
+    set.str(proto::tag::SET::text, "btCodec=aptx_hd\n");
+    phone.send(proto::msg::SET, set);
+    rig.server.poll();
+    frames = phone.frames();
+    QCOMPARE(rig.settings.btCodecHeadphones(), QStringLiteral("aptx_hd"));
+    QCOMPARE(rig.settings.btCodec(), QStringLiteral("aac"));
+    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=aptx_hd\n")));
 }
 
 const fd::LinkFrame *awaitReply(LibRig &rig, std::vector<fd::LinkFrame> &frames, uint8_t type)

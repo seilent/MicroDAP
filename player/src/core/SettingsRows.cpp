@@ -146,7 +146,9 @@ QList<Row> build()
     out.push_back(readOnly(raises(bounded(balance)), "slot"));
 
     Row codec = choice("output", "codec", "bluetooth codec", "btCodec", words({"auto", "aptx", "aac", "ldac", "sbc"}));
-    out.push_back(draft(codec, "profile switch"));
+    codec.headphonesSetting = QStringLiteral("btCodecHeadphones");
+    codec.headphonesValues = words({"auto", "ldac", "aptx_hd", "aptx", "aac", "sbc"});
+    out.push_back(readOnly(draft(codec, "profile switch"), "codecRole"));
 
     Row level = choice("output", "level", "bit perfect", "outputLevel", words({"off", "bitperfect", "exclusive"}));
     out.push_back(readOnly(draft(level, "chain reconfigure, device reservation"), "overlay"));
@@ -281,6 +283,8 @@ QVariantMap SettingsRows::map(const Row &row)
         {QStringLiteral("draft"), row.draft},
         {QStringLiteral("reason"), row.reason},
         {QStringLiteral("linkKey"), row.linkKey},
+        {QStringLiteral("headphonesSetting"), row.headphonesSetting},
+        {QStringLiteral("headphonesValues"), row.headphonesValues},
     };
 }
 

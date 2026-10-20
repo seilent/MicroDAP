@@ -73,6 +73,7 @@ private slots:
     void rotationSubscribe();
     void rowTable();
     void balanceCrossfeedSlot();
+    void btCodecKeys();
     void volumeKeys();
     void brightnessRow();
 
@@ -180,6 +181,11 @@ void SettingsTest::defaultsWithoutDaemon()
     QCOMPARE(settings.output(), QStringLiteral("auto"));
     settings.setBtCodec(QStringLiteral("AAC"));
     QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
+    QCOMPARE(settings.btCodecHeadphones(), QStringLiteral("auto"));
+    settings.setBtCodecHeadphones(QStringLiteral("APTX_HD"));
+    QCOMPARE(settings.btCodecHeadphones(), QStringLiteral("aptx_hd"));
+    settings.setBtCodecHeadphones(QStringLiteral("opus"));
+    QCOMPARE(settings.btCodecHeadphones(), QStringLiteral("aptx_hd"));
     settings.setAccentHue(198);
     QCOMPARE(settings.accentHue(), 200);
     settings.setAccentHue(-10);
@@ -378,7 +384,8 @@ void SettingsTest::legacyMap()
     QCOMPARE(map.value(QStringLiteral("audio.speaker_gain")).typeId(), QMetaType::UInt);
     QCOMPARE(map.value(QStringLiteral("audio.speaker_gain")).toUInt(), 96u);
     QCOMPARE(map.value(QStringLiteral("audio.volume_step")).toUInt(), 10u);
-    QCOMPARE(map.value(QStringLiteral("audio.bt_codec")).toString(), QStringLiteral("ldac"));
+    QCOMPARE(map.value(QStringLiteral("audio.bt_codec_headphones")).toString(), QStringLiteral("ldac"));
+    QVERIFY(!map.contains(QStringLiteral("audio.bt_codec")));
     QCOMPARE(map.value(QStringLiteral("display.orientation")).toString(), QStringLiteral("landscape"));
     QCOMPARE(map.value(QStringLiteral("display.auto_rotate")), QVariant(true));
     QCOMPARE(map.value(QStringLiteral("microdap.rgb")).toString(), QStringLiteral("system"));
@@ -498,7 +505,8 @@ void SettingsTest::importKeepsStored()
     settings.importLegacy(path);
     QTRY_COMPARE_WITH_TIMEOUT(imported.count(), 1, waitMs);
     QCOMPARE(settings.output(), QStringLiteral("speaker"));
-    QTRY_COMPARE_WITH_TIMEOUT(settings.btCodec(), QStringLiteral("aac"), waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(settings.btCodecHeadphones(), QStringLiteral("aac"), waitMs);
+    QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
 
     m_set.stop();
     const QString again = ini(QStringLiteral("[General]\noutput=usb\n"));
@@ -727,7 +735,30 @@ void SettingsTest::rowTable()
     QCOMPARE(sleep->linkKey, QStringLiteral("sleep"));
     QCOMPARE(sleep->shown, QStringLiteral("dap"));
     QCOMPARE(ints(sleep->values), QList<int>({0, 15, 30, 45, 60, 90, 120}));
+    const SettingsRows::Row *codec = SettingsRows::find(QStringLiteral("codec"));
+    QVERIFY(codec && codec->draft && !codec->bounded);
+    QCOMPARE(codec->kind, QStringLiteral("sheet"));
+    QCOMPARE(codec->setting, QStringLiteral("btCodec"));
+    QCOMPARE(codec->readOnly, QStringLiteral("codecRole"));
+    QCOMPARE(strings(codec->values), Settings::codecs());
+    QCOMPARE(codec->headphonesSetting, QStringLiteral("btCodecHeadphones"));
+    QCOMPARE(strings(codec->headphonesValues), Settings::headphoneCodecs());
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
+}
+
+void SettingsTest::btCodecKeys()
+{
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    Settings settings(&client);
+    QSignalSpy headphones(&settings, &Settings::btCodecHeadphonesChanged);
+    settings.setBtCodecHeadphones(QStringLiteral("aptx_hd"));
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.bt_codec_headphones")).toString(), QStringLiteral("aptx_hd"),
+                              waitMs);
+    QCOMPARE(client.get(QStringLiteral("audio.bt_codec")).toString(), QStringLiteral("auto"));
+    QCOMPARE(headphones.count(), 1);
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("audio.bt_codec_headphones"), FakeService::variant(QStringLiteral("ldac"))});
+    QTRY_COMPARE_WITH_TIMEOUT(settings.btCodecHeadphones(), QStringLiteral("ldac"), waitMs);
+    QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
 }
 
 void SettingsTest::volumeKeys()

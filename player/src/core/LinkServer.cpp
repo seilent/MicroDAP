@@ -168,6 +168,11 @@ void LinkServer::setBluez(BluezModel *bluez)
     connect(bluez, &BluezModel::titleChanged, this, soon);
     connect(bluez, &BluezModel::statusChanged, this, soon);
     connect(bluez, &BluezModel::positionMsChanged, this, soon);
+    connect(bluez, &BluezModel::switchingChanged, this, [this] {
+        m_settingsFresh = false;
+        if (!m_peers.empty())
+            m_soon.start();
+    });
     auto window = [this] {
         const bool open = m_bluez && m_bluez->pairing() && m_bluez->pairingMode() == QLatin1StringView("companion");
         if (open && m_pairWindow) {
@@ -573,6 +578,11 @@ void LinkServer::updateConnected()
 bool LinkServer::phone() const
 {
     return m_bluez && m_bluez->transportActive();
+}
+
+QString LinkServer::btRole() const
+{
+    return m_bluez ? m_bluez->activeRole() : QString();
 }
 
 int LinkServer::cap() const
@@ -1169,7 +1179,7 @@ void LinkServer::refresh()
     if (m_settingsFresh)
         return;
     m_settingsFresh = true;
-    const LinkSettings link(m_settings, version());
+    const LinkSettings link(m_settings, version(), btRole());
     const QList<LinkSettingRow> rows = link.rows();
     std::vector<Pivot> pivots;
     std::vector<Pivot> confirm;
@@ -1297,9 +1307,9 @@ void LinkServer::settingsCommand(Peer &p, fd::LinkCommand &c, qint64 now)
     QStringList refused;
     uint8_t code = proto::err::refused;
     if (!p.refused && c.type == m::SET) {
-        code = c.body.has("text") ? LinkSettings(m_settings, version()).set(QString::fromStdString(c.body.str("text")), kept,
-                                                                             refused)
-                                  : uint8_t(proto::err::badValue);
+        code = c.body.has("text")
+                   ? LinkSettings(m_settings, version(), btRole()).set(QString::fromStdString(c.body.str("text")), kept, refused)
+                   : uint8_t(proto::err::badValue);
     }
     m_settingsFresh = false;
     refresh();

@@ -31,6 +31,8 @@ public:
         bool raises = false;
         QString reason;
         QString linkKey;
+        QString headphonesSetting;
+        QVariantList headphonesValues;
     };
 
     static QStringList pivots();
