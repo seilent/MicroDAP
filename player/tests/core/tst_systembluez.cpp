@@ -1156,8 +1156,9 @@ void SystemBluezTest::headsetLists()
     QTest::qWait(300);
     QVERIFY(!slow->calls.contains(QStringLiteral("Pair")));
 
-    m_model->forgetHeadset(arc->path());
-    QTRY_VERIFY_WITH_TIMEOUT(m_fake->removedDevices.contains(arc->path()), busTimeoutMs);
+    const QString arcPath = arc->path();
+    m_model->forgetHeadset(arcPath);
+    QTRY_VERIFY_WITH_TIMEOUT(m_fake->removedDevices.contains(arcPath), busTimeoutMs);
     const QString zest = fresh->path();
     QCOMPARE(m_model->lastHeadset(), zest);
     m_model->forgetHeadset(zest);
