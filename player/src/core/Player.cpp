@@ -227,6 +227,7 @@ QVariantMap Player::current() const
     if (m_library && !map.isEmpty()) {
         const qint64 id = map.value(QStringLiteral("id")).toLongLong();
         map.insert(QStringLiteral("rating"), m_favorites ? int(m_favorites->contains(id)) : m_library->rating(id));
+        map.insert(QStringLiteral("artists"), m_library->trackArtists(id));
         const QVariantList rows = m_library->trackRows({id});
         if (!rows.isEmpty()) {
             const QVariantMap row = rows.first().toMap();

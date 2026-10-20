@@ -56,6 +56,7 @@ class Settings : public QObject
     Q_PROPERTY(QString bootSession READ bootSession WRITE setBootSession NOTIFY bootSessionChanged)
     Q_PROPERTY(bool companion READ companion WRITE setCompanion NOTIFY companionChanged)
     Q_PROPERTY(QString companionPhone READ companionPhone WRITE setCompanionPhone NOTIFY companionPhoneChanged)
+    Q_PROPERTY(bool artistPhoto READ artistPhoto WRITE setArtistPhoto NOTIFY artistPhotoChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
 public:
@@ -188,6 +189,8 @@ public:
     void setCompanion(bool on);
     QString companionPhone() const;
     void setCompanionPhone(const QString &address);
+    bool artistPhoto() const;
+    void setArtistPhoto(bool on);
 
 signals:
     void outputChanged();
@@ -228,6 +231,7 @@ signals:
     void bootSessionChanged();
     void companionChanged();
     void companionPhoneChanged();
+    void artistPhotoChanged();
     void availableChanged();
     void valueChanged(const QString &key);
     void imported(bool ok);

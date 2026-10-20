@@ -1,5 +1,6 @@
 #include "LinkServer.h"
 
+#include "ArtistStore.h"
 #include "BluezModel.h"
 #include "Favorites.h"
 #include "HubModels.h"
@@ -17,6 +18,7 @@
 #include <QRandomGenerator>
 #include <QSet>
 #include <QSocketNotifier>
+#include <QSqlQuery>
 #include <QThreadPool>
 
 #include <algorithm>
@@ -74,7 +76,8 @@ quint64 LinkServer::features()
 {
     return 1ull << proto::feature::settings | 1ull << proto::feature::library | 1ull << proto::feature::queue
            | 1ull << proto::feature::art | 1ull << proto::feature::lyrics | 1ull << proto::feature::lyricsGet
-           | 1ull << proto::feature::stateClock;
+           | 1ull << proto::feature::image | 1ull << proto::feature::imgOrigin | 1ull << proto::feature::artBlock
+           | 1ull << proto::feature::artPick | 1ull << proto::feature::stateClock;
 }
 
 quint32 LinkServer::randomRev()
@@ -514,6 +517,7 @@ void LinkServer::poll()
             settings(p, now);
         }
     }
+    answers();
     for (auto it = m_peers.begin(); it != m_peers.end();) {
         if ((*it)->s->closed()) {
             qInfo().noquote() << "microdap link: session" << (*it)->gen << "closed:" << QString::fromStdString((*it)->s->why());
@@ -737,6 +741,8 @@ void LinkServer::command(fd::LinkCommand &c, int64_t now)
         return lrcCommand(*p, c, now);
     if (c.type == m::LYR_GET)
         return lyrGet(*p, c, now);
+    if ((c.type >= m::IMG_BEGIN && c.type <= m::IMG_ABORT) || c.type == m::IMG_TAG)
+        return image(*p, c, now);
     if (library(*p, c, now))
         return;
     if (c.type != m::TRANSPORT && c.type != m::VOLUME)
@@ -1581,6 +1587,289 @@ void LinkServer::lyrDone(quint32 job, const LyricsText &text)
     }
     if (any)
         m_soon.start();
+}
+
+void LinkServer::setArtists(ArtistStore *store)
+{
+    m_artists = store;
+}
+
+void LinkServer::prune()
+{
+    Library *lib = m_player->library();
+    if (!m_artists || !lib || !lib->isOpen())
+        return;
+    QSet<quint64> keep;
+    QSqlQuery q(QStringLiteral("SELECT name FROM artists"), lib->database());
+    while (q.next())
+        keep.insert(ArtistStore::key(q.value(0).toString()));
+    const int n = m_artists->prune(keep);
+    if (n > 0)
+        qInfo() << "microdap art: prune" << n << "library photos";
+}
+
+namespace {
+
+uint8_t imageErr(ArtistStore::Code c)
+{
+    switch (c) {
+    case ArtistStore::Code::Crc:
+        return proto::err::crc;
+    case ArtistStore::Code::TooBig:
+        return proto::err::tooBig;
+    case ArtistStore::Code::BadValue:
+        return proto::err::badValue;
+    case ArtistStore::Code::NoSpace:
+        return proto::err::noSpace;
+    case ArtistStore::Code::Refused:
+        return proto::err::refused;
+    case ArtistStore::Code::NotFound:
+        return proto::err::notFound;
+    default:
+        return proto::err::busy;
+    }
+}
+
+uint8_t abortOf(ArtistStore::Code c)
+{
+    namespace a = proto::val::ABORT_CODE;
+    switch (c) {
+    case ArtistStore::Code::Crc:
+        return a::crc;
+    case ArtistStore::Code::BadValue:
+        return a::badValue;
+    case ArtistStore::Code::NoSpace:
+        return a::noSpace;
+    case ArtistStore::Code::Busy:
+        return a::busy;
+    default:
+        return a::writeError;
+    }
+}
+
+quint8 originBits(const fd::LinkBody &b)
+{
+    if (!b.has("origin"))
+        return 0;
+    return b.u("origin") == proto::val::IMG_ORIGIN::phone ? ArtistStore::originPhone : ArtistStore::originLibrary;
+}
+
+}
+
+void LinkServer::image(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    namespace m = proto::msg;
+    if (c.type == m::IMG_ABORT)
+        return;
+    if (!m_artists || p.refused) {
+        if (c.want())
+            p.s->fail(c, p.refused ? uint8_t(proto::err::refused) : uint8_t(proto::err::busy),
+                      fd::link_err_text(p.refused ? uint8_t(proto::err::refused) : uint8_t(proto::err::busy)), now);
+        return;
+    }
+    auto fail = [&p, &c, now](uint8_t code) { p.s->fail(c, code, fd::link_err_text(code), now); };
+    switch (c.type) {
+    case m::IMG_BEGIN: {
+        if (!c.body.has("name") || !c.body.has("total") || !c.body.has("crc") || !c.body.has("kind")) {
+            p.push = 0;
+            return fail(proto::err::badValue);
+        }
+        ArtistStore::Head h;
+        h.name = QString::fromStdString(c.body.str("name"));
+        h.mbid = QString::fromStdString(c.body.str("mbid"));
+        h.total = quint32(std::min<uint64_t>(c.body.u("total"), UINT32_MAX));
+        h.crc = quint32(c.body.u("crc"));
+        h.w = int(c.body.u("w"));
+        h.h = int(c.body.u("h"));
+        h.wrong = c.body.u("wrongArtist") != 0;
+        h.source = QString::fromStdString(c.body.str("source"));
+        h.credit = QString::fromStdString(c.body.str("credit"));
+        h.origin = originBits(c.body);
+        quint32 offset = 0;
+        quint32 crc = 0;
+        quint32 push = 0;
+        const ArtistStore::Code code = m_artists->begin(h, offset, crc, &push);
+        p.push = code == ArtistStore::Code::Ok ? push : 0;
+        if (!p.push)
+            return fail(imageErr(code));
+        namespace t = proto::tag::IMG_BEGIN_reply;
+        fd::LinkWriter w;
+        w.u32(t::offset, offset).u32(t::crc, crc);
+        p.s->reply(c, w, now);
+        return;
+    }
+    case m::IMG_DATA: {
+        const fd::LinkField *d = c.body.get("data");
+        if (!p.push || !d)
+            return;
+        const ArtistStore::Code code =
+            m_artists->data(quint32(c.body.u("offset")), QByteArray::fromStdString(d->s), p.push);
+        if (code != ArtistStore::Code::Ok) {
+            p.s->abort_image(abortOf(code), now);
+            p.push = 0;
+        }
+        return;
+    }
+    case m::IMG_END: {
+        const quint32 push = p.push;
+        p.push = 0;
+        const ArtistStore::Code code = push ? m_artists->end(quint32(c.body.u("crc")), push) : ArtistStore::Code::Refused;
+        if (code != ArtistStore::Code::Ok)
+            return fail(imageErr(code));
+        p.s->reply(c, fd::LinkWriter(), now);
+        return;
+    }
+    case m::IMG_LIST: {
+        namespace t = proto::tag::IMG_LIST_reply;
+        namespace e = proto::tag::ImgEntry;
+        const QList<ArtistStore::Entry> entries = m_artists->listed();
+        const size_t cap = size_t(proto::maxPayload) * proto::pageFillPct / 100;
+        size_t used = 40;
+        const quint32 total = quint32(entries.size());
+        const quint32 from = std::min(quint32(c.body.u("offset")), total);
+        const quint32 count = quint32(std::min<uint64_t>(c.body.u("count", UINT32_MAX), UINT32_MAX));
+        quint32 n = 0;
+        std::vector<fd::LinkWriter> recs;
+        while (from + n < total && n < count) {
+            const ArtistStore::Entry &a = entries.at(qsizetype(from + n));
+            fd::LinkWriter r;
+            r.str(e::name, utf8(a.name));
+            if (!a.mbid.isEmpty())
+                r.str(e::mbid, utf8(a.mbid));
+            if (a.origin & ArtistStore::originLibrary)
+                r.u8(e::origin, proto::val::IMG_ORIGIN::library);
+            if (a.origin & ArtistStore::originPhone)
+                r.u8(e::origin, proto::val::IMG_ORIGIN::phone);
+            if (n > 0 && used + proto::tlvHeaderBytes + r.size() > cap)
+                break;
+            used += proto::tlvHeaderBytes + r.size();
+            recs.push_back(std::move(r));
+            ++n;
+        }
+        fd::LinkWriter w;
+        w.u32(t::offset, from).u32(t::total, total).flag(t::more, from + n < total);
+        for (const fd::LinkWriter &r : recs)
+            w.rec(t::entry, r);
+        w.u64(t::bytes, m_artists->bytes()).u64(t::cap, uint64_t(m_artists->cap()));
+        p.s->reply(c, w, now);
+        return;
+    }
+    case m::IMG_DEL:
+        if (c.body.str("name").empty())
+            return fail(proto::err::badValue);
+        m_artists->remove(QString::fromStdString(c.body.str("name")));
+        p.s->reply(c, fd::LinkWriter(), now);
+        return;
+    case m::IMG_TAG:
+        if (c.body.str("name").empty() || !c.body.has("origin"))
+            return fail(proto::err::badValue);
+        if (!m_artists->tag(QString::fromStdString(c.body.str("name")), originBits(c.body)))
+            return fail(proto::err::notFound);
+        p.s->reply(c, fd::LinkWriter(), now);
+        return;
+    default:
+        return;
+    }
+}
+
+LinkServer::Peer *LinkServer::askPeer(uint8_t type) const
+{
+    for (auto it = m_peers.rbegin(); it != m_peers.rend(); ++it) {
+        Peer &p = **it;
+        if (p.hello && !p.refused && p.s->open())
+            return p.s->can_ask(type) ? &p : nullptr;
+    }
+    return nullptr;
+}
+
+bool LinkServer::canAsk(const QString &what) const
+{
+    const uint8_t type = what == QLatin1StringView("pick") ? proto::msg::ART_PICK : proto::msg::ART_BLOCK;
+    return askPeer(type) != nullptr;
+}
+
+bool LinkServer::ask(uint8_t type, const fd::LinkWriter &w, const QString &name, const QString &what)
+{
+    if (m_askGen) {
+        emit askDone(what, QStringLiteral("busy"), name, {});
+        return false;
+    }
+    Peer *p = askPeer(type);
+    if (!p) {
+        emit askDone(what, QStringLiteral("closed"), name, {});
+        return false;
+    }
+    const qint64 now = m_clock().boot;
+    const uint16_t seq = p->s->ask(type, w, now);
+    if (!seq) {
+        emit askDone(what, QStringLiteral("closed"), name, {});
+        return false;
+    }
+    m_askGen = p->gen;
+    m_askSeq = seq;
+    m_askType = type;
+    m_askName = name;
+    m_askWhat = what;
+    qInfo().noquote() << "microdap link:" << QString::fromLatin1(fd::link_msg(type)->name) << name << "seq" << seq;
+    m_soon.start();
+    return true;
+}
+
+bool LinkServer::artBlock(bool wrongArtist, const QString &name, const QString &mbid, quint32 crc)
+{
+    namespace t = proto::tag::ART_BLOCK;
+    fd::LinkWriter w;
+    w.u8(t::cmd, wrongArtist ? proto::val::BLOCK_CMD::wrongArtist : proto::val::BLOCK_CMD::blockImage).str(t::name, utf8(name));
+    if (!mbid.isEmpty())
+        w.str(t::mbid, utf8(mbid));
+    w.u32(t::crc, crc);
+    return ask(proto::msg::ART_BLOCK, w, name, wrongArtist ? QStringLiteral("wrong") : QStringLiteral("block"));
+}
+
+bool LinkServer::artPick(const QString &name, const QString &mbid)
+{
+    namespace t = proto::tag::ART_PICK;
+    fd::LinkWriter w;
+    w.str(t::name, utf8(name));
+    if (!mbid.isEmpty())
+        w.str(t::mbid, utf8(mbid));
+    return ask(proto::msg::ART_PICK, w, name, QStringLiteral("pick"));
+}
+
+void LinkServer::answers()
+{
+    for (auto &p : m_peers) {
+        fd::LinkAnswer a;
+        while (p->s->take_answer(a)) {
+            if (!m_askGen || p->gen != m_askGen || a.seq != m_askSeq || a.type != m_askType)
+                continue;
+            m_askGen = 0;
+            const QString what = m_askWhat;
+            QString result;
+            QString text;
+            switch (a.kind) {
+            case fd::LinkAnswer::Reply:
+                result = a.type == proto::msg::ART_PICK && a.body.u("shown") == 0 ? QStringLiteral("notified")
+                                                                                   : QStringLiteral("ok");
+                break;
+            case fd::LinkAnswer::Error:
+                result = QStringLiteral("error %1").arg(a.code);
+                text = QString::fromStdString(a.body.str("text"));
+                break;
+            case fd::LinkAnswer::Timeout:
+                result = QStringLiteral("timeout");
+                break;
+            case fd::LinkAnswer::Closed:
+                result = QStringLiteral("closed");
+                break;
+            }
+            emit askDone(what, result, m_askName, text);
+        }
+    }
+    if (m_askGen && !peer(m_askGen)) {
+        m_askGen = 0;
+        emit askDone(m_askWhat, QStringLiteral("closed"), m_askName, {});
+    }
 }
 
 }

@@ -8,6 +8,9 @@ Page {
     property string name: ""
     property string artPath: ""
     property QtObject library: null
+    property QtObject photos: null
+    property bool photoOn: true
+    readonly property bool photoShown: backdrop.hasArt && page.photos !== null && typeof page.photos.touchName === "function"
     property QtObject player: null
     readonly property int currentId: page.player !== null && page.player.current !== undefined && page.player.current !== null
         && page.player.current.id !== undefined && page.player.current.id !== null ? Number(page.player.current.id) : -1
@@ -689,6 +692,12 @@ Page {
         id: backdrop
 
         anchors.fill: parent
+        source: page.photoOn && page.photos !== null && page.photos.revision >= 0 ? page.photos.photoFor([page.name]) : ""
+    }
+
+    onPhotoShownChanged: {
+        if (page.photoShown)
+            page.photos.touchName(page.photos.photoArtist([page.name]))
     }
 
     Pane {

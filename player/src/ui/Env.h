@@ -19,6 +19,7 @@ class Env : public QObject
     Q_PROPERTY(int landscapeTurn READ landscapeTurn CONSTANT)
     Q_PROPERTY(bool rotateMotion READ rotateMotion CONSTANT)
     Q_PROPERTY(QVariantList settingsRows READ settingsRows CONSTANT)
+    Q_PROPERTY(QString shotPhoto READ shotPhoto CONSTANT)
 
 public:
     explicit Env(QObject *parent = nullptr);
@@ -29,6 +30,7 @@ public:
     int landscapeTurn() const;
     bool rotateMotion() const;
     QVariantList settingsRows() const;
+    QString shotPhoto() const;
     Q_INVOKABLE QString fitPath(const QStringList &parts, const QFont &font, qreal width) const;
     Q_INVOKABLE QStringList wrapLines(const QString &text, const QFont &font, qreal width) const;
 };

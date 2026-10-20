@@ -9,6 +9,12 @@ Page {
     property QtObject bluez: null
     property QtObject status: null
     property QtObject lyrics: null
+    property QtObject photos: null
+    property QtObject link: null
+    property bool photoOn: true
+    property var artItems: []
+    property var artNames: []
+    property var artTarget: ({})
     property bool animated: true
     property bool screenOff: false
     property int focusRow: 0
@@ -25,7 +31,7 @@ Page {
     property bool lyricsMode: false
     property bool lyricsView: false
     property real lyricsShade: 0
-    property var shown: ({ id: null, title: "", artist: "", album: "", artPath: "", rating: 0 })
+    property var shown: ({ id: null, title: "", artist: "", album: "", artPath: "", rating: 0, artists: [] })
     property var pending: null
     property var nextTitles: []
     property real shownPosition: 0
@@ -201,9 +207,83 @@ Page {
             artist: map.artist === undefined || map.artist === null ? "" : String(map.artist),
             album: map.album === undefined || map.album === null ? "" : String(map.album),
             artPath: map.artPath === undefined || map.artPath === null ? "" : String(map.artPath),
-            rating: map.rating === undefined || map.rating === null ? 0 : Number(map.rating)
+            rating: map.rating === undefined || map.rating === null ? 0 : Number(map.rating),
+            artists: map.artists !== undefined && map.artists !== null && map.artists.length > 0 ? map.artists
+                : map.artist === undefined || map.artist === null || String(map.artist) === "" ? [] : [String(map.artist)]
         }
     }
+
+    readonly property int photoRevision: np.photos !== null && np.photos.revision !== undefined ? np.photos.revision : 0
+    readonly property string photoName: np.photoOn && np.photos !== null && np.photoRevision >= 0 && np.shown.artists !== undefined
+        ? np.photos.photoArtist(np.shown.artists) : ""
+    readonly property url photoUrl: np.photoName !== "" && np.photoRevision >= 0 ? np.photos.photoFor([np.photoName]) : ""
+    readonly property bool linked: np.link !== null && np.link.connected === true
+
+    function artSheetItems(info: var): var {
+        if (!np.photoOn || !np.linked || np.shownVariant)
+            return []
+        const out = []
+        if (np.photoName !== "" && info.name !== undefined && String(info.name) !== "" && Number(info.crc) !== 0
+            && np.link.canAsk("block")) {
+            out.push("block image")
+            if (info.wrong === true)
+                out.push("wrong artist")
+        }
+        if (np.link.canAsk("pick") && (np.photoName !== "" || np.shown.artists.length > 0))
+            out.push("pick image")
+        return out
+    }
+
+    function openArtSheet(): bool {
+        if (np.idle)
+            return false
+        const info = np.photoName !== "" && np.photos !== null ? np.photos.photoInfo(np.photoName) : ({})
+        const items = np.artSheetItems(info)
+        if (items.length === 0)
+            return false
+        np.artTarget = {
+            stored: info.name === undefined ? "" : String(info.name),
+            tag: np.photoName !== "" ? np.photoName : (np.shown.artists.length > 0 ? String(np.shown.artists[0]) : ""),
+            crc: info.crc === undefined ? 0 : Number(info.crc),
+            mbid: info.mbid === undefined ? "" : String(info.mbid),
+            artists: np.shown.artists.slice(),
+            photo: np.photoName !== ""
+        }
+        np.artNames = []
+        np.artItems = items
+        sheet.title = np.artTarget.photo ? np.artTarget.stored : np.shown.artist
+        sheet.items = items
+        sheet.open()
+        return true
+    }
+
+    function artChosen(index: int): void {
+        const t = np.artTarget
+        if (sheet.stack.length > 0 && np.artNames.length > 0) {
+            const name = np.artNames[index]
+            np.artNames = []
+            np.artItems = []
+            sheet.close()
+            if (name !== undefined)
+                np.link.artPick(name, "")
+            return
+        }
+        const item = np.artItems[index]
+        if (item === "pick image" && !t.photo && t.artists.length > 1) {
+            np.artNames = t.artists.slice()
+            sheet.push(sheet.title, np.artNames)
+            return
+        }
+        np.artItems = []
+        sheet.close()
+        if (item === "block image")
+            np.link.artBlock(false, t.stored, t.mbid, t.crc)
+        else if (item === "wrong artist")
+            np.link.artBlock(true, t.stored, t.mbid, t.crc)
+        else if (item === "pick image")
+            np.link.artPick(t.tag, "")
+    }
+
 
     function artUrl(path: string): string {
         return path === "" ? "" : "file://" + path
@@ -551,6 +631,8 @@ Page {
     }
 
     function touchContext(kind: string, index: int, hit: Item): bool {
+        if (kind === "backdrop")
+            return np.openArtSheet()
         return kind === "title" && np.openInfo()
     }
 
@@ -968,7 +1050,10 @@ Page {
         Backdrop {
             id: backdrop
 
+            readonly property string touchKind: "backdrop"
+
             anchors.fill: parent
+            source: np.photoUrl
         }
 
         Rectangle {
@@ -1534,5 +1619,18 @@ Page {
 
         anchors.fill: parent
         screenOff: !np.live
+        onAccepted: (index) => {
+            if (np.artItems.length > 0 || np.artNames.length > 0)
+                np.artChosen(index)
+        }
+        onRejected: {
+            np.artItems = []
+            np.artNames = []
+        }
+    }
+
+    onPhotoNameChanged: {
+        if (np.photoName !== "" && np.photos !== null)
+            np.photos.touchName(np.photoName)
     }
 }

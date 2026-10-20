@@ -304,6 +304,14 @@
       "label": "Battery percent",
       "ui": {"order": 9}
     },
+    "microdap.artist_photo": {
+      "type": "b",
+      "default": true,
+      "applier": null,
+      "group": "microdap_display",
+      "label": "Artist photo",
+      "ui": {"order": 11}
+    },
     "microdap.quickplay": {
       "type": "b",
       "default": true,

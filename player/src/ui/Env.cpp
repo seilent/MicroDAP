@@ -19,6 +19,11 @@ QString Env::defaultFontDir()
     return QStringLiteral("/usr/share/fonts/microset");
 }
 
+QString Env::shotPhoto() const
+{
+    return qEnvironmentVariable("MICRODAP_SHOT_PHOTO");
+}
+
 QString Env::fontDir() const
 {
     const QString dir = qEnvironmentVariable("MICRODAP_FONT_DIR");

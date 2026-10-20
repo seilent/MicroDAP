@@ -73,6 +73,16 @@ Item {
     }
 
     QtObject {
+        id: samplePhotos
+
+        readonly property int revision: 0
+
+        function photoFor(names: var): url {
+            return root.fixture === "photo" && Env.shotPhoto !== "" ? "file://" + Env.shotPhoto : ""
+        }
+    }
+
+    QtObject {
         id: samplePlayer
 
         readonly property int status: 1
@@ -86,9 +96,11 @@ Item {
             id: artistPage
 
             artistId: 1
+            name: "Addison Road"
             animated: false
             library: sampleLibrary
             player: samplePlayer
+            photos: samplePhotos
 
             Component.onCompleted: artistPage.completeAll()
         }
@@ -104,6 +116,7 @@ Item {
             animated: false
             library: sampleLibrary
             player: samplePlayer
+            photos: samplePhotos
 
             Component.onCompleted: {
                 albumPage.completeAll()

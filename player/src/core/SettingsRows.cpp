@@ -190,6 +190,7 @@ QList<Row> build()
     out.push_back(choice("display", "clock", "clock", "clock", words({"24h", "12h", "off"})));
     out.push_back(toggle("display", "batteryPercent", "battery percent", "batteryPercent"));
     out.push_back(toggle("display", "quickplay", "quickplay", "quickplay"));
+    out.push_back(toggle("display", "artistPhoto", "artist photo", "artistPhoto"));
 
     Row rgb = choice("display", "rgb", "rgb", "rgb", words({"accent", "off", "system"}));
     out.push_back(shown(readOnly(rgb, "rgb"), "dap"));

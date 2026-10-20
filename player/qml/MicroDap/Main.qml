@@ -35,6 +35,8 @@ Window {
     property var outputMode: root.screenshot || typeof OutputMode === "undefined" ? null : OutputMode
     property var dacEq: root.screenshot || typeof DacEq === "undefined" ? null : DacEq
     property var link: root.screenshot || typeof Link === "undefined" ? null : Link
+    property var photos: root.screenshot || typeof ArtistPhotos === "undefined" ? null : ArtistPhotos
+    readonly property bool photoOn: root.settings === null || root.settings.artistPhoto !== false
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
     property var accentControl: root.screenshot || typeof Accent === "undefined" ? null : Accent
     property var outputs: root.shotState === "orientation-external" ? externalShotOutputs
@@ -463,6 +465,34 @@ Window {
 
     function openPairing() {
         pages.push(bluetoothComponent, { pivotIndex: 1 })
+    }
+
+    function askWord(what: string, result: string, text: string): string {
+        if (result === "busy" || result === "error 3")
+            return "phone busy"
+        if (result === "closed")
+            return "phone app not linked"
+        if (what === "pick") {
+            if (result === "ok")
+                return "pick on phone"
+            if (result === "notified")
+                return "see phone notification"
+            if (result === "error 4" && text.trim() !== "")
+                return text.trim()
+            return "phone did not answer"
+        }
+        switch (result) {
+        case "ok":
+            return what === "wrong" ? "marked wrong artist" : "image blocked"
+        case "error 7":
+            return "photo changed"
+        case "error 10":
+            return "photo not on phone"
+        case "error 4":
+            return "wrong artist not offered"
+        default:
+            return "phone did not answer"
+        }
     }
 
     function openPhoneApp() {
@@ -907,6 +937,10 @@ Window {
 
         function onPhoneBound(name) {
             overlays.toast.show("phone app", name)
+        }
+
+        function onAskDone(what, result, name, text) {
+            overlays.toast.show(root.askWord(what, result, text), name)
         }
     }
 
@@ -1353,6 +1387,9 @@ Window {
             bluez: root.bluez
             status: root.status
             lyrics: root.lyrics
+            photos: root.photos
+            photoOn: root.photoOn
+            link: root.link
             property var infoId: null
 
             onOpenQueue: root.openQueue()
@@ -1489,6 +1526,8 @@ Window {
             animated: !root.hidden
             screenOff: root.off
             library: root.library
+            photos: root.photos
+            photoOn: root.photoOn
             player: root.player
             onOpenAlbum: (id) => root.openAlbum(id)
             onOpenQueue: root.openQueue()
@@ -1506,6 +1545,8 @@ Window {
             animated: !root.hidden
             screenOff: root.off
             library: root.library
+            photos: root.photos
+            photoOn: root.photoOn
             player: root.player
             status: root.status
             bluez: root.bluez
@@ -1597,6 +1638,7 @@ Window {
         id: artistShotComponent
         DetailShot {
             kind: "artist"
+            fixture: root.shotState
         }
     }
 

@@ -278,14 +278,14 @@ TestCase {
     readonly property var expectedKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "rgb", "toasts"],
+        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "artistPhoto", "rgb", "toasts"],
         ["screenOff", "suspend", "sleep", "wifi"],
         ["boot", "phoneApp", "about"]
     ]
     readonly property var overlayKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "toasts"],
+        ["accent", "accentArt", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "artistPhoto", "toasts"],
         ["screenOff", "suspend", "wifi"],
         ["boot", "closePlayer", "about"]
     ]

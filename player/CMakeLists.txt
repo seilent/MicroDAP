@@ -44,6 +44,8 @@ add_library(microdapcore STATIC
     src/core/AccentControl.h
     src/core/AlsaVolume.cpp
     src/core/AlsaVolume.h
+    src/core/ArtistStore.cpp
+    src/core/ArtistStore.h
     src/core/ArtColor.cpp
     src/core/ArtColor.h
     src/core/Biquad.cpp

@@ -82,6 +82,58 @@ TestCase {
     }
 
     QtObject {
+        id: fakePhotos
+
+        property int revision: 0
+        property var stored: ["Artist A"]
+        property var info: ({ name: "Artist A", mbid: "", crc: 9, wrong: true, phone: true })
+        property var touched: []
+
+        function photoArtist(names) {
+            for (const n of names) {
+                if (fakePhotos.stored.indexOf(n) >= 0)
+                    return n
+            }
+            return ""
+        }
+
+        function photoFor(names) {
+            return fakePhotos.photoArtist(names) === "" ? "" : "file:///photos/" + fakePhotos.photoArtist(names) + ".jpg"
+        }
+
+        function photoInfo(name) {
+            return fakePhotos.info
+        }
+
+        function touchName(name) {
+            fakePhotos.touched = fakePhotos.touched.concat([name])
+        }
+    }
+
+    QtObject {
+        id: fakeLink
+
+        property bool connected: true
+        property bool pick: true
+        property bool block: true
+        property var calls: []
+
+        function canAsk(what) {
+            return what === "pick" ? fakeLink.pick : fakeLink.block
+        }
+
+        function artBlock(wrong, name, mbid, crc) {
+            fakeLink.calls = fakeLink.calls.concat([(wrong ? "wrong " : "block ") + name + " " + crc])
+            return true
+        }
+
+        function artPick(name, mbid) {
+            fakeLink.calls = fakeLink.calls.concat(["pick " + name])
+            return true
+        }
+    }
+
+    QtObject {
         id: fakePlayer
 
         property int status: 1
@@ -276,6 +328,8 @@ TestCase {
             bluez: fakeBluez
             status: fakeStatus
             lyrics: fakeLyrics
+            photos: fakePhotos
+            link: fakeLink
             onOpenQueue: counters.queueOpens++
             onTrackInfo: (id) => counters.infos = counters.infos.concat([id])
         }
@@ -348,6 +402,67 @@ TestCase {
     function ringCenterX(page, i) {
         const ring = page.ring(i)
         return ring.x + ring.width / 2
+    }
+
+    function test_artist_photo_and_sheet() {
+        fakePhotos.stored = ["Artist A"]
+        fakePhotos.info = { name: "Artist A", mbid: "", crc: 9, wrong: true, phone: true }
+        fakeLink.connected = true
+        fakeLink.pick = true
+        fakeLink.block = true
+        fakeLink.calls = []
+        fakePlayer.current = { id: 7, title: "Song", artist: "Artist A, Artist B", album: "Album", artPath: "", rating: 0, artists: ["Artist A", "Artist B"] }
+        const page = open()
+        page.completeAll()
+        compare(String(page.backdrop.source), "file:///photos/Artist A.jpg")
+        compare(fakePhotos.touched[fakePhotos.touched.length - 1], "Artist A")
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["block image", "wrong artist", "pick image"])
+        compare(page.sheet.title, "Artist A")
+        fakePlayer.current = { id: 8, title: "Other", artist: "Artist B", album: "Album", artPath: "", rating: 0, artists: ["Artist B"] }
+        page.sheet.accepted(0)
+        compare(fakeLink.calls, ["block Artist A 9"])
+        fakePlayer.current = { id: 7, title: "Song", artist: "Artist A, Artist B", album: "Album", artPath: "", rating: 0, artists: ["Artist A", "Artist B"] }
+        page.completeAll()
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        page.sheet.accepted(1)
+        compare(fakeLink.calls[1], "wrong Artist A 9")
+        fakePhotos.info = { name: "Artist A", mbid: "x", crc: 9, wrong: false, phone: false }
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["block image", "pick image"])
+        page.sheet.accepted(1)
+        compare(fakeLink.calls[fakeLink.calls.length - 1], "pick Artist A")
+        fakeLink.block = false
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["pick image"])
+        page.sheet.close()
+        fakeLink.block = true
+        page.idle = true
+        verify(!page.touchContext("backdrop", -1, page.backdrop))
+        page.idle = false
+        fakePhotos.stored = []
+        fakePhotos.revision++
+        compare(String(page.backdrop.source), "")
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["pick image"])
+        compare(page.sheet.title, "Artist A, Artist B")
+        page.sheet.accepted(0)
+        page.sheet.complete()
+        compare(page.sheet.items, ["Artist A", "Artist B"])
+        compare(page.sheet.title, "Artist A, Artist B")
+        page.sheet.accepted(1)
+        compare(fakeLink.calls[fakeLink.calls.length - 1], "pick Artist B")
+        fakeLink.connected = false
+        verify(!page.touchContext("backdrop", -1, page.backdrop))
+        fakeLink.connected = true
+        page.photoOn = false
+        verify(!page.touchContext("backdrop", -1, page.backdrop))
+        fakePhotos.stored = ["Artist A"]
+        fakePhotos.revision++
+        compare(String(page.backdrop.source), "")
+        page.photoOn = true
+        compare(String(page.backdrop.source), "file:///photos/Artist A.jpg")
+        fakePlayer.current = ({})
     }
 
     function test_layout_portrait() {

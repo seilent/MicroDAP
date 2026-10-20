@@ -1,4 +1,5 @@
 #include "AccentControl.h"
+#include "ArtistStore.h"
 #include "AlsaVolume.h"
 #include "FakeBluezModel.h"
 #include "DacEq.h"
@@ -469,6 +470,7 @@ int main(int argc, char *argv[])
         QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, outputs.get(),
                          [&power, watch = outputs.get()] { watch->setScreenOff(power.screenOff()); });
     }
+    microdap::ArtistStore artistPhotos;
     std::unique_ptr<microdap::LinkServer> link;
     std::unique_ptr<microdap::LinkProfile> linkProfile;
     std::unique_ptr<microdap::FolderModel> linkFolders;
@@ -483,6 +485,12 @@ int main(int argc, char *argv[])
         link->setVolume(routedVolume);
         link->setSources({&library, &artists, &albums, &songs, &playlists, linkFolders.get(), &favorites});
         link->setLyrics(&lyrics);
+        link->setArtists(&artistPhotos);
+        QObject::connect(&library, &microdap::Library::scanned, link.get(),
+                         [server = link.get()](int, int, int, bool ok) {
+                             if (ok)
+                                 server->prune();
+                         });
         linkProfile = std::make_unique<microdap::LinkProfile>(QDBusConnection::systemBus());
         QObject::connect(linkProfile.get(), &microdap::LinkProfile::connection, link.get(), &microdap::LinkServer::open);
         QObject::connect(linkProfile.get(), &microdap::LinkProfile::ended, link.get(), &microdap::LinkServer::end);
@@ -593,6 +601,7 @@ int main(int argc, char *argv[])
         engine.rootContext()->setContextProperty(QStringLiteral("DacEq"), dacEq.get());
     if (link)
         engine.rootContext()->setContextProperty(QStringLiteral("Link"), link.get());
+    engine.rootContext()->setContextProperty(QStringLiteral("ArtistPhotos"), &artistPhotos);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("MicroDap", "Main");

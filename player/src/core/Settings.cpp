@@ -65,6 +65,7 @@ const QString keyBatteryPercent = QStringLiteral("microdap.battery_percent");
 const QString keyQuickplay = QStringLiteral("microdap.quickplay");
 const QString keyCompanion = QStringLiteral("microdap.companion");
 const QString keyCompanionPhone = QStringLiteral("microdap.companion_phone");
+const QString keyArtistPhoto = QStringLiteral("microdap.artist_photo");
 
 constexpr Key keys[] = {
     {"audio.output", QMetaType::QString, &Settings::outputChanged},
@@ -102,6 +103,7 @@ constexpr Key keys[] = {
     {"microdap.quickplay", QMetaType::Bool, &Settings::quickplayChanged},
     {"microdap.companion", QMetaType::Bool, &Settings::companionChanged},
     {"microdap.companion_phone", QMetaType::QString, &Settings::companionPhoneChanged},
+    {"microdap.artist_photo", QMetaType::Bool, &Settings::artistPhotoChanged},
 };
 
 const Key *find(const QString &key)
@@ -205,6 +207,7 @@ QVariantMap defaults()
         {keyQuickplay, true},
         {keyCompanion, false},
         {keyCompanionPhone, QString()},
+        {keyArtistPhoto, true},
     };
     for (const QString &slot : EqControl::outputs()) {
         out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
@@ -1089,6 +1092,16 @@ QString Settings::companionPhone() const
 void Settings::setCompanionPhone(const QString &address)
 {
     store(keyCompanionPhone, address);
+}
+
+bool Settings::artistPhoto() const
+{
+    return m_values.value(keyArtistPhoto).toBool();
+}
+
+void Settings::setArtistPhoto(bool on)
+{
+    store(keyArtistPhoto, on);
 }
 
 bool Settings::touch() const

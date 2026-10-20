@@ -1,3 +1,4 @@
+#include "ArtistStore.h"
 #include "FakeBluezModel.h"
 #include "HubModels.h"
 #include "Library.h"
@@ -13,6 +14,7 @@
 
 #include "LinkProto.h"
 
+#include <QBuffer>
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -86,13 +88,15 @@ struct Phone
             at += size_t(r);
         }
     }
-    void hello(uint16_t major = uint16_t(proto::major))
+    void hello(uint16_t major = uint16_t(proto::major), uint64_t features = 0)
     {
         fd::LinkWriter w;
         w.u32(proto::tag::HELLO::magic, uint32_t(proto::magic))
             .u16(proto::tag::HELLO::major, major)
             .u16(proto::tag::HELLO::minor, uint16_t(proto::minor))
             .str(proto::tag::HELLO::appVersion, "test");
+        if (features)
+            w.u64(proto::tag::HELLO::features, features);
         send(proto::msg::HELLO, w);
     }
     std::vector<fd::LinkFrame> frames()
@@ -493,6 +497,10 @@ private slots:
     void artGetCoalescedAndCapped();
     void artEncode();
     void lyricsLink();
+    void artistStore();
+    void artistStoreResumeAndCap();
+    void imagesOverTheLink();
+    void artistAsks();
     void schemaAfterHello();
     void setKeptAndRefused();
     void draftRefused();
@@ -525,6 +533,8 @@ void LinkTest::helloReply()
     QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::settings | uint64_t(1) << proto::feature::library
                                   | uint64_t(1) << proto::feature::queue | uint64_t(1) << proto::feature::art
                                   | uint64_t(1) << proto::feature::lyrics | uint64_t(1) << proto::feature::lyricsGet
+                                  | uint64_t(1) << proto::feature::image | uint64_t(1) << proto::feature::imgOrigin
+                                  | uint64_t(1) << proto::feature::artBlock | uint64_t(1) << proto::feature::artPick
                                   | uint64_t(1) << proto::feature::stateClock);
     QCOMPARE(b.u("minor"), uint64_t(proto::minor));
     QVERIFY(find(frames, proto::msg::STATE));
@@ -1570,6 +1580,208 @@ void LinkTest::lyricsLink()
     QVERIFY(!QFileInfo::exists(Lyrics::storeFile(e.path)));
     QTRY_VERIFY_WITH_TIMEOUT(lyrics.current().empty() && !lyrics.pending(), waitMs);
     lyrics.waitForDone();
+}
+
+QByteArray squareJpeg(int side, Qt::GlobalColor color)
+{
+    QImage image(side, side, QImage::Format_RGB888);
+    image.fill(color);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "JPEG", 90);
+    return bytes;
+}
+
+ArtistStore::Head head(const QString &name, const QByteArray &jpeg, quint8 origin = 0, int side = 960)
+{
+    ArtistStore::Head h;
+    h.name = name;
+    h.total = quint32(jpeg.size());
+    h.crc = linkCrc32(jpeg);
+    h.w = side;
+    h.h = side;
+    h.origin = origin;
+    return h;
+}
+
+void LinkTest::artistStore()
+{
+    QTemporaryDir dir;
+    const QByteArray jpeg = squareJpeg(960, Qt::red);
+    int w = 0;
+    int h = 0;
+    QVERIFY(ArtistStore::jpegFrame(jpeg, w, h));
+    QCOMPARE(w, 960);
+    {
+        ArtistStore store(dir.path());
+        quint32 offset = 0;
+        quint32 crc = 0;
+        QCOMPARE(store.begin(head(QStringLiteral("Artist A"), jpeg, 0, 640), offset, crc), ArtistStore::Code::BadValue);
+        ArtistStore::Head big = head(QStringLiteral("Artist A"), jpeg);
+        big.total = 300000;
+        QCOMPARE(store.begin(big, offset, crc), ArtistStore::Code::TooBig);
+        QCOMPARE(store.begin(head(QStringLiteral(" "), jpeg), offset, crc), ArtistStore::Code::BadValue);
+        QCOMPARE(store.begin(head(QString(256, QLatin1Char('n')), jpeg), offset, crc), ArtistStore::Code::BadValue);
+        QCOMPARE(store.begin(head(QStringLiteral("Artist A"), jpeg, ArtistStore::originPhone), offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(offset, 0u);
+        QCOMPARE(store.data(0, jpeg), ArtistStore::Code::Ok);
+        QCOMPARE(store.end(linkCrc32(jpeg) + 1), ArtistStore::Code::Crc);
+        QCOMPARE(store.begin(head(QStringLiteral("Artist A"), jpeg, ArtistStore::originPhone), offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(store.data(0, jpeg), ArtistStore::Code::Ok);
+        QCOMPARE(store.end(linkCrc32(jpeg)), ArtistStore::Code::Ok);
+        QCOMPARE(store.listed().size(), 1);
+        QCOMPARE(store.listed().constFirst().origin, ArtistStore::originPhone);
+        QCOMPARE(store.photoArtist({QStringLiteral("Nobody"), QStringLiteral("ARTIST A ")}), QStringLiteral("ARTIST A "));
+        QVERIFY(store.photoFor({QStringLiteral("artist a")}).isLocalFile());
+        QVERIFY(QFileInfo::exists(store.photoFor({QStringLiteral("artist a")}).toLocalFile()));
+        QCOMPARE(store.begin(head(QStringLiteral("Artist A"), jpeg, ArtistStore::originLibrary), offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(offset, quint32(jpeg.size()));
+        QCOMPARE(crc, linkCrc32(jpeg));
+        QCOMPARE(store.listed().constFirst().origin, quint8(ArtistStore::originPhone | ArtistStore::originLibrary));
+        const QByteArray blue = squareJpeg(960, Qt::blue);
+        QCOMPARE(store.begin(head(QStringLiteral("Artist B"), blue, ArtistStore::originLibrary), offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(store.data(0, blue), ArtistStore::Code::Ok);
+        QCOMPARE(store.end(linkCrc32(blue)), ArtistStore::Code::Ok);
+        {
+            ArtistStore peek(dir.path());
+            QCOMPARE(peek.origin(ArtistStore::key(QStringLiteral("Artist B"))), ArtistStore::originLibrary);
+        }
+        QVERIFY(!store.tag(QStringLiteral("Nobody"), ArtistStore::originPhone));
+        QVERIFY(store.flushOrigins());
+    }
+    {
+        ArtistStore store(dir.path());
+        QCOMPARE(store.listed().size(), 2);
+        QCOMPARE(store.origin(ArtistStore::key(QStringLiteral("Artist B"))), ArtistStore::originLibrary);
+        QCOMPARE(store.prune({ArtistStore::key(QStringLiteral("Artist C"))}), 1);
+        QCOMPARE(store.listed().size(), 1);
+        QCOMPARE(store.listed().constFirst().name, QStringLiteral("Artist A"));
+        QVERIFY(store.remove(QStringLiteral("artist a")));
+        QVERIFY(store.listed().isEmpty());
+        QVERIFY(store.photoFor({QStringLiteral("Artist A")}).isEmpty());
+    }
+}
+
+void LinkTest::artistStoreResumeAndCap()
+{
+    QTemporaryDir dir;
+    const QByteArray jpeg = squareJpeg(960, Qt::green);
+    ArtistStore store(dir.path(), 960, 262144, 1000, qint64(jpeg.size()) * 2 + 10);
+    quint32 offset = 0;
+    quint32 crc = 0;
+    QCOMPARE(store.begin(head(QStringLiteral("One"), jpeg), offset, crc), ArtistStore::Code::Ok);
+    QCOMPARE(store.data(0, jpeg.left(2500)), ArtistStore::Code::Ok);
+    QCOMPARE(store.begin(head(QStringLiteral("One"), jpeg), offset, crc), ArtistStore::Code::Ok);
+    QCOMPARE(offset, 2000u);
+    QCOMPARE(crc, linkCrc32(jpeg.left(2000)));
+    QCOMPARE(store.data(1000, jpeg.mid(1000)), ArtistStore::Code::WriteError);
+    QCOMPARE(store.data(2000, jpeg.mid(2000)), ArtistStore::Code::Ok);
+    QCOMPARE(store.end(linkCrc32(jpeg)), ArtistStore::Code::Ok);
+    for (const char *name : {"Two", "Three"}) {
+        QTest::qWait(20);
+        QCOMPARE(store.begin(head(QString::fromLatin1(name), jpeg), offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(store.data(0, jpeg), ArtistStore::Code::Ok);
+        QCOMPARE(store.end(linkCrc32(jpeg)), ArtistStore::Code::Ok);
+    }
+    QCOMPARE(store.listed().size(), 2);
+    QVERIFY(store.photoFor({QStringLiteral("One")}).isEmpty());
+    QVERIFY(!store.photoFor({QStringLiteral("Three")}).isEmpty());
+}
+
+void LinkTest::imagesOverTheLink()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    QTemporaryDir dir;
+    ArtistStore store(dir.path());
+    rig.server.setArtists(&store);
+    rig.connect();
+    const QByteArray jpeg = squareJpeg(960, Qt::red);
+    fd::LinkWriter begin;
+    namespace b = proto::tag::IMG_BEGIN;
+    begin.u8(b::kind, proto::val::IMG_KIND::artist).str(b::name, "Artist A").u32(b::total, uint32_t(jpeg.size()))
+        .u32(b::crc, linkCrc32(jpeg)).u16(b::w, 960).u16(b::h, 960).u8(b::origin, proto::val::IMG_ORIGIN::library);
+    std::vector<fd::LinkFrame> frames = rig.ask(proto::msg::IMG_BEGIN, begin);
+    const fd::LinkFrame *reply = find(frames, proto::msg::IMG_BEGIN, true);
+    QVERIFY(reply && !(reply->flags & proto::flagError));
+    QCOMPARE(body(*reply).u("offset"), 0u);
+    for (qsizetype at = 0; at < jpeg.size(); at += 16000) {
+        fd::LinkWriter data;
+        const QByteArray part = jpeg.mid(at, 16000);
+        data.u32(proto::tag::IMG_DATA::offset, uint32_t(at)).bytes(proto::tag::IMG_DATA::data, part.constData(), size_t(part.size()));
+        rig.phone.send(proto::msg::IMG_DATA, data, 0);
+    }
+    fd::LinkWriter end;
+    end.u32(proto::tag::IMG_END::crc, linkCrc32(jpeg));
+    frames = rig.ask(proto::msg::IMG_END, end);
+    QVERIFY(okReply(frames, proto::msg::IMG_END));
+    QCOMPARE(store.listed().size(), 1);
+    fd::LinkWriter list;
+    frames = rig.ask(proto::msg::IMG_LIST, list);
+    reply = find(frames, proto::msg::IMG_LIST, true);
+    QVERIFY(reply);
+    const fd::LinkBody lb = body(*reply);
+    QCOMPARE(lb.u("total"), 1u);
+    QCOMPARE(lb.all("entry").size(), size_t(1));
+    QVERIFY(lb.has("cap"));
+    fd::LinkWriter tag;
+    tag.str(proto::tag::IMG_TAG::name, "Nobody").u8(proto::tag::IMG_TAG::origin, proto::val::IMG_ORIGIN::phone);
+    QCOMPARE(errorCode(rig.ask(proto::msg::IMG_TAG, tag), proto::msg::IMG_TAG), uint64_t(proto::err::notFound));
+    QVERIFY(QDir(rig.music + QStringLiteral("/Album One")).removeRecursively());
+    QVERIFY(rig.scan());
+    rig.server.prune();
+    QVERIFY(store.listed().isEmpty());
+    fd::LinkWriter del;
+    del.str(proto::tag::IMG_DEL::name, "Artist A");
+    QVERIFY(okReply(rig.ask(proto::msg::IMG_DEL, del), proto::msg::IMG_DEL));
+    fd::LinkWriter badBegin;
+    badBegin.u8(b::kind, proto::val::IMG_KIND::artist).str(b::name, "X").u32(b::total, 10).u32(b::crc, 1).u16(b::w, 640).u16(b::h, 960);
+    QCOMPARE(errorCode(rig.ask(proto::msg::IMG_BEGIN, badBegin), proto::msg::IMG_BEGIN), uint64_t(proto::err::badValue));
+}
+
+void LinkTest::artistAsks()
+{
+    Rig rig;
+    Phone phone;
+    rig.server.open(phone.dev, phoneA);
+    phone.dev = -1;
+    phone.hello(uint16_t(proto::major), uint64_t(1) << proto::feature::artPick | uint64_t(1) << proto::feature::artBlock);
+    rig.server.poll();
+    phone.frames();
+    QVERIFY(rig.server.canAsk(QStringLiteral("pick")));
+    QSignalSpy done(&rig.server, &LinkServer::askDone);
+    QVERIFY(rig.server.artPick(QStringLiteral("Artist A"), QString()));
+    rig.server.poll();
+    std::vector<fd::LinkFrame> frames = phone.frames();
+    const fd::LinkFrame *pick = find(frames, proto::msg::ART_PICK);
+    QVERIFY(pick && (pick->flags & proto::flagWant));
+    QCOMPARE(QString::fromStdString(body(*pick).str("name")), QStringLiteral("Artist A"));
+    QVERIFY(!rig.server.artBlock(false, QStringLiteral("Artist A"), QString(), 1));
+    QCOMPARE(done.count(), 1);
+    QCOMPARE(done.at(0).at(1).toString(), QStringLiteral("busy"));
+    fd::LinkWriter shown;
+    shown.flag(proto::tag::ART_PICK_reply::shown, true);
+    std::vector<uint8_t> bytes = fd::link_frame(proto::msg::ART_PICK, proto::flagReply, pick->seq, shown.data());
+    ::send(phone.app, bytes.data(), bytes.size(), MSG_NOSIGNAL);
+    rig.server.poll();
+    QTRY_COMPARE_WITH_TIMEOUT(done.count(), 2, waitMs);
+    QCOMPARE(done.at(1).at(0).toString(), QStringLiteral("pick"));
+    QCOMPARE(done.at(1).at(1).toString(), QStringLiteral("ok"));
+    QVERIFY(rig.server.artBlock(true, QStringLiteral("Artist A"), QString(), 7));
+    rig.server.poll();
+    frames = phone.frames();
+    const fd::LinkFrame *block = find(frames, proto::msg::ART_BLOCK);
+    QVERIFY(block);
+    QCOMPARE(body(*block).u("cmd"), uint64_t(proto::val::BLOCK_CMD::wrongArtist));
+    fd::LinkWriter err;
+    err.u8(proto::tag::error::code, proto::err::staleRev).str(proto::tag::error::text, "stale rev");
+    bytes = fd::link_frame(proto::msg::ART_BLOCK, proto::flagReply | proto::flagError, block->seq, err.data());
+    ::send(phone.app, bytes.data(), bytes.size(), MSG_NOSIGNAL);
+    rig.server.poll();
+    QTRY_COMPARE_WITH_TIMEOUT(done.count(), 3, waitMs);
+    QCOMPARE(done.at(2).at(0).toString(), QStringLiteral("wrong"));
+    QCOMPARE(done.at(2).at(1).toString(), QStringLiteral("error 7"));
 }
 
 void LinkTest::profileRegisters()

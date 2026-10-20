@@ -19,6 +19,38 @@ Item {
     }
 
     QtObject {
+        id: samplePhotos
+
+        readonly property int revision: 0
+        readonly property bool fallback: root.fixture === "photo-fallback-sheet" || root.fixture === "photo-artists-sheet"
+
+        function photoArtist(names: var): string {
+            return !samplePhotos.fallback && Env.shotPhoto !== "" && names.length > 0 ? String(names[0]) : ""
+        }
+
+        function photoFor(names: var): url {
+            return samplePhotos.photoArtist(names) === "" ? "" : "file://" + Env.shotPhoto
+        }
+
+        function photoInfo(name: string): var {
+            return { name: name, mbid: "", source: "theaudiodb", credit: "", crc: 1, wrong: true, phone: true }
+        }
+
+        function touchName(name: string): void {
+        }
+    }
+
+    QtObject {
+        id: sampleLink
+
+        readonly property bool connected: true
+
+        function canAsk(what: string): bool {
+            return true
+        }
+    }
+
+    QtObject {
         id: sampleStatus
 
         readonly property int battery: root.fixture === "percent-low" ? 5 : 73
@@ -106,7 +138,8 @@ Item {
         readonly property int status: 1
         readonly property real position: 5000
         readonly property real duration: 233000
-        readonly property var current: Object.assign({ rating: 0 }, sampleQueue.rows[0], root.fixture === "outside-library" ? { id: 0 } : {})
+        readonly property var current: Object.assign({ rating: 0 }, sampleQueue.rows[0], root.fixture === "outside-library" ? { id: 0 } : {},
+            root.fixture === "photo-artists-sheet" ? { artist: "Addison Road, Sufjan Stevens", artists: ["Addison Road", "Sufjan Stevens"] } : {})
         readonly property QtObject queue: sampleQueue
     }
 
@@ -114,11 +147,13 @@ Item {
         id: screen
 
         anchors.fill: parent
-        animated: root.fixture === "track-info"
+        animated: root.fixture === "track-info" || root.fixture.endsWith("-sheet")
         player: samplePlayer
         bluez: root.contextBluez
         status: sampleStatus
         lyrics: root.lyricsFixture || root.markFixture ? sampleLyrics : null
+        photos: root.fixture.startsWith("photo") ? samplePhotos : null
+        link: root.fixture.startsWith("photo") ? sampleLink : null
 
         Component.onCompleted: {
             screen.completeAll()
@@ -129,6 +164,18 @@ Item {
                 Qt.callLater(root.infoFixture)
             if (root.lyricsFixture)
                 root.lyricsShot()
+            if (root.fixture.endsWith("-sheet")) {
+                screen.openArtSheet()
+                screen.sheet.complete()
+            }
+            if (root.fixture === "photo-artists-sheet") {
+                screen.artChosen(0)
+                screen.sheet.complete()
+            }
+            if (root.fixture === "photo-toast") {
+                shotToast.show("image blocked", "Addison Road")
+                shotToast.complete()
+            }
         }
     }
 
@@ -149,5 +196,13 @@ Item {
         screen.sheet.showLines(screen.titleItem.text, ["flac", "44100 hz", "16 bit", "912 kbps", "27.4 mb", path], 5)
         screen.completeAll()
         screen.sheet.complete()
+    }
+
+    Toast {
+        id: shotToast
+
+        x: 0
+        y: 0
+        width: root.width
     }
 }

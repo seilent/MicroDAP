@@ -10,6 +10,9 @@ Page {
     property int year: 0
     property string artPath: ""
     property QtObject library: null
+    property QtObject photos: null
+    property bool photoOn: true
+    readonly property bool photoShown: backdrop.hasArt && page.photos !== null && typeof page.photos.touchName === "function"
     property QtObject player: null
     property QtObject status: null
     property QtObject bluez: null
@@ -355,6 +358,12 @@ Page {
         id: backdrop
 
         anchors.fill: parent
+        source: page.photoOn && page.photos !== null && page.photos.revision >= 0 ? page.photos.photoFor([page.artist]) : ""
+    }
+
+    onPhotoShownChanged: {
+        if (page.photoShown)
+            page.photos.touchName(page.photos.photoArtist([page.artist]))
     }
 
     FocusList {

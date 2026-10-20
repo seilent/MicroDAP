@@ -24,6 +24,7 @@ namespace microdap {
 
 class BluezModel;
 class Favorites;
+class ArtistStore;
 class Library;
 class Lyrics;
 struct LyricsText;
@@ -89,6 +90,11 @@ public:
     void setPairWindowMs(int ms);
     void setSources(const LinkSources &sources);
     void setLyrics(Lyrics *lyrics);
+    void setArtists(ArtistStore *store);
+    void prune();
+    Q_INVOKABLE bool canAsk(const QString &what) const;
+    Q_INVOKABLE bool artBlock(bool wrongArtist, const QString &name, const QString &mbid, quint32 crc);
+    Q_INVOKABLE bool artPick(const QString &name, const QString &mbid);
     static quint32 lyricsCrc(const LyricsText &text);
 
     fd::LinkHello hello() const;
@@ -112,6 +118,7 @@ signals:
     void pairWindowChanged();
     void phoneBound(const QString &name);
     void phoneHello();
+    void askDone(const QString &what, const QString &result, const QString &name, const QString &text);
 
 private:
     struct Peer
@@ -122,6 +129,7 @@ private:
         QString device;
         quint32 gen = 0;
         bool refused = false;
+        quint32 push = 0;
         bool candidate = false;
         bool hello = false;
         bool schemaSent = false;
@@ -172,6 +180,10 @@ private:
                   qint64 now);
     void lyrDone(quint32 job, const LyricsText &text);
     void trimLyrics(const QString &keep);
+    void image(Peer &p, fd::LinkCommand &c, qint64 now);
+    bool ask(uint8_t type, const fd::LinkWriter &w, const QString &name, const QString &what);
+    void answers();
+    Peer *askPeer(uint8_t type) const;
     Peer *peer(quint32 gen) const;
     bool phone() const;
     int cap() const;
@@ -186,8 +198,14 @@ private:
     QPointer<SinkVolume> m_volume;
     QPointer<Favorites> m_favorites;
     QPointer<Lyrics> m_lyrics;
-    QString m_confirmName;
+    QPointer<ArtistStore> m_artists;
+    quint32 m_askGen = 0;
+    quint16 m_askSeq = 0;
+    uint8_t m_askType = 0;
+    QString m_askName;
+    QString m_askWhat;
     LinkSources m_sources;
+    QString m_confirmName;
     struct ArtCache
     {
         bool ok = false;
