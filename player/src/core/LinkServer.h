@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BluezModel.h"
+#include "LinkArt.h"
 #include "LinkLibrary.h"
 #include "LinkProto.h"
 #include "LinkSettings.h"
@@ -8,6 +9,7 @@
 #include <QDeadlineTimer>
 #include <QObject>
 #include <QPointer>
+#include <QThreadPool>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -155,6 +157,10 @@ private:
     void pushSettings(Peer &p, qint64 now);
     void settings(Peer &p, qint64 now);
     void settingsCommand(Peer &p, fd::LinkCommand &c, qint64 now);
+    void artGet(Peer &p, fd::LinkCommand &c, qint64 now);
+    void artReply(Peer &p, const fd::LinkCommand &c, quint32 offset, bool hasHave, quint32 have, qint64 now);
+    void artDone(quint32 job, bool ok, const LinkJpeg &jpeg);
+    Peer *peer(quint32 gen) const;
     bool phone() const;
     int cap() const;
     void setPairWindow(bool on);
@@ -169,6 +175,31 @@ private:
     QPointer<Favorites> m_favorites;
     QString m_confirmName;
     LinkSources m_sources;
+    struct ArtCache
+    {
+        bool ok = false;
+        qint64 track = 0;
+        int px = 0;
+        quint32 rev = 0;
+        LinkJpeg jpeg;
+    };
+    struct ArtPending
+    {
+        quint32 job = 0;
+        quint32 gen = 0;
+        fd::LinkCommand c;
+        quint32 offset = 0;
+        quint32 have = 0;
+        bool hasHave = false;
+        qint64 track = 0;
+        int px = 0;
+        quint32 rev = 0;
+    };
+    ArtCache m_art;
+    std::vector<ArtPending> m_artPending;
+    quint32 m_artJob = 0;
+    QThreadPool m_pool;
+    static qsizetype jobs(const std::vector<ArtPending> &pending);
     Clock m_clock;
     std::vector<std::unique_ptr<Peer>> m_peers;
     Peer *m_ticking = nullptr;

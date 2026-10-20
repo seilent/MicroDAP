@@ -15,6 +15,7 @@
 #include <QRandomGenerator>
 #include <QSet>
 #include <QSocketNotifier>
+#include <QThreadPool>
 
 #include <algorithm>
 #include <time.h>
@@ -33,6 +34,8 @@ constexpr uint16_t screenH = 960;
 constexpr uint16_t backdropSide = 960;
 constexpr int linkQueueArtists = 8;
 constexpr size_t linkNameMax = 255;
+constexpr qsizetype linkJobMax = 4;
+constexpr size_t linkWaitMax = 16;
 
 qint64 clockMs(clockid_t id)
 {
@@ -67,7 +70,7 @@ LinkTime LinkServer::now()
 quint64 LinkServer::features()
 {
     return 1ull << proto::feature::settings | 1ull << proto::feature::library | 1ull << proto::feature::queue
-           | 1ull << proto::feature::stateClock;
+           | 1ull << proto::feature::art | 1ull << proto::feature::stateClock;
 }
 
 quint32 LinkServer::randomRev()
@@ -98,6 +101,7 @@ LinkServer::LinkServer(Player *player, Settings *settings, QObject *parent)
     connect(&m_timer, &QTimer::timeout, this, &LinkServer::poll);
     m_windowTimer.setSingleShot(true);
     connect(&m_windowTimer, &QTimer::timeout, this, [this] { closeWindow(true); });
+    m_pool.setMaxThreadCount(1);
     m_soon.setSingleShot(true);
     m_soon.setInterval(0);
     connect(&m_soon, &QTimer::timeout, this, &LinkServer::poll);
@@ -678,6 +682,8 @@ void LinkServer::command(fd::LinkCommand &c, int64_t now)
         settingsCommand(*p, c, now);
         return;
     }
+    if (c.type == m::ART_GET)
+        return artGet(*p, c, now);
     if (library(*p, c, now))
         return;
     if (c.type != m::TRANSPORT && c.type != m::VOLUME)
@@ -1187,6 +1193,143 @@ void LinkServer::settingsCommand(Peer &p, fd::LinkCommand &c, qint64 now)
     for (const std::string &k : names)
         w.str(t::refused, k);
     p.s->reply(c, w, now);
+}
+
+LinkServer::Peer *LinkServer::peer(quint32 gen) const
+{
+    for (const auto &p : m_peers) {
+        if (p->gen == gen && !p->s->closed())
+            return p.get();
+    }
+    return nullptr;
+}
+
+void LinkServer::artReply(Peer &p, const fd::LinkCommand &c, quint32 offset, bool hasHave, quint32 have, qint64 now)
+{
+    namespace t = proto::tag::ART_GET_reply;
+    const LinkJpeg &j = m_art.jpeg;
+    const quint32 total = quint32(j.bytes.size());
+    if (offset > total) {
+        p.s->fail(c, proto::err::badValue, fd::link_err_text(proto::err::badValue), now);
+        return;
+    }
+    if (offset > 0 && hasHave && have != j.crc)
+        offset = 0;
+    fd::LinkWriter w;
+    if (offset == 0)
+        w.u32(t::crc, j.crc).u32(t::total, total).u16(t::w, uint16_t(j.side)).u16(t::h, uint16_t(j.side));
+    w.u32(t::offset, offset);
+    if (!(offset == 0 && hasHave && have == j.crc)) {
+        const qsizetype n = std::min<qsizetype>(qsizetype(proto::artChunk), qsizetype(total - offset));
+        w.bytes(t::data, j.bytes.constData() + offset, size_t(n));
+    }
+    p.s->reply(c, w, now);
+}
+
+void LinkServer::artGet(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    uint8_t code = 0;
+    Library *lib = m_player->library();
+    QList<QueueEntry> entries;
+    if (p.refused)
+        code = proto::err::refused;
+    else if (!c.body.has("track") || !c.body.has("px"))
+        code = proto::err::badValue;
+    else if (!lib || !lib->isOpen())
+        code = proto::err::noLibrary;
+    else if ((entries = lib->queueEntries({qint64(c.body.u("track"))})).isEmpty())
+        code = proto::err::staleRev;
+    if (code) {
+        p.s->fail(c, code, fd::link_err_text(code), now);
+        return;
+    }
+    const qint64 track = qint64(c.body.u("track"));
+    const int px = int(std::clamp<uint64_t>(c.body.u("px"), uint64_t(proto::artMinPx), uint64_t(proto::artMaxPx)));
+    const quint32 offset = quint32(std::min<uint64_t>(c.body.u("offset"), UINT32_MAX));
+    const bool hasHave = c.body.has("have");
+    const quint32 have = quint32(c.body.u("have"));
+    if (m_art.ok && m_art.track == track && m_art.px == px && m_art.rev == m_snapRev) {
+        artReply(p, c, offset, hasHave, have, now);
+        return;
+    }
+    const auto same = std::find_if(m_artPending.cbegin(), m_artPending.cend(), [&](const ArtPending &o) {
+        return o.track == track && o.px == px && o.rev == m_snapRev;
+    });
+    if (m_artPending.size() >= linkWaitMax || (same == m_artPending.cend() && jobs(m_artPending) >= linkJobMax)) {
+        p.s->fail(c, proto::err::busy, fd::link_err_text(proto::err::busy), now);
+        return;
+    }
+    ArtPending q;
+    q.job = same != m_artPending.cend() ? same->job : ++m_artJob;
+    q.gen = p.gen;
+    q.c.type = c.type;
+    q.c.flags = c.flags;
+    q.c.seq = c.seq;
+    q.offset = offset;
+    q.have = have;
+    q.hasHave = hasHave;
+    q.track = track;
+    q.px = px;
+    q.rev = m_snapRev;
+    const bool started = same != m_artPending.cend();
+    m_artPending.push_back(q);
+    c.deferred = true;
+    if (started)
+        return;
+    const QString path = entries.constFirst().artPath;
+    const quint32 job = q.job;
+    QPointer<LinkServer> self(this);
+    m_pool.start([self, job, path, px] {
+        LinkJpeg jpeg;
+        const bool ok = linkEncodeArt(path, px, jpeg);
+        QMetaObject::invokeMethod(
+            self.data(), [self, job, ok, jpeg] {
+                if (self)
+                    self->artDone(job, ok, jpeg);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+qsizetype LinkServer::jobs(const std::vector<ArtPending> &pending)
+{
+    QSet<quint32> ids;
+    for (const ArtPending &q : pending)
+        ids.insert(q.job);
+    return ids.size();
+}
+
+void LinkServer::artDone(quint32 job, bool ok, const LinkJpeg &jpeg)
+{
+    std::vector<ArtPending> done;
+    for (auto it = m_artPending.begin(); it != m_artPending.end();) {
+        if (it->job == job) {
+            done.push_back(*it);
+            it = m_artPending.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (done.empty())
+        return;
+    if (ok) {
+        m_art.ok = true;
+        m_art.track = done.front().track;
+        m_art.px = done.front().px;
+        m_art.rev = done.front().rev;
+        m_art.jpeg = jpeg;
+    }
+    const qint64 now = m_clock().boot;
+    for (const ArtPending &q : done) {
+        Peer *p = peer(q.gen);
+        if (!p)
+            continue;
+        if (!ok)
+            p->s->fail(q.c, proto::err::notFound, fd::link_err_text(proto::err::notFound), now);
+        else
+            artReply(*p, q.c, q.offset, q.hasHave, q.have, now);
+    }
+    m_soon.start();
 }
 
 }

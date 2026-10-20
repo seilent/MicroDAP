@@ -20,6 +20,7 @@
 #include <QDBusUnixFileDescriptor>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QImage>
 #include <QTemporaryDir>
 #include <QSignalSpy>
 #include <QSqlQuery>
@@ -485,6 +486,9 @@ private slots:
     void pruneBumpsSnapRev();
     void playAndQueue();
     void libraryScale();
+    void trackArt();
+    void artGetCoalescedAndCapped();
+    void artEncode();
     void schemaAfterHello();
     void setKeptAndRefused();
     void draftRefused();
@@ -515,7 +519,8 @@ void LinkTest::helloReply()
     QCOMPARE(b.u("backdropW"), 960u);
     QCOMPARE(b.u("backdropH"), 960u);
     QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::settings | uint64_t(1) << proto::feature::library
-                                  | uint64_t(1) << proto::feature::queue | uint64_t(1) << proto::feature::stateClock);
+                                  | uint64_t(1) << proto::feature::queue | uint64_t(1) << proto::feature::art
+                                  | uint64_t(1) << proto::feature::stateClock);
     QCOMPARE(b.u("minor"), uint64_t(proto::minor));
     QVERIFY(find(frames, proto::msg::STATE));
     QVERIFY(rig.server.connected());
@@ -1298,6 +1303,154 @@ void LinkTest::draftRefused()
     phone.send(proto::msg::DRAFT, draft);
     rig.server.poll();
     QCOMPARE(errorCode(phone.frames(), proto::msg::DRAFT), uint64_t(proto::err::refused));
+}
+
+const fd::LinkFrame *awaitReply(LibRig &rig, std::vector<fd::LinkFrame> &frames, uint8_t type)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < waitMs) {
+        for (const fd::LinkFrame &f : frames) {
+            if (f.type == type && (f.flags & proto::flagReply))
+                return &f;
+        }
+        QTest::qWait(10);
+        rig.server.poll();
+        const std::vector<fd::LinkFrame> more = rig.phone.frames();
+        frames.insert(frames.end(), more.begin(), more.end());
+    }
+    return nullptr;
+}
+
+fd::LinkWriter artGet(qint64 track, int px, int offset = -1, qint64 have = -1)
+{
+    fd::LinkWriter w;
+    w.u64(proto::tag::ART_GET::track, uint64_t(track)).u16(proto::tag::ART_GET::px, uint16_t(px));
+    if (offset >= 0)
+        w.u32(proto::tag::ART_GET::offset, uint32_t(offset));
+    if (have >= 0)
+        w.u32(proto::tag::ART_GET::have, uint32_t(have));
+    return w;
+}
+
+void LinkTest::trackArt()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    const qint64 one = rig.id(QStringLiteral("One"));
+    rig.phone.send(proto::msg::ART_GET, artGet(one, 512));
+    rig.server.poll();
+    std::vector<fd::LinkFrame> frames = rig.phone.frames();
+    const fd::LinkFrame *first = awaitReply(rig, frames, proto::msg::ART_GET);
+    QVERIFY(first);
+    QVERIFY(!(first->flags & proto::flagError));
+    fd::LinkBody b = body(*first);
+    const quint32 crc = quint32(b.u("crc"));
+    const quint32 total = quint32(b.u("total"));
+    QVERIFY(total > 0);
+    QCOMPARE(b.u("w"), b.u("h"));
+    QVERIFY(b.u("w") > 0 && b.u("w") <= 512);
+    QByteArray jpeg = QByteArray::fromStdString(b.str("data"));
+    QVERIFY(jpeg.size() <= proto::artChunk);
+    while (quint32(jpeg.size()) < total) {
+        rig.phone.send(proto::msg::ART_GET, artGet(one, 512, jpeg.size(), crc));
+        rig.server.poll();
+        frames = rig.phone.frames();
+        const fd::LinkFrame *chunk = awaitReply(rig, frames, proto::msg::ART_GET);
+        QVERIFY(chunk);
+        const fd::LinkBody cb = body(*chunk);
+        QCOMPARE(cb.u("offset"), uint64_t(jpeg.size()));
+        jpeg += QByteArray::fromStdString(cb.str("data"));
+    }
+    QCOMPARE(linkCrc32(jpeg), crc);
+    QImage image;
+    QVERIFY(image.loadFromData(jpeg, "JPEG"));
+    QCOMPARE(image.width(), int(b.u("w")));
+    rig.phone.send(proto::msg::ART_GET, artGet(one, 512, 0, crc));
+    rig.server.poll();
+    frames = rig.phone.frames();
+    const fd::LinkFrame *hit = awaitReply(rig, frames, proto::msg::ART_GET);
+    QVERIFY(hit);
+    QVERIFY(!body(*hit).has("data"));
+    QCOMPARE(body(*hit).u("crc"), uint64_t(crc));
+    rig.phone.send(proto::msg::ART_GET, artGet(one, 10));
+    rig.server.poll();
+    frames = rig.phone.frames();
+    const fd::LinkFrame *small = awaitReply(rig, frames, proto::msg::ART_GET);
+    QVERIFY(small);
+    QCOMPARE(body(*small).u("w"), std::min<uint64_t>(uint64_t(proto::artMinPx), b.u("w")));
+    rig.phone.send(proto::msg::ART_GET, artGet(999999, 256));
+    rig.server.poll();
+    frames = rig.phone.frames();
+    QCOMPARE(errorCode(frames, proto::msg::ART_GET), uint64_t(proto::err::staleRev));
+    rig.phone.send(proto::msg::ART_GET, artGet(rig.id(QStringLiteral("Single")), 256));
+    rig.server.poll();
+    frames = rig.phone.frames();
+    QVERIFY(awaitReply(rig, frames, proto::msg::ART_GET));
+    QCOMPARE(errorCode(frames, proto::msg::ART_GET), uint64_t(proto::err::notFound));
+}
+
+void LinkTest::artGetCoalescedAndCapped()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    const qint64 one = rig.id(QStringLiteral("One"));
+    for (int px : {512, 512, 512, 300, 301, 302, 303})
+        rig.phone.send(proto::msg::ART_GET, artGet(one, px));
+    rig.server.poll();
+    std::vector<fd::LinkFrame> replies;
+    QElapsedTimer timer;
+    timer.start();
+    while (replies.size() < 7 && timer.elapsed() < waitMs) {
+        for (const fd::LinkFrame &f : rig.phone.frames()) {
+            if (f.type == proto::msg::ART_GET && (f.flags & proto::flagReply))
+                replies.push_back(f);
+        }
+        QTest::qWait(10);
+        rig.server.poll();
+    }
+    QCOMPARE(replies.size(), size_t(7));
+    uint16_t last = 0;
+    for (const fd::LinkFrame &f : replies)
+        last = std::max(last, f.seq);
+    int busy = 0;
+    for (const fd::LinkFrame &f : replies) {
+        if (!(f.flags & proto::flagError))
+            continue;
+        QCOMPARE(body(f).u("code"), uint64_t(proto::err::busy));
+        QCOMPARE(f.seq, last);
+        ++busy;
+    }
+    QCOMPARE(busy, 1);
+}
+
+void LinkTest::artEncode()
+{
+    QTemporaryDir dir;
+    QImage wide(1200, 800, QImage::Format_RGB32);
+    wide.fill(Qt::red);
+    const QString path = dir.filePath(QStringLiteral("wide.png"));
+    QVERIFY(wide.save(path));
+    LinkJpeg jpeg;
+    QVERIFY(linkEncodeArt(path, 512, jpeg));
+    QCOMPARE(jpeg.side, 512);
+    QImage out;
+    QVERIFY(out.loadFromData(jpeg.bytes, "JPEG"));
+    QCOMPARE(out.size(), QSize(512, 512));
+    QCOMPARE(jpeg.crc, linkCrc32(jpeg.bytes));
+    QVERIFY(linkEncodeArt(path, 300, jpeg));
+    QCOMPARE(jpeg.side, 300);
+    QImage tiny(40, 50, QImage::Format_RGB32);
+    tiny.fill(Qt::blue);
+    const QString small = dir.filePath(QStringLiteral("tiny.png"));
+    QVERIFY(tiny.save(small));
+    QVERIFY(linkEncodeArt(small, 512, jpeg));
+    QCOMPARE(jpeg.side, 40);
+    QVERIFY(!linkEncodeArt(dir.filePath(QStringLiteral("missing.png")), 256, jpeg));
+    QVERIFY(!linkEncodeArt(QString(), 256, jpeg));
+    QCOMPARE(linkCrc32(QByteArrayLiteral("123456789")), 0xcbf43926u);
 }
 
 void LinkTest::profileRegisters()

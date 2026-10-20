@@ -84,6 +84,8 @@ add_library(microdapcore STATIC
     src/core/Library.h
     src/core/LibraryWatcher.cpp
     src/core/LibraryWatcher.h
+    src/core/LinkArt.cpp
+    src/core/LinkArt.h
     src/core/LinkLibrary.cpp
     src/core/LinkLibrary.h
     src/core/LinkProfile.cpp
