@@ -108,6 +108,10 @@ TestCase {
         function touchName(name) {
             fakePhotos.touched = fakePhotos.touched.concat([name])
         }
+
+        function splitArtists(text) {
+            return text.split(", ")
+        }
     }
 
     QtObject {
@@ -419,6 +423,7 @@ TestCase {
         verify(page.touchContext("backdrop", -1, page.backdrop))
         compare(page.sheet.items, ["block image", "wrong artist", "pick image"])
         compare(page.sheet.title, "Artist A")
+        compare(page.sheet.lead, "")
         fakePlayer.current = { id: 8, title: "Other", artist: "Artist B", album: "Album", artPath: "", rating: 0, artists: ["Artist B"] }
         page.sheet.accepted(0)
         compare(fakeLink.calls, ["block Artist A 9"])
@@ -427,9 +432,10 @@ TestCase {
         verify(page.touchContext("backdrop", -1, page.backdrop))
         page.sheet.accepted(1)
         compare(fakeLink.calls[1], "wrong Artist A 9")
-        fakePhotos.info = { name: "Artist A", mbid: "x", crc: 9, wrong: false, phone: false }
+        fakePhotos.info = { name: "Artist A", mbid: "x", crc: 9, wrong: false, phone: false, source: "theaudiodb", credit: "Jane Roe" }
         verify(page.touchContext("backdrop", -1, page.backdrop))
         compare(page.sheet.items, ["block image", "pick image"])
+        compare(page.sheet.lead, "theaudiodb, Jane Roe")
         page.sheet.accepted(1)
         compare(fakeLink.calls[fakeLink.calls.length - 1], "pick Artist A")
         fakeLink.block = false
@@ -979,6 +985,96 @@ TestCase {
         tryCompare(page, "shownVariant", false, 2000)
         compare(page.artTile.visible, true)
         verify(String(page.artImage.source) !== art)
+    }
+
+    function test_variant_photo_and_sheet() {
+        fakePhotos.stored = ["Phone Artist"]
+        fakePhotos.info = { name: "Phone Artist", mbid: "", crc: 5, wrong: true, phone: true, source: "deezer", credit: "" }
+        fakeLink.connected = true
+        fakeLink.pick = true
+        fakeLink.block = true
+        fakeLink.calls = []
+        fakeBluez.activate()
+        const page = open()
+        page.completeAll()
+        compare(page.shownVariant, true)
+        compare(String(page.backdrop.source), "file:///photos/Phone Artist.jpg")
+        compare(page.backdrop.visible, true)
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["block image", "wrong artist", "pick image"])
+        compare(page.sheet.title, "Phone Artist")
+        compare(page.sheet.lead, "deezer")
+        page.sheet.accepted(0)
+        compare(fakeLink.calls, ["block Phone Artist 5"])
+        page.photoOn = false
+        compare(String(page.backdrop.source), "")
+        page.photoOn = true
+        fakePhotos.stored = []
+        fakePhotos.revision++
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["pick image"])
+        compare(page.sheet.lead, "")
+        page.sheet.close()
+    }
+
+    function test_variant_split_artists() {
+        fakePhotos.stored = ["Second Artist"]
+        fakePhotos.info = { name: "Second Artist", mbid: "", crc: 6, wrong: false, phone: true, source: "", credit: "" }
+        fakeLink.connected = true
+        fakeLink.pick = true
+        fakeLink.block = true
+        fakeLink.calls = []
+        fakeBluez.activate()
+        fakeBluez.artist = "Phone Artist, Second Artist"
+        const page = open()
+        page.completeAll()
+        compare(String(page.backdrop.source), "file:///photos/Second Artist.jpg")
+        fakePhotos.stored = []
+        fakePhotos.revision++
+        verify(page.touchContext("backdrop", -1, page.backdrop))
+        compare(page.sheet.items, ["pick image"])
+        page.sheet.accepted(0)
+        page.sheet.complete()
+        compare(page.sheet.items, ["Phone Artist", "Second Artist"])
+        compare(page.sheet.lead, "")
+        page.sheet.accepted(1)
+        compare(fakeLink.calls[fakeLink.calls.length - 1], "pick Second Artist")
+    }
+
+    function test_variant_backdrop_swap_fades() {
+        fakePhotos.stored = ["Artist A"]
+        fakePlayer.current = { id: 7, title: "Song", artist: "Artist A", album: "Album", artPath: "", rating: 0, artists: ["Artist A"] }
+        const page = open({ animated: true })
+        page.completeAll()
+        compare(String(page.backdrop.source), "file:///photos/Artist A.jpg")
+        fakeBluez.activate()
+        compare(page.variantInAnimation.running, true)
+        tryVerify(() => page.backdrop.opacity < 0.5, 2000)
+        compare(String(page.backdrop.source), "file:///photos/Artist A.jpg")
+        tryCompare(page, "shownVariant", true, 2000)
+        compare(String(page.backdrop.source), "")
+        tryCompare(page, "variantAnimating", false, 2000)
+        compare(page.backdropSwap, 1)
+        fakeBluez.transportActive = false
+        tryCompare(page, "shownVariant", false, 2000)
+        tryCompare(page, "variantAnimating", false, 2000)
+        compare(String(page.backdrop.source), "file:///photos/Artist A.jpg")
+        compare(page.backdrop.opacity, 1)
+
+        fakePhotos.stored = ["Artist A", "Phone Artist"]
+        fakePhotos.revision++
+        fakeBluez.activate()
+        compare(page.backdropSame, false)
+        tryCompare(page, "variantAnimating", false, 2000)
+        compare(String(page.backdrop.source), "file:///photos/Phone Artist.jpg")
+        fakeBluez.transportActive = false
+        tryCompare(page, "variantAnimating", false, 2000)
+        fakePlayer.current = { id: 7, title: "Song", artist: "Phone Artist", album: "Album", artPath: "", rating: 0, artists: ["Phone Artist"] }
+        fakeBluez.activate()
+        compare(page.backdropSame, true)
+        compare(page.backdrop.opacity, 1)
+        tryCompare(page, "variantAnimating", false, 2000)
+        fakePlayer.current = ({})
     }
 
     function test_variant_pad() {

@@ -1,6 +1,7 @@
 #include "ArtistStore.h"
 
 #include "LinkArt.h"
+#include "Scanner.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -571,6 +572,11 @@ QUrl ArtistStore::photoFor(const QStringList &names) const
             url.setQuery(QStringLiteral("v=%1").arg(e.crc));
     }
     return url;
+}
+
+QStringList ArtistStore::splitArtists(const QString &text)
+{
+    return Scanner::splitArtistText(text);
 }
 
 QPointF ArtistStore::photoFocus(const QStringList &names) const

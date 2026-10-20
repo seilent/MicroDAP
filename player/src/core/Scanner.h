@@ -94,6 +94,7 @@ public:
                     const QHash<QString, FileStamp> &playlistStamps = {});
 
     static bool isAudioFile(const QString &path);
+    static QStringList splitArtistText(const QString &text, const QString &albumArtist = {});
     static bool isPlaylistFile(const QString &path);
     static bool isFavoritesFile(const QString &path);
     static QString albumKey(const QString &album, const QString &albumArtist);

@@ -92,6 +92,7 @@ public:
     Q_INVOKABLE QString photoArtist(const QStringList &names) const;
     Q_INVOKABLE QVariantMap photoInfo(const QString &name) const;
     Q_INVOKABLE QPointF photoFocus(const QStringList &names) const;
+    Q_INVOKABLE static QStringList splitArtists(const QString &text);
     Q_INVOKABLE void touchName(const QString &name);
     void touch(quint64 key);
 

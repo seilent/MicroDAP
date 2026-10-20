@@ -173,6 +173,22 @@ Page {
 
     focusCount: 0
 
+    function artistsFor(variant: bool): var {
+        if (!variant)
+            return np.shown.artists !== undefined ? np.shown.artists : []
+        const text = np.phoneField("artist")
+        if (text === "")
+            return []
+        return np.photos !== null && typeof np.photos.splitArtists === "function" ? np.photos.splitArtists(text) : [text]
+    }
+
+    function photoUrlFor(variant: bool): string {
+        if (!np.photoOn || np.photos === null)
+            return ""
+        const name = np.photos.photoArtist(np.artistsFor(variant))
+        return name === "" ? "" : String(np.photos.photoFor([name]))
+    }
+
     function phoneField(name: string): string {
         if (np.bluez === null || np.bluez[name] === undefined || np.bluez[name] === null)
             return ""
@@ -214,15 +230,19 @@ Page {
     }
 
     readonly property int photoRevision: np.photos !== null && np.photos.revision !== undefined ? np.photos.revision : 0
-    readonly property string photoName: np.photoOn && np.photos !== null && np.photoRevision >= 0 && np.shown.artists !== undefined
-        ? np.photos.photoArtist(np.shown.artists) : ""
+    readonly property var photoArtists: np.artistsFor(np.shownVariant)
+    property real backdropSwap: 1
+    property bool backdropSame: true
+    readonly property string photoName: np.photoOn && np.photos !== null && np.photoRevision >= 0
+        ? np.photos.photoArtist(np.photoArtists) : ""
+    property string artLead: ""
     readonly property url photoUrl: np.photoName !== "" && np.photoRevision >= 0 ? np.photos.photoFor([np.photoName]) : ""
     readonly property point photoFocus: np.photoName !== "" && np.photoRevision >= 0 && typeof np.photos.photoFocus === "function"
         ? np.photos.photoFocus([np.photoName]) : Qt.point(0.5, 0.5)
     readonly property bool linked: np.link !== null && np.link.connected === true
 
     function artSheetItems(info: var): var {
-        if (!np.photoOn || !np.linked || np.shownVariant)
+        if (!np.photoOn || !np.linked)
             return []
         const out = []
         if (np.photoName !== "" && info.name !== undefined && String(info.name) !== "" && Number(info.crc) !== 0
@@ -231,7 +251,7 @@ Page {
             if (info.wrong === true)
                 out.push("wrong artist")
         }
-        if (np.link.canAsk("pick") && (np.photoName !== "" || np.shown.artists.length > 0))
+        if (np.link.canAsk("pick") && (np.photoName !== "" || np.photoArtists.length > 0))
             out.push("pick image")
         return out
     }
@@ -245,15 +265,18 @@ Page {
             return false
         np.artTarget = {
             stored: info.name === undefined ? "" : String(info.name),
-            tag: np.photoName !== "" ? np.photoName : (np.shown.artists.length > 0 ? String(np.shown.artists[0]) : ""),
+            tag: np.photoName !== "" ? np.photoName : (np.photoArtists.length > 0 ? String(np.photoArtists[0]) : ""),
             crc: info.crc === undefined ? 0 : Number(info.crc),
             mbid: info.mbid === undefined ? "" : String(info.mbid),
-            artists: np.shown.artists.slice(),
+            artists: np.photoArtists.slice(),
             photo: np.photoName !== ""
         }
         np.artNames = []
         np.artItems = items
-        sheet.title = np.artTarget.photo ? np.artTarget.stored : np.shown.artist
+        const source = info.source === undefined ? "" : String(info.source)
+        const credit = info.credit === undefined ? "" : String(info.credit)
+        np.artLead = !np.artTarget.photo || source === "" ? "" : credit === "" ? source : source + ", " + credit
+        sheet.title = np.artTarget.photo ? np.artTarget.stored : np.artistText
         sheet.items = items
         sheet.open()
         return true
@@ -374,6 +397,7 @@ Page {
             np.landVariant()
             return
         }
+        np.backdropSame = np.photoUrlFor(np.variant) === np.photoUrlFor(!np.variant)
         if (np.variant)
             variantIn.start()
         else
@@ -381,6 +405,7 @@ Page {
     }
 
     function landVariant() {
+        np.backdropSwap = 1
         np.shownVariant = np.variant
         if (np.variant) {
             np.lyricsView = false
@@ -1042,23 +1067,24 @@ Page {
         opacity: np.backdropFade
     }
 
+    Backdrop {
+        id: backdrop
+
+        readonly property string touchKind: "backdrop"
+
+        anchors.fill: parent
+        opacity: np.backdropFade * np.backdropSwap
+        source: np.photoUrl
+        focusX: np.photoFocus.x
+        focusY: np.photoFocus.y
+    }
+
     Item {
         id: localLayer
 
         anchors.fill: parent
         opacity: np.localLayerOpacity * np.backdropFade
         visible: np.localLayerOpacity > 0
-
-        Backdrop {
-            id: backdrop
-
-            readonly property string touchKind: "backdrop"
-
-            anchors.fill: parent
-            source: np.photoUrl
-            focusX: np.photoFocus.x
-            focusY: np.photoFocus.y
-        }
 
         Rectangle {
             id: shade
@@ -1550,6 +1576,13 @@ Page {
                 duration: Motion.nowPlayingFade
                 easing.type: Motion.pop
             }
+            NumberAnimation {
+                target: np
+                property: "backdropSwap"
+                to: np.backdropSame ? 1 : 0
+                duration: Motion.nowPlayingFade
+                easing.type: Motion.pop
+            }
         }
         ScriptAction {
             script: {
@@ -1575,20 +1608,37 @@ Page {
                 duration: Motion.nowPlayingIn
                 easing.type: Motion.easeIn
             }
+            NumberAnimation {
+                target: np
+                property: "backdropSwap"
+                to: 1
+                duration: Motion.nowPlayingIn
+                easing.type: Motion.easeIn
+            }
         }
     }
 
     SequentialAnimation {
         id: variantOut
 
-        NumberAnimation {
-            target: np
-            property: "contentOpacity"
-            from: 1
-            to: 0
-            duration: Motion.variantFade
-            easing.type: Motion.bezier
-            easing.bezierCurve: Motion.decel
+        ParallelAnimation {
+            NumberAnimation {
+                target: np
+                property: "contentOpacity"
+                from: 1
+                to: 0
+                duration: Motion.variantFade
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.decel
+            }
+            NumberAnimation {
+                target: np
+                property: "backdropSwap"
+                to: np.backdropSame ? 1 : 0
+                duration: Motion.variantFade
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.decel
+            }
         }
         ScriptAction {
             script: {
@@ -1601,6 +1651,14 @@ Page {
                 target: np
                 property: "localLayerOpacity"
                 from: 0
+                to: 1
+                duration: Motion.variantFade
+                easing.type: Motion.bezier
+                easing.bezierCurve: Motion.decel
+            }
+            NumberAnimation {
+                target: np
+                property: "backdropSwap"
                 to: 1
                 duration: Motion.variantFade
                 easing.type: Motion.bezier
@@ -1623,6 +1681,7 @@ Page {
 
         anchors.fill: parent
         screenOff: !np.live
+        lead: sheet.depth === 0 ? np.artLead : ""
         onAccepted: (index) => {
             if (np.artItems.length > 0 || np.artNames.length > 0)
                 np.artChosen(index)
@@ -1630,6 +1689,10 @@ Page {
         onRejected: {
             np.artItems = []
             np.artNames = []
+        }
+        onProgressChanged: {
+            if (!sheet.shown && sheet.progress === 0)
+                np.artLead = ""
         }
     }
 

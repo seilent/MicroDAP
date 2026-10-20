@@ -206,6 +206,8 @@ const QStringList &states()
         QStringLiteral("photo"),
         QStringLiteral("photo-focus"),
         QStringLiteral("photo-sheet"),
+        QStringLiteral("photo-source-sheet"),
+        QStringLiteral("photo-long-sheet"),
         QStringLiteral("photo-fallback-sheet"),
         QStringLiteral("photo-artists-sheet"),
         QStringLiteral("photo-toast"),

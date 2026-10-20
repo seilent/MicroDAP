@@ -108,9 +108,11 @@ Item {
 
             x: root.edge
             y: root.edge + root.titleHeight
+            width: root.width - 2 * root.edge
             height: root.leadHeight
             visible: root.lead !== ""
             verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
             text: root.lead
             color: Ui.white(Ui.settingsValue.alpha)
             font: Ui.font(Ui.settingsValue)

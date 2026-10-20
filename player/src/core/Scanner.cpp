@@ -77,20 +77,8 @@ QStringList splitArtists(const TagLib::StringList &values, const QString &albumA
 {
     QStringList names;
     for (const TagLib::String &value : values) {
-        QString text = fromTag(value);
-        if (text.isEmpty())
-            continue;
-        QStringList parts;
-        if (!albumArtist.isEmpty() && text.compare(albumArtist, Qt::CaseInsensitive) == 0) {
-            parts.append(text);
-        } else {
-            text.replace(QStringLiteral(" / "), QStringLiteral("; "));
-            text.replace(QStringLiteral(", "), QStringLiteral("; "));
-            parts = text.split(QStringLiteral("; "), Qt::SkipEmptyParts);
-        }
-        for (const QString &part : parts) {
-            const QString name = part.trimmed();
-            if (!name.isEmpty() && !names.contains(name))
+        for (const QString &name : Scanner::splitArtistText(fromTag(value), albumArtist)) {
+            if (!names.contains(name))
                 names.append(name);
         }
     }
@@ -195,6 +183,28 @@ std::optional<Picture> embeddedPicture(TagLib::File *file)
 Scanner::Scanner(const QString &artDir)
     : m_artDir(QDir::cleanPath(artDir))
 {
+}
+
+QStringList Scanner::splitArtistText(const QString &value, const QString &albumArtist)
+{
+    QString text = value.trimmed();
+    QStringList names;
+    if (text.isEmpty())
+        return names;
+    QStringList parts;
+    if (!albumArtist.isEmpty() && text.compare(albumArtist, Qt::CaseInsensitive) == 0) {
+        parts.append(text);
+    } else {
+        text.replace(QStringLiteral(" / "), QStringLiteral("; "));
+        text.replace(QStringLiteral(", "), QStringLiteral("; "));
+        parts = text.split(QStringLiteral("; "), Qt::SkipEmptyParts);
+    }
+    for (const QString &part : parts) {
+        const QString name = part.trimmed();
+        if (!name.isEmpty() && !names.contains(name))
+            names.append(name);
+    }
+    return names;
 }
 
 bool Scanner::isAudioFile(const QString &path)

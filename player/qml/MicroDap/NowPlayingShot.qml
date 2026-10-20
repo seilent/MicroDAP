@@ -37,7 +37,10 @@ Item {
         }
 
         function photoInfo(name: string): var {
-            return { name: name, mbid: "", source: "theaudiodb", credit: "", crc: 1, wrong: true, phone: true }
+            const credit = root.fixture === "photo-sheet" ? "Jane Roe"
+                : root.fixture === "photo-long-sheet" ? "Wikimedia Commons user Somebody With A Very Long Handle, CC BY-SA 4.0" : ""
+            const source = root.fixture === "photo-source-sheet" ? "deezer" : "theaudiodb"
+            return { name: name, mbid: "", source: source, credit: credit, crc: 1, wrong: true, phone: true }
         }
 
         function touchName(name: string): void {
