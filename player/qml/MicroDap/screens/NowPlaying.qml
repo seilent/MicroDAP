@@ -217,6 +217,8 @@ Page {
     readonly property string photoName: np.photoOn && np.photos !== null && np.photoRevision >= 0 && np.shown.artists !== undefined
         ? np.photos.photoArtist(np.shown.artists) : ""
     readonly property url photoUrl: np.photoName !== "" && np.photoRevision >= 0 ? np.photos.photoFor([np.photoName]) : ""
+    readonly property point photoFocus: np.photoName !== "" && np.photoRevision >= 0 && typeof np.photos.photoFocus === "function"
+        ? np.photos.photoFocus([np.photoName]) : Qt.point(0.5, 0.5)
     readonly property bool linked: np.link !== null && np.link.connected === true
 
     function artSheetItems(info: var): var {
@@ -1054,6 +1056,8 @@ Page {
 
             anchors.fill: parent
             source: np.photoUrl
+            focusX: np.photoFocus.x
+            focusY: np.photoFocus.y
         }
 
         Rectangle {

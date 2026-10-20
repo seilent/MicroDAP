@@ -693,6 +693,10 @@ Page {
 
         anchors.fill: parent
         source: page.photoOn && page.photos !== null && page.photos.revision >= 0 ? page.photos.photoFor([page.name]) : ""
+        focusX: page.photoOn && page.photos !== null && page.photos.revision >= 0 && typeof page.photos.photoFocus === "function"
+            ? page.photos.photoFocus([page.name]).x : 0.5
+        focusY: page.photoOn && page.photos !== null && page.photos.revision >= 0 && typeof page.photos.photoFocus === "function"
+            ? page.photos.photoFocus([page.name]).y : 0.5
     }
 
     onPhotoShownChanged: {

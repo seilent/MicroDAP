@@ -5,7 +5,10 @@ Item {
     id: root
 
     property url source
+    property real focusX: 0.5
+    property real focusY: 0.5
     readonly property bool hasArt: root.source.toString() !== ""
+    readonly property real side: Math.max(root.width, root.height)
     readonly property var stops: Ui.backdropStops
     property alias art: art
     property alias shade: shade
@@ -21,10 +24,10 @@ Item {
     Image {
         id: art
 
-        x: 0
-        y: 0
-        width: root.width
-        height: root.height
+        x: Math.min(0, Math.max(root.width - root.side, root.width / 2 - root.focusX * root.side))
+        y: Math.min(0, Math.max(root.height - root.side, root.height / 2 - root.focusY * root.side))
+        width: root.side
+        height: root.side
         source: root.source
         visible: root.hasArt
         fillMode: Image.PreserveAspectCrop

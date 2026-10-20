@@ -153,6 +153,12 @@ void ArtistStore::rebuild()
                 e.credit = o.value(QStringLiteral("credit")).toString();
                 e.crc = quint32(o.value(QStringLiteral("crc")).toDouble());
                 e.wrong = o.value(QStringLiteral("wrong")).toBool();
+                const int fx = o.value(QStringLiteral("focusX")).toInt(-1);
+                const int fy = o.value(QStringLiteral("focusY")).toInt(-1);
+                if (fx >= 0 && fx <= focusScale && fy >= 0 && fy <= focusScale) {
+                    e.focusX = fx;
+                    e.focusY = fy;
+                }
             }
         }
         m_entries.append(e);
@@ -254,6 +260,10 @@ bool ArtistStore::writeInfo(const Entry &e) const
                   {QStringLiteral("source"), e.source}, {QStringLiteral("credit"), e.credit},
                   {QStringLiteral("crc"), double(e.crc)}, {QStringLiteral("size"), double(e.size)},
                   {QStringLiteral("wrong"), e.wrong}};
+    if (e.focusX >= 0 && e.focusY >= 0) {
+        o.insert(QStringLiteral("focusX"), e.focusX);
+        o.insert(QStringLiteral("focusY"), e.focusY);
+    }
     const QString jpg = imagePath(e.key);
     QSaveFile save(jpg.left(jpg.size() - 4) + QStringLiteral(".inf"));
     const QByteArray bytes = QJsonDocument(o).toJson(QJsonDocument::Compact);
@@ -294,6 +304,10 @@ ArtistStore::Code ArtistStore::begin(const Head &in, quint32 &offset, quint32 &p
     h.source = cutMeta(in.source);
     h.credit = cutMeta(in.credit);
     h.mbid = cutMeta(in.mbid);
+    if (h.focusX < 0 || h.focusX > focusScale || h.focusY < 0 || h.focusY > focusScale) {
+        h.focusX = -1;
+        h.focusY = -1;
+    }
     if (h.name.trimmed().isEmpty() || h.name.toUtf8().size() > nameBytes || h.total == 0)
         return Code::BadValue;
     if (h.total > m_max)
@@ -306,11 +320,14 @@ ArtistStore::Code ArtistStore::begin(const Head &in, quint32 &offset, quint32 &p
             continue;
         addOrigin(k, h.origin);
         if (e.crc == h.crc && e.size == h.total) {
-            if (e.wrong != h.wrong || e.source != h.source || e.credit != h.credit) {
+            if (e.wrong != h.wrong || e.source != h.source || e.credit != h.credit || e.focusX != h.focusX
+                || e.focusY != h.focusY) {
                 Entry n = e;
                 n.wrong = h.wrong;
                 n.source = h.source;
                 n.credit = h.credit;
+                n.focusX = h.focusX;
+                n.focusY = h.focusY;
                 if (writeInfo(n))
                     e = n;
             }
@@ -410,6 +427,8 @@ ArtistStore::Code ArtistStore::end(quint32 crc, quint32 push)
     e.crc = p->head.crc;
     e.size = p->head.total;
     e.wrong = p->head.wrong;
+    e.focusX = p->head.focusX;
+    e.focusY = p->head.focusY;
     e.mtime = QDateTime::currentMSecsSinceEpoch();
     if (!writeInfo(e)) {
         dropPart(k);
@@ -552,6 +571,17 @@ QUrl ArtistStore::photoFor(const QStringList &names) const
             url.setQuery(QStringLiteral("v=%1").arg(e.crc));
     }
     return url;
+}
+
+QPointF ArtistStore::photoFocus(const QStringList &names) const
+{
+    const QString name = photoArtist(names);
+    const quint64 k = name.isEmpty() ? 0 : key(name);
+    for (const Entry &e : m_entries) {
+        if (e.key == k && e.focusX >= 0)
+            return {double(e.focusX) / focusScale, double(e.focusY) / focusScale};
+    }
+    return {0.5, 0.5};
 }
 
 void ArtistStore::touchName(const QString &name)

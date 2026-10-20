@@ -1879,6 +1879,10 @@ void LinkServer::image(Peer &p, fd::LinkCommand &c, qint64 now)
         h.source = QString::fromStdString(c.body.str("source"));
         h.credit = QString::fromStdString(c.body.str("credit"));
         h.origin = originBits(c.body);
+        if (c.body.has("focusX") && c.body.has("focusY")) {
+            h.focusX = int(std::min<uint64_t>(c.body.u("focusX"), uint64_t(INT32_MAX)));
+            h.focusY = int(std::min<uint64_t>(c.body.u("focusY"), uint64_t(INT32_MAX)));
+        }
         quint32 offset = 0;
         quint32 crc = 0;
         quint32 push = 0;

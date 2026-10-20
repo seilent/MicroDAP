@@ -2306,12 +2306,25 @@ void LinkTest::artistStore()
             QCOMPARE(peek.origin(ArtistStore::key(QStringLiteral("Artist B"))), ArtistStore::originLibrary);
         }
         QVERIFY(!store.tag(QStringLiteral("Nobody"), ArtistStore::originPhone));
+        QCOMPARE(store.photoFocus({QStringLiteral("Artist B")}), QPointF(0.5, 0.5));
+        ArtistStore::Head focused = head(QStringLiteral("Artist A"), jpeg, ArtistStore::originPhone);
+        focused.focusX = 120;
+        focused.focusY = 800;
+        QCOMPARE(store.begin(focused, offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(offset, quint32(jpeg.size()));
+        QCOMPARE(store.photoFocus({QStringLiteral("artist a")}), QPointF(0.12, 0.8));
+        ArtistStore::Head wild = head(QStringLiteral("Artist B"), blue, ArtistStore::originLibrary);
+        wild.focusX = 1500;
+        wild.focusY = 10;
+        QCOMPARE(store.begin(wild, offset, crc), ArtistStore::Code::Ok);
+        QCOMPARE(store.photoFocus({QStringLiteral("Artist B")}), QPointF(0.5, 0.5));
         QVERIFY(store.flushOrigins());
     }
     {
         ArtistStore store(dir.path());
         QCOMPARE(store.listed().size(), 2);
         QCOMPARE(store.origin(ArtistStore::key(QStringLiteral("Artist B"))), ArtistStore::originLibrary);
+        QCOMPARE(store.photoFocus({QStringLiteral("Artist A")}), QPointF(0.12, 0.8));
         QCOMPARE(store.prune({ArtistStore::key(QStringLiteral("Artist C"))}), 1);
         QCOMPARE(store.listed().size(), 1);
         QCOMPARE(store.listed().constFirst().name, QStringLiteral("Artist A"));
@@ -2359,7 +2372,8 @@ void LinkTest::imagesOverTheLink()
     fd::LinkWriter begin;
     namespace b = proto::tag::IMG_BEGIN;
     begin.u8(b::kind, proto::val::IMG_KIND::artist).str(b::name, "Artist A").u32(b::total, uint32_t(jpeg.size()))
-        .u32(b::crc, linkCrc32(jpeg)).u16(b::w, 960).u16(b::h, 960).u8(b::origin, proto::val::IMG_ORIGIN::library);
+        .u32(b::crc, linkCrc32(jpeg)).u16(b::w, 960).u16(b::h, 960).u8(b::origin, proto::val::IMG_ORIGIN::library)
+        .u16(b::focusX, 250).u16(b::focusY, 300);
     std::vector<fd::LinkFrame> frames = rig.ask(proto::msg::IMG_BEGIN, begin);
     const fd::LinkFrame *reply = find(frames, proto::msg::IMG_BEGIN, true);
     QVERIFY(reply && !(reply->flags & proto::flagError));
@@ -2375,6 +2389,7 @@ void LinkTest::imagesOverTheLink()
     frames = rig.ask(proto::msg::IMG_END, end);
     QVERIFY(okReply(frames, proto::msg::IMG_END));
     QCOMPARE(store.listed().size(), 1);
+    QCOMPARE(store.photoFocus({QStringLiteral("Artist A")}), QPointF(0.25, 0.3));
     fd::LinkWriter list;
     frames = rig.ask(proto::msg::IMG_LIST, list);
     reply = find(frames, proto::msg::IMG_LIST, true);

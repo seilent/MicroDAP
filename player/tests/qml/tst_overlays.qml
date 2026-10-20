@@ -268,15 +268,42 @@ TestCase {
         compare(backdrop.art.fillMode, Image.PreserveAspectCrop)
     }
 
-    function test_backdrop_static() {
+    function test_backdrop_focus() {
+        compare(backdrop.art.width, 960)
+        compare(backdrop.art.height, 960)
+        compare(backdrop.art.x, -160)
+        compare(backdrop.art.y, 0)
+        backdrop.focusX = 0.6
+        compare(backdrop.art.x, -256)
+        backdrop.focusX = 0.1
+        compare(backdrop.art.x, 0)
+        backdrop.focusX = 0.95
+        compare(backdrop.art.x, -320)
+        backdrop.focusY = 0.1
+        compare(backdrop.art.y, 0)
+        backdrop.width = 960
+        backdrop.height = 640
         compare(backdrop.art.x, 0)
         compare(backdrop.art.y, 0)
-        compare(backdrop.art.width, backdrop.width)
-        compare(backdrop.art.height, backdrop.height)
+        backdrop.focusY = 0.7
+        compare(backdrop.art.y, -320)
+        backdrop.focusY = 0.5
+        compare(backdrop.art.y, -160)
+        backdrop.width = 640
+        backdrop.height = 960
+        backdrop.focusX = 0.5
+        compare(backdrop.art.x, -160)
+    }
+
+    function test_backdrop_static() {
+        compare(backdrop.art.x, -160)
+        compare(backdrop.art.y, 0)
+        compare(backdrop.art.width, 960)
+        compare(backdrop.art.height, 960)
         compare(backdrop.art.scale, 1)
         compare(backdrop.art.visible, true)
         wait(60)
-        compare(backdrop.art.x, 0)
+        compare(backdrop.art.x, -160)
         compare(backdrop.art.scale, 1)
         backdrop.source = ""
         compare(backdrop.hasArt, false)

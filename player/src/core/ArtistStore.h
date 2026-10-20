@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QObject>
+#include <QPointF>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -24,6 +25,7 @@ public:
     static constexpr quint8 originPhone = 2;
     static constexpr int metaBytes = 256;
     static constexpr int nameBytes = 255;
+    static constexpr int focusScale = 1000;
     static constexpr int maxParts = 4;
     static constexpr int originDelayMs = 2000;
     static constexpr qint64 defaultCap = 128LL * 1024 * 1024;
@@ -42,6 +44,8 @@ public:
         int h = 0;
         bool wrong = false;
         quint8 origin = 0;
+        int focusX = -1;
+        int focusY = -1;
     };
 
     struct Entry
@@ -56,6 +60,8 @@ public:
         qint64 mtime = 0;
         bool wrong = false;
         quint8 origin = 0;
+        int focusX = -1;
+        int focusY = -1;
     };
 
     static QString defaultRoot();
@@ -85,6 +91,7 @@ public:
     Q_INVOKABLE QUrl photoFor(const QStringList &names) const;
     Q_INVOKABLE QString photoArtist(const QStringList &names) const;
     Q_INVOKABLE QVariantMap photoInfo(const QString &name) const;
+    Q_INVOKABLE QPointF photoFocus(const QStringList &names) const;
     Q_INVOKABLE void touchName(const QString &name);
     void touch(quint64 key);
 

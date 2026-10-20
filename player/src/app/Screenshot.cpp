@@ -204,6 +204,7 @@ const QStringList &states()
         QStringLiteral("brightness-step-sheet"),
         QStringLiteral("brightness-floor-sheet"),
         QStringLiteral("photo"),
+        QStringLiteral("photo-focus"),
         QStringLiteral("photo-sheet"),
         QStringLiteral("photo-fallback-sheet"),
         QStringLiteral("photo-artists-sheet"),

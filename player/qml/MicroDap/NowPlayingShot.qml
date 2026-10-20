@@ -32,6 +32,10 @@ Item {
             return samplePhotos.photoArtist(names) === "" ? "" : "file://" + Env.shotPhoto
         }
 
+        function photoFocus(names: var): point {
+            return root.fixture === "photo-focus" ? Qt.point(0.25, 0.3) : Qt.point(0.5, 0.5)
+        }
+
         function photoInfo(name: string): var {
             return { name: name, mbid: "", source: "theaudiodb", credit: "", crc: 1, wrong: true, phone: true }
         }
