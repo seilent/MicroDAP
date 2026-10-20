@@ -1009,6 +1009,15 @@ Window {
     }
 
     Connections {
+        target: root.eq
+        ignoreUnknownSignals: true
+
+        function onImportNote(first, second) {
+            overlays.toast.show(first, second)
+        }
+    }
+
+    Connections {
         target: root.sensor
         ignoreUnknownSignals: true
 

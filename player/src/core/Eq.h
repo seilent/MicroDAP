@@ -13,12 +13,18 @@
 #include <QVariantMap>
 
 #include <array>
+#include <atomic>
+#include <memory>
 #include <optional>
+#include <thread>
+#include <vector>
 
 namespace microdap {
 
 class OutputControl;
 class Settings;
+struct EqFitOptions;
+enum class EqFitEnd;
 
 struct EqBand
 {
@@ -134,6 +140,8 @@ class EqControl : public QObject
     Q_PROPERTY(QString activeName READ activeName NOTIFY activeProfileChanged)
     Q_PROPERTY(QVariantMap activeProfile READ activeProfileMap NOTIFY activeProfileChanged)
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
+    Q_PROPERTY(QVariantList imports READ imports NOTIFY importsChanged)
+    Q_PROPERTY(QString importing READ importing NOTIFY importingChanged)
 
 public:
     static constexpr int syncDelayMs = 500;
@@ -149,6 +157,7 @@ public:
     static constexpr int freqCoarseSteps = 6;
     static constexpr int presetsMax = 200;
     static constexpr int presetNameMax = 64;
+    static constexpr qint64 graphicFileMax = 64 * 1024;
 
     explicit EqControl(Settings *settings, QObject *parent = nullptr);
     ~EqControl() override;
@@ -166,6 +175,7 @@ public:
     static bool nameOk(const QString &name);
     static bool nameLess(const QString &a, const QString &b);
     static QString autoEqText(const EqProfile &profile);
+    static QString importName(const QString &path);
     static QString outputForSink(const QString &sink);
     static QString defaultSinkOutput();
 
@@ -180,6 +190,10 @@ public:
     QString activeName() const;
     QVariantMap activeProfileMap() const;
     int revision() const;
+    QVariantList imports() const;
+    QString importing() const;
+    QString importPresetName(const QString &base) const;
+    EqFitOptions &fitOptions();
 
     EqProfile profile(const QString &output) const;
     void setCustom(const QString &output, const EqProfile &profile);
@@ -194,6 +208,7 @@ public:
     Q_INVOKABLE bool deletePreset(const QString &output);
     Q_INVOKABLE QString renameRefusal(const QString &output, const QString &name) const;
     Q_INVOKABLE bool renamePreset(const QString &output, const QString &name);
+    Q_INVOKABLE QString importGraphic(const QString &output, const QString &path);
     Q_INVOKABLE QVariantMap profileMap(const QString &output) const;
     Q_INVOKABLE bool graphic(const QString &output) const;
     Q_INVOKABLE void cycleMode(const QString &output, int direction);
@@ -224,8 +239,15 @@ signals:
     void revisionChanged();
     void profilesChanged();
     void profileChanged(const QString &output);
+    void importsChanged();
+    void importingChanged();
+    void importNote(const QString &first, const QString &second);
 
 private:
+    int presetCount(bool graphicList) const;
+    static bool readGraphic(const QString &path, std::vector<double> &freqs, std::vector<double> &gains,
+                            QStringList *log = nullptr);
+    void imported(bool read, EqFitEnd end, const EqProfile &profile);
     std::optional<EqProfile> fileProfile(const QString &path) const;
     EqProfile restored(const QString &output) const;
     QString pathOf(const QString &key) const;
@@ -283,6 +305,15 @@ private:
     QTimer m_syncTimer;
     QTimer m_writeTimer;
     int m_revision = 0;
+    QVariantList m_imports;
+    QStringList m_importPaths;
+    QString m_importPath;
+    QString m_importName;
+    QString m_importOutput;
+    QString m_importKey;
+    std::unique_ptr<EqFitOptions> m_fitOptions;
+    std::atomic<bool> m_fitCancel{false};
+    std::thread m_fitThread;
 };
 
 }

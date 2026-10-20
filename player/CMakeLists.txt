@@ -66,6 +66,8 @@ add_library(microdapcore STATIC
     src/core/DeviceReservation.h
     src/core/Eq.cpp
     src/core/Eq.h
+    src/core/EqFit.cpp
+    src/core/EqFit.h
     src/core/FakeBluezModel.cpp
     src/core/FakeBluezModel.h
     src/core/Favorites.cpp

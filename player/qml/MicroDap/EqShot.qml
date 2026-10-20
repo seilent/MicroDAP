@@ -20,6 +20,9 @@ Item {
     readonly property bool graphicShot: root.fixture.startsWith("eq-graphic")
     readonly property bool typeShot: root.fixture.startsWith("eq-typed-")
     readonly property bool customShot: root.fixture === "eq-custom"
+    readonly property bool importShot: root.fixture.startsWith("eq-import") && root.fixture !== "eq-imported"
+    readonly property bool importedShot: root.fixture === "eq-imported"
+    readonly property bool longImport: root.fixture === "eq-import-long"
     readonly property bool savedShot: root.fixture === "eq-saved" || root.fixture === "eq-delete" || root.fixture === "eq-rename"
     readonly property bool dacShot: root.fixture === "eq-dac-range" || root.fixture === "eq-dac-preamp" || root.fixture === "eq-dac-long"
 
@@ -34,10 +37,10 @@ Item {
         readonly property string activeOutput: root.dacShot ? "usb" : "headphones"
         readonly property var sources: [{ name: "SENNHEISER HD 600 PARAMETRICEQ", path: "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt" }]
         readonly property var headphones: ({
-            key: root.customShot ? "custom" : root.savedShot ? "/home/micro/.config/microdap/eq/presets/Preset 1.txt"
+            key: root.customShot || root.importShot ? "custom" : root.importedShot ? "/home/micro/.config/microdap/eq/presets/Demo Headphone 2.txt" : root.savedShot ? "/home/micro/.config/microdap/eq/presets/Preset 1.txt"
                 : "/home/micro/.config/microdap/eq/Sennheiser HD 600 ParametricEQ.txt",
-            name: root.customShot ? "" : root.savedShot ? "Preset 1" : "Sennheiser HD 600 ParametricEQ",
-            saved: root.savedShot,
+            name: root.customShot || root.importShot ? "" : root.importedShot ? "Demo Headphone 2" : root.savedShot ? "Preset 1" : "Sennheiser HD 600 ParametricEQ",
+            saved: root.savedShot || root.importedShot,
             missing: false,
             preamp: -6.5,
             bands: root.typesShot ? sampleEq.types : root.bandShot > 0 ? sampleEq.autoEq.slice(0, root.bandShot) : sampleEq.autoEq
@@ -77,6 +80,13 @@ Item {
                 { type: "lowshelf", freq: 105, gain: -24, q: 0.1 }
             ].concat(sampleEq.autoEq.slice(2))
         })
+
+        readonly property var imports: !root.importShot && !root.importedShot ? [] : [
+            { name: "Demo Headphone", path: "/run/media/micro/SD/Music/EQ/Demo Headphone GraphicEQ.txt" },
+            { name: root.longImport ? "Sennheiser HD 800 S (sample 2) measured on a GRAS 43AG ear simulator" : "HIFIMAN Sundara",
+              path: "/home/micro/.config/microdap/eq/Long GraphicEQ.txt" }
+        ]
+        readonly property string importing: root.fixture === "eq-importing" || root.longImport ? sampleEq.imports[root.longImport ? 1 : 0].path : ""
 
         signal profilesChanged()
 
@@ -183,6 +193,19 @@ Item {
                 keyboard.complete()
                 return
             }
+            if (root.importShot || root.importedShot) {
+                screen.focusIndex = screen.indexOfKey("import")
+                screen.activate()
+                screen.headphonesPane.settle()
+                screen.focusIndex = root.fixture === "eq-import" ? screen.indexOfKey("import") : screen.indexOfKey("import:" + sampleEq.imports[root.longImport ? 1 : 0].path)
+                Qt.callLater(() => screen.activePane.ensureVisible(screen.focusIndex, 0))
+                if (root.fixture === "eq-imported") {
+                    toast.show("imported", "Demo Headphone 2")
+                    toast.complete()
+                    toast.hold.stop()
+                }
+                return
+            }
             if (root.customShot || root.savedShot) {
                 screen.focusIndex = screen.indexOfKey(root.customShot ? "savePreset"
                     : root.fixture === "eq-saved" ? "renamePreset" : "deletePreset")
@@ -211,5 +234,13 @@ Item {
             screen.focusIndex = screen.indexOfKey("band1:freq")
             Qt.callLater(() => screen.activePane.ensureVisible(screen.focusIndex, 0))
         }
+    }
+
+    Toast {
+        id: toast
+
+        x: 0
+        y: 0
+        width: root.width
     }
 }

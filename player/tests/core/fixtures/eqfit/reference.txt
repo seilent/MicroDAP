@@ -1,0 +1,74 @@
+flatdap 17558f5fbfbe049f66cdf31c84717fbdf9df9aa9
+command g++ -O2 -std=c++17 -I$FLATDAP/player/audio/src gen.cpp $FLATDAP/player/audio/src/eq.cpp $FLATDAP/player/audio/src/eqfit.cpp -o gen && ./gen > reference.txt
+target 1 end 0 iterations 200 rms 0.028331
+Preamp: -6 dB
+Filter 1: ON PK Fc 20 Hz Gain 0.6 dB Q 0.31
+Filter 2: ON PK Fc 51 Hz Gain 0.1 dB Q 2.9
+Filter 3: ON LSC Fc 107 Hz Gain 5.3 dB Q 0.72
+Filter 4: ON PK Fc 335 Hz Gain -0.1 dB Q 10
+Filter 5: ON PK Fc 754 Hz Gain -0.1 dB Q 0.69
+Filter 6: ON PK Fc 1842 Hz Gain -0.1 dB Q 5.92
+Filter 7: ON PK Fc 2431 Hz Gain -3.3 dB Q 1.38
+Filter 8: ON PK Fc 2797 Hz Gain 0.1 dB Q 6.17
+Filter 9: ON PK Fc 8451 Hz Gain 0.5 dB Q 1.05
+Filter 10: ON HSC Fc 9960 Hz Gain 1.8 dB Q 0.75
+target 2 end 0 iterations 200 rms 0.037996
+Preamp: -6 dB
+Filter 1: ON PK Fc 20 Hz Gain -8.8 dB Q 0.36
+Filter 2: ON LSC Fc 84 Hz Gain 5.8 dB Q 0.84
+Filter 3: ON PK Fc 291 Hz Gain -3.9 dB Q 0.74
+Filter 4: ON PK Fc 993 Hz Gain 1.4 dB Q 2.18
+Filter 5: ON PK Fc 1540 Hz Gain 0.7 dB Q 0.73
+Filter 6: ON PK Fc 1909 Hz Gain -4.1 dB Q 0.25
+Filter 7: ON PK Fc 3003 Hz Gain -4.3 dB Q 2.91
+Filter 8: ON PK Fc 3045 Hz Gain 0.7 dB Q 1.54
+Filter 9: ON PK Fc 5977 Hz Gain 3.3 dB Q 1.72
+Filter 10: ON HSC Fc 6665 Hz Gain -3.7 dB Q 0.47
+target 3 end 0 iterations 200 rms 0.028139
+Preamp: -6 dB
+Filter 1: ON PK Fc 52 Hz Gain -1.2 dB Q 0.72
+Filter 2: ON LSC Fc 94 Hz Gain -0.4 dB Q 1.17
+Filter 3: ON PK Fc 144 Hz Gain 3.4 dB Q 0.34
+Filter 4: ON PK Fc 530 Hz Gain 1.1 dB Q 0.6
+Filter 5: ON PK Fc 1604 Hz Gain 5.1 dB Q 0.51
+Filter 6: ON PK Fc 3539 Hz Gain 0.9 dB Q 1.02
+Filter 7: ON PK Fc 5364 Hz Gain -0 dB Q 10
+Filter 8: ON PK Fc 7784 Hz Gain -1.6 dB Q 0.8
+Filter 9: ON HSC Fc 10598 Hz Gain -2.1 dB Q 0.66
+Filter 10: ON PK Fc 10741 Hz Gain -0.1 dB Q 10
+target 4 end 0 iterations 110 rms 0.100799
+Preamp: -12.6 dB
+Filter 1: ON PK Fc 40 Hz Gain 5.1 dB Q 1.47
+Filter 2: ON LSC Fc 49 Hz Gain 2.2 dB Q 0.55
+Filter 3: ON PK Fc 119 Hz Gain -3.2 dB Q 0.9
+Filter 4: ON PK Fc 649 Hz Gain 2.6 dB Q 0.72
+Filter 5: ON PK Fc 2237 Hz Gain -14.1 dB Q 1.03
+Filter 6: ON PK Fc 2359 Hz Gain 12 dB Q 1.07
+Filter 7: ON PK Fc 2661 Hz Gain -0.1 dB Q 10
+Filter 8: ON PK Fc 4504 Hz Gain 4.3 dB Q 3.54
+Filter 9: ON PK Fc 6979 Hz Gain -2.6 dB Q 3.27
+Filter 10: ON HSC Fc 9468 Hz Gain 1.4 dB Q 0.86
+target 5 end 0 iterations 53 rms 0.026753
+Preamp: -4.7 dB
+Filter 1: ON LSC Fc 214 Hz Gain 2.5 dB Q 0.51
+Filter 2: ON PK Fc 435 Hz Gain -0.4 dB Q 0.27
+Filter 3: ON PK Fc 765 Hz Gain -0.2 dB Q 2.87
+Filter 4: ON PK Fc 797 Hz Gain 0.2 dB Q 10
+Filter 5: ON PK Fc 1102 Hz Gain -0.1 dB Q 10
+Filter 6: ON PK Fc 1401 Hz Gain -0.1 dB Q 10
+Filter 7: ON PK Fc 3335 Hz Gain 3.6 dB Q 1.08
+Filter 8: ON PK Fc 4076 Hz Gain 1.2 dB Q 1.18
+Filter 9: ON PK Fc 12397 Hz Gain -0.2 dB Q 0.48
+Filter 10: ON HSC Fc 18494 Hz Gain -0.7 dB Q 0.36
+target 6 end 0 iterations 71 rms 0.085334
+Preamp: -12.7 dB
+Filter 1: ON PK Fc 30 Hz Gain -6.4 dB Q 0.66
+Filter 2: ON PK Fc 239 Hz Gain 3.1 dB Q 1.01
+Filter 3: ON PK Fc 331 Hz Gain 0.7 dB Q 2.18
+Filter 4: ON LSC Fc 411 Hz Gain 3 dB Q 0.43
+Filter 5: ON PK Fc 905 Hz Gain -0.4 dB Q 10
+Filter 6: ON PK Fc 1717 Hz Gain 2.6 dB Q 1.46
+Filter 7: ON PK Fc 2764 Hz Gain 5.3 dB Q 1.8
+Filter 8: ON PK Fc 5821 Hz Gain -14.3 dB Q 1.44
+Filter 9: ON PK Fc 6130 Hz Gain 12 dB Q 1.36
+Filter 10: ON HSC Fc 11782 Hz Gain -0.4 dB Q 0.97

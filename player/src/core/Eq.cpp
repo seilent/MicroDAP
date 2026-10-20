@@ -1,11 +1,13 @@
 #include "Eq.h"
 
+#include "EqFit.h"
 #include "OutputControl.h"
 #include "Settings.h"
 
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -610,6 +612,7 @@ EqProfile EqFilters::decode(const QStringList &items)
 EqControl::EqControl(Settings *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
+    , m_fitOptions(std::make_unique<EqFitOptions>())
 {
     m_syncTimer.setSingleShot(true);
     m_syncTimer.setInterval(syncDelayMs);
@@ -633,6 +636,9 @@ EqControl::EqControl(Settings *settings, QObject *parent)
 
 EqControl::~EqControl()
 {
+    m_fitCancel = true;
+    if (m_fitThread.joinable())
+        m_fitThread.join();
     m_sinkTimer.stop();
     dropSinkProcess();
     sync();
@@ -1244,12 +1250,7 @@ QString EqControl::savePreset(const QString &output)
         return QStringLiteral("preset not saved");
     const QString dir = g ? graphicDir() : presetDir();
     const QString suffix = g ? QStringLiteral(".ini") : QStringLiteral(".txt");
-    int count = 0;
-    for (const QString &path : paths(g)) {
-        if (QFileInfo(path).absolutePath() == QDir::cleanPath(dir))
-            ++count;
-    }
-    if (count >= presetsMax)
+    if (presetCount(g) >= presetsMax)
         return QStringLiteral("too many presets");
     QString path;
     for (int n = 1;; ++n) {
@@ -1279,6 +1280,159 @@ QString EqControl::savePreset(const QString &output)
         return QStringLiteral("preset not saved");
     select(output, true, displayName(path), *parsed);
     return {};
+}
+
+int EqControl::presetCount(bool graphicList) const
+{
+    const QString dir = QDir::cleanPath(graphicList ? graphicDir() : presetDir());
+    int count = 0;
+    for (const QString &path : paths(graphicList)) {
+        if (QFileInfo(path).absolutePath() == dir)
+            ++count;
+    }
+    return count;
+}
+
+bool EqControl::readGraphic(const QString &path, std::vector<double> &freqs, std::vector<double> &gains,
+                            QStringList *log)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) && file.size() <= graphicFileMax
+           && EqFit::parse(file.read(graphicFileMax), freqs, gains, log);
+}
+
+QString EqControl::importName(const QString &path)
+{
+    QString name = QFileInfo(path).fileName();
+    if (name.endsWith(QLatin1StringView(".txt"), Qt::CaseInsensitive))
+        name.chop(4);
+    const auto suffix = QLatin1StringView(" GraphicEQ");
+    if (name.size() > suffix.size() && name.endsWith(suffix, Qt::CaseInsensitive))
+        name.chop(suffix.size());
+    return name;
+}
+
+QVariantList EqControl::imports() const
+{
+    return m_imports;
+}
+
+QString EqControl::importing() const
+{
+    return m_importPath;
+}
+
+EqFitOptions &EqControl::fitOptions()
+{
+    return *m_fitOptions;
+}
+
+QString EqControl::importPresetName(const QString &base) const
+{
+    for (int n = 1; n <= presetsMax + 1; ++n) {
+        const QString tail = n == 1 ? QString() : QLatin1Char(' ') + QString::number(n);
+        QString b = base;
+        while (b.startsWith(QLatin1Char(' ')))
+            b.remove(0, 1);
+        while (!b.isEmpty() && (b + tail).toUtf8().size() > presetNameMax)
+            b.chop(b.size() >= 2 && b.at(b.size() - 1).isLowSurrogate() ? 2 : 1);
+        while (b.endsWith(QLatin1Char(' ')))
+            b.chop(1);
+        const QString name = b + tail;
+        if (!nameOk(name))
+            continue;
+        const QString path = QDir::cleanPath(presetDir() + QLatin1Char('/') + name + QStringLiteral(".txt"));
+        bool taken = QFileInfo::exists(path);
+        for (const QString &listed : paths(false))
+            taken = taken || entryName(listed, false) == entryName(path, false);
+        if (!taken)
+            return name;
+    }
+    return {};
+}
+
+QString EqControl::importGraphic(const QString &output, const QString &path)
+{
+    if (!outputs().contains(output) || !m_importPath.isEmpty() || graphic(output) || !m_importPaths.contains(path))
+        return {};
+    if (presetCount(false) >= presetsMax)
+        return QStringLiteral("too many presets");
+    if (m_fitThread.joinable())
+        m_fitThread.join();
+    m_fitCancel = false;
+    m_importPath = path;
+    m_importName = importName(path);
+    m_importOutput = output;
+    m_importKey = key(output);
+    EqFitOptions options = *m_fitOptions;
+    options.cancel = &m_fitCancel;
+    m_fitThread = std::thread([this, path, options] {
+        std::vector<double> freqs;
+        std::vector<double> gains;
+        QStringList log;
+        const bool read = readGraphic(path, freqs, gains, &log);
+        EqProfile profile;
+        EqFitStats stats;
+        QElapsedTimer clock;
+        clock.start();
+        const EqFitEnd end = read ? EqFit::fit(freqs, gains, profile, options, &stats) : EqFitEnd::Cancelled;
+        const qint64 ms = clock.elapsed();
+        for (const QString &line : std::as_const(log))
+            qInfo().noquote() << "microdap eq: import" << path << line;
+        if (read)
+            qInfo().noquote() << "microdap eq: import" << path << stats.iterations << "iterations" << stats.trials
+                              << "trials" << ms << "ms" << QString::number(stats.rms, 'f', 2) << "db rms end"
+                              << int(end);
+        QMetaObject::invokeMethod(this, [this, read, end, profile] { imported(read, end, profile); },
+                                  Qt::QueuedConnection);
+    });
+    emit importingChanged();
+    return {};
+}
+
+void EqControl::imported(bool read, EqFitEnd end, const EqProfile &profile)
+{
+    if (m_fitThread.joinable())
+        m_fitThread.join();
+    const QString name = m_importName;
+    const QString output = m_importOutput;
+    const bool kept = key(output) == m_importKey && !graphic(output);
+    const bool gone = m_fitCancel || !m_importPaths.contains(m_importPath) || !QFileInfo::exists(m_importPath);
+    m_importPath.clear();
+    m_importName.clear();
+    emit importingChanged();
+    if (!read || gone || end == EqFitEnd::Cancelled) {
+        emit importNote(QStringLiteral("import failed"), name);
+        return;
+    }
+    if (end == EqFitEnd::Boost) {
+        emit importNote(QStringLiteral("import failed"), QStringLiteral("boost over 24 db"));
+        return;
+    }
+    if (presetCount(false) >= presetsMax) {
+        emit importNote(QStringLiteral("too many presets"), QString());
+        return;
+    }
+    const QString saved = importPresetName(name);
+    if (saved.isEmpty()) {
+        emit importNote(QStringLiteral("import failed"), name);
+        return;
+    }
+    const QString path = QDir::cleanPath(presetDir() + QLatin1Char('/') + saved + QStringLiteral(".txt"));
+    QDir().mkpath(presetDir());
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(autoEqText(profile).toUtf8()) < 0
+        || !file.commit()) {
+        qWarning() << "microdap eq: cannot write preset" << path;
+        emit importNote(QStringLiteral("preset not saved"), saved);
+        return;
+    }
+    qInfo() << "microdap eq: preset imported" << path;
+    relist();
+    const std::optional<EqProfile> parsed = kept ? fileProfile(path) : std::nullopt;
+    if (parsed)
+        select(output, true, displayName(path), *parsed);
+    emit importNote(QStringLiteral("imported"), saved);
 }
 
 bool EqControl::deletePreset(const QString &output)
@@ -1573,6 +1727,8 @@ void EqControl::relist()
     m_files.clear();
     QVariantList list;
     QStringList paths;
+    QVariantList importList;
+    QStringList importPaths;
     if (m_settings) {
         QStringList dirs{presetDir(), sourceDir()};
         for (const QString &root : m_settings->roots())
@@ -1586,7 +1742,19 @@ void EqControl::relist()
                 if (entry.suffix().compare(QLatin1StringView("txt"), Qt::CaseInsensitive) != 0)
                     continue;
                 const QString path = QDir::cleanPath(entry.absoluteFilePath());
-                if (paths.contains(path) || !fileProfile(path))
+                if (paths.contains(path) || importPaths.contains(path))
+                    continue;
+                std::vector<double> freqs;
+                std::vector<double> gains;
+                if (readGraphic(path, freqs, gains)) {
+                    importPaths.append(path);
+                    importList.append(QVariantMap{
+                        {QStringLiteral("path"), path},
+                        {QStringLiteral("name"), importName(path)},
+                    });
+                    continue;
+                }
+                if (!fileProfile(path))
                     continue;
                 paths.append(path);
                 list.append(QVariantMap{
@@ -1611,8 +1779,16 @@ void EqControl::relist()
                 graphicPaths.append(path);
         }
     }
-    qInfo() << "microdap eq: listed" << paths.size() << "profiles" << graphicPaths.size() << "graphic presets";
+    qInfo() << "microdap eq: listed" << paths.size() << "profiles" << graphicPaths.size() << "graphic presets"
+            << importPaths.size() << "imports";
     m_graphicPaths = graphicPaths;
+    if (!m_importPath.isEmpty() && !importPaths.contains(m_importPath))
+        m_fitCancel = true;
+    if (importPaths != m_importPaths) {
+        m_importPaths = importPaths;
+        m_imports = importList;
+        emit importsChanged();
+    }
     if (paths != m_sourcePaths) {
         m_sourcePaths = paths;
         m_sources = list;

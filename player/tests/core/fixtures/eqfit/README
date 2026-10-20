@@ -1,0 +1,10 @@
+Reference fits from flatdap 17558f5 (eq: autoeq graphiceq import fitted to parametric), the six
+fit_targets of its player/tests/eq_test.cpp, 200 iterations, no wall clock cap.
+
+target-N GraphicEQ.txt is the 96 kHz response of target N at the 127 AutoEQ frequencies, rounded to
+0.1 dB. reference.txt holds flatdap's fit of each file as ParametricEQ text.
+
+Rebuild from a flatdap checkout at 17558f5, in this folder:
+
+    g++ -O2 -std=c++17 -I$FLATDAP/player/audio/src gen.cpp $FLATDAP/player/audio/src/eq.cpp \
+        $FLATDAP/player/audio/src/eqfit.cpp -o gen && ./gen > reference.txt

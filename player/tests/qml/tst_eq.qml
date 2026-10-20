@@ -50,6 +50,8 @@ TestCase {
         property var gains: ({})
         property bool failNext: false
         property var calls: []
+        property var imports: []
+        property string importing: ""
         readonly property var cycle: ["off", "/eq/HD 600.txt", "/eq/Gone.txt", "custom"]
         readonly property var types: ["off", "peak", "lowshelf", "highshelf", "bandpass", "lowpass", "highpass", "allpass"]
 
@@ -75,6 +77,8 @@ TestCase {
             fakeEq.calls = []
             fakeEq.savedKeys = []
             fakeEq.failNext = false
+            fakeEq.imports = []
+            fakeEq.importing = ""
             fakeEq.modes = ({ headphones: "parametric", usb: "parametric", speaker: "parametric" })
             fakeEq.presets = ({ headphones: "flat", usb: "flat", speaker: "flat" })
             fakeEq.gains = ({ headphones: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], usb: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -148,6 +152,15 @@ TestCase {
             g[output] = state.gains
             fakeEq.gains = g
             fakeEq.profilesChanged()
+        }
+
+        function importGraphic(output, path) {
+            fakeEq.calls = fakeEq.calls.concat([["importGraphic", output, path]])
+            if (fakeEq.failNext)
+                return "too many presets"
+            if (fakeEq.importing === "")
+                fakeEq.importing = path
+            return ""
         }
 
         function savePreset(output) {
@@ -1607,5 +1620,113 @@ TestCase {
         compare(page.headphonesPane.contentY, 0)
         compare(page.editing, true)
         compare(page.focusIndex, 2)
+    }
+
+    readonly property var importFiles: [
+        { name: "Demo Headphone", path: "/sd/EQ/Demo Headphone GraphicEQ.txt" },
+        { name: "Sennheiser HD 800 S (sample 2) measured on a GRAS 43AG ear simulator", path: "/eq/Long GraphicEQ.txt" }
+    ]
+
+    function test_import_rows() {
+        const page = open()
+        compare(tc.keys(page).indexOf("import"), -1)
+        fakeEq.imports = tc.importFiles
+        compare(JSON.stringify(tc.keys(page).slice(0, 4)), JSON.stringify(["mode", "profile", "import", "preamp"]))
+        compare(page.rows[2].title, "import graphiceq")
+        compare(page.rows[2].value, "")
+        page.setFocus(2)
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(page.focusedRow.key, "import")
+        compare(JSON.stringify(tc.keys(page).slice(2, 6)), JSON.stringify(["import", "import:/sd/EQ/Demo Headphone GraphicEQ.txt",
+            "import:/eq/Long GraphicEQ.txt", "preamp"]))
+        compare(page.rows[3].kind, "file")
+        compare(page.rows[3].title, "Demo Headphone")
+        compare(page.rows[3].path, "/sd/EQ/Demo Headphone GraphicEQ.txt")
+        const file = tc.rowItem(page.activePane, 3)
+        compare(file.titleItem.font.capitalization, Font.MixedCase)
+        compare(file.titleItem.font.pixelSize, Ui.fontPx(Ui.settingsSub.size))
+        compare(file.touchKind, "sub")
+        verify(router.dispatch("a", false))
+        compare(tc.keys(page).indexOf("import:/eq/Long GraphicEQ.txt"), -1)
+        compare(page.focusedRow.key, "import")
+        fakeEq.makeCustom("headphones")
+        fakeEq.profilesChanged()
+        compare(JSON.stringify(tc.keys(page).slice(1, 5)), JSON.stringify(["profile", "savePreset", "import", "preamp"]))
+    }
+
+    function test_import_file_starts() {
+        fakeEq.imports = tc.importFiles
+        const page = open()
+        page.setFocus(page.indexOfKey("import"))
+        verify(router.dispatch("a", false))
+        verify(router.dispatch("down", false))
+        verify(router.dispatch("down", false))
+        compare(page.focusedRow.key, "import:/eq/Long GraphicEQ.txt")
+        verify(router.dispatch("a", false))
+        compare(page.editing, false)
+        compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["importGraphic", "headphones", "/eq/Long GraphicEQ.txt"]))
+        compare(page.focusedRow.value, "importing")
+        compare(page.rows[page.indexOfKey("import:/sd/EQ/Demo Headphone GraphicEQ.txt")].value, "")
+        const long = tc.rowItem(page.activePane, page.focusIndex)
+        verify(long.titleItem.clip)
+        verify(long.titleItem.width < long.titleItem.implicitWidth)
+        fuzzyCompare(long.titleItem.x + long.titleItem.width, long.valueSlot.x - Ui.px(Ui.gutter), 0.01)
+        fuzzyCompare(long.valueSlot.x + long.valueItem.x + long.valueItem.width, page.width - Ui.px(Ui.hubEdge), 0.01)
+        verify(router.dispatch("up", false))
+        verify(router.dispatch("a", false))
+        compare(fakeEq.importing, "/eq/Long GraphicEQ.txt")
+        fakeEq.importing = ""
+        compare(page.rows[page.indexOfKey("import:/eq/Long GraphicEQ.txt")].value, "")
+        fakeEq.failNext = true
+        verify(router.dispatch("a", false))
+        compare(JSON.stringify(toasts.shown), JSON.stringify([["too many presets", ""]]))
+        compare(toasts.shown.length, 1)
+    }
+
+    function test_import_rows_close_and_graphic() {
+        fakeEq.imports = tc.importFiles
+        const page = open()
+        page.setFocus(page.indexOfKey("import"))
+        verify(router.dispatch("a", false))
+        compare(page.rows.filter((r) => r.kind === "file").length, 2)
+        fakeEq.imports = []
+        compare(tc.keys(page).indexOf("import"), -1)
+        fakeEq.imports = tc.importFiles
+        compare(page.rows.filter((r) => r.kind === "file").length, 0)
+        const missing = Object.assign({}, fakeEq.missing)
+        missing.headphones = true
+        fakeEq.missing = missing
+        fakeEq.profilesChanged()
+        compare(JSON.stringify(tc.keys(page)), JSON.stringify(["mode", "profile", "import"]))
+        page.setFocus(0)
+        verify(router.dispatch("a", false))
+        verify(router.dispatch("right", false))
+        verify(router.dispatch("a", false))
+        compare(page.activePane.profile.mode, "graphic")
+        compare(tc.keys(page).indexOf("import"), -1)
+    }
+
+    function test_import_rows_reset_and_touch() {
+        fakeEq.imports = tc.importFiles
+        const page = open()
+        page.setFocus(page.indexOfKey("import"))
+        verify(router.dispatch("a", false))
+        compare(page.rows.filter((r) => r.kind === "file").length, 2)
+        verify(router.dispatch("rb", false))
+        verify(router.dispatch("lb", false))
+        compare(page.pivotIndex, 0)
+        compare(page.rows.filter((r) => r.kind === "file").length, 0)
+        tc.tapEqRow(page, page.indexOfKey("import"))
+        compare(page.rows.filter((r) => r.kind === "file").length, 2)
+        tc.tapEqRow(page, page.indexOfKey("import:/sd/EQ/Demo Headphone GraphicEQ.txt"))
+        compare(page.editing, false)
+        compare(tc.callAt(fakeEq.calls.length - 1), JSON.stringify(["importGraphic", "headphones", "/sd/EQ/Demo Headphone GraphicEQ.txt"]))
+        compare(page.rows[page.indexOfKey("import:/sd/EQ/Demo Headphone GraphicEQ.txt")].value, "importing")
+        fakeEq.cycleMode("headphones", 1)
+        compare(page.headphonesPane.importOpen, false)
+        fakeEq.cycleMode("headphones", 1)
+        compare(page.rows.filter((r) => r.kind === "file").length, 0)
+        compare(page.indexOfKey("import") >= 0, true)
     }
 }

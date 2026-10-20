@@ -1,15 +1,19 @@
 #include "Eq.h"
+#include "EqFit.h"
 #include "OutputControl.h"
 #include "Settings.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QThread>
 
+#include <atomic>
 #include <cmath>
 #include <memory>
 
@@ -101,6 +105,44 @@ struct LogCapture
     QStringList messages;
 };
 
+QString graphicEq(double bass)
+{
+    EqProfile p = EqProfile::flat();
+    p.bands[0] = EqBand{true, EqBand::LowShelf, 105, bass, 0.7};
+    p.bands[1] = EqBand{true, EqBand::Peak, 2400, -3, 1.4};
+    p.count = 2;
+    std::vector<double> db(EqFit::points);
+    EqFit::response(p, 96000, EqFit::frequencies.data(), EqFit::points, db.data());
+    QString text = QStringLiteral("GraphicEQ: ");
+    for (int i = 0; i < EqFit::points; ++i)
+        text += (i ? QStringLiteral("; ") : QString()) + QString::number(EqFit::frequencies[i]) + QLatin1Char(' ')
+                + QString::number(std::round(db[i] * 10) / 10, 'f', 1);
+    return text + QLatin1Char('\n');
+}
+
+QStringList names(const QVariantList &list)
+{
+    QStringList out;
+    for (const QVariant &v : list)
+        out.append(v.toMap().value(QStringLiteral("name")).toString());
+    return out;
+}
+
+struct Gate
+{
+    std::atomic<bool> open{false};
+    std::atomic<int> waits{0};
+
+    void wait()
+    {
+        ++waits;
+        QElapsedTimer clock;
+        clock.start();
+        while (!open && clock.elapsed() < waitMs)
+            QThread::msleep(1);
+    }
+};
+
 QString filters(int count)
 {
     QString text;
@@ -159,6 +201,11 @@ private slots:
     void filtersRoundTrip();
     void externalChange();
     void sinkPoll();
+    void importList();
+    void importSaves();
+    void importCardGone();
+    void importRefused();
+    void importLate();
 
 private:
     QString m_bin;
@@ -1610,6 +1657,228 @@ void EqTest::displayNames()
     QCOMPARE(EqControl::displayName(QStringLiteral("/eq/Sennheiser HD 600 ParametricEQ.txt")), QStringLiteral("SENNHEISER HD 600"));
     QCOMPARE(EqControl::displayName(QStringLiteral("/eq/HD 600.txt")), QStringLiteral("HD 600"));
     QCOMPARE(EqControl::displayName(QStringLiteral("/eq/ParametricEQ.txt")), QStringLiteral("PARAMETRICEQ"));
+}
+
+void EqTest::importList()
+{
+    const QString card = m_dir + QStringLiteral("/music/EQ");
+    QVERIFY(writeFile(card + QStringLiteral("/Demo GraphicEQ.txt"), graphicEq(5)));
+    QVERIFY(writeFile(card + QStringLiteral("/Demo ParametricEQ.txt"), QString::fromUtf8(autoEq)));
+    QVERIFY(writeFile(card + QStringLiteral("/junk.txt"), QStringLiteral("GraphicEQ: 20 1; 30 1\n")));
+    QVERIFY(writeFile(EqControl::sourceDir() + QStringLiteral("/Mine GraphicEQ.txt"), graphicEq(3)));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    QCOMPARE(names(eq.imports()), (QStringList{QStringLiteral("Mine"), QStringLiteral("Demo")}));
+    QCOMPARE(eq.imports().at(1).toMap().value(QStringLiteral("path")).toString(), card + QStringLiteral("/Demo GraphicEQ.txt"));
+    QCOMPARE(names(eq.sources()), QStringList{QStringLiteral("DEMO")});
+    QCOMPARE(EqControl::importName(QStringLiteral("/x/A B GraphicEQ.txt")), QStringLiteral("A B"));
+    QCOMPARE(EqControl::importName(QStringLiteral("/x/c.TXT")), QStringLiteral("c"));
+    QVERIFY(!EqControl::nameOk(QStringLiteral("Demo GraphicEQ")));
+    QSignalSpy changed(&eq, &EqControl::importsChanged);
+    settings.setRoots({m_dir + QStringLiteral("/other")});
+    QCOMPARE(names(eq.imports()), QStringList{QStringLiteral("Mine")});
+    QCOMPARE(changed.size(), 1);
+}
+
+void EqTest::importSaves()
+{
+    const QString card = m_dir + QStringLiteral("/music/EQ");
+    const QString demo = card + QStringLiteral("/Demo GraphicEQ.txt");
+    const QString mine = EqControl::sourceDir() + QStringLiteral("/Mine GraphicEQ.txt");
+    QVERIFY(writeFile(demo, graphicEq(5)));
+    QVERIFY(writeFile(card + QStringLiteral("/Demo ParametricEQ.txt"), QString::fromUtf8(autoEq)));
+    QVERIFY(writeFile(mine, graphicEq(3)));
+    Gate gate;
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    const QString out = QStringLiteral("usb");
+    eq.cycleProfile(out, 1);
+    QCOMPARE(eq.key(out), QStringLiteral("DEMO"));
+    const QString headphones = eq.key(QStringLiteral("headphones"));
+    eq.fitOptions().onIteration = [&gate](int i) {
+        if (i == 1)
+            gate.wait();
+    };
+    QSignalSpy notes(&eq, &EqControl::importNote);
+    QSignalSpy importing(&eq, &EqControl::importingChanged);
+    QCOMPARE(eq.importGraphic(out, demo), QString());
+    QCOMPARE(eq.importing(), demo);
+    QCOMPARE(importing.size(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(gate.waits.load(), 1, waitMs);
+    QCOMPARE(eq.importGraphic(out, mine), QString());
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), mine), QString());
+    QCOMPARE(eq.importing(), demo);
+    QCOMPARE(importing.size(), 1);
+    gate.open = true;
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 1, waitMs);
+    QCOMPARE(notes.at(0).at(0).toString(), QStringLiteral("imported"));
+    QCOMPARE(notes.at(0).at(1).toString(), QStringLiteral("Demo 2"));
+    QCOMPARE(eq.importing(), QString());
+    QCOMPARE(importing.size(), 2);
+    QCOMPARE(gate.waits.load(), 1);
+    const QString saved = EqControl::presetDir() + QStringLiteral("/Demo 2.txt");
+    QVERIFY(QFileInfo::exists(saved));
+    const std::optional<EqProfile> back = EqParser::parseFile(saved);
+    QVERIFY(back);
+    QCOMPARE(back->count, 10);
+    QVERIFY(back->preamp < 0);
+    QCOMPARE(eq.key(out), QStringLiteral("DEMO 2"));
+    QVERIFY(eq.saved(out));
+    QCOMPARE(EqFilters::encode(eq.profile(out)), EqFilters::encode(*back));
+    QCOMPARE(eq.key(QStringLiteral("headphones")), headphones);
+    QVERIFY(names(eq.sources()).contains(QStringLiteral("DEMO 2")));
+    eq.fitOptions().onIteration = nullptr;
+    QCOMPARE(eq.importGraphic(out, demo), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 2, waitMs);
+    QCOMPARE(notes.at(1).at(1).toString(), QStringLiteral("Demo 3"));
+    QVERIFY(QFileInfo::exists(EqControl::presetDir() + QStringLiteral("/Demo 3.txt")));
+    QCOMPARE(eq.key(out), QStringLiteral("DEMO 3"));
+    gate.open = false;
+    gate.waits = 0;
+    eq.fitOptions().onIteration = [&gate](int i) {
+        if (i == 1)
+            gate.wait();
+    };
+    QCOMPARE(eq.importGraphic(out, mine), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(gate.waits.load(), 1, waitMs);
+    eq.cycleProfile(out, -1);
+    const QString moved = eq.key(out);
+    QVERIFY(moved != QStringLiteral("DEMO 3"));
+    gate.open = true;
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 3, waitMs);
+    QCOMPARE(eq.key(out), moved);
+    QCOMPARE(notes.at(2).at(1).toString(), QStringLiteral("Mine"));
+    QVERIFY(QFileInfo::exists(EqControl::presetDir() + QStringLiteral("/Mine.txt")));
+    QCOMPARE(eq.importPresetName(QStringLiteral("Custom")), QStringLiteral("Custom 2"));
+    QCOMPARE(eq.importPresetName(QString(70, QLatin1Char('a'))).toUtf8().size(), EqControl::presetNameMax);
+    QCOMPARE(eq.importPresetName(QStringLiteral("  Lead")), QStringLiteral("Lead"));
+    QString wide;
+    for (int i = 0; i < 17; ++i)
+        wide += QString::fromUtf8("\xF0\x9F\x8E\xA7");
+    const QString cut = eq.importPresetName(wide);
+    QCOMPARE(cut.toUtf8().size(), 64);
+    QCOMPARE(QString::fromUtf8(cut.toUtf8()), cut);
+    QVERIFY(EqControl::nameOk(cut));
+}
+
+void EqTest::importCardGone()
+{
+    const QString card = m_dir + QStringLiteral("/music/EQ");
+    const QString demo = card + QStringLiteral("/Demo GraphicEQ.txt");
+    QVERIFY(writeFile(demo, graphicEq(5)));
+    Gate gate;
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    eq.fitOptions().onIteration = [&gate](int i) {
+        if (i == 1)
+            gate.wait();
+    };
+    QSignalSpy notes(&eq, &EqControl::importNote);
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), demo), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(gate.waits.load(), 1, waitMs);
+    QVERIFY(QDir(m_dir + QStringLiteral("/music")).removeRecursively());
+    settings.setRoots({m_dir + QStringLiteral("/music"), m_dir + QStringLiteral("/other")});
+    QVERIFY(eq.imports().isEmpty());
+    gate.open = true;
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 1, waitMs);
+    QCOMPARE(notes.at(0).at(0).toString(), QStringLiteral("import failed"));
+    QCOMPARE(notes.at(0).at(1).toString(), QStringLiteral("Demo"));
+    QVERIFY(QDir(EqControl::presetDir()).entryList(QDir::Files).isEmpty());
+    QCOMPARE(eq.importing(), QString());
+
+    QVERIFY(writeFile(demo, graphicEq(5)));
+    eq.relist();
+    gate.open = false;
+    gate.waits = 0;
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), demo), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(gate.waits.load(), 1, waitMs);
+    QVERIFY(QFile::remove(demo));
+    gate.open = true;
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 2, waitMs);
+    QCOMPARE(notes.at(1).at(0).toString(), QStringLiteral("import failed"));
+    QVERIFY(QDir(EqControl::presetDir()).entryList(QDir::Files).isEmpty());
+}
+
+void EqTest::importRefused()
+{
+    const QString card = m_dir + QStringLiteral("/music/EQ");
+    const QString demo = card + QStringLiteral("/Demo GraphicEQ.txt");
+    const QString spike = card + QStringLiteral("/Spike GraphicEQ.txt");
+    QVERIFY(writeFile(demo, graphicEq(5)));
+    QString text = QStringLiteral("GraphicEQ: ");
+    for (int i = 0; i < EqFit::points; ++i) {
+        const double f = EqFit::frequencies[i];
+        text += (i ? QStringLiteral("; ") : QString()) + QString::number(f)
+                + (f > 900 && f < 1100 ? QStringLiteral(" 12") : QStringLiteral(" -24"));
+    }
+    QVERIFY(writeFile(spike, text + QLatin1Char('\n')));
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    EqControl eq(&settings);
+    QSignalSpy notes(&eq, &EqControl::importNote);
+    QCOMPARE(eq.importGraphic(QStringLiteral("nowhere"), demo), QString());
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), card + QStringLiteral("/Other GraphicEQ.txt")), QString());
+    QCOMPARE(eq.importing(), QString());
+    eq.cycleMode(QStringLiteral("speaker"), 1);
+    QVERIFY(eq.graphic(QStringLiteral("speaker")));
+    QCOMPARE(eq.importGraphic(QStringLiteral("speaker"), demo), QString());
+    QCOMPARE(eq.importing(), QString());
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), spike), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 1, waitMs);
+    QCOMPARE(notes.at(0).at(0).toString(), QStringLiteral("import failed"));
+    QCOMPARE(notes.at(0).at(1).toString(), QStringLiteral("boost over 24 db"));
+    QVERIFY(QDir(EqControl::presetDir()).entryList(QDir::Files).isEmpty());
+    for (int i = 1; i <= EqControl::presetsMax; ++i)
+        QVERIFY(writeFile(EqControl::presetDir() + QStringLiteral("/P%1.txt").arg(i), QString::fromUtf8(autoEq)));
+    eq.relist();
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), demo), QStringLiteral("too many presets"));
+    QCOMPARE(eq.importing(), QString());
+    QCOMPARE(notes.size(), 1);
+}
+
+void EqTest::importLate()
+{
+    const QString demo = m_dir + QStringLiteral("/music/EQ/Demo GraphicEQ.txt");
+    QVERIFY(writeFile(demo, graphicEq(5)));
+    Gate gate;
+    Settings settings(nullptr);
+    settings.setRoots({m_dir + QStringLiteral("/music")});
+    {
+        EqControl eq(&settings);
+        eq.fitOptions().onIteration = [&gate](int) { gate.wait(); };
+        QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), demo), QString());
+        QTRY_COMPARE_WITH_TIMEOUT(gate.waits.load(), 1, waitMs);
+        gate.open = true;
+    }
+    QVERIFY(!QFileInfo::exists(EqControl::presetDir()));
+    gate.open = false;
+    gate.waits = 0;
+    EqControl eq(&settings);
+    QSignalSpy notes(&eq, &EqControl::importNote);
+    eq.fitOptions().onIteration = [&gate](int i) {
+        if (i == 1)
+            gate.wait();
+    };
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), demo), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(gate.waits.load(), 1, waitMs);
+    for (int i = 1; i <= EqControl::presetsMax; ++i)
+        QVERIFY(writeFile(EqControl::presetDir() + QStringLiteral("/P%1.txt").arg(i), QString::fromUtf8(autoEq)));
+    eq.relist();
+    gate.open = true;
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 1, waitMs);
+    QCOMPARE(notes.at(0).at(0).toString(), QStringLiteral("too many presets"));
+    QVERIFY(!QFileInfo::exists(EqControl::presetDir() + QStringLiteral("/Demo.txt")));
+    QVERIFY(QDir(EqControl::presetDir()).removeRecursively());
+    QVERIFY(writeFile(EqControl::presetDir(), QStringLiteral("not a folder\n")));
+    eq.relist();
+    eq.fitOptions().onIteration = nullptr;
+    QCOMPARE(eq.importGraphic(QStringLiteral("headphones"), demo), QString());
+    QTRY_COMPARE_WITH_TIMEOUT(notes.size(), 2, waitMs);
+    QCOMPARE(notes.at(1).at(0).toString(), QStringLiteral("preset not saved"));
+    QCOMPARE(notes.at(1).at(1).toString(), QStringLiteral("Demo"));
 }
 
 QTEST_GUILESS_MAIN(EqTest)

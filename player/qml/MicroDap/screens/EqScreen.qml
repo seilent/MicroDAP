@@ -35,6 +35,8 @@ Page {
     readonly property real pitch: Ui.px(Ui.settingsPitch)
     readonly property bool switching: pivotAnim.running
     readonly property var subRole: Object.assign({}, Ui.settingsSub, { caps: Font.AllUppercase })
+    readonly property var importList: page.hasEq && page.eq.imports !== undefined && page.eq.imports !== null ? page.eq.imports : []
+    readonly property string importingPath: page.hasEq && page.eq.importing !== undefined ? String(page.eq.importing) : ""
     property alias header: header
     property alias strip: strip
     property alias focusBar: focusBar
@@ -61,20 +63,31 @@ Page {
         return { kind: kind, key: key, title: title, value: value, band: band, field: field, readOnly: false }
     }
 
-    function buildRows(p: var, openBand: int, ranges: var): var {
+    function buildRows(p: var, openBand: int, ranges: var, importOpen: bool): var {
         const graphic = p !== null && p !== undefined && p.mode === "graphic"
         const out = [page.entry("row", "mode", "mode", graphic ? "graphic" : "parametric", -1, "")]
         if (graphic)
             return page.graphicRows(p, out, ranges)
         out.push(page.entry("row", "profile", "profile", EqFormat.profileText(p), -1, ""))
-        if (!EqFormat.listed(p))
-            return out
-        if (EqFormat.key(p) === "custom")
+        const listed = EqFormat.listed(p)
+        if (listed && EqFormat.key(p) === "custom")
             out.push(page.entry("row", "savePreset", "save preset", "", -1, ""))
-        if (p.saved === true) {
+        if (listed && p.saved === true) {
             out.push(page.entry("row", "deletePreset", "delete preset", "", -1, ""))
             out.push(page.entry("row", "renamePreset", "rename preset", "", -1, ""))
         }
+        const imports = page.importList
+        if (imports.length > 0) {
+            out.push(page.entry("row", "import", "import graphiceq", "", -1, ""))
+            for (let i = 0; importOpen && i < imports.length; i++) {
+                const path = String(imports[i].path)
+                const file = page.entry("file", "import:" + path, String(imports[i].name), path === page.importingPath ? "importing" : "", -1, "")
+                file.path = path
+                out.push(file)
+            }
+        }
+        if (!listed)
+            return out
         const preamp = p.preamp === undefined ? 0 : p.preamp
         out.push(page.entry("row", "preamp", "preamp", EqFormat.preampText(preamp) + EqFormat.dacSuffix("preamp", preamp, ranges), -1, ""))
         const bands = p.bands === undefined || p.bands === null ? [] : p.bands
@@ -129,6 +142,23 @@ Page {
         page.focusIndex = Math.max(0, page.indexOfKey("band" + at))
         pane.ensureVisible(page.focusIndex, Motion.scroll)
         pane.refreshFrom(page.focusIndex)
+    }
+
+    function toggleImport(): void {
+        const pane = page.activePane
+        pane.importOpen = !pane.importOpen
+        if (!pane.importOpen)
+            return
+        pane.ensureVisible(page.focusIndex, Motion.scroll)
+        pane.refreshFrom(page.focusIndex + 1)
+    }
+
+    function importFile(path: string): void {
+        if (!page.canCall("importGraphic"))
+            return
+        const error = String(page.eq.importGraphic(page.activePane.output, path))
+        if (error !== "")
+            page.toast(error, "")
     }
 
     function savePreset(): void {
@@ -438,6 +468,14 @@ Page {
             page.savePreset()
             return
         }
+        if (r.key === "import") {
+            page.toggleImport()
+            return
+        }
+        if (r.kind === "file") {
+            page.importFile(r.path)
+            return
+        }
         if (r.key === "deletePreset") {
             page.confirmDelete()
             return
@@ -716,6 +754,14 @@ Page {
         function onProfilesChanged() {
             page.revision++
         }
+
+        function onImportsChanged() {
+            const list = page.eq.imports
+            if (list !== undefined && list !== null && list.length > 0)
+                return
+            for (const pane of page.panes)
+                pane.importOpen = false
+        }
     }
 
     component EqRow: Item {
@@ -727,9 +773,10 @@ Page {
         readonly property bool isFocused: item.owner !== null && page.pivotIndex === item.owner.pivot && page.focusIndex === item.index
         readonly property bool editing: item.isFocused && page.editing && page.editKey === item.modelData.key
         readonly property bool sub: item.modelData.kind === "sub"
-        readonly property string touchKind: item.sub ? "sub" : "row"
+        readonly property bool file: item.modelData.kind === "file"
+        readonly property string touchKind: item.sub || item.file ? "sub" : "row"
         readonly property int touchIndex: item.index
-        readonly property var titleRole: item.sub ? page.subRole : Ui.settingsItem
+        readonly property var titleRole: item.file ? Ui.settingsSub : item.sub ? page.subRole : Ui.settingsItem
         readonly property real titleAlpha: item.isFocused ? Ui.settingsItem.alpha : Ui.settingsItem.alphaDim
         readonly property real valueAlpha: item.isFocused ? Ui.settingsValueFocused : Ui.settingsValueDim
         readonly property Item titleItem: titleText
@@ -838,9 +885,12 @@ Page {
 
             x: Ui.px(Ui.hubEdge)
             y: (item.height - titleText.height) / 2
+            width: !item.file ? titleText.implicitWidth : valueText.visible ? slot.x - Ui.px(Ui.gutter) - titleText.x
+                : item.width - Ui.px(Ui.hubEdge) - titleText.x
             text: item.modelData.title
             color: Ui.white(item.titleAlpha)
             font: Ui.font(item.titleRole)
+            clip: item.file
 
             Behavior on color {
                 enabled: page.live
@@ -853,7 +903,8 @@ Page {
         Item {
             id: slot
 
-            x: titleText.x + titleText.implicitWidth + Ui.px(Ui.eqValueGap)
+            x: item.file ? item.width - Ui.px(Ui.hubEdge) - valueText.implicitWidth
+                : titleText.x + titleText.implicitWidth + Ui.px(Ui.eqValueGap)
             width: Math.max(0, item.width - Ui.px(Ui.hubEdge) - slot.x)
             height: item.height
             clip: true
@@ -883,12 +934,14 @@ Page {
 
         property int pivot: 0
         property int openBand: -1
+        property bool importOpen: false
         property var shownValues: ({})
         property int pendingFrom: -1
         readonly property string output: pane.pivot < page.pivots.length ? page.pivots[pane.pivot] : ""
         readonly property var profile: page.profileOf(pane.output, page.revision)
         readonly property bool listed: EqFormat.listed(pane.profile)
-        readonly property var rows: page.buildRows(pane.profile, pane.listed ? pane.openBand : -1, pane.output === "usb" ? page.dacRanges : null)
+        readonly property bool graphicMode: pane.profile !== null && pane.profile !== undefined && pane.profile.mode === "graphic"
+        readonly property var rows: page.buildRows(pane.profile, pane.listed ? pane.openBand : -1, pane.output === "usb" ? page.dacRanges : null, pane.importOpen)
         readonly property bool scrolling: scrollAnim.running
         readonly property real scrollTarget: scrollAnim.to
         readonly property Repeater repeater: rowRepeater
@@ -989,7 +1042,13 @@ Page {
             scrollAnim.stop()
             pane.pendingFrom = -1
             pane.openBand = -1
+            pane.importOpen = false
             pane.contentY = 0
+        }
+
+        onGraphicModeChanged: {
+            if (pane.graphicMode)
+                pane.importOpen = false
         }
 
         onListedChanged: {

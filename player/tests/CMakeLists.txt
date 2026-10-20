@@ -198,6 +198,17 @@ target_link_libraries(tst_eq PRIVATE microdapcore Qt6::Test)
 add_test(NAME eq COMMAND tst_eq)
 microdap_test_env(eq)
 
+qt_add_executable(tst_eqfit core/tst_eqfit.cpp)
+target_link_libraries(tst_eqfit PRIVATE microdapcore Qt6::Test)
+target_compile_definitions(tst_eqfit PRIVATE MICRODAP_FIXTURE_EQFIT="${CMAKE_CURRENT_SOURCE_DIR}/core/fixtures/eqfit")
+add_test(NAME eqfit COMMAND tst_eqfit)
+microdap_test_env(eqfit)
+
+qt_add_executable(tst_eqfittiming core/tst_eqfittiming.cpp)
+target_link_libraries(tst_eqfittiming PRIVATE microdapcore Qt6::Test)
+add_test(NAME scale-eqfit COMMAND tst_eqfittiming)
+microdap_test_env(scale-eqfit)
+
 qt_add_executable(tst_biquad core/tst_biquad.cpp)
 target_link_libraries(tst_biquad PRIVATE microdapcore Qt6::Test)
 add_test(NAME biquad COMMAND tst_biquad)
