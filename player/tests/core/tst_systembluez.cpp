@@ -1179,29 +1179,41 @@ void SystemBluezTest::savedRoleAndEngine()
     QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("role-model"));
     QVERIFY(other.isConnected());
     {
+        FakeEngine engine;
+        QVERIFY(bus.registerObject(SystemBluezModel::enginePath(), &engine, QDBusConnection::ExportAllSlots));
+        QVERIFY(bus.registerService(SystemBluezModel::engineService()));
         m_agent->calls.clear();
         SystemBluezModel model(other, other);
         QCOMPARE(model.role(), QStringLiteral("headphones"));
         QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("SetRole headphones")), busTimeoutMs);
-        model.setDapSession(true);
-        model.want();
-        model.setReceiverScope(true);
-
-        FakeEngine engine;
-        QVERIFY(bus.registerObject(SystemBluezModel::enginePath(), &engine, QDBusConnection::ExportAllSlots));
-        QVERIFY(bus.registerService(SystemBluezModel::engineService()));
         const QString sender = other.baseService();
-        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender),
-                                  QStringList({QStringLiteral("SetRole headphones"), QStringLiteral("Scope true")}),
+        QTest::qWait(200);
+        QVERIFY(engine.callsFrom(sender).isEmpty());
+        QVERIFY(!engine.callsFrom(bus.baseService()).contains(QStringLiteral("SetRole receiver")));
+
+        model.setDapSession(true);
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender), QStringList({QStringLiteral("SetRole headphones")}),
                                   busTimeoutMs);
         model.want();
+        model.setReceiverScope(true);
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(1),
+                                  QStringList({QStringLiteral("Want"), QStringLiteral("Scope true")}), busTimeoutMs);
+
+        QVERIFY(bus.unregisterService(SystemBluezModel::engineService()));
+        QVERIFY(bus.registerService(SystemBluezModel::engineService()));
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(3),
+                                  QStringList({QStringLiteral("SetRole headphones"), QStringLiteral("Scope true")}),
+                                  busTimeoutMs);
+        QTest::qWait(200);
+        QVERIFY(!engine.callsFrom(bus.baseService()).contains(QStringLiteral("SetRole receiver")));
+        model.want();
         model.setReceiverScope(false);
-        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(2),
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(5),
                                   QStringList({QStringLiteral("Want"), QStringLiteral("Scope false")}), busTimeoutMs);
 
         model.setRole(QStringLiteral("receiver"));
         QTRY_COMPARE_WITH_TIMEOUT(model.role(), QStringLiteral("receiver"), busTimeoutMs);
-        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(4),
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(7),
                                   QStringList({QStringLiteral("Hold true"), QStringLiteral("SetRole receiver"),
                                                QStringLiteral("Hold false")}),
                                   busTimeoutMs);

@@ -188,7 +188,8 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     connect(this, &BluezModel::lastHeadsetChanged, this, [this] { writeLine(lastHeadsetPath(), lastHeadset()); });
     connect(this, &BluezModel::roleChanged, this, [this] {
         writeLine(rolePath(), role());
-        callEngine(QStringLiteral("SetRole"), {role()});
+        if (m_dap)
+            callEngine(QStringLiteral("SetRole"), {role()});
     });
     connect(this, &BluezModel::switchingChanged, this, [this] { callEngine(QStringLiteral("Hold"), {switching()}); });
     connect(&m_engineWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
@@ -324,7 +325,8 @@ void SystemBluezModel::syncEngine()
 {
     if (!m_engineUp)
         return;
-    callEngine(QStringLiteral("SetRole"), {role()});
+    if (m_dap)
+        callEngine(QStringLiteral("SetRole"), {role()});
     if (switching())
         callEngine(QStringLiteral("Hold"), {true});
     if (m_dap && m_scope > 0)
@@ -334,6 +336,8 @@ void SystemBluezModel::syncEngine()
 void SystemBluezModel::setDapSession(bool dap)
 {
     m_dap = dap;
+    if (m_dap)
+        syncEngine();
 }
 
 void SystemBluezModel::want()
