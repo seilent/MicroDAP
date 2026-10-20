@@ -243,6 +243,7 @@ private slots:
     void sleepTimer();
     void sessionsAndSwitchTo();
     void imageAndUpdate();
+    void updateCheckAgain();
 
 private:
     bool sawChange(const QString &name, const QVariant &value) const;
@@ -1683,6 +1684,36 @@ void PowerTest::sessionsAndSwitchTo()
     QCOMPARE(PowerBridge::switchCommand(QStringLiteral("steam")),
              QStringList({QStringLiteral("systemctl"), QStringLiteral("start"), QStringLiteral("--no-block"),
                           QStringLiteral("microos-session-switch@steam.service")}));
+}
+
+void PowerTest::updateCheckAgain()
+{
+    const QString update = m_dir.path() + QStringLiteral("/update-again");
+    const QString showDir = m_dir.path() + QStringLiteral("/show-again");
+    const QString show = m_dir.path() + QStringLiteral("/show-again.txt");
+    const QString read = m_dir.path() + QStringLiteral("/show-again.read");
+    QVERIFY(writeFile(showDir + QStringLiteral("/systemctl"),
+                      QStringLiteral("#!/bin/sh\nv=$(cat \"") + show + QStringLiteral("\")\ntouch \"") + read
+                          + QStringLiteral("\"\nsleep 0.3\necho \"$v\"\n"), true));
+    qputenv("MICRODAP_UPDATE_FILE", update.toUtf8());
+    qputenv("MICRODAP_VERB_DIR", showDir.toUtf8());
+    auto restore = qScopeGuard([this] {
+        qunsetenv("MICRODAP_UPDATE_FILE");
+        qputenv("MICRODAP_VERB_DIR", m_stubDir.toUtf8());
+    });
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-again"));
+    {
+        PowerBridge bridge(nullptr, other);
+        QVERIFY(writeFile(show, QStringLiteral("ExecMainStatus=7\nExecMainStartTimestampMonotonic=4242\n")));
+        bridge.reloadUpdate();
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(read), busTimeoutMs);
+        QVERIFY(writeFile(show, QStringLiteral("ExecMainStatus=4\nExecMainStartTimestampMonotonic=4242\n")));
+        bridge.reloadUpdate();
+        QTRY_COMPARE_WITH_TIMEOUT(bridge.updateStatus(), QStringLiteral("offline"), busTimeoutMs);
+        QTest::qWait(500);
+        QCOMPARE(bridge.updateStatus(), QStringLiteral("offline"));
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("power-again"));
 }
 
 void PowerTest::imageAndUpdate()

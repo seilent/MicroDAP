@@ -579,13 +579,20 @@ void PowerBridge::reloadUpdate()
 {
     if (readUpdateFile())
         return;
-    if (m_check)
+    if (m_check) {
+        m_checkAgain = true;
         return;
+    }
+    m_checkAgain = false;
     m_check = new QProcess(this);
     connect(m_check, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         const QString out = QString::fromUtf8(m_check->readAllStandardOutput());
         m_check->deleteLater();
         m_check = nullptr;
+        if (m_checkAgain) {
+            reloadUpdate();
+            return;
+        }
         setUpdate(status == QProcess::NormalExit && code == 0 ? checkStatus(out) : QStringLiteral("unchecked"), {});
     });
     connect(m_check, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
@@ -593,6 +600,10 @@ void PowerBridge::reloadUpdate()
             return;
         m_check->deleteLater();
         m_check = nullptr;
+        if (m_checkAgain) {
+            reloadUpdate();
+            return;
+        }
         setUpdate(QStringLiteral("unchecked"), {});
     });
     m_check->start(programPath(QStringLiteral("systemctl")),

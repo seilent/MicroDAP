@@ -216,6 +216,7 @@ private:
     QProcess *m_switch = nullptr;
     QProcess *m_radio = nullptr;
     QProcess *m_check = nullptr;
+    bool m_checkAgain = false;
     QTimer m_switchTimer;
     QTimer m_readyTimer;
     QTimer m_idleTimer;
