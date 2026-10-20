@@ -75,7 +75,7 @@ public:
     static QString storeRoot();
     static QString storeFile(const QString &audio);
     static Put storePut(const QString &audio, const QByteArray &text);
-    static void storeTrim(const QString &keep, qsizetype cap = storeCap);
+    static int storeTrim(const QString &keep, qsizetype cap = storeCap);
     static bool storeDel(const QString &audio);
     static QByteArray cutLine(const QString &text);
 

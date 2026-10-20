@@ -512,6 +512,7 @@ private slots:
     void artGetCoalescedAndCapped();
     void artEncode();
     void lyricsLink();
+    void queueLyricsFlags();
     void artistStore();
     void artistStoreResumeAndCap();
     void imagesOverTheLink();
@@ -2136,6 +2137,53 @@ fd::LinkWriter lrcPut(qint64 track, const QByteArray &text, std::optional<quint3
     if (crc)
         w.u32(proto::tag::LRC_PUT::crc, *crc);
     return w;
+}
+
+void LinkTest::queueLyricsFlags()
+{
+    LibRig rig;
+    QVERIFY(rig.scan());
+    rig.connect();
+    const quint32 lib = rig.server.libRev();
+    const QByteArray timed = QByteArrayLiteral("[00:01.00]first\n");
+    const QByteArray plain = QByteArrayLiteral("plain words\n");
+    QVERIFY(okReply(rig.ask(proto::msg::LRC_PUT, lrcPut(rig.id(QStringLiteral("Two")), timed, lib, linkCrc32(timed))),
+                    proto::msg::LRC_PUT));
+    QVERIFY(okReply(rig.ask(proto::msg::LRC_PUT, lrcPut(rig.id(QStringLiteral("Three")), plain, lib, linkCrc32(plain))),
+                    proto::msg::LRC_PUT));
+    const QString four = rig.library.queueEntries({rig.id(QStringLiteral("Four"))}).constFirst().path;
+    QVERIFY(QFile::rename(four, four + QStringLiteral(".gone")));
+    QCOMPARE(rig.player.playIds({rig.id(QStringLiteral("One")), rig.id(QStringLiteral("Two")), rig.id(QStringLiteral("Three")),
+                                 rig.id(QStringLiteral("Four"))},
+                                QStringLiteral("play")),
+             4);
+    auto flags = [&rig] {
+        fd::LinkWriter page;
+        page.u8(proto::tag::QUEUE_OP::cmd, proto::val::QUEUE_CMD::page);
+        QStringList out;
+        for (const fd::LinkFrame &f : rig.ask(proto::msg::QUEUE_OP, page)) {
+            if (f.type != proto::msg::QUEUE || (f.flags & proto::flagReply))
+                continue;
+            const fd::LinkBody b = body(f);
+            for (const fd::LinkField *item : b.all("item")) {
+                const fd::LinkBody ib{item->rec};
+                out.append(!ib.has("lyrics") ? QStringLiteral("?")
+                           : ib.u("lyrics")  ? QStringLiteral("synced")
+                           : ib.u("lyricsPlain") ? QStringLiteral("plain")
+                                                 : QStringLiteral("none"));
+            }
+        }
+        return out;
+    };
+    QTRY_COMPARE_WITH_TIMEOUT(flags(), QStringList({QStringLiteral("none"), QStringLiteral("synced"), QStringLiteral("plain"),
+                                                     QStringLiteral("?")}),
+                              waitMs);
+    QVERIFY(QFile::rename(four + QStringLiteral(".gone"), four));
+    QTRY_COMPARE_WITH_TIMEOUT(flags().value(3), QStringLiteral("none"), waitMs);
+    fd::LinkWriter del;
+    del.u64(proto::tag::LRC_DEL::track, uint64_t(rig.id(QStringLiteral("Two"))));
+    QVERIFY(okReply(rig.ask(proto::msg::LRC_DEL, del), proto::msg::LRC_DEL));
+    QTRY_COMPARE_WITH_TIMEOUT(flags().value(1), QStringLiteral("none"), waitMs);
 }
 
 void LinkTest::lyricsLink()

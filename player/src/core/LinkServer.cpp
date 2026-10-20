@@ -40,6 +40,7 @@ constexpr int linkQueueArtists = 8;
 constexpr size_t linkNameMax = 255;
 constexpr qsizetype linkJobMax = 4;
 constexpr size_t linkWaitMax = 16;
+constexpr int linkLyricsAhead = 16;
 
 qint64 clockMs(clockid_t id)
 {
@@ -514,8 +515,10 @@ void LinkServer::poll()
     m_polling = true;
     const qint64 now = m_clock().boot;
     m_nextAt = -1;
-    if (m_connected)
+    if (m_connected) {
         refresh();
+        probeLyrics();
+    }
     for (size_t i = 0; i < m_peers.size(); ++i) {
         Peer &p = *m_peers[i];
         if (p.s->closed())
@@ -1047,7 +1050,8 @@ uint8_t LinkServer::queuePage(Peer &p, const fd::LinkCommand &c, qint64 now)
     const uint8_t tags[4] = {t::offset, t::total, t::more, t::item};
     Library *lib = m_player->library();
     quint32 at = quint32(offset);
-    const bool ok = pages(p, proto::msg::QUEUE, head, tags, at, end, slots, [queue, lib](quint32 i, fd::LinkWriter &w) {
+    const QHash<qint64, int> flags = m_lyrFlagsRev == m_snapRev ? m_lyrFlags : QHash<qint64, int>();
+    const bool ok = pages(p, proto::msg::QUEUE, head, tags, at, end, slots, [queue, lib, &flags](quint32 i, fd::LinkWriter &w) {
         const QueueEntry e = queue->entry(queue->rowAt(int(i)));
         w.u64(q::track, uint64_t(std::max<qint64>(0, e.id))).str(q::title, utf8(e.title));
         QStringList names = lib && e.id > 0 ? lib->trackArtists(e.id) : QStringList();
@@ -1065,6 +1069,9 @@ uint8_t LinkServer::queuePage(Peer &p, const fd::LinkCommand &c, qint64 now)
             w.str(q::album, utf8(e.album));
         if (e.durationMs > 0)
             w.u32(q::durationMs, uint32_t(e.durationMs));
+        const int kind = flags.value(e.id, -1);
+        if (kind >= 0)
+            w.flag(q::lyrics, kind == 1).flag(q::lyricsPlain, kind == 2);
     }, now);
     return ok ? 0 : uint8_t(proto::err::busy);
 }
@@ -1497,6 +1504,12 @@ void LinkServer::lrcCommand(Peer &p, fd::LinkCommand &c, qint64 now)
         }
         if (!code && m_lyrics)
             m_lyrics->refresh();
+        if (!code) {
+            const qint64 id = qint64(c.body.u("track"));
+            m_lyrFlags.remove(id);
+            m_lyrAsked.remove(id);
+            ++m_lyrEpoch[id];
+        }
     }
     if (code)
         p.s->fail(c, code, fd::link_err_text(code), now);
@@ -1592,6 +1605,8 @@ void LinkServer::lyrGet(Peer &p, fd::LinkCommand &c, qint64 now)
     q.have = have;
     q.hasHave = hasHave;
     q.track = track;
+    q.rev = m_snapRev;
+    q.epoch = m_lyrEpoch.value(track);
     const bool started = same != m_lyrPending.cend();
     m_lyrPending.push_back(q);
     c.deferred = true;
@@ -1612,6 +1627,52 @@ void LinkServer::lyrGet(Peer &p, fd::LinkCommand &c, qint64 now)
     });
 }
 
+int LinkServer::lyricsKind(const LyricsText &text)
+{
+    return text.timed() ? 1 : text.plain.isEmpty() ? 0 : 2;
+}
+
+void LinkServer::probeLyrics()
+{
+    if (m_lyrFlagsRev != m_snapRev) {
+        m_lyrFlags.clear();
+        m_lyrAsked.clear();
+        m_lyrFlagsRev = m_snapRev;
+    }
+    const Queue *queue = m_player->queue();
+    const int from = std::max(0, queue->currentSlot());
+    const int to = std::min(queue->count(), from + linkLyricsAhead);
+    for (int slot = from; slot < to; ++slot) {
+        const QueueEntry e = queue->entry(queue->rowAt(slot));
+        if (e.id <= 0 || m_lyrFlags.contains(e.id) || m_lyrAsked.contains(e.id) || !QFileInfo::exists(e.path))
+            continue;
+        m_lyrAsked.insert(e.id);
+        const LyricsTrack lt{e.path, cueFrameMs(e.startFrame), e.endFrame ? cueFrameMs(e.endFrame) : 0, e.cueIndex > 0};
+        const qint64 track = e.id;
+        const quint32 rev = m_snapRev;
+        const quint32 epoch = m_lyrEpoch.value(track);
+        QPointer<LinkServer> self(this);
+        m_pool.start(
+            [self, lt, track, rev, epoch] {
+                const bool readable = QFileInfo::exists(lt.path);
+                const int kind = readable ? lyricsKind(Lyrics::load(lt, lt.cue ? QString() : Lyrics::storeFile(lt.path))) : -1;
+                QMetaObject::invokeMethod(
+                    self.data(), [self, track, rev, epoch, kind] {
+                        if (!self)
+                            return;
+                        if (kind < 0) {
+                            self->m_lyrAsked.remove(track);
+                            return;
+                        }
+                        if (self->m_lyrFlagsRev == rev && self->m_snapRev == rev && self->m_lyrEpoch.value(track) == epoch)
+                            self->m_lyrFlags.insert(track, kind);
+                    },
+                    Qt::QueuedConnection);
+            },
+            -1);
+    }
+}
+
 void LinkServer::trimLyrics(const QString &keep)
 {
     if (m_trimQueued)
@@ -1619,11 +1680,16 @@ void LinkServer::trimLyrics(const QString &keep)
     m_trimQueued = true;
     QPointer<LinkServer> self(this);
     m_pool.start([self, keep] {
-        Lyrics::storeTrim(keep);
+        const int removed = Lyrics::storeTrim(keep);
         QMetaObject::invokeMethod(
-            self.data(), [self] {
-                if (self)
-                    self->m_trimQueued = false;
+            self.data(), [self, removed] {
+                if (!self)
+                    return;
+                self->m_trimQueued = false;
+                if (removed > 0) {
+                    self->m_lyrFlags.clear();
+                    self->m_lyrAsked.clear();
+                }
             },
             Qt::QueuedConnection);
     });
@@ -1640,6 +1706,8 @@ void LinkServer::lyrDone(quint32 job, const LyricsText &text)
         }
         const ArtPending q = *it;
         it = m_lyrPending.erase(it);
+        if (!any && m_lyrFlagsRev == m_snapRev && q.rev == m_snapRev && q.epoch == m_lyrEpoch.value(q.track))
+            m_lyrFlags.insert(q.track, lyricsKind(text));
         any = true;
         if (Peer *p = peer(q.gen))
             lyrReply(*p, q.c, text, q.offset, q.hasHave, q.have, now);

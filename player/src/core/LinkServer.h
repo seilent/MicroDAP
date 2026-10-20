@@ -9,6 +9,7 @@
 
 #include <QDeadlineTimer>
 #include <QHash>
+#include <QSet>
 #include <QObject>
 #include <QPointer>
 #include <QThreadPool>
@@ -185,6 +186,8 @@ private:
                   qint64 now);
     void lyrDone(quint32 job, const LyricsText &text);
     void trimLyrics(const QString &keep);
+    void probeLyrics();
+    static int lyricsKind(const LyricsText &text);
     void image(Peer &p, fd::LinkCommand &c, qint64 now);
     bool ask(uint8_t type, const fd::LinkWriter &w, const QString &name, const QString &what);
     void answers();
@@ -234,6 +237,7 @@ private:
         qint64 track = 0;
         int px = 0;
         quint32 rev = 0;
+        quint32 epoch = 0;
     };
     ArtCache m_art;
     std::vector<ArtPending> m_lyrPending;
@@ -241,6 +245,10 @@ private:
     quint32 m_artJob = 0;
     QThreadPool m_pool;
     bool m_trimQueued = false;
+    QHash<qint64, int> m_lyrFlags;
+    QSet<qint64> m_lyrAsked;
+    quint32 m_lyrFlagsRev = 0;
+    QHash<qint64, quint32> m_lyrEpoch;
     static qsizetype jobs(const std::vector<ArtPending> &pending);
     Clock m_clock;
     std::vector<std::unique_ptr<Peer>> m_peers;

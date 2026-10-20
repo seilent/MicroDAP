@@ -426,8 +426,9 @@ Lyrics::Put Lyrics::storePut(const QString &audio, const QByteArray &text)
     return Put::Ok;
 }
 
-void Lyrics::storeTrim(const QString &keep, qsizetype cap)
+int Lyrics::storeTrim(const QString &keep, qsizetype cap)
 {
+    int removed = 0;
     const QString file = storeFile(keep);
     QList<QFileInfo> files;
     qint64 total = 0;
@@ -446,9 +447,12 @@ void Lyrics::storeTrim(const QString &keep, qsizetype cap)
             break;
         if (info.absoluteFilePath() == QFileInfo(file).absoluteFilePath())
             continue;
-        if (QFile::remove(info.absoluteFilePath()))
+        if (QFile::remove(info.absoluteFilePath())) {
             total -= info.size();
+            ++removed;
+        }
     }
+    return removed;
 }
 
 bool Lyrics::storeDel(const QString &audio)
