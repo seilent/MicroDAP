@@ -670,6 +670,27 @@ class Driver:
         roles = [str(s['Role']) for s in self.fake.signals if 'Role' in s]
         self.check(roles == ['headphones', 'receiver'], f'Role signals {roles}')
 
+    def test_avrcp_only(self):
+        phone = ADAPTER_PATH + '/dev_40_00_00_00_00_01'
+        in_loop(self.fake.add_device, phone, [uuid('110c'), uuid('110e')])
+        self.fake.devices[phone].props['Paired'] = dbus.Boolean(True)
+        self.fake.removed.clear()
+        self.expect_ok('SetRole(receiver) for the engine run', self.service.SetRole, dbus.String('receiver'))
+        in_loop(self.fake.flip, phone, 'Connected', dbus.Boolean(True))
+        in_loop(self.fake.flip, phone, 'ServicesResolved', dbus.Boolean(True))
+        for short in ('110e', '110c'):
+            self.expect_ok(f'last phone avrcp only {short}', self.agent.AuthorizeService, dbus.ObjectPath(phone),
+                           dbus.String(uuid(short)))
+        self.fake.devices[phone].props['UUIDs'] = dbus.Array([uuid('110a'), uuid('110c'), uuid('110e')], signature='s')
+        in_loop(self.fake.flip, phone, 'UUIDs', self.fake.devices[phone].props['UUIDs'])
+        self.expect_ok('last phone a2dp after avrcp', self.agent.AuthorizeService, dbus.ObjectPath(phone),
+                       dbus.String(uuid('110b')))
+        time.sleep(0.3)
+        self.check(phone not in self.fake.removed, 'gate acted on a bonded reconnect')
+        self.check(self.active() is False, 'a window opened for the engine run')
+        in_loop(self.fake.flip, phone, 'Connected', dbus.Boolean(False))
+        in_loop(self.fake.adapter.RemoveDevice, dbus.ObjectPath(phone))
+
     def test_sigterm(self, proc):
         phone = ADAPTER_PATH + '/dev_10_00_00_00_00_06'
         idle_phone = ADAPTER_PATH + '/dev_10_00_00_00_00_08'
@@ -792,6 +813,7 @@ def main():
         driver.test_search()
         driver.test_search_and_pairing()
         driver.test_roles()
+        driver.test_avrcp_only()
         driver.test_companion()
         driver.test_sigterm(proc)
         write_marker(BOOT_ID + '\n')
