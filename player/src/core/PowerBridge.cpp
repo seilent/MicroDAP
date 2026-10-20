@@ -112,6 +112,7 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
     m_switchTimer.setSingleShot(true);
     connect(&m_switchTimer, &QTimer::timeout, this, &PowerBridge::onSwitchTimeout);
     m_readyTimer.setSingleShot(true);
+    m_readyTimer.setTimerType(Qt::PreciseTimer);
     connect(&m_readyTimer, &QTimer::timeout, this, [this] {
         if (!m_awaitReady)
             return;
