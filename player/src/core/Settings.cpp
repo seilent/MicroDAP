@@ -320,8 +320,7 @@ QStringList Settings::outputs()
 
 QStringList Settings::codecs()
 {
-    return {QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"),
-            QStringLiteral("ldac"), QStringLiteral("sbc")};
+    return {QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"), QStringLiteral("sbc")};
 }
 
 QStringList Settings::headphoneCodecs()

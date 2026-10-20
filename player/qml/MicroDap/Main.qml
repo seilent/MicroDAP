@@ -35,6 +35,7 @@ Window {
     property var outputMode: root.screenshot || typeof OutputMode === "undefined" ? null : OutputMode
     property var dacEq: root.screenshot || typeof DacEq === "undefined" ? null : DacEq
     property var link: root.screenshot || typeof Link === "undefined" ? null : Link
+    property var btOffer: root.screenshot || typeof BtOffer === "undefined" ? null : BtOffer
     property var photos: root.screenshot || typeof ArtistPhotos === "undefined" ? null : ArtistPhotos
     readonly property bool photoOn: root.settings === null || root.settings.artistPhoto !== false
     property var rgbControl: root.screenshot || typeof RgbControl === "undefined" ? null : RgbControl
@@ -1496,6 +1497,7 @@ Window {
             folders: root.settings !== null && typeof root.settings.candidateRoots === "function" ? root.settings.candidateRoots() : []
             overlay: root.overlay
             btRole: root.bluez !== null && root.bluez.activeRole !== undefined ? String(root.bluez.activeRole) : "receiver"
+            btApplied: root.btOffer !== null ? String(root.btOffer.applied) : "auto"
             settings: root.settings
             power: root.power
             player: root.player

@@ -2,6 +2,7 @@
 
 #include "ArtistStore.h"
 #include "BluezModel.h"
+#include "BtOffer.h"
 #include "Favorites.h"
 #include "HubModels.h"
 #include "Library.h"
@@ -153,6 +154,18 @@ LinkServer::~LinkServer()
         p->write = nullptr;
     }
     m_peers.clear();
+}
+
+void LinkServer::setBtOffer(BtOffer *offer)
+{
+    m_offer = offer;
+    if (!offer)
+        return;
+    connect(offer, &BtOffer::appliedChanged, this, [this] {
+        m_settingsFresh = false;
+        if (!m_peers.empty())
+            m_soon.start();
+    });
 }
 
 void LinkServer::setBluez(BluezModel *bluez)
@@ -583,6 +596,11 @@ bool LinkServer::phone() const
 QString LinkServer::btRole() const
 {
     return m_bluez ? m_bluez->activeRole() : QString();
+}
+
+QString LinkServer::btApplied() const
+{
+    return m_offer ? m_offer->applied() : QStringLiteral("auto");
 }
 
 int LinkServer::cap() const
@@ -1179,7 +1197,7 @@ void LinkServer::refresh()
     if (m_settingsFresh)
         return;
     m_settingsFresh = true;
-    const LinkSettings link(m_settings, version(), btRole());
+    const LinkSettings link(m_settings, version(), btRole(), btApplied());
     const QList<LinkSettingRow> rows = link.rows();
     std::vector<Pivot> pivots;
     std::vector<Pivot> confirm;
@@ -1307,9 +1325,9 @@ void LinkServer::settingsCommand(Peer &p, fd::LinkCommand &c, qint64 now)
     QStringList refused;
     uint8_t code = proto::err::refused;
     if (!p.refused && c.type == m::SET) {
-        code = c.body.has("text")
-                   ? LinkSettings(m_settings, version(), btRole()).set(QString::fromStdString(c.body.str("text")), kept, refused)
-                   : uint8_t(proto::err::badValue);
+        const LinkSettings link(m_settings, version(), btRole(), btApplied());
+        code = c.body.has("text") ? link.set(QString::fromStdString(c.body.str("text")), kept, refused)
+                                  : uint8_t(proto::err::badValue);
     }
     m_settingsFresh = false;
     refresh();

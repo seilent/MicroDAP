@@ -26,6 +26,7 @@ class QSocketNotifier;
 namespace microdap {
 
 class BluezModel;
+class BtOffer;
 class Favorites;
 class ArtistStore;
 class Library;
@@ -87,6 +88,7 @@ public:
     ~LinkServer() override;
 
     void setBluez(BluezModel *bluez);
+    void setBtOffer(BtOffer *offer);
     void setStatus(StatusModel *status);
     void setVolume(SinkVolume *volume);
     void setFavorites(Favorites *favorites);
@@ -197,6 +199,7 @@ private:
     Peer *peer(quint32 gen) const;
     bool phone() const;
     QString btRole() const;
+    QString btApplied() const;
     int cap() const;
     void setPairWindow(bool on);
     void closeWindow(bool stop);
@@ -209,6 +212,7 @@ private:
     Player *m_player;
     Settings *m_settings;
     QPointer<BluezModel> m_bluez;
+    QPointer<BtOffer> m_offer;
     QPointer<StatusModel> m_status;
     QPointer<SinkVolume> m_volume;
     QPointer<Favorites> m_favorites;

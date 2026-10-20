@@ -739,8 +739,10 @@ void SettingsTest::rowTable()
     QVERIFY(codec && codec->draft && !codec->bounded);
     QCOMPARE(codec->kind, QStringLiteral("sheet"));
     QCOMPARE(codec->setting, QStringLiteral("btCodec"));
-    QCOMPARE(codec->readOnly, QStringLiteral("codecRole"));
+    QVERIFY(codec->readOnly.isEmpty());
     QCOMPARE(strings(codec->values), Settings::codecs());
+    QCOMPARE(Settings::codecs(), QStringList({QStringLiteral("auto"), QStringLiteral("aptx"), QStringLiteral("aac"),
+                                              QStringLiteral("sbc")}));
     QCOMPARE(codec->headphonesSetting, QStringLiteral("btCodecHeadphones"));
     QCOMPARE(strings(codec->headphonesValues), Settings::headphoneCodecs());
     QCOMPARE(SettingsRows::maps().size(), SettingsRows::all().size());
@@ -759,6 +761,12 @@ void SettingsTest::btCodecKeys()
     m_set.call(QStringLiteral("SetStored"), {QStringLiteral("audio.bt_codec_headphones"), FakeService::variant(QStringLiteral("ldac"))});
     QTRY_COMPARE_WITH_TIMEOUT(settings.btCodecHeadphones(), QStringLiteral("ldac"), waitMs);
     QCOMPARE(settings.btCodec(), QStringLiteral("auto"));
+    settings.setBtCodec(QStringLiteral("aac"));
+    QTRY_COMPARE_WITH_TIMEOUT(client.get(QStringLiteral("audio.bt_codec")).toString(), QStringLiteral("aac"), waitMs);
+    settings.setBtCodec(QStringLiteral("ldac"));
+    QCOMPARE(settings.btCodec(), QStringLiteral("aac"));
+    m_set.call(QStringLiteral("SetStored"), {QStringLiteral("audio.bt_codec"), FakeService::variant(QStringLiteral("ldac"))});
+    QTRY_COMPARE_WITH_TIMEOUT(settings.btCodec(), QStringLiteral("auto"), waitMs);
 }
 
 void SettingsTest::volumeKeys()

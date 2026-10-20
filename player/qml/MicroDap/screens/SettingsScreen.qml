@@ -19,6 +19,7 @@ Page {
     property var eq: null
     property bool overlay: false
     property string btRole: "receiver"
+    property string btApplied: "auto"
     property bool animated: true
     property bool screenOff: false
     property bool foldersOpen: false
@@ -60,6 +61,9 @@ Page {
     readonly property string codec: page.sourceRole
         ? (page.settings !== null && page.settings.btCodecHeadphones !== undefined ? String(page.settings.btCodecHeadphones) : "auto")
         : (page.settings !== null && page.settings.btCodec !== undefined ? String(page.settings.btCodec) : "auto")
+    readonly property bool codecPending: page.sourceRole
+        ? page.btApplied !== "auto" && page.codec !== page.btApplied && page.codec !== "sbc"
+        : page.codec !== page.btApplied
     readonly property string hpGain: page.settings !== null && page.settings.hpGain !== undefined ? String(page.settings.hpGain) : "normal"
     readonly property string hpAmp: page.settings !== null && page.settings.hpAmp !== undefined ? String(page.settings.hpAmp) : "lohifi"
     readonly property int spkGain: page.settings !== null && page.settings.spkGain !== undefined ? Number(page.settings.spkGain) : 102
@@ -346,8 +350,6 @@ Page {
             return !page.sensorSupported
         case "rgb":
             return !page.rgbSupported
-        case "codecRole":
-            return !page.sourceRole
         case "boot":
             return page.bootReadOnly
         case "slot":
@@ -397,7 +399,7 @@ Page {
         case "crossfeed":
             return !page.crossfeedSlot ? "headphones only" : page.crossfeedWord(page.crossfeed) + page.chainNote
         case "codec":
-            return page.wordOf("codec", page.codec) + (page.sourceRole ? "" : " (not applied)")
+            return page.wordOf("codec", page.codec) + (page.codecPending ? " (pending)" : "")
         case "level":
             return page.levelValue
         case "rate":

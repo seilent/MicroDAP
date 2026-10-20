@@ -34,7 +34,8 @@ struct LinkSettingRow
 class LinkSettings
 {
 public:
-    explicit LinkSettings(Settings *settings, QString version = {}, QString role = {});
+    explicit LinkSettings(Settings *settings, QString version = {}, QString role = {},
+                          QString applied = QStringLiteral("auto"));
 
     QList<LinkSettingRow> rows() const;
     QString text() const;
@@ -49,6 +50,7 @@ private:
     Settings *m_settings;
     QString m_version;
     bool m_headphones;
+    QString m_applied;
 };
 
 }

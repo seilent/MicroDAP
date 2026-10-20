@@ -126,6 +126,11 @@ else()
 endif()
 microdap_test_env(settings)
 
+qt_add_executable(tst_btoffer core/tst_btoffer.cpp)
+target_link_libraries(tst_btoffer PRIVATE microdapcore Qt6::Test)
+add_test(NAME btoffer COMMAND tst_btoffer)
+microdap_test_env(btoffer)
+
 qt_add_executable(tst_output core/tst_output.cpp)
 target_link_libraries(tst_output PRIVATE microdapcore Qt6::Test)
 add_test(NAME output COMMAND tst_output)

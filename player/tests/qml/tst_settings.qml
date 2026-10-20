@@ -1366,19 +1366,49 @@ TestCase {
         compare(tc.itemOf(page, "codec").valueItem.font.capitalization, Font.AllUppercase)
     }
 
-    function test_codec_receiver_read_only() {
+    function test_codec_receiver_draft() {
         fakeSettings.btCodec = "aac"
         fakeSettings.btCodecHeadphones = "ldac"
         const page = open()
-        compare(tc.rowOf(page, "codec").readOnly, true)
-        compare(tc.rowOf(page, "codec").value, "aac (not applied)")
-        tc.focusKey(page, "codec")
+        compare(tc.rowOf(page, "codec").readOnly, false)
+        compare(tc.rowOf(page, "codec").value, "aac (pending)")
+        tc.sheetOpen(page, "codec")
+        compare(tc.items(page), JSON.stringify(["auto", "aptx", "aac", "sbc"]))
+        compare(tc.focused(page), "aac")
+        verify(router.dispatch("down", false))
+        compare(tc.focused(page), "sbc")
+        compare(fakeSettings.btCodec, "aac")
+        page.btApplied = "aac"
+        compare(page.valueOpen, true)
+        compare(tc.rowOf(page, "codec").value, "aac")
         verify(router.dispatch("a", false))
         compare(page.valueOpen, false)
-        compare(fakeSettings.btCodec, "aac")
-        page.btRole = "headphones"
-        compare(tc.rowOf(page, "codec").readOnly, false)
+        compare(fakeSettings.btCodec, "sbc")
+        compare(fakeSettings.btCodecHeadphones, "ldac")
+        compare(tc.rowOf(page, "codec").value, "sbc (pending)")
+        page.btApplied = "sbc"
+        compare(tc.rowOf(page, "codec").value, "sbc")
+        fakeSettings.btCodec = "auto"
+        compare(tc.rowOf(page, "codec").value, "auto (pending)")
+        page.btApplied = "auto"
+        compare(tc.rowOf(page, "codec").value, "auto")
+    }
+
+    function test_codec_headphones_pending() {
+        fakeSettings.btCodecHeadphones = "ldac"
+        const page = open({btRole: "headphones", btApplied: "aac"})
+        compare(tc.rowOf(page, "codec").value, "ldac (pending)")
+        fakeSettings.btCodecHeadphones = "auto"
+        compare(tc.rowOf(page, "codec").value, "auto (pending)")
+        fakeSettings.btCodecHeadphones = "aac"
+        compare(tc.rowOf(page, "codec").value, "aac")
+        fakeSettings.btCodecHeadphones = "sbc"
+        compare(tc.rowOf(page, "codec").value, "sbc")
+        fakeSettings.btCodecHeadphones = "ldac"
+        page.btApplied = "auto"
         compare(tc.rowOf(page, "codec").value, "ldac")
+        fakeSettings.btCodecHeadphones = "auto"
+        compare(tc.rowOf(page, "codec").value, "auto")
     }
 
     function test_mixer_rows_order() {

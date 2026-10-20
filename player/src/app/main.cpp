@@ -1,6 +1,7 @@
 #include "AccentControl.h"
 #include "ArtistStore.h"
 #include "AlsaVolume.h"
+#include "BtOffer.h"
 #include "FakeBluezModel.h"
 #include "DacEq.h"
 #include "DbusPad.h"
@@ -220,6 +221,7 @@ int main(int argc, char *argv[])
         bluez = std::make_unique<microdap::SystemBluezModel>(QDBusConnection::systemBus(),
                                                            QDBusConnection::sessionBus());
     player.setBluez(bluez.get());
+    microdap::BtOffer btOffer;
     const bool overlayMode = parser.isSet(overlayOption);
     if (auto *system = dynamic_cast<microdap::SystemBluezModel *>(bluez.get()); system && !overlayMode) {
         system->setDapSession(true);
@@ -481,6 +483,7 @@ int main(int argc, char *argv[])
                          [&settings, folders = linkFolders.get()] { folders->setRoots(settings.roots()); });
         link = std::make_unique<microdap::LinkServer>(&player, &settings);
         link->setBluez(bluez.get());
+        link->setBtOffer(&btOffer);
         link->setStatus(&status);
         link->setVolume(routedVolume);
         link->setSources({&library, &artists, &albums, &songs, &playlists, linkFolders.get(), &favorites});
@@ -588,6 +591,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("StatusModel"), &status);
     engine.rootContext()->setContextProperty(QStringLiteral("BluezModel"),
                                              static_cast<QObject *>(bluez.get()));
+    engine.rootContext()->setContextProperty(QStringLiteral("BtOffer"), &btOffer);
     if (overlay)
         engine.rootContext()->setContextProperty(QStringLiteral("OverlayBridge"), overlay.get());
     if (guide)

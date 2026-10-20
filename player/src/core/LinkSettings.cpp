@@ -1,5 +1,6 @@
 #include "LinkSettings.h"
 
+#include "BtOffer.h"
 #include "LinkProto.h"
 #include "Settings.h"
 
@@ -85,10 +86,11 @@ bool clean(const QString &line)
 
 }
 
-LinkSettings::LinkSettings(Settings *settings, QString version, QString role)
+LinkSettings::LinkSettings(Settings *settings, QString version, QString role, QString applied)
     : m_settings(settings)
     , m_version(std::move(version))
     , m_headphones(role == QLatin1StringView("headphones"))
+    , m_applied(std::move(applied))
 {
 }
 
@@ -102,8 +104,6 @@ bool LinkSettings::readOnlyRule(const QString &rule) const
         return m_settings->outputSlot().isEmpty();
     if (rule == QLatin1StringView("crossfeed"))
         return !Settings::crossfeedSlots().contains(m_settings->outputSlot());
-    if (rule == QLatin1StringView("codecRole"))
-        return !m_headphones;
     if (rule == QLatin1StringView("brightness"))
         return m_settings->brightnessSteps().isEmpty();
     return false;
@@ -168,14 +168,20 @@ QList<LinkSettingRow> LinkSettings::rows() const
                 lr.kind = kind::action;
                 lr.readOnly = r.key != QLatin1StringView("rescan");
             }
+            const bool codec = r.key == QLatin1StringView("codec");
+            const QString pick = codec ? m_settings->property(lr.setting.toLatin1().constData()).toString() : QString();
+            const bool pending = codec
+                                 && BtOffer::pending(m_headphones ? QStringLiteral("headphones") : QStringLiteral("receiver"),
+                                                     pick, m_applied);
+            const QString mark = QStringLiteral(" (PENDING)");
             for (const QString &v : std::as_const(values))
-                lr.words.push_back(word(r.key, v).toUpper());
+                lr.words.push_back(word(r.key, v).toUpper() + (pending && v == pick ? mark : QString()));
             lr.values = values;
             if (r.key == QLatin1StringView("phoneApp")) {
                 lr.readOnly = true;
                 lr.boardOnly = true;
             }
-            lr.restart = r.key == QLatin1StringView("codec") && !headphones;
+            lr.restart = codec && !headphones;
             out.push_back(lr);
         }
     }

@@ -1,4 +1,5 @@
 #include "ArtistStore.h"
+#include "BtOffer.h"
 #include "Eq.h"
 #include "FakeBluezModel.h"
 #include "HubModels.h"
@@ -22,8 +23,10 @@
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusUnixFileDescriptor>
+#include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QTemporaryDir>
@@ -31,6 +34,7 @@
 #include <QSqlQuery>
 #include <QtTest>
 
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -1998,45 +2002,104 @@ void LinkTest::draftRefused()
     QCOMPARE(errorCode(phone.frames(), proto::msg::DRAFT), uint64_t(proto::err::refused));
 }
 
+bool writeOffer(const QString &applied)
+{
+    const QString path = BtOffer::file();
+    if (!QDir().mkpath(QFileInfo(path).absolutePath()))
+        return false;
+    QFile f(path + QStringLiteral(".new"));
+    if (!f.open(QIODevice::WriteOnly))
+        return false;
+    f.write("wanted aac\napplied " + applied.toUtf8() + "\n");
+    f.close();
+    return std::rename(QFile::encodeName(f.fileName()).constData(), QFile::encodeName(path).constData()) == 0;
+}
+
 void LinkTest::codecPerRole()
 {
+    QTemporaryDir run;
+    qputenv("MICRODAP_RUNTIME_DIR", QFile::encodeName(run.path()));
+    const auto unset = qScopeGuard([] { qunsetenv("MICRODAP_RUNTIME_DIR"); });
+    BtOffer offer;
     Rig rig;
+    rig.server.setBtOffer(&offer);
     rig.settings.setBtCodec(QStringLiteral("aac"));
     Phone phone;
     std::vector<fd::LinkFrame> frames = rig.connect(phone);
     const QString readOnly = QString::number(proto::val::ROW_FLAG::readOnly);
     const QString restart = QString::number(proto::val::ROW_FLAG::restart);
+    const QStringList receiverWords{QStringLiteral("AUTO"), QStringLiteral("APTX"), QStringLiteral("AAC"),
+                                    QStringLiteral("SBC")};
+    auto pendingAt = [](QStringList words, int at) {
+        words[at] += QStringLiteral(" (PENDING)");
+        return words;
+    };
     const fd::LinkField *receiver = schemaRow(frames, "btCodec");
     QVERIFY(receiver);
     QCOMPARE(recordList(receiver, "value"), Settings::codecs());
-    QVERIFY(recordList(receiver, "flag").contains(readOnly));
+    QCOMPARE(recordList(receiver, "word"), pendingAt(receiverWords, 2));
+    QVERIFY(!recordList(receiver, "flag").contains(readOnly));
     QVERIFY(recordList(receiver, "flag").contains(restart));
     QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=aac\n")));
-    fd::LinkWriter refused;
-    refused.str(proto::tag::SET::text, "btCodec=sbc\n");
-    phone.send(proto::msg::SET, refused);
+
+    QVERIFY(writeOffer(QStringLiteral("aac")));
+    QTRY_COMPARE_WITH_TIMEOUT(offer.applied(), QStringLiteral("aac"), 5000);
+    rig.server.poll();
+    frames = phone.frames();
+    receiver = schemaRow(frames, "btCodec");
+    QVERIFY(receiver);
+    QCOMPARE(recordList(receiver, "word"), receiverWords);
+
+    fd::LinkWriter set;
+    set.str(proto::tag::SET::text, "btCodec=sbc\n");
+    phone.send(proto::msg::SET, set);
+    rig.server.poll();
+    frames = phone.frames();
+    QCOMPARE(rig.settings.btCodec(), QStringLiteral("sbc"));
+    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=sbc\n")));
+    receiver = schemaRow(frames, "btCodec");
+    QVERIFY(receiver);
+    QCOMPARE(recordList(receiver, "word"), pendingAt(receiverWords, 3));
+    fd::LinkWriter ldac;
+    ldac.str(proto::tag::SET::text, "btCodec=ldac\n");
+    phone.send(proto::msg::SET, ldac);
     rig.server.poll();
     QCOMPARE(errorCode(phone.frames(), proto::msg::SET), uint64_t(proto::err::refused));
-    QCOMPARE(rig.settings.btCodec(), QStringLiteral("aac"));
+    QCOMPARE(rig.settings.btCodec(), QStringLiteral("sbc"));
 
+    rig.settings.setBtCodecHeadphones(QStringLiteral("ldac"));
     rig.bluez.setRole(QStringLiteral("headphones"));
     QCOMPARE(rig.bluez.activeRole(), QStringLiteral("headphones"));
     rig.server.poll();
     frames = phone.frames();
+    const QStringList headphoneWords{QStringLiteral("AUTO"), QStringLiteral("LDAC"), QStringLiteral("APTX HD"),
+                                     QStringLiteral("APTX"), QStringLiteral("AAC"), QStringLiteral("SBC")};
     const fd::LinkField *headphones = schemaRow(frames, "btCodec");
     QVERIFY(headphones);
     QCOMPARE(recordList(headphones, "value"), Settings::headphoneCodecs());
-    QVERIFY(recordList(headphones, "word").contains(QStringLiteral("APTX HD")));
+    QCOMPARE(recordList(headphones, "word"), pendingAt(headphoneWords, 1));
     QVERIFY(recordList(headphones, "flag").isEmpty());
-    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=auto\n")));
-    fd::LinkWriter set;
-    set.str(proto::tag::SET::text, "btCodec=aptx_hd\n");
-    phone.send(proto::msg::SET, set);
+    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=ldac\n")));
+    const std::pair<const char *, int> picks[] = {{"auto", 0}, {"aac", -1}, {"aptx_hd", 2}, {"sbc", -1}, {"ldac", 1}};
+    for (const auto &[pick, at] : picks) {
+        fd::LinkWriter w;
+        w.str(proto::tag::SET::text, "btCodec=" + std::string(pick) + "\n");
+        phone.send(proto::msg::SET, w);
+        rig.server.poll();
+        frames = phone.frames();
+        QCOMPARE(rig.settings.btCodecHeadphones(), QString::fromLatin1(pick));
+        QCOMPARE(rig.settings.btCodec(), QStringLiteral("sbc"));
+        QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=%1\n").arg(QString::fromLatin1(pick))));
+        headphones = schemaRow(frames, "btCodec");
+        QVERIFY(headphones);
+        QCOMPARE(recordList(headphones, "word"), at < 0 ? headphoneWords : pendingAt(headphoneWords, at));
+    }
+    QVERIFY(writeOffer(QStringLiteral("auto")));
+    QTRY_COMPARE_WITH_TIMEOUT(offer.applied(), QStringLiteral("auto"), 5000);
     rig.server.poll();
-    frames = phone.frames();
-    QCOMPARE(rig.settings.btCodecHeadphones(), QStringLiteral("aptx_hd"));
-    QCOMPARE(rig.settings.btCodec(), QStringLiteral("aac"));
-    QVERIFY(settingsText(frames).contains(QStringLiteral("btCodec=aptx_hd\n")));
+    headphones = schemaRow(phone.frames(), "btCodec");
+    QVERIFY(headphones);
+    QCOMPARE(recordList(headphones, "word"), headphoneWords);
 }
 
 const fd::LinkFrame *awaitReply(LibRig &rig, std::vector<fd::LinkFrame> &frames, uint8_t type)

@@ -145,10 +145,10 @@ QList<Row> build()
     Row balance = range("output", "balance", "balance", "edit", "balance", -20, 20, 1);
     out.push_back(readOnly(raises(bounded(balance)), "slot"));
 
-    Row codec = choice("output", "codec", "bluetooth codec", "btCodec", words({"auto", "aptx", "aac", "ldac", "sbc"}));
+    Row codec = choice("output", "codec", "bluetooth codec", "btCodec", words({"auto", "aptx", "aac", "sbc"}));
     codec.headphonesSetting = QStringLiteral("btCodecHeadphones");
     codec.headphonesValues = words({"auto", "ldac", "aptx_hd", "aptx", "aac", "sbc"});
-    out.push_back(readOnly(draft(codec, "profile switch"), "codecRole"));
+    out.push_back(draft(codec, "receiver: the offer applies with audio idle and no device connected; headphones: profile switch"));
 
     Row level = choice("output", "level", "bit perfect", "outputLevel", words({"off", "bitperfect", "exclusive"}));
     out.push_back(readOnly(draft(level, "chain reconfigure, device reservation"), "overlay"));
