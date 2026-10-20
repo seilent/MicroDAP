@@ -19,9 +19,14 @@
 #include <taglib/wavfile.h>
 #include <taglib/xiphcomment.h>
 
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -391,6 +396,78 @@ int Lyrics::lineAt(const QList<LyricLine> &lines, qint64 ms)
     return int(it - lines.cbegin()) - 1;
 }
 
+QString Lyrics::storeRoot()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/microdap/lyrics");
+}
+
+QString Lyrics::storeFile(const QString &audio)
+{
+    if (audio.isEmpty())
+        return {};
+    const QString hash = QString::fromLatin1(
+        QCryptographicHash::hash(audio.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
+    return storeRoot() + QLatin1Char('/') + hash.left(2) + QLatin1Char('/') + hash + QStringLiteral(".lrc");
+}
+
+Lyrics::Put Lyrics::storePut(const QString &audio, const QByteArray &text)
+{
+    const LyricsText parsed = parseBytes(text);
+    if (parsed.empty())
+        return Put::Empty;
+    const QString file = storeFile(audio);
+    if (!parsed.timed() && readFile(file, LyricsText::Store).timed())
+        return Put::Synced;
+    if (!QDir().mkpath(QFileInfo(file).absolutePath()))
+        return Put::Failed;
+    QSaveFile save(file);
+    if (!save.open(QIODevice::WriteOnly) || save.write(text) != text.size() || !save.commit())
+        return Put::Failed;
+    return Put::Ok;
+}
+
+void Lyrics::storeTrim(const QString &keep, qsizetype cap)
+{
+    const QString file = storeFile(keep);
+    QList<QFileInfo> files;
+    qint64 total = 0;
+    QDirIterator it(storeRoot(), {QStringLiteral("*.lrc")}, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QFileInfo info = it.nextFileInfo();
+        files.append(info);
+        total += info.size();
+    }
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    std::sort(files.begin(), files.end(), [&now](const QFileInfo &a, const QFileInfo &b) {
+        return std::min(a.lastModified(), now) < std::min(b.lastModified(), now);
+    });
+    for (const QFileInfo &info : std::as_const(files)) {
+        if (total <= cap)
+            break;
+        if (info.absoluteFilePath() == QFileInfo(file).absoluteFilePath())
+            continue;
+        if (QFile::remove(info.absoluteFilePath()))
+            total -= info.size();
+    }
+}
+
+bool Lyrics::storeDel(const QString &audio)
+{
+    const QString file = storeFile(audio);
+    return !QFileInfo::exists(file) || QFile::remove(file);
+}
+
+QByteArray Lyrics::cutLine(const QString &text)
+{
+    QByteArray bytes = text.toUtf8();
+    if (bytes.size() <= lineMax)
+        return bytes;
+    qsizetype n = lineMax;
+    while (n > 0 && (quint8(bytes.at(n)) & 0xc0) == 0x80)
+        --n;
+    return bytes.left(n ? n : lineMax);
+}
+
 bool Lyrics::pending() const
 {
     return m_shown != m_current;
@@ -465,7 +542,7 @@ void Lyrics::request(const LyricsTrack &track)
     const int generation = ++m_generation;
     m_pending.insert(path, generation);
     m_pool.start([this, track, path, generation] {
-        const LyricsText text = load(track);
+        const LyricsText text = load(track, track.cue ? QString() : storeFile(track.path));
         QMetaObject::invokeMethod(
             this, [this, path, generation, text] { loaded(path, generation, text); }, Qt::QueuedConnection);
     });

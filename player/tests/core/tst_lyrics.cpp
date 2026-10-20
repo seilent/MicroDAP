@@ -98,6 +98,7 @@ private slots:
     void otherTags();
     void precedence();
     void storeSlot();
+    void storePutAndDel();
     void tracks();
     void refresh();
     void cueSpan();
@@ -338,6 +339,56 @@ void LyricsTest::storeSlot()
     const LyricsText fromStore = Lyrics::load(bare, store);
     QCOMPARE(fromStore.source, LyricsText::Store);
     QCOMPARE(fromStore.plain, QStringList{QStringLiteral("store plain")});
+}
+
+void LyricsTest::storePutAndDel()
+{
+    const QString timedTag = flac(QStringLiteral("timedtag.flac"));
+    QVERIFY(xiphLyrics(timedTag, "LYRICS", {QStringLiteral("[00:03.00]tag")}));
+    QCOMPARE(Lyrics::storePut(timedTag, QByteArrayLiteral("store plain\n")), Lyrics::Put::Ok);
+    QVERIFY(Lyrics::storeFile(timedTag).startsWith(Lyrics::storeRoot() + QLatin1Char('/')));
+    QVERIFY(QFileInfo::exists(Lyrics::storeFile(timedTag)));
+    QCOMPARE(Lyrics::load(timedTag, Lyrics::storeFile(timedTag)).source, LyricsText::Tag);
+
+    const QString audio = flac(QStringLiteral("put.flac"));
+    QCOMPARE(Lyrics::storePut(audio, QByteArrayLiteral("  \n\n")), Lyrics::Put::Empty);
+    QCOMPARE(Lyrics::storePut(audio, QByteArrayLiteral("[00:01.00]one\n")), Lyrics::Put::Ok);
+    QCOMPARE(Lyrics::storePut(audio, QByteArrayLiteral("plain over synced\n")), Lyrics::Put::Synced);
+    QCOMPARE(linesOf(Lyrics::load(audio, Lyrics::storeFile(audio))), QStringLiteral("1000 one"));
+    QCOMPARE(Lyrics::storePut(audio, QByteArrayLiteral("[00:02.00]two\n")), Lyrics::Put::Ok);
+    QCOMPARE(linesOf(Lyrics::load(audio, Lyrics::storeFile(audio))), QStringLiteral("2000 two"));
+
+    Lyrics lyrics;
+    lyrics.setTracks(audio, QString());
+    QTRY_VERIFY_WITH_TIMEOUT(!lyrics.pending(), loadTimeoutMs);
+    QCOMPARE(lyrics.current().source, LyricsText::Store);
+    QVERIFY(Lyrics::storeDel(audio));
+    QVERIFY(!QFileInfo::exists(Lyrics::storeFile(audio)));
+    QVERIFY(Lyrics::storeDel(audio));
+    lyrics.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(lyrics.current().empty(), loadTimeoutMs);
+    lyrics.waitForDone();
+
+    {
+        QFile old(Lyrics::storeFile(timedTag));
+        QVERIFY(old.open(QIODevice::ReadWrite));
+        QVERIFY(old.setFileTime(QDateTime::currentDateTimeUtc().addSecs(-60), QFileDevice::FileModificationTime));
+    }
+    QCOMPARE(Lyrics::storePut(audio, QByteArrayLiteral("[00:02.00]two\n")), Lyrics::Put::Ok);
+    const QString third = flac(QStringLiteral("third.flac"));
+    QCOMPARE(Lyrics::storePut(third, QByteArrayLiteral("[00:03.00]three\n")), Lyrics::Put::Ok);
+    Lyrics::storeTrim(third, QFileInfo(Lyrics::storeFile(audio)).size() + QFileInfo(Lyrics::storeFile(third)).size());
+    QVERIFY(!QFileInfo::exists(Lyrics::storeFile(timedTag)));
+    QVERIFY(QFileInfo::exists(Lyrics::storeFile(audio)));
+    QVERIFY(QFileInfo::exists(Lyrics::storeFile(third)));
+    Lyrics::storeTrim(third, 0);
+    QVERIFY(!QFileInfo::exists(Lyrics::storeFile(audio)));
+    QVERIFY(QFileInfo::exists(Lyrics::storeFile(third)));
+
+    const QString wide = QString(4095, QLatin1Char('a')) + QChar(0x3042);
+    const QByteArray cut = Lyrics::cutLine(wide);
+    QCOMPARE(cut.size(), 4095);
+    QCOMPARE(Lyrics::cutLine(QStringLiteral("short")), QByteArrayLiteral("short"));
 }
 
 void LyricsTest::tracks()

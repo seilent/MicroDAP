@@ -482,6 +482,7 @@ int main(int argc, char *argv[])
         link->setStatus(&status);
         link->setVolume(routedVolume);
         link->setSources({&library, &artists, &albums, &songs, &playlists, linkFolders.get(), &favorites});
+        link->setLyrics(&lyrics);
         linkProfile = std::make_unique<microdap::LinkProfile>(QDBusConnection::systemBus());
         QObject::connect(linkProfile.get(), &microdap::LinkProfile::connection, link.get(), &microdap::LinkServer::open);
         QObject::connect(linkProfile.get(), &microdap::LinkProfile::ended, link.get(), &microdap::LinkServer::end);

@@ -69,6 +69,15 @@ public:
     static LyricsText load(const LyricsTrack &track, const QString &storeFile = {});
     static LyricsText span(const LyricsText &text, qint64 beginMs, qint64 endMs);
     static int lineAt(const QList<LyricLine> &lines, qint64 ms);
+    static constexpr qsizetype storeCap = 16 * 1024 * 1024;
+    static constexpr qsizetype lineMax = 4096;
+    enum class Put { Ok, Empty, Synced, Failed };
+    static QString storeRoot();
+    static QString storeFile(const QString &audio);
+    static Put storePut(const QString &audio, const QByteArray &text);
+    static void storeTrim(const QString &keep, qsizetype cap = storeCap);
+    static bool storeDel(const QString &audio);
+    static QByteArray cutLine(const QString &text);
 
     bool pending() const;
     QVariantList lines() const;

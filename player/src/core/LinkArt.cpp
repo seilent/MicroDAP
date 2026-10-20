@@ -27,13 +27,18 @@ std::array<quint32, 256> crcTable()
 
 }
 
-quint32 linkCrc32(const QByteArray &data)
+quint32 linkCrc32(const char *data, qsizetype size, quint32 seed)
 {
     static const std::array<quint32, 256> table = crcTable();
-    quint32 c = 0xffffffffu;
-    for (char b : data)
-        c = table[(c ^ quint8(b)) & 0xff] ^ (c >> 8);
-    return c ^ 0xffffffffu;
+    quint32 c = ~seed;
+    for (qsizetype i = 0; i < size; ++i)
+        c = table[(c ^ quint8(data[i])) & 0xff] ^ (c >> 8);
+    return ~c;
+}
+
+quint32 linkCrc32(const QByteArray &data, quint32 seed)
+{
+    return linkCrc32(data.constData(), data.size(), seed);
 }
 
 bool linkEncodeArt(const QString &path, int px, LinkJpeg &out)

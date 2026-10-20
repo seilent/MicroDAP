@@ -1,6 +1,7 @@
 #include "FakeBluezModel.h"
 #include "HubModels.h"
 #include "Library.h"
+#include "Lyrics.h"
 #include "LinkProfile.h"
 #include "LinkServer.h"
 #include "Models.h"
@@ -20,6 +21,7 @@
 #include <QDBusUnixFileDescriptor>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QImage>
 #include <QTemporaryDir>
 #include <QSignalSpy>
@@ -28,6 +30,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -489,6 +492,7 @@ private slots:
     void trackArt();
     void artGetCoalescedAndCapped();
     void artEncode();
+    void lyricsLink();
     void schemaAfterHello();
     void setKeptAndRefused();
     void draftRefused();
@@ -520,6 +524,7 @@ void LinkTest::helloReply()
     QCOMPARE(b.u("backdropH"), 960u);
     QCOMPARE(b.u("features"), uint64_t(1) << proto::feature::settings | uint64_t(1) << proto::feature::library
                                   | uint64_t(1) << proto::feature::queue | uint64_t(1) << proto::feature::art
+                                  | uint64_t(1) << proto::feature::lyrics | uint64_t(1) << proto::feature::lyricsGet
                                   | uint64_t(1) << proto::feature::stateClock);
     QCOMPARE(b.u("minor"), uint64_t(proto::minor));
     QVERIFY(find(frames, proto::msg::STATE));
@@ -1451,6 +1456,120 @@ void LinkTest::artEncode()
     QVERIFY(!linkEncodeArt(dir.filePath(QStringLiteral("missing.png")), 256, jpeg));
     QVERIFY(!linkEncodeArt(QString(), 256, jpeg));
     QCOMPARE(linkCrc32(QByteArrayLiteral("123456789")), 0xcbf43926u);
+}
+
+fd::LinkWriter lrcPut(qint64 track, const QByteArray &text, std::optional<quint32> lib, std::optional<quint32> crc)
+{
+    fd::LinkWriter w;
+    w.u64(proto::tag::LRC_PUT::track, uint64_t(track));
+    if (lib)
+        w.u32(proto::tag::LRC_PUT::libRev, *lib);
+    w.bytes(proto::tag::LRC_PUT::text, text.constData(), size_t(text.size()));
+    if (crc)
+        w.u32(proto::tag::LRC_PUT::crc, *crc);
+    return w;
+}
+
+void LinkTest::lyricsLink()
+{
+    LibRig rig;
+    Lyrics lyrics;
+    rig.server.setLyrics(&lyrics);
+    QVERIFY(rig.scan());
+    rig.connect();
+    const qint64 two = rig.id(QStringLiteral("Two"));
+    const QByteArray timed = QByteArrayLiteral("[00:01.00]first\n[00:02.50]second\n");
+    const quint32 lib = rig.server.libRev();
+    std::vector<fd::LinkFrame> frames = rig.ask(proto::msg::LRC_PUT, lrcPut(two, timed, std::nullopt, linkCrc32(timed)));
+    QCOMPARE(errorCode(frames, proto::msg::LRC_PUT), uint64_t(proto::err::badValue));
+    frames = rig.ask(proto::msg::LRC_PUT, lrcPut(two, timed, lib, linkCrc32(timed) + 1));
+    QCOMPARE(errorCode(frames, proto::msg::LRC_PUT), uint64_t(proto::err::crc));
+    frames = rig.ask(proto::msg::LRC_PUT, lrcPut(two, timed, lib + 1, linkCrc32(timed)));
+    QCOMPARE(errorCode(frames, proto::msg::LRC_PUT), uint64_t(proto::err::staleRev));
+    const QByteArray big(proto::lrcMaxBytes + 1, 'x');
+    frames = rig.ask(proto::msg::LRC_PUT, lrcPut(two, big, lib, linkCrc32(big)));
+    QCOMPARE(errorCode(frames, proto::msg::LRC_PUT), uint64_t(proto::err::tooBig));
+    frames = rig.ask(proto::msg::LRC_PUT, lrcPut(two, timed, lib, linkCrc32(timed)));
+    QVERIFY(okReply(frames, proto::msg::LRC_PUT));
+    QCOMPARE(errorCode(frames, proto::msg::LRC_PUT), 0u);
+    const QByteArray plain = QByteArrayLiteral("plain words\n");
+    frames = rig.ask(proto::msg::LRC_PUT, lrcPut(two, plain, lib, linkCrc32(plain)));
+    QCOMPARE(errorCode(frames, proto::msg::LRC_PUT), uint64_t(proto::err::refused));
+
+    fd::LinkWriter get;
+    get.u64(proto::tag::LYR_GET::track, uint64_t(two));
+    rig.phone.send(proto::msg::LYR_GET, get);
+    rig.server.poll();
+    frames = rig.phone.frames();
+    const fd::LinkFrame *reply = awaitReply(rig, frames, proto::msg::LYR_GET);
+    QVERIFY(reply && !(reply->flags & proto::flagError));
+    fd::LinkBody b = body(*reply);
+    QCOMPARE(b.u("kind"), uint64_t(proto::val::LYRICS_KIND::synced));
+    QCOMPARE(b.u("total"), 2u);
+    QCOMPARE(b.all("line").size(), size_t(2));
+    const quint32 crc = quint32(b.u("crc"));
+    fd::LinkWriter again;
+    again.u64(proto::tag::LYR_GET::track, uint64_t(two)).u32(proto::tag::LYR_GET::have, crc);
+    rig.phone.send(proto::msg::LYR_GET, again);
+    rig.server.poll();
+    frames = rig.phone.frames();
+    reply = awaitReply(rig, frames, proto::msg::LYR_GET);
+    QVERIFY(reply);
+    QCOMPARE(body(*reply).all("line").size(), size_t(0));
+    QCOMPARE(body(*reply).u("crc"), uint64_t(crc));
+
+    fd::LinkWriter none;
+    none.u64(proto::tag::LYR_GET::track, uint64_t(rig.id(QStringLiteral("Three"))));
+    rig.phone.send(proto::msg::LYR_GET, none);
+    rig.server.poll();
+    frames = rig.phone.frames();
+    QVERIFY(awaitReply(rig, frames, proto::msg::LYR_GET));
+    QCOMPARE(errorCode(frames, proto::msg::LYR_GET), uint64_t(proto::err::notFound));
+    rig.phone.send(proto::msg::LYR_GET, get);
+    rig.phone.send(proto::msg::LYR_GET, get);
+    rig.server.poll();
+    std::vector<fd::LinkFrame> twice;
+    QElapsedTimer timer;
+    timer.start();
+    while (twice.size() < 2 && timer.elapsed() < waitMs) {
+        for (const fd::LinkFrame &f : rig.phone.frames()) {
+            if (f.type == proto::msg::LYR_GET && (f.flags & proto::flagReply))
+                twice.push_back(f);
+        }
+        QTest::qWait(10);
+        rig.server.poll();
+    }
+    QCOMPARE(twice.size(), size_t(2));
+    for (const fd::LinkFrame &f : twice) {
+        QVERIFY(!(f.flags & proto::flagError));
+        QCOMPARE(body(f).u("crc"), uint64_t(crc));
+    }
+    fd::LinkWriter gone;
+    gone.u64(proto::tag::LYR_GET::track, 999999);
+    QCOMPARE(errorCode(rig.ask(proto::msg::LYR_GET, gone), proto::msg::LYR_GET), uint64_t(proto::err::staleRev));
+
+    QCOMPARE(rig.player.playIds({two}, QStringLiteral("play")), 1);
+    const QueueEntry e = rig.player.queue()->entry(rig.player.queue()->currentIndex());
+    lyrics.setTracks(e.path, QString());
+    QTRY_VERIFY_WITH_TIMEOUT(!lyrics.pending(), waitMs);
+    rig.server.poll();
+    frames = rig.phone.frames();
+    const fd::LinkFrame *state = nullptr;
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type == proto::msg::STATE)
+            state = &f;
+    }
+    QVERIFY(state);
+    QCOMPARE(body(*state).u("lyrics"), 1u);
+    QCOMPARE(body(*state).u("lyricsPlain"), 0u);
+    QCOMPARE(body(*state).u("lyricsCrc"), uint64_t(crc));
+
+    fd::LinkWriter del;
+    del.u64(proto::tag::LRC_DEL::track, uint64_t(two));
+    QVERIFY(okReply(rig.ask(proto::msg::LRC_DEL, del), proto::msg::LRC_DEL));
+    QVERIFY(!QFileInfo::exists(Lyrics::storeFile(e.path)));
+    QTRY_VERIFY_WITH_TIMEOUT(lyrics.current().empty() && !lyrics.pending(), waitMs);
+    lyrics.waitForDone();
 }
 
 void LinkTest::profileRegisters()

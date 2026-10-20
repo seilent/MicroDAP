@@ -4,6 +4,8 @@
 #include "Favorites.h"
 #include "HubModels.h"
 #include "Library.h"
+#include "Cue.h"
+#include "Lyrics.h"
 #include "Player.h"
 #include "Queue.h"
 #include "Settings.h"
@@ -56,7 +58,8 @@ bool LinkSig::same(const LinkSig &o) const
     return track == o.track && title == o.title && source == o.source && output == o.output && repeat == o.repeat
            && volume == o.volume && cap == o.cap && step == o.step && battery == o.battery && favorite == o.favorite
            && playing == o.playing && held == o.held && shuffle == o.shuffle && charging == o.charging
-           && queueRev == o.queueRev && slot == o.slot && slotCount == o.slotCount;
+           && queueRev == o.queueRev && slot == o.slot && slotCount == o.slotCount && lyrics == o.lyrics
+           && lyricsCrc == o.lyricsCrc;
 }
 
 LinkTime LinkServer::now()
@@ -70,7 +73,8 @@ LinkTime LinkServer::now()
 quint64 LinkServer::features()
 {
     return 1ull << proto::feature::settings | 1ull << proto::feature::library | 1ull << proto::feature::queue
-           | 1ull << proto::feature::art | 1ull << proto::feature::stateClock;
+           | 1ull << proto::feature::art | 1ull << proto::feature::lyrics | 1ull << proto::feature::lyricsGet
+           | 1ull << proto::feature::stateClock;
 }
 
 quint32 LinkServer::randomRev()
@@ -219,6 +223,41 @@ void LinkServer::setSources(const LinkSources &sources)
     }
     if (FolderModel *folders = sources.folders)
         connect(folders, &FolderModel::rootsChanged, this, [this] { bumpLib(true); });
+}
+
+void LinkServer::setLyrics(Lyrics *lyrics)
+{
+    m_lyrics = lyrics;
+    if (!lyrics)
+        return;
+    connect(lyrics, &Lyrics::changed, this, [this] {
+        if (!m_peers.empty())
+            m_soon.start();
+    });
+}
+
+quint32 LinkServer::lyricsCrc(const LyricsText &text)
+{
+    const bool synced = text.timed();
+    const char kind = synced ? 0 : 1;
+    quint32 crc = linkCrc32(&kind, 1);
+    auto line = [&crc](const QString &t) {
+        const QByteArray bytes = Lyrics::cutLine(t);
+        crc = linkCrc32(bytes, crc);
+        crc = linkCrc32("\n", 1, crc);
+    };
+    if (synced) {
+        for (const LyricLine &l : text.lines) {
+            const quint32 ms = quint32(l.ms);
+            const char le[4] = {char(ms & 0xff), char((ms >> 8) & 0xff), char((ms >> 16) & 0xff), char((ms >> 24) & 0xff)};
+            crc = linkCrc32(le, 4, crc);
+            line(l.text);
+        }
+    } else {
+        for (const QString &t : text.plain)
+            line(t);
+    }
+    return crc;
 }
 
 void LinkServer::bumpLib(bool snap)
@@ -554,6 +593,12 @@ LinkSig LinkServer::sig(qint64) const
         s.title = e.title;
         if (m_favorites && e.id > 0)
             s.favorite = m_favorites->contains(e.id) ? 1 : 0;
+        if (m_lyrics && !m_lyrics->pending()) {
+            const LyricsText text = m_lyrics->current();
+            s.lyrics = text.timed() ? 1 : text.plain.isEmpty() ? 0 : 2;
+            if (s.lyrics > 0)
+                s.lyricsCrc = lyricsCrc(text);
+        }
     }
     s.held = m_player->playPending();
     s.playing = m_player->status() == Player::Playing || s.held;
@@ -606,6 +651,10 @@ void LinkServer::writeState(fd::LinkWriter &w, const LinkTime &at, const LinkSig
             w.str(t::album, utf8(queue->entry(queue->currentIndex()).album));
     }
     w.u32(t::sleepLeftS, 0);
+    if (s.lyrics >= 0)
+        w.flag(t::lyrics, s.lyrics == 1).flag(t::lyricsPlain, s.lyrics == 2);
+    if (s.lyrics > 0)
+        w.u32(t::lyricsCrc, s.lyricsCrc);
     if (s.favorite >= 0)
         w.flag(t::favorite, s.favorite != 0);
 }
@@ -684,6 +733,10 @@ void LinkServer::command(fd::LinkCommand &c, int64_t now)
     }
     if (c.type == m::ART_GET)
         return artGet(*p, c, now);
+    if (c.type == m::LRC_PUT || c.type == m::LRC_DEL)
+        return lrcCommand(*p, c, now);
+    if (c.type == m::LYR_GET)
+        return lyrGet(*p, c, now);
     if (library(*p, c, now))
         return;
     if (c.type != m::TRANSPORT && c.type != m::VOLUME)
@@ -1330,6 +1383,204 @@ void LinkServer::artDone(quint32 job, bool ok, const LinkJpeg &jpeg)
             artReply(*p, q.c, q.offset, q.hasHave, q.have, now);
     }
     m_soon.start();
+}
+
+void LinkServer::lrcCommand(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    namespace m = proto::msg;
+    const bool put = c.type == m::LRC_PUT;
+    const fd::LinkField *text = c.body.get("text");
+    Library *lib = m_player->library();
+    QList<QueueEntry> entries;
+    uint8_t code = 0;
+    if (p.refused)
+        code = proto::err::refused;
+    else if (!c.body.has("track")
+             || (put && (!text || (!c.body.has("libRev") && !c.body.has("snapRev")) || !c.body.has("crc"))))
+        code = proto::err::badValue;
+    else if (put && text->s.size() > size_t(proto::lrcMaxBytes))
+        code = proto::err::tooBig;
+    else if (const uint8_t e = put ? revCode(c.body, false, true) : 0)
+        code = e;
+    else if (put && linkCrc32(text->s.data(), qsizetype(text->s.size())) != quint32(c.body.u("crc")))
+        code = proto::err::crc;
+    else if (!lib || !lib->isOpen())
+        code = proto::err::noLibrary;
+    else if ((entries = lib->queueEntries({qint64(c.body.u("track"))})).isEmpty())
+        code = proto::err::staleRev;
+    else if (put && entries.constFirst().cueIndex > 0)
+        code = proto::err::badValue;
+    if (!code && entries.constFirst().cueIndex == 0) {
+        const QString audio = entries.constFirst().path;
+        if (put) {
+            switch (Lyrics::storePut(audio, QByteArray::fromStdString(text->s))) {
+            case Lyrics::Put::Ok:
+                trimLyrics(audio);
+                break;
+            case Lyrics::Put::Empty:
+                code = proto::err::badValue;
+                break;
+            case Lyrics::Put::Synced:
+                code = proto::err::refused;
+                break;
+            case Lyrics::Put::Failed:
+                code = proto::err::noSpace;
+                break;
+            }
+        } else if (!Lyrics::storeDel(audio)) {
+            code = proto::err::readOnly;
+        }
+        if (!code && m_lyrics)
+            m_lyrics->refresh();
+    }
+    if (code)
+        p.s->fail(c, code, fd::link_err_text(code), now);
+    else
+        p.s->reply(c, fd::LinkWriter(), now);
+}
+
+void LinkServer::lyrReply(Peer &p, const fd::LinkCommand &c, const LyricsText &text, quint32 offset, bool hasHave,
+                          quint32 have, qint64 now)
+{
+    namespace t = proto::tag::LYR_GET_reply;
+    namespace l = proto::tag::LyrLine;
+    const bool synced = text.timed();
+    const quint32 total = quint32(synced ? text.lines.size() : text.plain.size());
+    if (!total) {
+        p.s->fail(c, proto::err::notFound, fd::link_err_text(proto::err::notFound), now);
+        return;
+    }
+    const quint32 crc = lyricsCrc(text);
+    if (offset > 0 && hasHave && have != crc)
+        offset = 0;
+    if (offset > total) {
+        p.s->fail(c, proto::err::badValue, fd::link_err_text(proto::err::badValue), now);
+        return;
+    }
+    const bool head = offset == 0 && hasHave && have == crc;
+    fd::LinkWriter w;
+    if (offset == 0)
+        w.u32(t::crc, crc)
+            .u8(t::kind, synced ? proto::val::LYRICS_KIND::synced : proto::val::LYRICS_KIND::plain)
+            .u32(t::total, total);
+    const size_t fill = size_t(proto::maxPayload) * proto::pageFillPct / 100;
+    size_t used = w.size() + 2 * proto::tlvHeaderBytes + 5;
+    std::vector<fd::LinkWriter> recs;
+    while (!head && offset + recs.size() < total) {
+        const qsizetype i = qsizetype(offset + recs.size());
+        fd::LinkWriter r;
+        if (synced)
+            r.u32(l::ms, quint32(text.lines.at(i).ms));
+        const QByteArray line = Lyrics::cutLine(synced ? text.lines.at(i).text : text.plain.at(i));
+        r.str(l::text, std::string_view(line.constData(), size_t(line.size())));
+        const size_t n = proto::tlvHeaderBytes + r.size();
+        if (!recs.empty() && used + n > fill)
+            break;
+        used += n;
+        recs.push_back(std::move(r));
+    }
+    w.u32(t::offset, offset).flag(t::more, offset + recs.size() < total && !head);
+    for (const fd::LinkWriter &r : recs)
+        w.rec(t::line, r);
+    p.s->reply(c, w, now);
+}
+
+void LinkServer::lyrGet(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    Library *lib = m_player->library();
+    QList<QueueEntry> entries;
+    uint8_t code = 0;
+    if (p.refused)
+        code = proto::err::refused;
+    else if (!c.body.has("track"))
+        code = proto::err::badValue;
+    else if (!lib || !lib->isOpen())
+        code = proto::err::noLibrary;
+    else if ((entries = lib->queueEntries({qint64(c.body.u("track"))})).isEmpty())
+        code = proto::err::staleRev;
+    if (code) {
+        p.s->fail(c, code, fd::link_err_text(code), now);
+        return;
+    }
+    const qint64 track = qint64(c.body.u("track"));
+    const quint32 offset = quint32(std::min<uint64_t>(c.body.u("offset"), UINT32_MAX));
+    const bool hasHave = c.body.has("have");
+    const quint32 have = quint32(c.body.u("have"));
+    const Queue *queue = m_player->queue();
+    if (m_lyrics && !m_lyrics->pending() && queue->currentIndex() >= 0 && queue->entry(queue->currentIndex()).id == track) {
+        lyrReply(p, c, m_lyrics->current(), offset, hasHave, have, now);
+        return;
+    }
+    const auto same = std::find_if(m_lyrPending.cbegin(), m_lyrPending.cend(),
+                                   [track](const ArtPending &o) { return o.track == track; });
+    if (m_lyrPending.size() >= linkWaitMax || (same == m_lyrPending.cend() && jobs(m_lyrPending) >= linkJobMax)) {
+        p.s->fail(c, proto::err::busy, fd::link_err_text(proto::err::busy), now);
+        return;
+    }
+    ArtPending q;
+    q.job = same != m_lyrPending.cend() ? same->job : ++m_artJob;
+    q.gen = p.gen;
+    q.c.type = c.type;
+    q.c.flags = c.flags;
+    q.c.seq = c.seq;
+    q.offset = offset;
+    q.have = have;
+    q.hasHave = hasHave;
+    q.track = track;
+    const bool started = same != m_lyrPending.cend();
+    m_lyrPending.push_back(q);
+    c.deferred = true;
+    if (started)
+        return;
+    const QueueEntry e = entries.constFirst();
+    const LyricsTrack lt{e.path, cueFrameMs(e.startFrame), e.endFrame ? cueFrameMs(e.endFrame) : 0, e.cueIndex > 0};
+    const quint32 job = q.job;
+    QPointer<LinkServer> self(this);
+    m_pool.start([self, job, lt] {
+        const LyricsText text = Lyrics::load(lt, lt.cue ? QString() : Lyrics::storeFile(lt.path));
+        QMetaObject::invokeMethod(
+            self.data(), [self, job, text] {
+                if (self)
+                    self->lyrDone(job, text);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void LinkServer::trimLyrics(const QString &keep)
+{
+    if (m_trimQueued)
+        return;
+    m_trimQueued = true;
+    QPointer<LinkServer> self(this);
+    m_pool.start([self, keep] {
+        Lyrics::storeTrim(keep);
+        QMetaObject::invokeMethod(
+            self.data(), [self] {
+                if (self)
+                    self->m_trimQueued = false;
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void LinkServer::lyrDone(quint32 job, const LyricsText &text)
+{
+    const qint64 now = m_clock().boot;
+    bool any = false;
+    for (auto it = m_lyrPending.begin(); it != m_lyrPending.end();) {
+        if (it->job != job) {
+            ++it;
+            continue;
+        }
+        const ArtPending q = *it;
+        it = m_lyrPending.erase(it);
+        any = true;
+        if (Peer *p = peer(q.gen))
+            lyrReply(*p, q.c, text, q.offset, q.hasHave, q.have, now);
+    }
+    if (any)
+        m_soon.start();
 }
 
 }

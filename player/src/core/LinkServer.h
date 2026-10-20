@@ -25,6 +25,8 @@ namespace microdap {
 class BluezModel;
 class Favorites;
 class Library;
+class Lyrics;
+struct LyricsText;
 class Player;
 class Settings;
 class SinkVolume;
@@ -48,6 +50,8 @@ struct LinkSig
     int step = 0;
     int battery = -1;
     int favorite = -1;
+    int lyrics = -1;
+    quint32 lyricsCrc = 0;
     bool playing = false;
     bool held = false;
     bool shuffle = false;
@@ -84,6 +88,8 @@ public:
     void setClock(Clock clock);
     void setPairWindowMs(int ms);
     void setSources(const LinkSources &sources);
+    void setLyrics(Lyrics *lyrics);
+    static quint32 lyricsCrc(const LyricsText &text);
 
     fd::LinkHello hello() const;
     bool connected() const;
@@ -160,6 +166,12 @@ private:
     void artGet(Peer &p, fd::LinkCommand &c, qint64 now);
     void artReply(Peer &p, const fd::LinkCommand &c, quint32 offset, bool hasHave, quint32 have, qint64 now);
     void artDone(quint32 job, bool ok, const LinkJpeg &jpeg);
+    void lrcCommand(Peer &p, fd::LinkCommand &c, qint64 now);
+    void lyrGet(Peer &p, fd::LinkCommand &c, qint64 now);
+    void lyrReply(Peer &p, const fd::LinkCommand &c, const LyricsText &text, quint32 offset, bool hasHave, quint32 have,
+                  qint64 now);
+    void lyrDone(quint32 job, const LyricsText &text);
+    void trimLyrics(const QString &keep);
     Peer *peer(quint32 gen) const;
     bool phone() const;
     int cap() const;
@@ -173,6 +185,7 @@ private:
     QPointer<StatusModel> m_status;
     QPointer<SinkVolume> m_volume;
     QPointer<Favorites> m_favorites;
+    QPointer<Lyrics> m_lyrics;
     QString m_confirmName;
     LinkSources m_sources;
     struct ArtCache
@@ -196,9 +209,11 @@ private:
         quint32 rev = 0;
     };
     ArtCache m_art;
+    std::vector<ArtPending> m_lyrPending;
     std::vector<ArtPending> m_artPending;
     quint32 m_artJob = 0;
     QThreadPool m_pool;
+    bool m_trimQueued = false;
     static qsizetype jobs(const std::vector<ArtPending> &pending);
     Clock m_clock;
     std::vector<std::unique_ptr<Peer>> m_peers;
