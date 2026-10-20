@@ -2,6 +2,7 @@
 #include "DacEq.h"
 #include "Eq.h"
 #include "FakeUsbIo.h"
+#include "LinkEq.h"
 #include "OutputFakes.h"
 #include "Settings.h"
 
@@ -371,6 +372,7 @@ private slots:
     void effectiveUnsupported();
     void updateGetsPresetFirst();
     void coalescing();
+    void linkSetReachesFrames();
     void abandonWithinOneTransaction();
     void slotReleased();
     void releasingThenTake();
@@ -621,6 +623,27 @@ void DacEqTest::coalescing()
     QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
     QVERIFY(rig.idle());
     QCOMPARE(rig.outs(from), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 15 00ffdd03e8008d00")}));
+}
+
+void DacEqTest::linkSetReachesFrames()
+{
+    Rig rig;
+    QVERIFY(rig.ready);
+    QVERIFY(rig.takeOn());
+    const std::size_t from = rig.mark();
+    fd::LinkWriter ints;
+    LinkEq::profileWire(testProfile(-5.0), ints);
+    fd::LinkWriter w;
+    w.str(fd::proto::tag::EQ_SET::slot, "usb").rec(fd::proto::tag::EQ_SET::ints, ints);
+    fd::LinkFrame frame;
+    frame.type = fd::proto::msg::EQ_SET;
+    frame.body = w.data();
+    fd::LinkBody body;
+    QCOMPARE(int(fd::link_decode_frame(frame, body)), int(fd::LinkFault::None));
+    QCOMPARE(LinkEq::set(*rig.eq, usb, body), uint8_t(0));
+    QTRY_COMPARE_WITH_TIMEOUT(rig.dac->status(), QStringLiteral("on"), waitMs);
+    QVERIFY(rig.idle());
+    QCOMPARE(rig.outs(from), (QStringList{QStringLiteral("get 16"), QStringLiteral("set 15 00ffce03e8008d00")}));
 }
 
 void DacEqTest::abandonWithinOneTransaction()

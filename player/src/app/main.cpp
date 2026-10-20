@@ -486,6 +486,7 @@ int main(int argc, char *argv[])
         link->setSources({&library, &artists, &albums, &songs, &playlists, linkFolders.get(), &favorites});
         link->setLyrics(&lyrics);
         link->setArtists(&artistPhotos);
+        link->setEq(eqControl.get());
         QObject::connect(&library, &microdap::Library::scanned, link.get(),
                          [server = link.get()](int, int, int, bool ok) {
                              if (ok)

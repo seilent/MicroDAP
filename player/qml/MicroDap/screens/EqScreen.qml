@@ -755,6 +755,19 @@ Page {
             page.revision++
         }
 
+        function onRemoteEdit() {
+            page.cancelEdit()
+            if (sheet.shown)
+                sheet.close()
+            if (deleteDialog.shown)
+                deleteDialog.close()
+            d.deleteOutput = ""
+            if (d.kbTarget !== "" && page.keyboard !== null)
+                page.keyboard.dismiss()
+            d.kbTarget = ""
+            d.renameOutput = ""
+        }
+
         function onImportsChanged() {
             const list = page.eq.imports
             if (list !== undefined && list !== null && list.length > 0)

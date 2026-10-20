@@ -2,11 +2,13 @@
 
 #include "BluezModel.h"
 #include "LinkArt.h"
+#include "LinkEq.h"
 #include "LinkLibrary.h"
 #include "LinkProto.h"
 #include "LinkSettings.h"
 
 #include <QDeadlineTimer>
+#include <QHash>
 #include <QObject>
 #include <QPointer>
 #include <QThreadPool>
@@ -61,6 +63,7 @@ struct LinkSig
     quint32 slot = 0;
     quint32 slotCount = 0;
     qint64 position = 0;
+    QString eqSlot;
 
     bool same(const LinkSig &o) const;
 };
@@ -75,7 +78,7 @@ public:
     using Clock = std::function<LinkTime()>;
 
     static LinkTime now();
-    static quint64 features();
+    quint64 features() const;
     static quint32 randomRev();
     static QString address(const QString &device);
 
@@ -91,6 +94,7 @@ public:
     void setSources(const LinkSources &sources);
     void setLyrics(Lyrics *lyrics);
     void setArtists(ArtistStore *store);
+    void setEq(EqControl *eq);
     void prune();
     Q_INVOKABLE bool canAsk(const QString &what) const;
     Q_INVOKABLE bool artBlock(bool wrongArtist, const QString &name, const QString &mbid, quint32 crc);
@@ -136,6 +140,7 @@ private:
         bool settingsSent = false;
         quint32 schema = 0;
         quint32 settings = 0;
+        QHash<QString, QByteArray> eq;
     };
 
     struct Pivot
@@ -145,7 +150,7 @@ private:
     };
 
     LinkSig sig(qint64 mono) const;
-    void writeState(fd::LinkWriter &w, const LinkTime &at, const LinkSig &s) const;
+    void writeState(fd::LinkWriter &w, const LinkTime &at, const LinkSig &s, const Peer &p) const;
     void state(Peer &p, qint64 now);
     void tick(Peer &p, qint64 now);
     void watch(Peer &p);
@@ -189,6 +194,10 @@ private:
     int cap() const;
     void setPairWindow(bool on);
     void closeWindow(bool stop);
+    bool eqPeer(const Peer &p) const;
+    void pushEq(Peer &p, const QString &slot, qint64 now);
+    QString eqSlotOf(const Peer &p, const fd::LinkBody &body, bool &missing) const;
+    void eqCommand(Peer &p, fd::LinkCommand &c, qint64 now);
     bool companionWindow() const;
 
     Player *m_player;
@@ -246,6 +255,11 @@ private:
     qint64 m_sentAt = -1;
     quint32 m_sentRev = 0;
     std::vector<Pivot> m_schema;
+    std::vector<Pivot> m_schemaConfirm;
+    QPointer<EqControl> m_eq;
+    QHash<QString, LinkEqPush> m_eqPush;
+    QHash<QString, QByteArray> m_eqSig;
+    bool m_eqFresh = false;
     QByteArray m_schemaSig;
     QString m_settingsText;
     quint32 m_schemaRev;

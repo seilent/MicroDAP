@@ -81,6 +81,12 @@ Row &draft(Row &r, const char *reason)
     return r;
 }
 
+Row &raises(Row &r)
+{
+    r.raises = true;
+    return r;
+}
+
 Row &bounded(Row &r)
 {
     r.bounded = true;
@@ -111,32 +117,33 @@ QList<Row> build()
 
     Row output = choice("output", "output", "output", "output", words({"auto", "speaker", "headphones", "usb"}));
     draft(output, "switches the route; a browse would play on each output; can raise the level");
-    out.push_back(output);
+    out.push_back(raises(output));
 
     Row hpGain = choice("output", "hpGain", "headphone gain", "hpGain", words({"low", "normal", "high"}));
-    readOnly(bounded(draft(hpGain, "raises the level, applies live")), "usbActive");
+    readOnly(raises(bounded(draft(hpGain, "raises the level, applies live"))), "usbActive");
     out.push_back(hpGain);
 
     Row hpAmp = choice("output", "hpAmp", "headphone amp", "hpAmp", words({"lohifi", "ulp", "hifi"}));
-    readOnly(bounded(draft(hpAmp, "raises the level; each change runs the microos-audio suspend apply cycle")), "usbActive");
+    readOnly(raises(bounded(draft(hpAmp, "raises the level; each change runs the microos-audio suspend apply cycle"))),
+             "usbActive");
     out.push_back(hpAmp);
 
     Row spkGain = steps("output", "spkGain", "speaker digital gain", "spkGain", numbers({84, 90, 96, 99, 102, 105, 108}));
-    bounded(draft(spkGain, "raises the level, same apply cycle"));
+    raises(bounded(draft(spkGain, "raises the level, same apply cycle")));
     out.push_back(spkGain);
 
     out.push_back(steps("output", "volumeStep", "volume step", "volumeStep", numbers({2, 5, 10})));
 
     Row maxVolume = steps("output", "maxVolume", "max volume", "maxVolume",
                           numbers({50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100}));
-    out.push_back(bounded(draft(maxVolume, "raises the cap; a lower cap lowers the level at once")));
+    out.push_back(raises(bounded(draft(maxVolume, "raises the cap; a lower cap lowers the level at once"))));
 
     Row powerOnVolume = steps("output", "powerOnVolume", "power on volume", "powerOnVolume",
                               numbers({0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100}));
-    out.push_back(bounded(draft(powerOnVolume, "sets the level at the next boot")));
+    out.push_back(raises(bounded(draft(powerOnVolume, "sets the level at the next boot"))));
 
     Row balance = range("output", "balance", "balance", "edit", "balance", -20, 20, 1);
-    out.push_back(readOnly(bounded(balance), "slot"));
+    out.push_back(readOnly(raises(bounded(balance)), "slot"));
 
     Row codec = choice("output", "codec", "bluetooth codec", "btCodec", words({"auto", "aptx", "aac", "ldac", "sbc"}));
     out.push_back(draft(codec, "profile switch"));
@@ -149,7 +156,7 @@ QList<Row> build()
     out.push_back(readOnly(draft(rate, "chain reconfigure"), "rate"));
 
     Row replaygain = choice("output", "replaygain", "replaygain", "replaygain", words({"off", "track", "album"}));
-    out.push_back(readOnly(draft(replaygain, "off plays louder than track or album"), "bitPerfect"));
+    out.push_back(readOnly(raises(draft(replaygain, "off plays louder than track or album")), "bitPerfect"));
 
     Row crossfade = steps("output", "crossfade", "crossfade", "crossfadeMs", numbers({0, 1000, 2000, 3000, 5000}));
     link(crossfade, "crossfade");
@@ -158,7 +165,7 @@ QList<Row> build()
     out.push_back(action("output", "eq", "eq", "eq"));
 
     Row crossfeed = choice("output", "crossfeed", "crossfeed", "crossfeed", words({"off", "default", "chuMoy", "janMeier"}));
-    out.push_back(readOnly(draft(crossfeed, "off plays louder than the other values"), "crossfeed"));
+    out.push_back(readOnly(raises(draft(crossfeed, "off plays louder than the other values")), "crossfeed"));
     out.push_back(choice("output", "playThrough", "play through", "playThrough", words({"off", "folders", "albums"})));
     out.push_back(choice("output", "resume", "resume", "resume", words({"off", "track", "position"})));
     out.push_back(toggle("output", "autoNowPlaying", "auto now playing", "autoNowPlaying"));

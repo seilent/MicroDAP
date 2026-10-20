@@ -1,4 +1,5 @@
 #include "ArtistStore.h"
+#include "Eq.h"
 #include "FakeBluezModel.h"
 #include "HubModels.h"
 #include "Library.h"
@@ -478,6 +479,17 @@ private slots:
     void boundPhoneRefused();
     void pairWindowRebinds();
     void pairingCommitBinds();
+    void eqHelloAndPages();
+    void eqOldApp();
+    void eqSet();
+    void eqSetGraphic();
+    void eqPreset();
+    void eqSetDuringPendingWrite();
+    void eqRemoteCancelsFirst();
+    void eqPresetReplaceReloads();
+    void eqPresetManyProfiles();
+    void eqPresetCap();
+    void schemaConfirmPerPeer();
     void pairWindowRebindsAtHello();
     void pairWindowDeadline();
     void pairWindowRefusesUnknown();
@@ -538,7 +550,8 @@ void LinkTest::helloReply()
                                   | uint64_t(1) << proto::feature::lyrics | uint64_t(1) << proto::feature::lyricsGet
                                   | uint64_t(1) << proto::feature::image | uint64_t(1) << proto::feature::imgOrigin
                                   | uint64_t(1) << proto::feature::artBlock | uint64_t(1) << proto::feature::artPick
-                                  | uint64_t(1) << proto::feature::stateClock);
+                                  | uint64_t(1) << proto::feature::stateClock
+                 | uint64_t(1) << proto::feature::rowConfirm);
     QCOMPARE(b.u("minor"), uint64_t(proto::minor));
     QVERIFY(find(frames, proto::msg::STATE));
     QVERIFY(rig.server.connected());
@@ -768,6 +781,644 @@ void LinkTest::pairWindowCodeOutlivesDeadline()
     QCOMPARE(bound.count(), 1);
     QCOMPARE(rig.settings.companionPhone(), QStringLiteral("11:22:33:44:55:66"));
     QVERIFY(!rig.server.pairWindow());
+}
+
+
+constexpr uint64_t eqApp = 1ull << proto::feature::eqSlots | 1ull << proto::feature::eqPass
+                           | 1ull << proto::feature::outputKinds | 1ull << proto::feature::rowConfirm;
+
+bool writeText(const QString &path, const QByteArray &text)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(text) == text.size();
+}
+
+struct EqRig
+{
+    QTemporaryDir dir;
+    Rig rig;
+    std::unique_ptr<EqControl> eq;
+
+    explicit EqRig(int cards = 0, int presets = 0)
+    {
+        qputenv("MICRODAP_EQ_DIR", dir.path().toUtf8());
+        for (int i = 0; i < cards; ++i)
+            writeText(dir.filePath(QStringLiteral("eq/Card Headphone Model %1 ParametricEQ.txt").arg(i)),
+                      "Preamp: -1 dB\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 1.41\n");
+        for (int i = 0; i < presets; ++i)
+            writeText(dir.filePath(QStringLiteral("eq/presets/Saved %1.txt").arg(i)),
+                      "Preamp: -1 dB\nFilter 1: ON PK Fc 1000 Hz Gain 1 dB Q 1.41\n");
+        writeText(dir.filePath(QStringLiteral("eq/presets/Rock.txt")),
+                  "Preamp: -2 dB\nFilter 1: ON PK Fc 1000 Hz Gain 3 dB Q 1.41\n");
+        writeText(dir.filePath(QStringLiteral("eq/HD600 ParametricEQ.txt")),
+                  "Preamp: -3 dB\nFilter 1: ON LSC Fc 105 Hz Gain 4 dB Q 0.71\nFilter 2: ON LPQ Fc 18000 Hz Gain 0 dB Q 0.71\n");
+        writeText(dir.filePath(QStringLiteral("eq/graphic/Bass.ini")), "[General]\ngain1=6\ngain2=4\n");
+        eq = std::make_unique<EqControl>(&rig.settings);
+        eq->setActiveOutput(QStringLiteral("speaker"));
+        rig.server.setEq(eq.get());
+    }
+
+    std::vector<fd::LinkFrame> drain(Phone &phone)
+    {
+        std::vector<fd::LinkFrame> out;
+        for (int i = 0; i < 20; ++i) {
+            rig.server.poll();
+            const std::vector<fd::LinkFrame> more = phone.frames();
+            out.insert(out.end(), more.begin(), more.end());
+        }
+        return out;
+    }
+
+    std::vector<fd::LinkFrame> connect(Phone &phone, uint64_t features = eqApp)
+    {
+        rig.server.open(phone.dev, phoneA);
+        phone.dev = -1;
+        phone.hello(uint16_t(proto::major), features);
+        return drain(phone);
+    }
+
+    std::vector<fd::LinkFrame> ask(Phone &phone, uint8_t type, const fd::LinkWriter &w)
+    {
+        phone.send(type, w);
+        return drain(phone);
+    }
+};
+
+struct EqPage
+{
+    int pages = 0;
+    QString key;
+    QString graphicKey;
+    uint64_t mode = 255;
+    QStringList names;
+    QStringList presets;
+    QStringList graphicNames;
+    int bands = -1;
+    int preamp10 = 0;
+    QList<int> gains;
+    bool output = false;
+    bool lastMore = true;
+};
+
+EqPage eqPage(const std::vector<fd::LinkFrame> &frames, const QString &slot)
+{
+    EqPage out;
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type != proto::msg::EQ || (f.flags & proto::flagReply))
+            continue;
+        const fd::LinkBody b = body(f);
+        if (QString::fromStdString(b.str("slot")) != slot)
+            continue;
+        if (out.pages == 0 || b.u("offset") == 0) {
+            if (b.u("offset") == 0 && !b.has("graphicOffset"))
+                out = EqPage();
+        }
+        ++out.pages;
+        out.output = out.output || b.has("output");
+        out.key = QString::fromStdString(b.str("key"));
+        out.graphicKey = QString::fromStdString(b.str("graphicKey"));
+        out.mode = b.u("mode", 255);
+        out.lastMore = b.u("more") != 0;
+        for (const fd::LinkField *n : b.all("profile")) {
+            const fd::LinkBody nb{n->rec};
+            out.names.append(QString::fromStdString(nb.str("key")));
+            if (nb.u("preset"))
+                out.presets.append(QString::fromStdString(nb.str("key")));
+        }
+        for (const fd::LinkField *n : b.all("graphicName"))
+            out.graphicNames.append(QString::fromStdString(fd::LinkBody{n->rec}.str("key")));
+        if (const fd::LinkField *ints = b.get("ints"))
+            out.bands = int(fd::LinkBody{ints->rec}.all("band").size());
+        out.gains.clear();
+        if (const fd::LinkField *g = b.get("gains")) {
+            const fd::LinkBody gb{g->rec};
+            out.preamp10 = int(gb.i("preamp10"));
+            for (const fd::LinkField *band : gb.all("band"))
+                out.gains.append(int(fd::LinkBody{band->rec}.i("gain10")));
+        }
+    }
+    return out;
+}
+
+fd::LinkWriter bandsWriter(std::initializer_list<std::array<int, 4>> bands, int preamp10 = 0)
+{
+    fd::LinkWriter p;
+    p.i32(proto::tag::Profile::preamp10, preamp10);
+    for (const std::array<int, 4> &b : bands) {
+        fd::LinkWriter r;
+        r.u8(proto::tag::Band::type, uint8_t(b[0])).i32(proto::tag::Band::grid, b[1]).i32(proto::tag::Band::gain10, b[2])
+            .i32(proto::tag::Band::q100, b[3]);
+        p.rec(proto::tag::Profile::band, r);
+    }
+    return p;
+}
+
+fd::LinkWriter gainsWriter(std::initializer_list<int> gains, int count = 10)
+{
+    fd::LinkWriter g;
+    int i = 0;
+    for (int v : gains) {
+        if (i >= count)
+            break;
+        fd::LinkWriter b;
+        b.i32(proto::tag::GraphicBand::grid, 4 + 6 * i).i32(proto::tag::GraphicBand::gain10, v);
+        g.rec(proto::tag::Graphic::band, b);
+        ++i;
+    }
+    for (; i < count; ++i) {
+        fd::LinkWriter b;
+        b.i32(proto::tag::GraphicBand::grid, 4 + 6 * i).i32(proto::tag::GraphicBand::gain10, 0);
+        g.rec(proto::tag::Graphic::band, b);
+    }
+    return g;
+}
+
+uint64_t eqCode(const std::vector<fd::LinkFrame> &frames, uint8_t type)
+{
+    for (const fd::LinkFrame &f : frames) {
+        if (f.type == type && (f.flags & proto::flagReply))
+            return (f.flags & proto::flagError) ? body(f).u("code") : 0;
+    }
+    return 255;
+}
+
+void LinkTest::eqHelloAndPages()
+{
+    EqRig r;
+    Phone phone;
+    const std::vector<fd::LinkFrame> frames = r.connect(phone);
+    const fd::LinkFrame *reply = find(frames, proto::msg::HELLO, true);
+    QVERIFY(reply);
+    const fd::LinkBody h = body(*reply);
+    namespace f = proto::feature;
+    const uint64_t features = h.u("features");
+    for (int bit : {f::eq, f::eqPresets, f::eqSlots, f::eqGraphic, f::eqPass, f::outputKinds, f::rowConfirm})
+        QVERIFY2((features >> bit) & 1, qPrintable(QString::number(bit)));
+    QStringList slotList;
+    QStringList labels;
+    for (const fd::LinkField *e : h.all("eqSlot")) {
+        const fd::LinkBody eb{e->rec};
+        slotList.append(QString::fromStdString(eb.str("key")));
+        labels.append(QString::fromStdString(eb.str("label")));
+    }
+    QCOMPARE(slotList, QStringList({QStringLiteral("headphones"), QStringLiteral("usb"), QStringLiteral("speaker"),
+                                 QStringLiteral("bt")}));
+    QCOMPARE(labels.at(0), QStringLiteral("HEADPHONES"));
+    QList<uint64_t> types;
+    for (const fd::LinkField *t : h.all("bandTypes"))
+        types.append(t->u);
+    QCOMPARE(types, QList<uint64_t>({0, 1, 2, 3, 4, 5, 6, 7}));
+    for (const QString &slot : std::as_const(slotList)) {
+        const EqPage page = eqPage(frames, slot);
+        QVERIFY2(page.pages >= 2, qPrintable(slot));
+        QVERIFY(!page.output);
+        QCOMPARE(page.key, QStringLiteral("off"));
+        QCOMPARE(page.mode, uint64_t(proto::val::EQ_MODE::parametric));
+        QCOMPARE(page.graphicKey, QStringLiteral("flat"));
+        QCOMPARE(page.names, QStringList({QStringLiteral("off"), QStringLiteral("ROCK"), QStringLiteral("HD600"),
+                                          QStringLiteral("custom")}));
+        QCOMPARE(page.presets, QStringList{QStringLiteral("ROCK")});
+        QCOMPARE(page.graphicNames, QStringList({QStringLiteral("off"), QStringLiteral("flat"), QStringLiteral("BASS"),
+                                                 QStringLiteral("custom")}));
+        QCOMPARE(page.gains, QList<int>({0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+        QVERIFY(!page.lastMore);
+    }
+    const fd::LinkFrame *state = find(frames, proto::msg::STATE);
+    QVERIFY(state);
+    QCOMPARE(QString::fromStdString(body(*state).str("eqSlot")), QStringLiteral("speaker"));
+    QCOMPARE(body(*state).u("output"), uint64_t(proto::val::OUTPUT::speaker));
+    r.eq->setActiveOutput(QStringLiteral("usb"));
+    const std::vector<fd::LinkFrame> after = r.drain(phone);
+    const fd::LinkFrame *next = find(after, proto::msg::STATE);
+    QVERIFY(next);
+    QCOMPARE(QString::fromStdString(body(*next).str("eqSlot")), QStringLiteral("usb"));
+    QCOMPARE(body(*next).u("output"), uint64_t(proto::val::OUTPUT::usbDac));
+    QCOMPARE(count(r.drain(phone), proto::msg::EQ), 0);
+}
+
+void LinkTest::eqOldApp()
+{
+    EqRig r;
+    Phone phone;
+    const std::vector<fd::LinkFrame> frames = r.connect(phone, 0);
+    QCOMPARE(count(frames, proto::msg::EQ), 0);
+    const fd::LinkFrame *state = find(frames, proto::msg::STATE);
+    QVERIFY(state);
+    QVERIFY(!body(*state).has("eqSlot"));
+    QCOMPARE(body(*state).u("output"), uint64_t(proto::val::OUTPUT::wired));
+    fd::LinkWriter set;
+    set.u8(proto::tag::EQ_SET::output, 0).str(proto::tag::EQ_SET::key, "off");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, set), proto::msg::EQ_SET), uint64_t(proto::err::unknown));
+    Phone confirm;
+    std::vector<fd::LinkFrame> schema = r.connect(confirm, 1ull << proto::feature::eqSlots);
+    QCOMPARE(count(schema, proto::msg::EQ), 0);
+}
+
+void LinkTest::eqSet()
+{
+    EqRig r;
+    Phone phone;
+    r.connect(phone);
+    namespace t = proto::tag::EQ_SET;
+    fd::LinkWriter set;
+    set.str(t::slot, "headphones").rec(t::ints, bandsWriter({{1, 34, 37, 141}, {5, -1, 0, 71}}, -40));
+    std::vector<fd::LinkFrame> frames = r.ask(phone, proto::msg::EQ_SET, set);
+    QCOMPARE(eqCode(frames, proto::msg::EQ_SET), 0u);
+    size_t pushAt = frames.size();
+    size_t replyAt = frames.size();
+    for (size_t i = 0; i < frames.size(); ++i) {
+        if (frames[i].type == proto::msg::EQ && pushAt == frames.size())
+            pushAt = i;
+        if (frames[i].type == proto::msg::EQ_SET && (frames[i].flags & proto::flagReply))
+            replyAt = i;
+    }
+    QVERIFY(pushAt < replyAt);
+    EqPage page = eqPage(frames, QStringLiteral("headphones"));
+    QCOMPARE(page.key, QStringLiteral("custom"));
+    QCOMPARE(page.bands, 2);
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("custom"));
+    const EqProfile p = r.eq->profile(QStringLiteral("headphones"));
+    QCOMPARE(p.count, 2);
+    QCOMPARE(p.preamp, -4.0);
+    QCOMPARE(p.bands[0].gain, 3.7);
+    QCOMPARE(p.bands[1].type, EqBand::LowPass);
+    QCOMPARE(p.bands[1].gain, 0.0);
+
+    fd::LinkWriter pick;
+    pick.str(t::slot, "headphones").str(t::key, "ROCK");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, pick), proto::msg::EQ_SET), 0u);
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("ROCK"));
+    QCOMPARE(r.eq->profile(QStringLiteral("headphones")).bands[0].gain, 3.0);
+
+    auto refused = [&](fd::LinkWriter w) { return eqCode(r.ask(phone, proto::msg::EQ_SET, w), proto::msg::EQ_SET); };
+    fd::LinkWriter unknownKey;
+    unknownKey.str(t::slot, "headphones").str(t::key, "NOPE");
+    QCOMPARE(refused(unknownKey), uint64_t(proto::err::badValue));
+    fd::LinkWriter withOutput;
+    withOutput.u8(t::output, 0).str(t::key, "off");
+    QCOMPARE(refused(withOutput), uint64_t(proto::err::badValue));
+    fd::LinkWriter unlisted;
+    unlisted.str(t::slot, "aux").str(t::key, "off");
+    QCOMPARE(refused(unlisted), uint64_t(proto::err::badValue));
+    fd::LinkWriter none;
+    none.str(t::slot, "usb");
+    QCOMPARE(refused(none), uint64_t(proto::err::badValue));
+    fd::LinkWriter empty;
+    empty.str(t::slot, "usb").rec(t::ints, bandsWriter({}));
+    QCOMPARE(refused(empty), uint64_t(proto::err::badValue));
+    fd::LinkWriter loud;
+    loud.str(t::slot, "usb").rec(t::ints, bandsWriter({{1, 34, 130, 141}}));
+    QCOMPARE(refused(loud), uint64_t(proto::err::badValue));
+    fd::LinkWriter badType;
+    badType.str(t::slot, "usb").rec(t::ints, bandsWriter({{9, 34, 10, 141}}));
+    QCOMPARE(refused(badType), uint64_t(proto::err::badValue));
+    QCOMPARE(r.eq->key(QStringLiteral("usb")), QStringLiteral("off"));
+    fd::LinkWriter off;
+    off.str(t::slot, "headphones").str(t::key, "off");
+    QCOMPARE(refused(off), 0u);
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("off"));
+}
+
+void LinkTest::eqSetGraphic()
+{
+    EqRig r;
+    Phone phone;
+    r.connect(phone);
+    namespace t = proto::tag::EQ_SET;
+    namespace md = proto::val::EQ_MODE;
+    auto code = [&](fd::LinkWriter w) { return eqCode(r.ask(phone, proto::msg::EQ_SET, w), proto::msg::EQ_SET); };
+    const QString out = QStringLiteral("speaker");
+    fd::LinkWriter bass;
+    bass.str(t::slot, "speaker").str(t::graphicKey, "BASS");
+    std::vector<fd::LinkFrame> frames = r.ask(phone, proto::msg::EQ_SET, bass);
+    QCOMPARE(eqCode(frames, proto::msg::EQ_SET), 0u);
+    QVERIFY(r.eq->graphic(out));
+    EqPage page = eqPage(frames, out);
+    QCOMPARE(page.mode, uint64_t(md::graphic));
+    QCOMPARE(page.graphicKey, QStringLiteral("BASS"));
+    QCOMPARE(page.gains.mid(0, 2), QList<int>({60, 40}));
+    QVERIFY(page.preamp10 < 0);
+
+    fd::LinkWriter gains;
+    gains.str(t::slot, "speaker").u8(t::mode, md::graphic).rec(t::gains, gainsWriter({-30, 25}));
+    QCOMPARE(code(gains), 0u);
+    QCOMPARE(r.eq->target(out).preset, QStringLiteral("custom"));
+    QCOMPARE(r.eq->customGraphic(out)[1], 2.5);
+    fd::LinkWriter shortList;
+    shortList.str(t::slot, "speaker").rec(t::gains, gainsWriter({}, 9));
+    QCOMPARE(code(shortList), uint64_t(proto::err::badValue));
+    fd::LinkWriter tooLoud;
+    tooLoud.str(t::slot, "speaker").rec(t::gains, gainsWriter({130}));
+    QCOMPARE(code(tooLoud), uint64_t(proto::err::badValue));
+    fd::LinkWriter unlisted;
+    unlisted.str(t::slot, "speaker").str(t::graphicKey, "TREBLE");
+    QCOMPARE(code(unlisted), uint64_t(proto::err::badValue));
+    fd::LinkWriter mixed;
+    mixed.str(t::slot, "speaker").str(t::key, "ROCK").str(t::graphicKey, "flat");
+    QCOMPARE(code(mixed), uint64_t(proto::err::badValue));
+    fd::LinkWriter mixedInts;
+    mixedInts.str(t::slot, "speaker").rec(t::ints, bandsWriter({{1, 34, 10, 100}})).rec(t::gains, gainsWriter({}));
+    QCOMPARE(code(mixedInts), uint64_t(proto::err::badValue));
+
+    fd::LinkWriter keepGraphic;
+    keepGraphic.str(t::slot, "speaker").u8(t::mode, md::graphic).str(t::key, "ROCK");
+    QCOMPARE(code(keepGraphic), 0u);
+    QVERIFY(r.eq->graphic(out));
+    QCOMPARE(r.eq->target(out).key, QStringLiteral("ROCK"));
+    QCOMPARE(r.eq->target(out).preset, QStringLiteral("custom"));
+
+    fd::LinkWriter toParametric;
+    toParametric.str(t::slot, "speaker").rec(t::ints, bandsWriter({{1, 34, 20, 100}}));
+    frames = r.ask(phone, proto::msg::EQ_SET, toParametric);
+    QCOMPARE(eqCode(frames, proto::msg::EQ_SET), 0u);
+    QVERIFY(!r.eq->graphic(out));
+    page = eqPage(frames, out);
+    QCOMPARE(page.mode, uint64_t(md::parametric));
+    QCOMPARE(page.key, QStringLiteral("custom"));
+    QCOMPARE(r.eq->profile(out).bands[0].gain, 2.0);
+
+    fd::LinkWriter keepParametric;
+    keepParametric.str(t::slot, "speaker").u8(t::mode, md::parametric).str(t::graphicKey, "flat");
+    QCOMPARE(code(keepParametric), 0u);
+    QVERIFY(!r.eq->graphic(out));
+    QCOMPARE(r.eq->target(out).preset, QStringLiteral("flat"));
+
+    fd::LinkWriter both;
+    both.str(t::slot, "speaker").str(t::graphicKey, "BASS").rec(t::gains, gainsWriter({10}));
+    QCOMPARE(code(both), 0u);
+    QVERIFY(r.eq->graphic(out));
+    QCOMPARE(r.eq->target(out).preset, QStringLiteral("BASS"));
+    QCOMPARE(r.eq->customGraphic(out)[0], 1.0);
+    fd::LinkWriter offKey;
+    offKey.str(t::slot, "speaker").str(t::graphicKey, "off");
+    frames = r.ask(phone, proto::msg::EQ_SET, offKey);
+    QCOMPARE(eqCode(frames, proto::msg::EQ_SET), 0u);
+    QVERIFY(eqPage(frames, out).gains.isEmpty());
+    QCOMPARE(r.eq->key(out), QStringLiteral("off"));
+}
+
+void LinkTest::eqPreset()
+{
+    EqRig r;
+    Phone phone;
+    r.connect(phone);
+    namespace t = proto::tag::EQ_PRESET;
+    namespace op = proto::val::EQ_PRESET_OP;
+    namespace md = proto::val::EQ_MODE;
+    auto ask = [&](fd::LinkWriter w, QString *key = nullptr) {
+        const std::vector<fd::LinkFrame> frames = r.ask(phone, proto::msg::EQ_PRESET, w);
+        for (const fd::LinkFrame &f : frames) {
+            if (f.type == proto::msg::EQ_PRESET && (f.flags & proto::flagReply) && key)
+                *key = QString::fromStdString(body(f).str("key"));
+        }
+        return eqCode(frames, proto::msg::EQ_PRESET);
+    };
+    QString key;
+    const EqProfile before = r.eq->customProfile(QStringLiteral("headphones"));
+    fd::LinkWriter save;
+    save.u8(t::op, op::save).str(t::slot, "headphones").str(t::name, "Warm").rec(t::ints, bandsWriter({{2, 16, 30, 71}}));
+    {
+        const std::vector<fd::LinkFrame> frames = r.ask(phone, proto::msg::EQ_PRESET, save);
+        QCOMPARE(eqCode(frames, proto::msg::EQ_PRESET), 0u);
+        QStringList pushed;
+        bool replied = false;
+        for (const fd::LinkFrame &f : frames) {
+            if (f.type == proto::msg::EQ_PRESET && (f.flags & proto::flagReply))
+                replied = true;
+            if (f.type == proto::msg::EQ && !replied && !pushed.contains(QString::fromStdString(body(f).str("slot"))))
+                pushed.append(QString::fromStdString(body(f).str("slot")));
+        }
+        QCOMPARE(pushed, LinkEq::slotKeys());
+    }
+    fd::LinkWriter again;
+    again.u8(t::op, op::save).str(t::slot, "headphones").str(t::name, "Warm").rec(t::ints, bandsWriter({{2, 16, 30, 71}}))
+        .flag(t::replace, true);
+    QCOMPARE(ask(again, &key), 0u);
+    QCOMPARE(key, QStringLiteral("WARM"));
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("WARM"));
+    QVERIFY(r.eq->devicePreset(QStringLiteral("WARM"), false));
+    QVERIFY(r.eq->customProfile(QStringLiteral("headphones")) == before);
+    fd::LinkWriter clash;
+    clash.u8(t::op, op::save).str(t::slot, "usb").str(t::name, "warm");
+    QCOMPARE(ask(clash), uint64_t(proto::err::exists));
+    fd::LinkWriter replace;
+    replace.u8(t::op, op::save).str(t::slot, "usb").str(t::name, "warm").flag(t::replace, true);
+    QCOMPARE(ask(replace, &key), 0u);
+    QCOMPARE(key, QStringLiteral("WARM"));
+    QCOMPARE(r.eq->key(QStringLiteral("usb")), QStringLiteral("WARM"));
+    fd::LinkWriter card;
+    card.u8(t::op, op::save).str(t::slot, "usb").str(t::name, "HD600").flag(t::replace, true);
+    QCOMPARE(ask(card), uint64_t(proto::err::exists));
+    fd::LinkWriter badName;
+    badName.u8(t::op, op::save).str(t::slot, "usb").str(t::name, "a/b");
+    QCOMPARE(ask(badName), uint64_t(proto::err::badValue));
+    fd::LinkWriter noSlot;
+    noSlot.u8(t::op, op::save).str(t::name, "Other");
+    QCOMPARE(ask(noSlot), uint64_t(proto::err::badValue));
+
+    fd::LinkWriter rename;
+    rename.u8(t::op, op::rename).str(t::key, "WARM").str(t::name, "Cozy");
+    QCOMPARE(ask(rename, &key), 0u);
+    QCOMPARE(key, QStringLiteral("COZY"));
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("COZY"));
+    QCOMPARE(r.eq->key(QStringLiteral("usb")), QStringLiteral("COZY"));
+    fd::LinkWriter taken;
+    taken.u8(t::op, op::rename).str(t::key, "COZY").str(t::name, "Rock");
+    QCOMPARE(ask(taken), uint64_t(proto::err::exists));
+    fd::LinkWriter cardRename;
+    cardRename.u8(t::op, op::rename).str(t::key, "HD600").str(t::name, "Mine");
+    QCOMPARE(ask(cardRename), uint64_t(proto::err::readOnly));
+    fd::LinkWriter offRemove;
+    offRemove.u8(t::op, op::remove).str(t::key, "off");
+    QCOMPARE(ask(offRemove), uint64_t(proto::err::readOnly));
+    fd::LinkWriter missing;
+    missing.u8(t::op, op::remove).str(t::key, "GONE");
+    QCOMPARE(ask(missing), uint64_t(proto::err::notFound));
+    fd::LinkWriter remove;
+    remove.u8(t::op, op::remove).str(t::key, "COZY");
+    QCOMPARE(ask(remove), 0u);
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("off"));
+    QCOMPARE(r.eq->key(QStringLiteral("usb")), QStringLiteral("off"));
+
+    fd::LinkWriter graphicSave;
+    graphicSave.u8(t::op, op::save).str(t::slot, "bt").u8(t::mode, md::graphic).str(t::name, "Vocal")
+        .rec(t::gains, gainsWriter({0, 0, 0, 0, 30}));
+    QCOMPARE(ask(graphicSave, &key), 0u);
+    QCOMPARE(key, QStringLiteral("VOCAL"));
+    QVERIFY(r.eq->graphic(QStringLiteral("bt")));
+    QCOMPARE(r.eq->target(QStringLiteral("bt")).preset, QStringLiteral("VOCAL"));
+    QCOMPARE((*r.eq->presetGains(QStringLiteral("bt")))[4], 3.0);
+    fd::LinkWriter intsOnGraphic;
+    intsOnGraphic.u8(t::op, op::save).str(t::slot, "bt").u8(t::mode, md::graphic).rec(t::ints, bandsWriter({{1, 34, 0, 100}}));
+    QCOMPARE(ask(intsOnGraphic), uint64_t(proto::err::badValue));
+    fd::LinkWriter flatRemove;
+    flatRemove.u8(t::op, op::remove).u8(t::mode, md::graphic).str(t::key, "flat");
+    QCOMPARE(ask(flatRemove), uint64_t(proto::err::readOnly));
+    fd::LinkWriter mismatch;
+    mismatch.u8(t::op, op::remove).u8(t::mode, md::graphic).str(t::key, "ROCK");
+    QCOMPARE(ask(mismatch), uint64_t(proto::err::notFound));
+    fd::LinkWriter graphicRemove;
+    graphicRemove.u8(t::op, op::remove).u8(t::mode, md::graphic).str(t::key, "VOCAL");
+    QCOMPARE(ask(graphicRemove), 0u);
+    QCOMPARE(r.eq->key(QStringLiteral("bt")), QStringLiteral("off"));
+}
+
+void LinkTest::eqSetDuringPendingWrite()
+{
+    EqRig r;
+    Phone phone;
+    r.connect(phone);
+    const QString out = QStringLiteral("headphones");
+    r.eq->cycleProfile(out, -1);
+    QCOMPARE(r.eq->key(out), QStringLiteral("custom"));
+    r.eq->stepGain(out, 0, 1, true);
+    namespace t = proto::tag::EQ_SET;
+    fd::LinkWriter set;
+    set.str(t::slot, "headphones").rec(t::ints, bandsWriter({{1, 34, -50, 141}}));
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, set), proto::msg::EQ_SET), 0u);
+    QTest::qWait(EqControl::writeDelayMs + 100);
+    const EqProfile stored = EqFilters::decode(r.rig.settings.value(EqFilters::key(out, QStringLiteral("filters"))).toStringList());
+    QCOMPARE(stored.bands[0].gain, -5.0);
+    QCOMPARE(r.eq->profile(out).bands[0].gain, -5.0);
+}
+
+void LinkTest::eqRemoteCancelsFirst()
+{
+    EqRig r;
+    Phone phone;
+    r.connect(phone);
+    const QString out = QStringLiteral("headphones");
+    namespace t = proto::tag::EQ_SET;
+    fd::LinkWriter rock;
+    rock.str(t::slot, "headphones").str(t::key, "ROCK");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, rock), proto::msg::EQ_SET), 0u);
+    r.eq->cycleProfile(out, 1);
+    QCOMPARE(r.eq->key(out), QStringLiteral("HD600"));
+    QMetaObject::Connection revert = QObject::connect(r.eq.get(), &EqControl::remoteEdit, r.eq.get(),
+                                                      [&r, out] { r.eq->cycleProfile(out, -1); });
+    fd::LinkWriter graphicSide;
+    graphicSide.str(t::slot, "headphones").u8(t::mode, proto::val::EQ_MODE::graphic).str(t::graphicKey, "flat");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, graphicSide), proto::msg::EQ_SET), 0u);
+    QObject::disconnect(revert);
+    QVERIFY(r.eq->graphic(out));
+    QCOMPARE(r.eq->target(out).key, QStringLiteral("ROCK"));
+
+    const QString usb = QStringLiteral("usb");
+    r.eq->cycleProfile(usb, -1);
+    QCOMPARE(r.eq->key(usb), QStringLiteral("custom"));
+    const double original = r.eq->customProfile(usb).bands[0].gain;
+    r.eq->stepGain(usb, 0, 1, true);
+    revert = QObject::connect(r.eq.get(), &EqControl::remoteEdit, r.eq.get(),
+                              [&r, usb, original] { r.eq->setBandValue(usb, 0, QStringLiteral("gain"), original); });
+    fd::LinkWriter save;
+    save.u8(proto::tag::EQ_PRESET::op, proto::val::EQ_PRESET_OP::save).str(proto::tag::EQ_PRESET::slot, "usb")
+        .str(proto::tag::EQ_PRESET::name, "Kept");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_PRESET, save), proto::msg::EQ_PRESET), 0u);
+    QObject::disconnect(revert);
+    const std::optional<EqProfile> kept = EqParser::parseFile(r.dir.filePath(QStringLiteral("eq/presets/Kept.txt")));
+    QVERIFY(kept);
+    QCOMPARE(kept->bands[0].gain, original);
+}
+
+void LinkTest::eqPresetReplaceReloads()
+{
+    EqRig r;
+    Phone phone;
+    r.connect(phone);
+    fd::LinkWriter rock;
+    rock.str(proto::tag::EQ_SET::slot, "usb").str(proto::tag::EQ_SET::key, "ROCK");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, rock), proto::msg::EQ_SET), 0u);
+    QCOMPARE(r.eq->profile(QStringLiteral("usb")).bands[0].gain, 3.0);
+    namespace t = proto::tag::EQ_PRESET;
+    fd::LinkWriter replace;
+    replace.u8(t::op, proto::val::EQ_PRESET_OP::save).str(t::slot, "headphones").str(t::name, "rock")
+        .flag(t::replace, true).rec(t::ints, bandsWriter({{1, 34, -60, 141}}));
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_PRESET, replace), proto::msg::EQ_PRESET), 0u);
+    QCOMPARE(r.eq->key(QStringLiteral("usb")), QStringLiteral("ROCK"));
+    QCOMPARE(r.eq->profile(QStringLiteral("usb")).bands[0].gain, -6.0);
+    QCOMPARE(r.eq->profile(QStringLiteral("headphones")).bands[0].gain, -6.0);
+}
+
+void LinkTest::eqPresetManyProfiles()
+{
+    EqRig r(400);
+    Phone phone;
+    std::vector<fd::LinkFrame> frames = r.connect(phone);
+    fd::LinkWriter save;
+    save.u8(proto::tag::EQ_PRESET::op, proto::val::EQ_PRESET_OP::save).str(proto::tag::EQ_PRESET::slot, "headphones");
+    phone.send(proto::msg::EQ_PRESET, save);
+    QSet<QString> seen;
+    bool replied = false;
+    QElapsedTimer timer;
+    timer.start();
+    while ((seen.size() < 4 || !replied) && timer.elapsed() < waitMs) {
+        r.rig.server.poll();
+        for (const fd::LinkFrame &f : phone.frames()) {
+            if (f.type == proto::msg::EQ_PRESET && (f.flags & proto::flagReply))
+                replied = !(f.flags & proto::flagError);
+            if (f.type == proto::msg::EQ)
+                seen.insert(QString::fromStdString(body(f).str("slot")));
+        }
+        QTest::qWait(10);
+    }
+    QVERIFY(replied);
+    QCOMPARE(seen.size(), 4);
+    QVERIFY(!phone.eof());
+    QCOMPARE(r.rig.server.sessions(), 1);
+}
+
+void LinkTest::eqPresetCap()
+{
+    EqRig r(0, EqControl::presetsMax - 1);
+    Phone phone;
+    r.connect(phone);
+    namespace t = proto::tag::EQ_PRESET;
+    fd::LinkWriter full;
+    full.u8(t::op, proto::val::EQ_PRESET_OP::save).str(t::slot, "headphones").str(t::name, "New");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_PRESET, full), proto::msg::EQ_PRESET), uint64_t(proto::err::noSpace));
+    fd::LinkWriter replace;
+    replace.u8(t::op, proto::val::EQ_PRESET_OP::save).str(t::slot, "headphones").str(t::name, "Saved 3").flag(t::replace, true);
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_PRESET, replace), proto::msg::EQ_PRESET), 0u);
+    QCOMPARE(r.eq->key(QStringLiteral("headphones")), QStringLiteral("SAVED 3"));
+}
+
+void LinkTest::schemaConfirmPerPeer()
+{
+    EqRig r;
+    auto confirmed = [](const std::vector<fd::LinkFrame> &frames) {
+        QStringList out;
+        for (const fd::LinkFrame &f : frames) {
+            if (f.type != proto::msg::SCHEMA)
+                continue;
+            const fd::LinkBody b = body(f);
+            for (const fd::LinkField *row : b.all("row")) {
+                const fd::LinkBody rb{row->rec};
+                for (const fd::LinkField *flag : rb.all("flag"))
+                    if (flag->u == proto::val::ROW_FLAG::confirm)
+                        out.append(QString::fromStdString(rb.str("key")));
+            }
+        }
+        return out;
+    };
+    Phone asks;
+    const QStringList withBit = confirmed(r.connect(asks));
+    QStringList expected;
+    for (const SettingsRows::Row &row : SettingsRows::all()) {
+        if (row.raises)
+            expected.append(row.linkKey);
+    }
+    QCOMPARE(expected, QStringList({QStringLiteral("output"), QStringLiteral("hpGain"), QStringLiteral("hpAmp"),
+                                    QStringLiteral("spkGain"), QStringLiteral("maxVolume"), QStringLiteral("powerOnVolume"),
+                                    QStringLiteral("balance"), QStringLiteral("replaygain"), QStringLiteral("crossfeed")}));
+    for (const QString &key : {QStringLiteral("output"), QStringLiteral("spkGain"), QStringLiteral("maxVolume"),
+                               QStringLiteral("powerOnVolume"), QStringLiteral("replaygain")})
+        QVERIFY2(withBit.contains(key), qPrintable(key));
+    for (const QString &key : {QStringLiteral("orientation"), QStringLiteral("autoRotate"), QStringLiteral("scale"),
+                               QStringLiteral("crossfade"), QStringLiteral("volumeStep"), QStringLiteral("btCodec")})
+        QVERIFY2(!withBit.contains(key), qPrintable(key));
+    Phone plain;
+    QVERIFY(confirmed(r.connect(plain, 0)).isEmpty());
 }
 
 void LinkTest::pairingCommitBinds()

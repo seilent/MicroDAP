@@ -97,6 +97,8 @@ add_library(microdapcore STATIC
     src/core/LinkProto.h
     src/core/LinkServer.cpp
     src/core/LinkServer.h
+    src/core/LinkEq.cpp
+    src/core/LinkEq.h
     src/core/LinkSettings.cpp
     src/core/LinkSettings.h
     src/core/Lyrics.cpp

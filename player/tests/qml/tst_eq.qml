@@ -56,6 +56,7 @@ TestCase {
         readonly property var types: ["off", "peak", "lowshelf", "highshelf", "bandpass", "lowpass", "highpass", "allpass"]
 
         signal profilesChanged()
+        signal remoteEdit()
 
         function flat() {
             const out = []
@@ -925,6 +926,31 @@ TestCase {
         compare(fakeEq.calls.length, 6)
         for (let i = 3; i < 6; i++)
             compare(tc.callAt(i), JSON.stringify(["cycleProfile", "headphones", -1]))
+    }
+
+    function test_remote_edit_cancels() {
+        fakeEq.makeCustom("headphones")
+        const page = open()
+        tc.edit(page, 1)
+        router.dispatch("right", false)
+        compare(page.editing, true)
+        fakeEq.remoteEdit()
+        compare(page.editing, false)
+        page.setFocus(2)
+        verify(router.dispatch("a", false))
+        page.setFocus(page.indexOfKey("deletePreset"))
+        verify(router.dispatch("a", false))
+        compare(page.deleteDialog.shown, true)
+        fakeEq.remoteEdit()
+        page.deleteDialog.complete()
+        compare(page.deleteDialog.shown, false)
+        compare(fakeEq.calls.filter((c) => c[0] === "deletePreset").length, 0)
+        page.setFocus(page.indexOfKey("renamePreset"))
+        verify(router.dispatch("a", false))
+        compare(kb.shown, true)
+        fakeEq.remoteEdit()
+        tryCompare(kb, "shown", false)
+        compare(fakeEq.calls.filter((c) => c[0] === "renamePreset").length, 0)
     }
 
     function test_profile_coarse_inert() {

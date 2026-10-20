@@ -28,6 +28,7 @@ public:
         QString shown;
         bool bounded = false;
         bool draft = false;
+        bool raises = false;
         QString reason;
         QString linkKey;
     };

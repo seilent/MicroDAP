@@ -61,7 +61,7 @@ bool LinkSig::same(const LinkSig &o) const
            && volume == o.volume && cap == o.cap && step == o.step && battery == o.battery && favorite == o.favorite
            && playing == o.playing && held == o.held && shuffle == o.shuffle && charging == o.charging
            && queueRev == o.queueRev && slot == o.slot && slotCount == o.slotCount && lyrics == o.lyrics
-           && lyricsCrc == o.lyricsCrc;
+           && lyricsCrc == o.lyricsCrc && eqSlot == o.eqSlot;
 }
 
 LinkTime LinkServer::now()
@@ -72,12 +72,16 @@ LinkTime LinkServer::now()
     return t;
 }
 
-quint64 LinkServer::features()
+quint64 LinkServer::features() const
 {
-    return 1ull << proto::feature::settings | 1ull << proto::feature::library | 1ull << proto::feature::queue
-           | 1ull << proto::feature::art | 1ull << proto::feature::lyrics | 1ull << proto::feature::lyricsGet
-           | 1ull << proto::feature::image | 1ull << proto::feature::imgOrigin | 1ull << proto::feature::artBlock
-           | 1ull << proto::feature::artPick | 1ull << proto::feature::stateClock;
+    namespace f = proto::feature;
+    quint64 out = 1ull << f::settings | 1ull << f::library | 1ull << f::queue | 1ull << f::art | 1ull << f::lyrics
+                  | 1ull << f::lyricsGet | 1ull << f::image | 1ull << f::imgOrigin | 1ull << f::artBlock
+                  | 1ull << f::artPick | 1ull << f::stateClock | 1ull << f::rowConfirm;
+    if (m_eq)
+        out |= 1ull << f::eq | 1ull << f::eqPresets | 1ull << f::eqSlots | 1ull << f::eqGraphic | 1ull << f::eqPass
+               | 1ull << f::outputKinds;
+    return out;
 }
 
 quint32 LinkServer::randomRev()
@@ -290,6 +294,11 @@ fd::LinkHello LinkServer::hello() const
     h.lib_rev = m_libRev;
     h.settings_rev = m_settingsRev;
     h.snap_rev = m_snapRev;
+    if (m_eq) {
+        for (const QString &slot : LinkEq::slotKeys())
+            h.eq_slots.push_back({utf8(slot), utf8(LinkEq::label(slot))});
+        h.band_types = LinkEq::bandTypes();
+    }
     return h;
 }
 
@@ -572,7 +581,18 @@ LinkSig LinkServer::sig(qint64) const
 {
     LinkSig s;
     s.source = phone() ? proto::val::SOURCE::phone : proto::val::SOURCE::local;
-    s.output = phone() ? proto::val::OUTPUT::phoneReceiver : proto::val::OUTPUT::wired;
+    s.output = proto::val::OUTPUT::wired;
+    if (phone()) {
+        s.output = proto::val::OUTPUT::phoneReceiver;
+    } else if (m_eq) {
+        const QString out = m_eq->activeOutput();
+        s.output = out == QLatin1StringView("speaker") ? proto::val::OUTPUT::speaker
+                   : out == QLatin1StringView("usb")   ? proto::val::OUTPUT::usbDac
+                   : out == QLatin1StringView("bt")    ? proto::val::OUTPUT::btHeadset
+                                                       : proto::val::OUTPUT::wired;
+    }
+    if (m_eq)
+        s.eqSlot = m_eq->activeOutput();
     s.cap = cap();
     s.volume = m_level < 0 ? -1 : std::min(m_level, s.cap);
     s.step = m_settings->volumeStep();
@@ -612,10 +632,15 @@ LinkSig LinkServer::sig(qint64) const
     return s;
 }
 
-void LinkServer::writeState(fd::LinkWriter &w, const LinkTime &at, const LinkSig &s) const
+void LinkServer::writeState(fd::LinkWriter &w, const LinkTime &at, const LinkSig &s, const Peer &p) const
 {
     namespace t = proto::tag::STATE;
-    w.u8(t::source, uint8_t(s.source)).u8(t::output, uint8_t(s.output));
+    namespace o = proto::val::OUTPUT;
+    const bool kinds = p.s->app_bit(proto::feature::outputKinds);
+    const int output = !kinds && (s.output == o::speaker || s.output == o::usbDac) ? int(o::wired) : s.output;
+    w.u8(t::source, uint8_t(s.source)).u8(t::output, uint8_t(output));
+    if (eqPeer(p) && !s.eqSlot.isEmpty())
+        w.str(t::eqSlot, utf8(s.eqSlot));
     if (phone()) {
         w.u64(t::track, 0).str(t::title, utf8(m_bluez->title())).str(t::artist, utf8(m_bluez->artist()));
         if (!m_bluez->artist().isEmpty())
@@ -679,7 +704,7 @@ void LinkServer::state(Peer &p, qint64 now)
     if (!due)
         return;
     fd::LinkWriter w;
-    writeState(w, at, s);
+    writeState(w, at, s, p);
     w.u32(proto::tag::STATE::snapRev, m_snapRev);
     w.u64(proto::tag::STATE::sentMs, uint64_t(m_clock().boot));
     if (!p.s->push(proto::msg::STATE, w, now))
@@ -735,6 +760,8 @@ void LinkServer::command(fd::LinkCommand &c, int64_t now)
         settingsCommand(*p, c, now);
         return;
     }
+    if (c.type == m::EQ_SET || c.type == m::EQ_PRESET)
+        return eqCommand(*p, c, now);
     if (c.type == m::ART_GET)
         return artGet(*p, c, now);
     if (c.type == m::LRC_PUT || c.type == m::LRC_DEL)
@@ -1124,16 +1151,27 @@ uint8_t LinkServer::action(const fd::LinkCommand &c)
 
 void LinkServer::refresh()
 {
+    if (m_eq && !m_eqFresh) {
+        m_eqFresh = true;
+        for (const QString &slot : LinkEq::slotKeys()) {
+            LinkEqPush e = LinkEq::push(*m_eq, slot);
+            m_eqSig.insert(slot, e.sig());
+            m_eqPush.insert(slot, std::move(e));
+        }
+    }
     if (m_settingsFresh)
         return;
     m_settingsFresh = true;
     const LinkSettings link(m_settings, version());
     const QList<LinkSettingRow> rows = link.rows();
     std::vector<Pivot> pivots;
+    std::vector<Pivot> confirm;
     QByteArray sig;
     for (const LinkSettingRow &r : rows) {
-        if (pivots.empty() || pivots.back().name != r.pivot)
+        if (pivots.empty() || pivots.back().name != r.pivot) {
             pivots.push_back({r.pivot, {}});
+            confirm.push_back({r.pivot, {}});
+        }
         namespace t = proto::tag::Row;
         fd::LinkWriter w;
         w.str(t::key, utf8(r.key)).str(t::label, utf8(r.label)).str(t::pivot, utf8(r.pivot)).u8(t::kind, r.kind);
@@ -1150,11 +1188,16 @@ void LinkServer::refresh()
         if (r.boardOnly)
             w.u8(t::flag, proto::val::ROW_FLAG::boardOnly);
         sig.append(r.pivot.toUtf8()).append('\n').append(reinterpret_cast<const char *>(w.data().data()), qsizetype(w.size()));
+        fd::LinkWriter asked = w;
+        if (r.row && r.row->raises && !r.readOnly)
+            asked.u8(t::flag, proto::val::ROW_FLAG::confirm);
+        confirm.back().rows.push_back(std::move(asked));
         pivots.back().rows.push_back(std::move(w));
     }
     if (sig != m_schemaSig) {
         m_schemaSig = sig;
         m_schema = std::move(pivots);
+        m_schemaConfirm = std::move(confirm);
         ++m_schemaRev;
     }
     const QString text = link.text();
@@ -1168,16 +1211,17 @@ void LinkServer::pushSchema(Peer &p, qint64 now)
 {
     namespace t = proto::tag::SCHEMA;
     const size_t cap = size_t(proto::maxPayload) * proto::pageFillPct / 100;
-    for (size_t pi = 0; pi < m_schema.size(); ++pi) {
-        const std::vector<fd::LinkWriter> &rows = m_schema[pi].rows;
-        const std::string name = utf8(m_schema[pi].name);
+    const std::vector<Pivot> &schema = p.s->app_bit(proto::feature::rowConfirm) ? m_schemaConfirm : m_schema;
+    for (size_t pi = 0; pi < schema.size(); ++pi) {
+        const std::vector<fd::LinkWriter> &rows = schema[pi].rows;
+        const std::string name = utf8(schema[pi].name);
         auto page = [&](size_t at, size_t n) {
             fd::LinkWriter w;
             w.str(t::pivot, name).u32(t::offset, uint32_t(at)).u32(t::total, uint32_t(rows.size()));
             w.flag(t::more, at + n < rows.size());
             for (size_t i = at; i < at + n; ++i)
                 w.rec(t::row, rows[i]);
-            w.u32(t::rev, m_schemaRev).u8(t::pivotIndex, uint8_t(pi)).u8(t::pivotCount, uint8_t(m_schema.size()));
+            w.u32(t::rev, m_schemaRev).u8(t::pivotIndex, uint8_t(pi)).u8(t::pivotCount, uint8_t(schema.size()));
             p.s->push(proto::msg::SCHEMA, w, now);
         };
         const size_t fixed = name.size() + 48;
@@ -1219,6 +1263,19 @@ void LinkServer::settings(Peer &p, qint64 now)
     if (!p.settingsSent || p.settings != m_settingsRev) {
         pushSettings(p, now);
         sent = true;
+    }
+    if (eqPeer(p)) {
+        for (const QString &slot : LinkEq::slotKeys()) {
+            if (p.eq.value(slot) == m_eqSig.value(slot) && p.eq.contains(slot))
+                continue;
+            if (p.s->queued() > fd::kLinkQueueBytes / 8) {
+                if (m_nextAt < 0 || now + 50 < m_nextAt)
+                    m_nextAt = now + 50;
+                break;
+            }
+            pushEq(p, slot, now);
+            sent = true;
+        }
     }
     if (sent && !m_ticking && p.s->open())
         tick(p, now);
@@ -1594,6 +1651,141 @@ void LinkServer::lyrDone(quint32 job, const LyricsText &text)
 void LinkServer::setArtists(ArtistStore *store)
 {
     m_artists = store;
+}
+
+void LinkServer::setEq(EqControl *eq)
+{
+    if (m_eq)
+        disconnect(m_eq, nullptr, this, nullptr);
+    m_eq = eq;
+    m_eqFresh = false;
+    if (!eq)
+        return;
+    auto stale = [this] {
+        m_eqFresh = false;
+        if (!m_peers.empty())
+            m_soon.start();
+    };
+    connect(eq, &EqControl::revisionChanged, this, stale);
+    connect(eq, &EqControl::sourcesChanged, this, stale);
+    connect(eq, &EqControl::activeOutputChanged, this, stale);
+}
+
+bool LinkServer::eqPeer(const Peer &p) const
+{
+    return m_eq && p.s->app_bit(proto::feature::eqSlots) && p.s->app_bit(proto::feature::eqPass);
+}
+
+QString LinkServer::eqSlotOf(const Peer &p, const fd::LinkBody &body, bool &missing) const
+{
+    missing = false;
+    if (!eqPeer(p) || body.has("output"))
+        return {};
+    if (!body.has("slot")) {
+        missing = true;
+        return {};
+    }
+    const QString slot = QString::fromStdString(body.str("slot"));
+    return LinkEq::slotKeys().contains(slot) ? slot : QString();
+}
+
+void LinkServer::pushEq(Peer &p, const QString &slot, qint64 now)
+{
+    namespace t = proto::tag::EQ;
+    namespace e = proto::tag::EqName;
+    const LinkEqPush &q = m_eqPush[slot];
+    const size_t cap = size_t(proto::maxPayload) * proto::pageFillPct / 100;
+    const std::string slotKey = utf8(slot);
+    const std::string key = utf8(q.key);
+    const std::string graphicKey = utf8(q.graphicKey);
+    const size_t fixed = key.size() + q.ints.size() + 48 + slotKey.size() + graphicKey.size() + q.gains.size() + 32;
+    auto name = [](fd::LinkWriter &w, uint8_t tag, const LinkEqName &x) {
+        fd::LinkWriter n;
+        n.str(e::key, utf8(x.key)).str(e::name, utf8(x.name));
+        if (x.preset)
+            n.flag(e::preset, true);
+        w.rec(tag, n);
+    };
+    auto head = [&](fd::LinkWriter &w) { w.str(t::slot, slotKey).str(t::key, key); };
+    auto tail = [&](fd::LinkWriter &w, uint32_t offset, bool more) {
+        w.rec(t::ints, q.ints).u32(t::offset, offset).u32(t::total, uint32_t(q.names.size())).flag(t::more, more);
+        w.u8(t::mode, q.graphic ? proto::val::EQ_MODE::graphic : proto::val::EQ_MODE::parametric).str(t::graphicKey, graphicKey);
+        if (q.hasGains)
+            w.rec(t::gains, q.gains);
+    };
+    auto run = [&](const QList<LinkEqName> &names, const std::function<void(qsizetype, qsizetype)> &page) {
+        qsizetype at = 0;
+        size_t used = 0;
+        for (qsizetype i = 0; i < names.size(); ++i) {
+            const size_t sz = 9 + size_t(names[i].key.toUtf8().size() + names[i].name.toUtf8().size()) + (names[i].preset ? 4 : 0);
+            if (i > at && fixed + used + sz > cap) {
+                page(at, i);
+                at = i;
+                used = 0;
+            }
+            used += sz;
+        }
+        page(at, names.size());
+    };
+    run(q.names, [&](qsizetype from, qsizetype to) {
+        fd::LinkWriter w;
+        head(w);
+        for (qsizetype i = from; i < to; ++i)
+            name(w, t::profile, q.names[i]);
+        tail(w, uint32_t(from), true);
+        p.s->push(proto::msg::EQ, w, now);
+    });
+    run(q.graphicNames, [&](qsizetype from, qsizetype to) {
+        fd::LinkWriter w;
+        head(w);
+        tail(w, uint32_t(q.names.size()), to < q.graphicNames.size());
+        for (qsizetype i = from; i < to; ++i)
+            name(w, t::graphicName, q.graphicNames[i]);
+        w.u32(t::graphicOffset, uint32_t(from)).u32(t::graphicTotal, uint32_t(q.graphicNames.size()));
+        p.s->push(proto::msg::EQ, w, now);
+    });
+    p.eq[slot] = m_eqSig.value(slot);
+}
+
+void LinkServer::eqCommand(Peer &p, fd::LinkCommand &c, qint64 now)
+{
+    namespace m = proto::msg;
+    const bool set = c.type == m::EQ_SET;
+    uint8_t code = 0;
+    QString key;
+    bool missing = false;
+    const QString slot = eqSlotOf(p, c.body, missing);
+    if (p.refused) {
+        code = proto::err::refused;
+    } else if (!eqPeer(p)) {
+        code = proto::err::unknown;
+    } else {
+        m_eq->beginRemote();
+        if (slot.isEmpty() && (set || !missing || c.body.u("op", UINT64_MAX) == proto::val::EQ_PRESET_OP::save))
+            code = proto::err::badValue;
+        else
+            code = set ? LinkEq::set(*m_eq, slot, c.body) : LinkEq::preset(*m_eq, slot, c.body, key);
+    }
+    qInfo().noquote() << "microdap link:" << (set ? "EQ_SET" : "EQ_PRESET") << slot << (code ? "refused" : "ok");
+    if (code) {
+        p.s->fail(c, code, fd::link_err_text(code), now);
+        return;
+    }
+    m_eqFresh = false;
+    refresh();
+    if (set) {
+        pushEq(p, slot, now);
+    } else {
+        for (const QString &s : LinkEq::slotKeys()) {
+            if (p.s->queued() > fd::kLinkQueueBytes / 2)
+                break;
+            pushEq(p, s, now);
+        }
+    }
+    fd::LinkWriter w;
+    if (!set && !key.isEmpty())
+        w.str(proto::tag::EQ_PRESET_reply::key, utf8(key));
+    p.s->reply(c, w, now);
 }
 
 void LinkServer::prune()

@@ -131,6 +131,17 @@ struct EqFilters
     static EqProfile decode(const QStringList &items);
 };
 
+struct EqTarget
+{
+    bool graphic = false;
+    QString key = QStringLiteral("off");
+    QString preset = QStringLiteral("flat");
+    std::optional<EqProfile> custom;
+    std::optional<std::array<double, EqProfile::bandCount>> gains;
+};
+
+enum class EqRefusal { None, Name, Exists, Full, NotFound, ReadOnly, Failed };
+
 class EqControl : public QObject
 {
     Q_OBJECT
@@ -232,6 +243,22 @@ public:
     Q_INVOKABLE bool removeBand(const QString &output);
     Q_INVOKABLE void sync();
 
+    EqTarget target(const QString &output) const;
+    void apply(const QString &output, const EqTarget &target);
+    void beginRemote();
+    EqProfile parametric(const QString &output) const;
+    EqProfile customProfile(const QString &output) const;
+    std::array<double, EqProfile::bandCount> customGraphic(const QString &output) const;
+    std::optional<std::array<double, EqProfile::bandCount>> presetGains(const QString &output) const;
+    QStringList profileKeys() const;
+    QStringList graphicKeys() const;
+    bool devicePreset(const QString &key, bool graphicList) const;
+    QStringList presetKeys(bool graphicList) const;
+    EqRefusal presetSave(const QString &output, bool graphicList, const QString &name, const EqProfile &profile,
+                         const std::array<double, EqProfile::bandCount> &gains, bool replace, QString *key);
+    EqRefusal presetRemove(const QString &key, bool graphicList);
+    EqRefusal presetRename(const QString &key, const QString &name, bool replace, bool graphicList, QString *to);
+
 signals:
     void sourcesChanged();
     void activeOutputChanged();
@@ -242,6 +269,7 @@ signals:
     void importsChanged();
     void importingChanged();
     void importNote(const QString &first, const QString &second);
+    void remoteEdit();
 
 private:
     int presetCount(bool graphicList) const;
@@ -249,6 +277,8 @@ private:
                             QStringList *log = nullptr);
     void imported(bool read, EqFitEnd end, const EqProfile &profile);
     std::optional<EqProfile> fileProfile(const QString &path) const;
+    std::optional<std::array<double, EqProfile::bandCount>> gainFile(const QString &path) const;
+    void reload(const QString &key);
     EqProfile restored(const QString &output) const;
     QString pathOf(const QString &key) const;
     QString paramKey(const QString &output) const;
@@ -300,6 +330,7 @@ private:
     mutable QHash<QString, EqProfile> m_custom;
     mutable QHash<QString, EqProfile> m_live;
     mutable QHash<QString, std::optional<EqProfile>> m_files;
+    mutable QHash<QString, std::optional<std::array<double, EqProfile::bandCount>>> m_gainFiles;
     QSet<QString> m_dirty;
     QSet<QString> m_unwritten;
     QTimer m_syncTimer;
