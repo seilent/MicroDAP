@@ -17,6 +17,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace microdap {
@@ -66,6 +67,7 @@ const QString keyQuickplay = QStringLiteral("microdap.quickplay");
 const QString keyCompanion = QStringLiteral("microdap.companion");
 const QString keyCompanionPhone = QStringLiteral("microdap.companion_phone");
 const QString keyArtistPhoto = QStringLiteral("microdap.artist_photo");
+const QString keyBrightness = QStringLiteral("display.brightness");
 
 constexpr Key keys[] = {
     {"audio.output", QMetaType::QString, &Settings::outputChanged},
@@ -104,6 +106,7 @@ constexpr Key keys[] = {
     {"microdap.companion", QMetaType::Bool, &Settings::companionChanged},
     {"microdap.companion_phone", QMetaType::QString, &Settings::companionPhoneChanged},
     {"microdap.artist_photo", QMetaType::Bool, &Settings::artistPhotoChanged},
+    {"display.brightness", QMetaType::UInt, &Settings::brightnessChanged},
 };
 
 const Key *find(const QString &key)
@@ -208,6 +211,7 @@ QVariantMap defaults()
         {keyCompanion, false},
         {keyCompanionPhone, QString()},
         {keyArtistPhoto, true},
+        {keyBrightness, 2442u},
     };
     for (const QString &slot : EqControl::outputs()) {
         out.insert(EqFilters::key(slot, QStringLiteral("on")), false);
@@ -639,6 +643,7 @@ void Settings::listAll()
         return;
     }
     m_available = true;
+    loadBrightnessSteps();
     for (auto it = values.cbegin(); it != values.cend(); ++it)
         take(it.key(), it.value());
     if (m_values.value(keyRoots).toStringList() == oldDefaultRoots())
@@ -1102,6 +1107,95 @@ bool Settings::artistPhoto() const
 void Settings::setArtistPhoto(bool on)
 {
     store(keyArtistPhoto, on);
+}
+
+int Settings::brightness() const
+{
+    return int(m_values.value(keyBrightness).toUInt());
+}
+
+QVariantList Settings::brightnessSteps() const
+{
+    QVariantList out;
+    for (int step : m_brightnessSteps)
+        out.append(step);
+    return out;
+}
+
+int Settings::brightnessStep(int from, int delta) const
+{
+    const QList<int> &steps = m_brightnessSteps;
+    if (steps.isEmpty() || delta == 0)
+        return from;
+    const qsizetype at = steps.indexOf(from);
+    if (at >= 0)
+        return steps.at(std::clamp<qsizetype>(at + delta, 0, steps.size() - 1));
+    if (delta > 0) {
+        for (int step : steps) {
+            if (step > from)
+                return step;
+        }
+        return from;
+    }
+    for (qsizetype i = steps.size() - 1; i >= 0; --i) {
+        if (steps.at(i) < from)
+            return steps.at(i);
+    }
+    return from;
+}
+
+void Settings::previewBrightness(int value)
+{
+    if (!m_client)
+        return;
+    m_client->override(keyBrightness, QVariant::fromValue(uint(value)), [](const MicroSet::Error &error) {
+        if (!error.ok())
+            qWarning().noquote() << "microdap settings: brightness preview refused," << error.name << error.message;
+    });
+}
+
+void Settings::confirmBrightness(int value)
+{
+    if (!m_client)
+        return;
+    m_client->set(keyBrightness, QVariant::fromValue(uint(value)), [this](const MicroSet::Error &error) {
+        if (error.ok())
+            return;
+        qWarning().noquote() << "microdap settings: set" << keyBrightness << "refused," << error.name << error.message;
+        refresh(keyBrightness);
+    });
+    cancelBrightness();
+}
+
+void Settings::cancelBrightness()
+{
+    if (!m_client)
+        return;
+    m_client->clearOverride(keyBrightness, [](const MicroSet::Error &error) {
+        if (!error.ok())
+            qWarning().noquote() << "microdap settings: brightness clear refused," << error.name << error.message;
+    });
+}
+
+void Settings::loadBrightnessSteps()
+{
+    MicroSet::Error error;
+    const QString text = m_client->schema(keyBrightness, &error);
+    if (!error.ok())
+        return;
+    const QJsonObject entry = QJsonDocument::fromJson(text.toUtf8()).object().value(keyBrightness).toObject();
+    const int floor = entry.value(QStringLiteral("floor")).toInt(entry.value(QStringLiteral("min")).toInt(1));
+    QList<int> steps;
+    for (const QJsonValue &value : entry.value(QStringLiteral("ui")).toObject().value(QStringLiteral("steps")).toArray()) {
+        const int step = value.toInt();
+        if (step >= floor && !steps.contains(step))
+            steps.append(step);
+    }
+    std::sort(steps.begin(), steps.end());
+    if (steps == m_brightnessSteps)
+        return;
+    m_brightnessSteps = steps;
+    emit brightnessStepsChanged();
 }
 
 bool Settings::touch() const

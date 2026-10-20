@@ -1,5 +1,6 @@
 #include "Eq.h"
 #include "FakeService.h"
+#include "LinkSettings.h"
 #include "PowerBridge.h"
 #include "Rotation.h"
 #include "Settings.h"
@@ -73,6 +74,7 @@ private slots:
     void rowTable();
     void balanceCrossfeedSlot();
     void volumeKeys();
+    void brightnessRow();
 
 private:
     QString ini(const QString &text);
@@ -193,6 +195,9 @@ void SettingsTest::defaultsWithoutDaemon()
     settings.setSampleRate(QStringLiteral("22050"));
     QCOMPARE(settings.sampleRate(), QStringLiteral("auto"));
     QVERIFY(settings.bootSessions().isEmpty());
+    QCOMPARE(settings.brightness(), 2442);
+    QVERIFY(settings.brightnessSteps().isEmpty());
+    QCOMPARE(settings.brightnessStep(2442, 1), 2442);
     QTest::ignoreMessage(QtWarningMsg, "microdap settings: unknown key \"audio.nope\"");
     settings.setValue(QStringLiteral("audio.nope"), 1);
 }
@@ -796,6 +801,60 @@ void SettingsTest::balanceCrossfeedSlot()
     settings.setOutputSlot(QStringLiteral("hdmi"));
     QCOMPARE(settings.outputSlot(), QString());
     QCOMPARE(settings.balance(), 0);
+}
+
+void SettingsTest::brightnessRow()
+{
+    const QString key = QStringLiteral("display.brightness");
+    MicroSet::Client client(QDBusConnection::sessionBus());
+    Settings settings(&client);
+    QCOMPARE(settings.brightness(), 2442);
+    QVariantList steps;
+    for (int bp = 1000; bp <= 10000; bp += 500)
+        steps.append(bp);
+    QCOMPARE(settings.brightnessSteps(), steps);
+    QCOMPARE(settings.brightnessStep(2442, 1), 2500);
+    QCOMPARE(settings.brightnessStep(2442, -1), 2000);
+    QCOMPARE(settings.brightnessStep(300, 1), 1000);
+    QCOMPARE(settings.brightnessStep(300, -1), 300);
+    QCOMPARE(settings.brightnessStep(5000, 1), 5500);
+    QCOMPARE(settings.brightnessStep(5000, -1), 4500);
+    QCOMPARE(settings.brightnessStep(1000, -1), 1000);
+    QCOMPARE(settings.brightnessStep(10000, 1), 10000);
+    const SettingsRows::Row *row = SettingsRows::find(QStringLiteral("brightness"));
+    QVERIFY(row);
+    QVERIFY(row->bounded);
+    QCOMPARE(row->type, QStringLiteral("steps"));
+    QCOMPARE(row->readOnly, QStringLiteral("brightness"));
+
+    settings.previewBrightness(5000);
+    QTRY_COMPARE_WITH_TIMEOUT(settings.brightness(), 5000, waitMs);
+    QVERIFY(!client.stored().contains(key));
+    settings.cancelBrightness();
+    QTRY_COMPARE_WITH_TIMEOUT(settings.brightness(), 2442, waitMs);
+    QVERIFY(!client.stored().contains(key));
+    QCOMPARE(m_set.calls().filter(key), QStringList({QStringLiteral("Override ") + key,
+                                                     QStringLiteral("ClearOverride ") + key}));
+
+    settings.previewBrightness(6000);
+    QTRY_COMPARE_WITH_TIMEOUT(settings.brightness(), 6000, waitMs);
+    settings.confirmBrightness(6000);
+    QTRY_COMPARE_WITH_TIMEOUT(client.stored().value(key).toUInt(), 6000u, waitMs);
+    QCOMPARE(m_set.calls().filter(key).mid(2), QStringList({QStringLiteral("Override ") + key,
+                                                            QStringLiteral("Set ") + key,
+                                                            QStringLiteral("ClearOverride ") + key}));
+    QCOMPARE(settings.brightness(), 6000);
+
+    m_set.call(QStringLiteral("SetStored"), {key, FakeService::variant(2442u)});
+    QTRY_COMPARE_WITH_TIMEOUT(settings.brightness(), 2442, waitMs);
+    LinkSettings link(&settings, QStringLiteral("test"));
+    QVERIFY(link.text().contains(QStringLiteral("brightness=24\n")));
+    QStringList kept;
+    QStringList refused;
+    QCOMPARE(link.set(QStringLiteral("brightness=56\n"), kept, refused), uint8_t(0));
+    QCOMPARE(kept, QStringList{QStringLiteral("brightness")});
+    QTRY_COMPARE_WITH_TIMEOUT(client.stored().value(key).toUInt(), 5500u, waitMs);
+    QTRY_COMPARE_WITH_TIMEOUT(settings.brightness(), 5500, waitMs);
 }
 
 QTEST_GUILESS_MAIN(SettingsTest)

@@ -167,6 +167,9 @@ QList<Row> build()
     out.push_back(action("library", "folders", "library folders", "folders"));
     out.push_back(action("library", "rescan", "rescan library", "rescan"));
 
+    Row brightness = steps("display", "brightness", "brightness", "brightness", {});
+    out.push_back(shown(readOnly(bounded(brightness), "brightness"), "dap"));
+
     out.push_back(range("display", "accent", "accent", "edit", "accentHue", 0, 350, 10));
     out.push_back(toggle("display", "accentArt", "accent from art", "accentFromArt"));
 

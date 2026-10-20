@@ -33,7 +33,7 @@ QString word(const QString &key, const QString &v)
         const int db = n - 84;
         return (db > 0 ? QStringLiteral("+%1").arg(db) : QString::number(db)) + QStringLiteral(" db");
     }
-    if (key == QLatin1StringView("volumeStep"))
+    if (key == QLatin1StringView("volumeStep") || key == QLatin1StringView("brightness"))
         return v + QLatin1Char('%');
     if (key == QLatin1StringView("powerOnVolume"))
         return n <= 0 ? QStringLiteral("last") : v;
@@ -99,6 +99,8 @@ bool LinkSettings::readOnlyRule(const QString &rule) const
         return m_settings->outputSlot().isEmpty();
     if (rule == QLatin1StringView("crossfeed"))
         return !Settings::crossfeedSlots().contains(m_settings->outputSlot());
+    if (rule == QLatin1StringView("brightness"))
+        return m_settings->brightnessSteps().isEmpty();
     return false;
 }
 
@@ -136,8 +138,11 @@ QList<LinkSettingRow> LinkSettings::rows() const
                     values.push_back(v.toString());
             } else if (r.type == QLatin1StringView("steps")) {
                 lr.kind = kind::steps;
-                for (const QVariant &v : r.values)
-                    values.push_back(QString::number(r.key == QLatin1StringView("crossfade") ? v.toInt() / 1000 : v.toInt()));
+                const bool brightness = r.key == QLatin1StringView("brightness");
+                for (const QVariant &v : brightness ? m_settings->brightnessSteps() : r.values)
+                    values.push_back(QString::number(r.key == QLatin1StringView("crossfade") ? v.toInt() / 1000
+                                                     : brightness                             ? qRound(v.toInt() / 100.0)
+                                                                                              : v.toInt()));
             } else if (r.type == QLatin1StringView("range") && std::floor(r.step) != r.step) {
                 lr.kind = kind::choice;
                 for (double s = r.min; s <= r.max + 1e-6; s += r.step)
@@ -176,6 +181,8 @@ QString LinkSettings::wire(const LinkSettingRow &row) const
         return v.toBool() ? QStringLiteral("on") : QStringLiteral("off");
     if (row.row->key == QLatin1StringView("crossfade"))
         return QString::number(v.toInt() / 1000);
+    if (row.row->key == QLatin1StringView("brightness"))
+        return QString::number(qRound(v.toInt() / 100.0));
     if (row.row->key == QLatin1StringView("scale"))
         return QString::number(std::round(v.toDouble() * 10.0) / 10.0, 'f', 1);
     return v.toString();
@@ -213,6 +220,8 @@ QVariant LinkSettings::value(const LinkSettingRow &row, const QString &wire, boo
                 best = v.toInt();
         }
         ok = true;
+        if (row.row->key == QLatin1StringView("brightness"))
+            return best * 100;
         return row.row->key == QLatin1StringView("crossfade") ? best * 1000 : best;
     }
     case kind::range:
@@ -254,8 +263,12 @@ uint8_t LinkSettings::set(const QString &text, QStringList &kept, QStringList &r
     }
     if (kept.isEmpty())
         return fd::proto::err::refused;
-    for (const auto &[row, v] : std::as_const(writes))
-        m_settings->setProperty(row->row->setting.toLatin1().constData(), v);
+    for (const auto &[row, v] : std::as_const(writes)) {
+        if (row->row->key == QLatin1StringView("brightness"))
+            m_settings->confirmBrightness(v.toInt());
+        else
+            m_settings->setProperty(row->row->setting.toLatin1().constData(), v);
+    }
     return 0;
 }
 

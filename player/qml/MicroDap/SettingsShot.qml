@@ -29,6 +29,15 @@ Item {
     }
 
     function applyFixture(): void {
+        if (root.fixture.startsWith("brightness")) {
+            screen.focusKey("brightness")
+            screen.keepFocusVisible()
+            if (root.fixture.endsWith("-sheet"))
+                screen.activate()
+            if (root.fixture === "brightness-step-sheet")
+                screen.sheetAction("up", false)
+            return
+        }
         if (root.fixture.startsWith("sleep")) {
             screen.focusKey("sleep")
             screen.keepFocusVisible()
@@ -168,9 +177,29 @@ Item {
         property string resume: "position"
         property bool autoNowPlaying: root.fixture === "play-through"
         property string bootSession: root.fixture === "boot-missing" ? "handheld-desktop-session" : "steam"
+        property int brightness: root.fixture === "brightness-floor-sheet" ? 300 : 2442
+        readonly property var brightnessSteps: [1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500,
+                                                7000, 7500, 8000, 8500, 9000, 9500, 10000]
 
         function bootSessions() {
             return ["microdap", "microemu", "steam"]
+        }
+
+        function brightnessStep(from, delta) {
+            const up = sampleSettings.brightnessSteps.find((v) => v > from)
+            const down = sampleSettings.brightnessSteps.slice().reverse().find((v) => v < from)
+            return delta > 0 ? (up === undefined ? from : up) : (down === undefined ? from : down)
+        }
+
+        function previewBrightness(value) {
+            sampleSettings.brightness = value
+        }
+
+        function confirmBrightness(value) {
+            sampleSettings.brightness = value
+        }
+
+        function cancelBrightness() {
         }
     }
 

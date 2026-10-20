@@ -75,6 +75,10 @@ TestCase {
         property bool batteryPercent: false
         property bool quickplay: true
         property bool companion: false
+        property int brightness: 2442
+        property int storedBrightness: 2442
+        property var brightnessSteps: []
+        property var brightnessCalls: []
         property string bootSession: "steam"
         property var sessionChoices: ["microdap", "microemu", "steam"]
         property bool available: true
@@ -85,6 +89,35 @@ TestCase {
 
         function defaultRoots() {
             return fakeSettings.defaultList
+        }
+
+        function brightnessStep(from, delta) {
+            const steps = fakeSettings.brightnessSteps
+            const at = steps.indexOf(from)
+            if (at >= 0)
+                return steps[Math.max(0, Math.min(steps.length - 1, at + delta))]
+            if (delta > 0) {
+                const up = steps.find((v) => v > from)
+                return up === undefined ? from : up
+            }
+            const down = steps.slice().reverse().find((v) => v < from)
+            return down === undefined ? from : down
+        }
+
+        function previewBrightness(value) {
+            fakeSettings.brightnessCalls = fakeSettings.brightnessCalls.concat(["preview " + value])
+            fakeSettings.brightness = value
+        }
+
+        function confirmBrightness(value) {
+            fakeSettings.brightnessCalls = fakeSettings.brightnessCalls.concat(["confirm " + value])
+            fakeSettings.storedBrightness = value
+            fakeSettings.brightness = value
+        }
+
+        function cancelBrightness() {
+            fakeSettings.brightnessCalls = fakeSettings.brightnessCalls.concat(["cancel"])
+            fakeSettings.brightness = fakeSettings.storedBrightness
         }
     }
 
@@ -278,7 +311,7 @@ TestCase {
     readonly property var expectedKeys: [
         ["output", "hpGain", "hpAmp", "spkGain", "volumeStep", "maxVolume", "powerOnVolume", "balance", "codec", "level", "rate", "replaygain", "crossfade", "eq", "crossfeed", "playThrough", "resume", "autoNowPlaying", "pair"],
         ["folders", "rescan"],
-        ["accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "artistPhoto", "rgb", "toasts"],
+        ["brightness", "accent", "accentArt", "orientation", "autoRotate", "touch", "scale", "saver", "saverLyrics", "clock", "batteryPercent", "quickplay", "artistPhoto", "rgb", "toasts"],
         ["screenOff", "suspend", "sleep", "wifi"],
         ["boot", "phoneApp", "about"]
     ]
@@ -345,6 +378,11 @@ TestCase {
         fakeSettings.batteryPercent = false
         fakeSettings.quickplay = true
         fakeSettings.companion = false
+        fakeSettings.brightness = 2442
+        fakeSettings.storedBrightness = 2442
+        fakeSettings.brightnessSteps = [1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000,
+                                        7500, 8000, 8500, 9000, 9500, 10000]
+        fakeSettings.brightnessCalls = []
         fakeSensor.supported = true
         fakeSensor.turn = -1
         fakeSensor.raw = ""
@@ -479,6 +517,95 @@ TestCase {
 
     function focused(page) {
         return page.sheet.items[page.sheet.focusIndex]
+    }
+
+    function test_brightness_off_list_steps() {
+        const page = tc.open()
+        compare(tc.rowOf(page, "brightness").title, "brightness")
+        compare(tc.rowOf(page, "brightness").value, "24%")
+        compare(tc.rowOf(page, "brightness").readOnly, false)
+        tc.sheetOpen(page, "brightness")
+        compare(page.sheet.items.length, 19)
+        compare(page.sheet.items[0], "100%")
+        compare(page.sheet.items[18], "10%")
+        compare(page.sheet.mark, -1)
+        compare(page.sheet.wrap, false)
+        compare(tc.focused(page), "25%")
+        router.dispatch("up", false)
+        compare(tc.focused(page), "25%")
+        compare(fakeSettings.brightnessCalls, ["preview 2500"])
+        router.dispatch("up", false)
+        compare(tc.focused(page), "30%")
+        compare(fakeSettings.brightnessCalls, ["preview 2500", "preview 3000"])
+        compare(page.valueOpen, true)
+        verify(router.dispatch("a", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.brightnessCalls, ["preview 2500", "preview 3000", "confirm 3000"])
+        compare(tc.rowOf(page, "brightness").value, "30%")
+    }
+
+    function test_brightness_off_list_down_and_back() {
+        const page = tc.open()
+        tc.sheetOpen(page, "brightness")
+        router.dispatch("down", false)
+        compare(tc.focused(page), "20%")
+        compare(fakeSettings.brightnessCalls, ["preview 2000"])
+        compare(tc.rowOf(page, "brightness").value, "20%")
+        verify(router.dispatch("b", false))
+        compare(page.valueOpen, false)
+        compare(fakeSettings.brightnessCalls, ["preview 2000", "cancel"])
+        compare(tc.rowOf(page, "brightness").value, "24%")
+    }
+
+    function test_brightness_below_floor_and_bounds() {
+        fakeSettings.brightness = 300
+        fakeSettings.storedBrightness = 300
+        const page = tc.open()
+        compare(tc.rowOf(page, "brightness").value, "3%")
+        tc.sheetOpen(page, "brightness")
+        router.dispatch("down", false)
+        compare(fakeSettings.brightnessCalls, [])
+        router.dispatch("up", false)
+        compare(tc.focused(page), "10%")
+        compare(fakeSettings.brightnessCalls, ["preview 1000"])
+        router.dispatch("down", false)
+        compare(tc.focused(page), "10%")
+        compare(fakeSettings.brightnessCalls, ["preview 1000"])
+        verify(router.dispatch("b", false))
+        compare(fakeSettings.brightnessCalls, ["preview 1000", "cancel"])
+
+        fakeSettings.brightness = 10000
+        fakeSettings.storedBrightness = 10000
+        fakeSettings.brightnessCalls = []
+        tc.sheetOpen(page, "brightness")
+        compare(page.sheet.mark, 0)
+        compare(tc.focused(page), "100%")
+        router.dispatch("up", false)
+        compare(tc.focused(page), "100%")
+        router.dispatch("down", true)
+        compare(tc.focused(page), "95%")
+        compare(fakeSettings.brightnessCalls, [])
+        router.dispatch("down", false)
+        compare(tc.focused(page), "90%")
+        compare(fakeSettings.brightnessCalls, ["preview 9000"])
+        page.dismissValue()
+        compare(page.valueOpen, false)
+        compare(fakeSettings.brightnessCalls, ["preview 9000", "confirm 9000"])
+        compare(tc.rowOf(page, "brightness").value, "90%")
+
+        fakeSettings.brightnessCalls = []
+        tc.sheetOpen(page, "brightness")
+        fakeSettings.storedBrightness = 4000
+        fakeSettings.brightness = 4000
+        compare(page.valueOpen, false)
+        compare(fakeSettings.brightnessCalls, [])
+    }
+
+    function test_brightness_read_only_without_schema() {
+        fakeSettings.brightnessSteps = []
+        const page = tc.open()
+        compare(tc.rowOf(page, "brightness").readOnly, true)
+        compare(tc.rowOf(page, "brightness").value, "24%")
     }
 
     function test_sleep_timer() {

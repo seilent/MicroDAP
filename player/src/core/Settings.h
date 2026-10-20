@@ -57,6 +57,8 @@ class Settings : public QObject
     Q_PROPERTY(bool companion READ companion WRITE setCompanion NOTIFY companionChanged)
     Q_PROPERTY(QString companionPhone READ companionPhone WRITE setCompanionPhone NOTIFY companionPhoneChanged)
     Q_PROPERTY(bool artistPhoto READ artistPhoto WRITE setArtistPhoto NOTIFY artistPhotoChanged)
+    Q_PROPERTY(int brightness READ brightness NOTIFY brightnessChanged)
+    Q_PROPERTY(QVariantList brightnessSteps READ brightnessSteps NOTIFY brightnessStepsChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
 
 public:
@@ -191,6 +193,12 @@ public:
     void setCompanionPhone(const QString &address);
     bool artistPhoto() const;
     void setArtistPhoto(bool on);
+    int brightness() const;
+    QVariantList brightnessSteps() const;
+    Q_INVOKABLE int brightnessStep(int from, int delta) const;
+    Q_INVOKABLE void previewBrightness(int value);
+    Q_INVOKABLE void confirmBrightness(int value);
+    Q_INVOKABLE void cancelBrightness();
 
 signals:
     void outputChanged();
@@ -232,6 +240,8 @@ signals:
     void companionChanged();
     void companionPhoneChanged();
     void artistPhotoChanged();
+    void brightnessChanged();
+    void brightnessStepsChanged();
     void availableChanged();
     void valueChanged(const QString &key);
     void imported(bool ok);
@@ -243,11 +253,13 @@ private:
     void store(const QString &key, const QVariant &value);
     void refresh(const QString &key);
     void notify(const QString &key);
+    void loadBrightnessSteps();
 
     std::unique_ptr<MicroSet::Client> m_owned;
     MicroSet::Client *m_client = nullptr;
     QVariantMap m_values;
     QString m_slot;
+    QList<int> m_brightnessSteps;
     bool m_available = false;
     bool m_importing = false;
 };

@@ -126,6 +126,8 @@ Page {
     readonly property bool batteryPercent: page.settings !== null && page.settings.batteryPercent === true
     readonly property bool quickplay: page.settings === null || page.settings.quickplay !== false
     readonly property bool artistPhoto: page.settings === null || page.settings.artistPhoto !== false
+    readonly property int brightness: page.settings !== null && page.settings.brightness !== undefined ? Number(page.settings.brightness) : 0
+    readonly property var brightnessSteps: page.settings !== null && page.settings.brightnessSteps !== undefined ? page.settings.brightnessSteps : []
     readonly property bool saverLyrics: page.settings !== null && page.settings.saverLyrics === true
     readonly property int saverSeconds: page.settings !== null && page.settings.saverSeconds !== undefined ? page.settings.saverSeconds : 30
     readonly property int screenOffSeconds: page.settings !== null && page.settings.screenOffSeconds !== undefined ? page.settings.screenOffSeconds : 300
@@ -259,6 +261,10 @@ Page {
         return EqFormat.listed(page.eq.profileMap(output)) ? text + " (dac)" : text
     }
 
+    function percentText(value: int): string {
+        return Math.round(value / 100) + "%"
+    }
+
     function powerOnText(value: int): string {
         return value <= 0 ? "last" : String(value)
     }
@@ -340,6 +346,8 @@ Page {
             return page.outputSlot === ""
         case "crossfeed":
             return !page.crossfeedSlot
+        case "brightness":
+            return page.brightnessSteps.length === 0
         default:
             return false
         }
@@ -398,6 +406,8 @@ Page {
             return page.roots.length + " on"
         case "rescan":
             return page.rescanValue
+        case "brightness":
+            return page.percentText(page.brightness)
         case "accentArt":
             return page.accentFromArt ? "on" : "off"
         case "playThrough":
@@ -747,6 +757,8 @@ Page {
             return page.scaleSteps
         case "boot":
             return page.bootChoices
+        case "brightness":
+            return page.brightnessSteps
         default:
             return page.valuesOf(key)
         }
@@ -771,6 +783,8 @@ Page {
             return page.spkGainText(Number(value))
         case "volumeStep":
             return value + "%"
+        case "brightness":
+            return page.percentText(Number(value))
         case "level":
             return page.levelWord(String(value))
         case "crossfeed":
@@ -821,6 +835,8 @@ Page {
         d.ours = [d.valueOriginal]
         d.valueItems = JSON.stringify(page.valueWords(key, values))
         d.valueKey = key
+        d.valueOff = key === "brightness" && mark < 0
+        d.previewHeld = false
         d.leadSleep = key === "sleep"
         d.riseKept = ""
         sheet.title = spec.title
@@ -836,6 +852,10 @@ Page {
     }
 
     function endValue(): void {
+        if (d.previewHeld) {
+            d.previewHeld = false
+            page.settings.cancelBrightness()
+        }
         if (d.valueKey === "sleep")
             sheet.mark = page.sleepMark()
         d.valueKey = ""
@@ -849,16 +869,50 @@ Page {
     function previewValue(index: int): void {
         if (!page.valueOpen || d.valueDraft || index < 0 || index >= d.valueValues.length)
             return
+        d.valueOff = false
+        if (d.valueKey === "brightness") {
+            const value = Number(d.valueValues[index])
+            d.ours = d.ours.concat([value])
+            d.previewHeld = true
+            d.previewed = value
+            page.settings.previewBrightness(value)
+            return
+        }
         page.write(page.settingOf(d.valueKey), d.valueValues[index])
+    }
+
+    function offListStep(name: string, repeat: bool): void {
+        const value = page.settings.brightnessStep(page.brightness, name === "up" ? 1 : -1)
+        const to = d.valueValues.findIndex((v) => Number(v) === value)
+        if (to < 0)
+            return
+        d.valueOff = false
+        sheet.focusIndex = to
+        if (!repeat)
+            page.previewValue(to)
+    }
+
+    function sheetAction(name: string, repeat: bool): bool {
+        if (page.valueOpen && d.valueOff && (name === "up" || name === "down")) {
+            page.offListStep(name, repeat)
+            return true
+        }
+        return sheet.handleAction(name, repeat)
     }
 
     function acceptValue(index: int): void {
         const key = d.valueKey
         const value = d.valueValues[index]
         const draft = d.valueDraft
+        if (key === "brightness" && value !== undefined) {
+            d.previewHeld = false
+            page.settings.confirmBrightness(Number(value))
+        }
         page.endValue()
-        if (value === undefined)
+        if (value === undefined || key === "brightness") {
+            d.ours = []
             return
+        }
         if (key === "sleep") {
             if (page.power !== null && typeof page.power.startSleepTimer === "function")
                 page.power.startSleepTimer(Number(value))
@@ -877,7 +931,7 @@ Page {
         const original = d.valueOriginal
         const draft = d.valueDraft
         page.endValue()
-        if (!draft && String(page.currentOf(key)) !== String(original))
+        if (!draft && key !== "brightness" && String(page.currentOf(key)) !== String(original))
             page.write(page.settingOf(key), original)
         d.ours = []
     }
@@ -885,10 +939,15 @@ Page {
     function dismissValue(): void {
         if (!page.valueOpen)
             return
-        if (d.valueDraft)
+        if (d.valueDraft) {
             page.cancelValue()
-        else
-            page.endValue()
+            return
+        }
+        if (d.previewHeld) {
+            d.previewHeld = false
+            page.settings.confirmBrightness(d.previewed)
+        }
+        page.endValue()
     }
 
     function closeSheet(): void {
@@ -941,6 +1000,8 @@ Page {
             return page.sampleRate
         case "accent":
             return page.accentHue
+        case "brightness":
+            return page.brightness
         case "accentArt":
             return page.accentFromArt
         case "replaygain":
@@ -1211,7 +1272,7 @@ Page {
         if (sheet.shown && page.valueOpen && sheet.animating)
             return page.holdRise(name, repeat)
         if (sheet.shown)
-            return sheet.handleAction(name, repeat)
+            return page.sheetAction(name, repeat)
         if (name === "lb" || name === "rb") {
             if (!repeat)
                 page.switchPivot(name === "lb" ? -1 : 1)
@@ -1323,6 +1384,9 @@ Page {
         property var valueValues: []
         property var valueOriginal: null
         property bool valueDraft: false
+        property bool valueOff: false
+        property bool previewHeld: false
+        property int previewed: 0
         property bool leadSleep: false
         property string valueItems: ""
         property var ours: []
@@ -1625,7 +1689,7 @@ Page {
             const kept = d.riseKept
             d.riseKept = ""
             if (sheet.shown && page.valueOpen)
-                sheet.handleAction(kept, false)
+                page.sheetAction(kept, false)
         }
     }
 

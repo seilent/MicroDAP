@@ -36,6 +36,8 @@ KEYS = {
     'display.orientation': ('s', 'portrait', {}),
     'display.auto_rotate': ('b', True, {}),
     'display.rotation': ('s', 'portrait', {'live': True, 'writable': False}),
+    'display.brightness': ('u', 2442, {'override': True, 'min': 1, 'max': 10000, 'floor': 1000,
+                                       'ui': {'scale': 100, 'unit': '%', 'steps': [500] + list(range(1000, 10001, 500))}}),
     'session.default': ('s', 'steam', {'enum': ['steam', 'microdap', 'microemu']}),
     'rgb.enabled': ('b', False, {'override': True}),
     'rgb.hue': ('u', 0, {'override': True}),
@@ -122,6 +124,8 @@ def accepts(key, value):
     elif not isinstance(value, TYPES[sig]):
         return False
     if 'enum' in extra and plain(sig, value) not in extra['enum']:
+        return False
+    if 'min' in extra and not extra['min'] <= plain(sig, value) <= extra['max']:
         return False
     return True
 
@@ -227,6 +231,9 @@ class MicroSet(dbus.service.Object):
                 entry['enum'] = extra['enum']
             if extra.get('live'):
                 entry['live'] = True
+            for field in ('min', 'max', 'floor', 'ui'):
+                if field in extra:
+                    entry[field] = extra[field]
             out[key] = entry
         return json.dumps(out)
 
