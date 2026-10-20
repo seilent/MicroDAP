@@ -218,6 +218,13 @@ int main(int argc, char *argv[])
                                                            QDBusConnection::sessionBus());
     player.setBluez(bluez.get());
     const bool overlayMode = parser.isSet(overlayOption);
+    if (auto *system = dynamic_cast<microdap::SystemBluezModel *>(bluez.get()); system && !overlayMode) {
+        system->setDapSession(true);
+        QObject::connect(&player, &microdap::Player::statusChanged, system, [&player, system] {
+            if (player.status() == microdap::Player::Playing)
+                system->want();
+        });
+    }
     if (!overlayMode) {
         settings.importLegacy();
         QObject::connect(&settings, &microdap::Settings::availableChanged, &settings, [&settings] {
@@ -357,6 +364,10 @@ int main(int argc, char *argv[])
     player.setFavorites(&favorites);
     if (!overlayMode) {
         microdap::Keep::clear();
+        QObject::connect(&power, &microdap::PowerBridge::screenOffChanged, bluez.get(), [&power, model = bluez.get()] {
+            if (!power.screenOff())
+                model->want();
+        });
         power.setSettings(&settings);
         power.runScreenOn();
         power.enableHolds();

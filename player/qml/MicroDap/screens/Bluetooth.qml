@@ -417,7 +417,20 @@ Page {
             page.completeAll()
     }
 
+    function holdScope(held: bool): void {
+        if (held === d.scopeHeld)
+            return
+        d.scopeHeld = held
+        page.call("setReceiverScope", held)
+    }
+
+    onSourceRoleChanged: page.holdScope(!page.sourceRole)
+
+    Component.onDestruction: page.holdScope(false)
+
     Component.onCompleted: {
+        page.call("want")
+        page.holdScope(!page.sourceRole)
         if (page.sourceRole && page.pivotIndex === 0)
             page.pivotIndex = 2
         page.resetEq()
@@ -430,6 +443,7 @@ Page {
         id: d
 
         property bool internal: false
+        property bool scopeHeld: false
     }
 
     Timer {

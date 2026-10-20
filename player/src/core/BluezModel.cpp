@@ -51,6 +51,28 @@ QString BluezModel::lastHeadsetPath()
     return state + QStringLiteral("/microdap/last-headset");
 }
 
+QString BluezModel::rolePath()
+{
+    const QString state = qEnvironmentVariable("XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
+    return state + QStringLiteral("/microdap/bt-role");
+}
+
+void BluezModel::want()
+{
+}
+
+void BluezModel::setReceiverScope(bool)
+{
+}
+
+void BluezModel::restoreRole(const QString &role)
+{
+    if (!roles().contains(role) || role == m_role)
+        return;
+    m_role = role;
+    emit roleChanged();
+}
+
 QVariantList BluezModel::headsets() const
 {
     return m_headsets;

@@ -2,6 +2,7 @@
 
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
+#include <QDBusContext>
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QtTest>
@@ -337,6 +338,27 @@ private:
     FakeObject *m_object;
 };
 
+class FakeEngine : public QObject, protected QDBusContext
+{
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "net.seilent.MicroOs.Reconnect1")
+
+public:
+    QStringList callsFrom(const QString &sender) const { return m_calls.value(sender); }
+
+public slots:
+    void SetRole(const QString &role) { record(QStringLiteral("SetRole ") + role); }
+    void SetTarget(const QDBusObjectPath &device) { record(QStringLiteral("SetTarget ") + device.path()); }
+    void Hold(bool held) { record(QStringLiteral("Hold ") + (held ? QStringLiteral("true") : QStringLiteral("false"))); }
+    void Want() { record(QStringLiteral("Want")); }
+    void Scope(bool held) { record(QStringLiteral("Scope ") + (held ? QStringLiteral("true") : QStringLiteral("false"))); }
+
+private:
+    void record(const QString &call) { m_calls[message().service()].append(call); }
+
+    QMap<QString, QStringList> m_calls;
+};
+
 class FakeBluez : public QObject
 {
     Q_OBJECT
@@ -493,6 +515,7 @@ private slots:
     void transportStateNone();
     void headsetsAndRoles();
     void headsetLists();
+    void savedRoleAndEngine();
 
 private:
     QTemporaryDir m_state;
@@ -1078,6 +1101,84 @@ void SystemBluezTest::headsetLists()
     QCOMPARE(m_model->lastHeadset(), QString());
     m_model->setRole(QStringLiteral("receiver"));
     QTRY_COMPARE_WITH_TIMEOUT(m_model->role(), QStringLiteral("receiver"), busTimeoutMs);
+}
+
+void SystemBluezTest::savedRoleAndEngine()
+{
+    QVERIFY(QDir().mkpath(QFileInfo(BluezModel::rolePath()).absolutePath()));
+    {
+        QFile file(BluezModel::rolePath());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("headphones\n");
+    }
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("role-model"));
+    QVERIFY(other.isConnected());
+    {
+        m_agent->calls.clear();
+        SystemBluezModel model(other, other);
+        QCOMPARE(model.role(), QStringLiteral("headphones"));
+        QTRY_VERIFY_WITH_TIMEOUT(m_agent->calls.contains(QStringLiteral("SetRole headphones")), busTimeoutMs);
+        model.setDapSession(true);
+        model.want();
+        model.setReceiverScope(true);
+
+        FakeEngine engine;
+        QVERIFY(bus.registerObject(SystemBluezModel::enginePath(), &engine, QDBusConnection::ExportAllSlots));
+        QVERIFY(bus.registerService(SystemBluezModel::engineService()));
+        const QString sender = other.baseService();
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender),
+                                  QStringList({QStringLiteral("SetRole headphones"), QStringLiteral("Scope true")}),
+                                  busTimeoutMs);
+        model.want();
+        model.setReceiverScope(false);
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(2),
+                                  QStringList({QStringLiteral("Want"), QStringLiteral("Scope false")}), busTimeoutMs);
+
+        model.setRole(QStringLiteral("receiver"));
+        QTRY_COMPARE_WITH_TIMEOUT(model.role(), QStringLiteral("receiver"), busTimeoutMs);
+        QTRY_COMPARE_WITH_TIMEOUT(engine.callsFrom(sender).mid(4),
+                                  QStringList({QStringLiteral("Hold true"), QStringLiteral("SetRole receiver"),
+                                               QStringLiteral("Hold false")}),
+                                  busTimeoutMs);
+        QFile file(BluezModel::rolePath());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArrayLiteral("receiver\n"));
+
+        const QString headsetPath = QStringLiteral("/org/bluez/hci0/dev_02_00_00_00_00_01");
+        QVariantMap props;
+        props.insert(QStringLiteral("Alias"), QStringLiteral("Target Cans"));
+        props.insert(QStringLiteral("Connected"), false);
+        props.insert(QStringLiteral("Paired"), true);
+        props.insert(QStringLiteral("UUIDs"), QStringList{QStringLiteral("0000110b-0000-1000-8000-00805f9b34fb")});
+        InterfaceList interfaces;
+        interfaces.insert(device1(), props);
+        FakeObject *cans = m_fake->add(headsetPath, interfaces, true);
+        QVERIFY(cans);
+        model.connectHeadset(headsetPath);
+        QTRY_VERIFY_WITH_TIMEOUT(engine.callsFrom(sender).contains(QStringLiteral("SetTarget ") + headsetPath),
+                                 busTimeoutMs);
+        QTRY_COMPARE_WITH_TIMEOUT(model.lastHeadset(), headsetPath, busTimeoutMs);
+        model.forgetHeadset(headsetPath);
+        QTRY_VERIFY_WITH_TIMEOUT(engine.callsFrom(sender).contains(QStringLiteral("SetTarget /")), busTimeoutMs);
+
+        const qsizetype before = engine.callsFrom(bus.baseService()).count(QStringLiteral("Want"));
+        m_model->want();
+        m_model->setReceiverScope(true);
+        QTest::qWait(200);
+        QCOMPARE(engine.callsFrom(bus.baseService()).count(QStringLiteral("Want")), before);
+        QVERIFY(!engine.callsFrom(bus.baseService()).contains(QStringLiteral("Scope true")));
+
+        bus.unregisterService(SystemBluezModel::engineService());
+        bus.unregisterObject(SystemBluezModel::enginePath());
+        const qsizetype calls = engine.callsFrom(sender).size();
+        model.want();
+        model.setReceiverScope(true);
+        QTest::qWait(200);
+        QCOMPARE(engine.callsFrom(sender).size(), calls);
+    }
+    QDBusConnection::disconnectFromBus(QStringLiteral("role-model"));
+    QFile::remove(BluezModel::rolePath());
 }
 
 QTEST_GUILESS_MAIN(SystemBluezTest)

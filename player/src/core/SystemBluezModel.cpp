@@ -1,6 +1,7 @@
 #include "SystemBluezModel.h"
 
 #include <QDBusArgument>
+#include <QDBusConnectionInterface>
 #include <QDBusMetaType>
 #include <QDBusPendingCall>
 #include <QDBusPendingCallWatcher>
@@ -157,8 +158,12 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     , m_bluezWatcher(bluezService(), bluez, QDBusServiceWatcher::WatchForOwnerChange)
     , m_agentWatcher(agentService(), session, QDBusServiceWatcher::WatchForOwnerChange)
     , m_art(session)
+    , m_engineWatcher(engineService(), session, QDBusServiceWatcher::WatchForOwnerChange)
 {
     registerMetaTypes();
+    QFile roleFile(rolePath());
+    if (roleFile.open(QIODevice::ReadOnly))
+        restoreRole(QString::fromUtf8(roleFile.read(64)).trimmed());
     QFile last(lastPhonePath());
     if (last.open(QIODevice::ReadOnly))
         updateLastPhone(QString::fromUtf8(last.read(1024)).trimmed());
@@ -167,6 +172,16 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
     if (lastHeadsetFile.open(QIODevice::ReadOnly))
         updateLastHeadset(QString::fromUtf8(lastHeadsetFile.read(1024)).trimmed());
     connect(this, &BluezModel::lastHeadsetChanged, this, [this] { writeLine(lastHeadsetPath(), lastHeadset()); });
+    connect(this, &BluezModel::roleChanged, this, [this] {
+        writeLine(rolePath(), role());
+        callEngine(QStringLiteral("SetRole"), {role()});
+    });
+    connect(this, &BluezModel::switchingChanged, this, [this] { callEngine(QStringLiteral("Hold"), {switching()}); });
+    connect(&m_engineWatcher, &QDBusServiceWatcher::serviceRegistered, this, [this] {
+        m_engineUp = true;
+        syncEngine();
+    });
+    connect(&m_engineWatcher, &QDBusServiceWatcher::serviceUnregistered, this, [this] { m_engineUp = false; });
 
     m_gateTimer.setSingleShot(true);
     connect(&m_gateTimer, &QTimer::timeout, this, &SystemBluezModel::apply);
@@ -220,6 +235,10 @@ SystemBluezModel::SystemBluezModel(const QDBusConnection &bluez, const QDBusConn
                        << m_session.lastError().message();
         }
         refreshAgent();
+        if (role() != QLatin1StringView("receiver"))
+            applyRole(role());
+        m_engineUp = m_session.interface() && m_session.interface()->isServiceRegistered(engineService()).value();
+        syncEngine();
     } else {
         qWarning() << "microdap bluez: session bus not connected";
     }
@@ -259,6 +278,60 @@ QString SystemBluezModel::agentInterface()
 QString SystemBluezModel::a2dpSourceUuid()
 {
     return QStringLiteral("0000110a-0000-1000-8000-00805f9b34fb");
+}
+
+QString SystemBluezModel::engineService()
+{
+    return QStringLiteral("net.seilent.MicroOs.Reconnect");
+}
+
+QString SystemBluezModel::enginePath()
+{
+    return QStringLiteral("/net/seilent/MicroOs/Reconnect");
+}
+
+QString SystemBluezModel::engineInterface()
+{
+    return QStringLiteral("net.seilent.MicroOs.Reconnect1");
+}
+
+void SystemBluezModel::callEngine(const QString &method, const QList<QVariant> &arguments)
+{
+    if (!m_engineUp || !m_session.isConnected())
+        return;
+    QDBusMessage call = QDBusMessage::createMethodCall(engineService(), enginePath(), engineInterface(), method);
+    call.setArguments(arguments);
+    m_session.asyncCall(call);
+}
+
+void SystemBluezModel::syncEngine()
+{
+    if (!m_engineUp)
+        return;
+    callEngine(QStringLiteral("SetRole"), {role()});
+    if (switching())
+        callEngine(QStringLiteral("Hold"), {true});
+    if (m_dap && m_scope > 0)
+        callEngine(QStringLiteral("Scope"), {true});
+}
+
+void SystemBluezModel::setDapSession(bool dap)
+{
+    m_dap = dap;
+}
+
+void SystemBluezModel::want()
+{
+    if (m_dap)
+        callEngine(QStringLiteral("Want"));
+}
+
+void SystemBluezModel::setReceiverScope(bool held)
+{
+    const int before = m_scope;
+    m_scope = std::max(0, m_scope + (held ? 1 : -1));
+    if (m_dap && (before > 0) != (m_scope > 0))
+        callEngine(QStringLiteral("Scope"), {m_scope > 0});
 }
 
 QString SystemBluezModel::devicePath() const
@@ -961,8 +1034,11 @@ void SystemBluezModel::connectHeadset(const QString &path)
         if (m_connectTarget == path)
             m_connectTarget.clear();
         const QDBusMessage reply = finished->reply();
-        if (reply.type() == QDBusMessage::ErrorMessage)
+        if (reply.type() == QDBusMessage::ErrorMessage) {
             qInfo() << "microdap bluez: connect" << path << "failed" << reply.errorName();
+            return;
+        }
+        callEngine(QStringLiteral("SetTarget"), {QVariant::fromValue(QDBusObjectPath(path))});
     });
 }
 
@@ -977,8 +1053,10 @@ void SystemBluezModel::forgetHeadset(const QString &path)
 {
     if (!m_bluez.isConnected() || path.isEmpty())
         return;
-    if (path == lastHeadset())
+    if (path == lastHeadset()) {
         updateLastHeadset({});
+        callEngine(QStringLiteral("SetTarget"), {QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")))});
+    }
     if (path == m_connectTarget)
         m_connectTarget.clear();
     QDBusMessage call = QDBusMessage::createMethodCall(bluezService(), path.section(QLatin1Char('/'), 0, -2),

@@ -39,6 +39,9 @@ public:
     static QString agentPath();
     static QString agentInterface();
     static QString a2dpSourceUuid();
+    static QString engineService();
+    static QString enginePath();
+    static QString engineInterface();
 
     QString devicePath() const;
     QString transportPath() const;
@@ -62,6 +65,9 @@ public:
     void disconnectHeadset(const QString &path) override;
     void forgetHeadset(const QString &path) override;
     void pairDevice(const QString &path) override;
+    void want() override;
+    void setReceiverScope(bool held) override;
+    void setDapSession(bool dap);
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
 
@@ -89,6 +95,8 @@ private:
     void checkHeadset(const QString &path);
     void applyHeadsets();
     void startPair(const QString &path);
+    void callEngine(const QString &method, const QList<QVariant> &arguments = {});
+    void syncEngine();
     void disconnectDevice(const QString &path);
     void applyArt(const QString &address, int psm, const QString &handle);
     void updateArt();
@@ -122,6 +130,10 @@ private:
     QMap<QString, QString> m_pairState;
     QString m_pairAfterSearch;
     QString m_connectTarget;
+    QDBusServiceWatcher m_engineWatcher;
+    bool m_engineUp = false;
+    bool m_dap = false;
+    int m_scope = 0;
     QElapsedTimer m_activeSince;
     QTimer m_gateTimer;
     enum class Nudge { Idle, Next, Previous, Watch, Done };

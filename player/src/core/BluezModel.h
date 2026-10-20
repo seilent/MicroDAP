@@ -104,6 +104,9 @@ public:
     Q_INVOKABLE virtual void disconnectHeadset(const QString &path) = 0;
     Q_INVOKABLE virtual void forgetHeadset(const QString &path) = 0;
     Q_INVOKABLE virtual void pairDevice(const QString &path) = 0;
+    Q_INVOKABLE virtual void want();
+    Q_INVOKABLE virtual void setReceiverScope(bool held);
+    static QString rolePath();
     virtual void setShuffle(const QString &shuffle) = 0;
     virtual void setRepeat(const QString &repeat) = 0;
 
@@ -176,6 +179,7 @@ protected:
     bool wrongRoleCheck(const QString &device, bool source, bool sink, bool target);
     void roleDevicesChanged();
     void runHeld();
+    void restoreRole(const QString &role);
     virtual int roleDevices(const QString &role) const = 0;
     virtual void dropRole(const QString &role) = 0;
     virtual void applyRole(const QString &role) = 0;

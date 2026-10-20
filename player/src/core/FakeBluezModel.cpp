@@ -388,6 +388,16 @@ void FakeBluezModel::forgetHeadset(const QString &path)
     m_commands.append(QStringLiteral("forgetHeadset ") + path);
 }
 
+void FakeBluezModel::want()
+{
+    m_commands.append(QStringLiteral("want"));
+}
+
+void FakeBluezModel::setReceiverScope(bool held)
+{
+    m_commands.append(QStringLiteral("scope ") + (held ? QStringLiteral("on") : QStringLiteral("off")));
+}
+
 void FakeBluezModel::pairDevice(const QString &path)
 {
     if (holdDevice(true, path))

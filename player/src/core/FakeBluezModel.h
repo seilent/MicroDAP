@@ -66,6 +66,8 @@ public:
     void disconnectHeadset(const QString &path) override;
     void forgetHeadset(const QString &path) override;
     void pairDevice(const QString &path) override;
+    void want() override;
+    void setReceiverScope(bool held) override;
     void setShuffle(const QString &shuffle) override;
     void setRepeat(const QString &repeat) override;
 
