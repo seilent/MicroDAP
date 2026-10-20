@@ -137,6 +137,8 @@ bool LinkSession::app_has(uint8_t type) const
     return g < 0 || ((app_features_ >> g) & 1);
 }
 
+bool LinkSession::app_bit(int bit) const { return (app_features_ >> bit) & 1; }
+
 void LinkSession::end_ask(LinkAnswer::Kind k, uint8_t code, LinkBody body)
 {
     if (!ask_.type)
@@ -370,6 +372,13 @@ void LinkSession::hello(LinkCommand& c, int64_t now)
         .u32(t::libRev, hello_.lib_rev)
         .u32(t::settingsRev, hello_.settings_rev)
         .u32(t::snapRev, hello_.snap_rev);
+    for (const LinkEqSlot& e : hello_.eq_slots) {
+        LinkWriter r;
+        r.str(proto::tag::EqSlot::key, e.key).str(proto::tag::EqSlot::label, e.label);
+        w.rec(t::eqSlot, r);
+    }
+    for (uint8_t b : hello_.band_types)
+        w.u8(t::bandTypes, b);
     send(c.type, proto::flagReply, c.seq, w.data(), now);
     open_ = true;
     if (handler_ && fd_ >= 0)

@@ -2,6 +2,7 @@
 #include "link/proto.h"
 
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QTest>
 
@@ -234,10 +235,29 @@ class LinkProtoTest : public QObject
 
 private slots:
     void lockMatchesSpec();
+    void pinMatchesFiles();
     void vectorsRoundTrip();
     void everyMessageHasAVector();
     void repliesMatchTheirRequest();
 };
+
+void LinkProtoTest::pinMatchesFiles()
+{
+    const QList<QByteArray> lines = readSpec("../PIN").trimmed().split('\n');
+    QVERIFY(lines.size() > 1);
+    QVERIFY(lines.constFirst().startsWith("commit "));
+    QCOMPARE(lines.constFirst().size(), 47);
+    QDir dir(specPath("."));
+    QStringList listed;
+    for (qsizetype i = 1; i < lines.size(); ++i) {
+        const QList<QByteArray> parts = lines.at(i).split(' ');
+        QCOMPARE(parts.size(), 2);
+        QCOMPARE(QCryptographicHash::hash(readSpec(parts.at(0).constData()), QCryptographicHash::Sha256).toHex(), parts.at(1));
+        listed.append(QString::fromLatin1(parts.at(0)));
+    }
+    listed.sort();
+    QCOMPARE(dir.entryList(QDir::Files, QDir::Name), listed);
+}
 
 void LinkProtoTest::lockMatchesSpec()
 {

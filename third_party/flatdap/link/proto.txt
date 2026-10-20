@@ -1,7 +1,7 @@
 const uuid 6238ed73-a581-4335-9d8a-df1ecf688118
 const magic 0x50434446
 const major 1
-const minor 10
+const minor 12
 const headerBytes 6
 const tlvHeaderBytes 3
 const maxPayload 16384
@@ -58,11 +58,18 @@ feature lyricsGet 11
 feature artPick 12
 feature imgOrigin 13
 feature stateClock 14
+feature eqSlots 15
+feature eqGraphic 16
+feature eqPass 17
+feature outputKinds 18
+feature rowConfirm 19
 enum SOURCE 0 local
 enum SOURCE 1 phone
 enum OUTPUT 0 wired
 enum OUTPUT 1 btHeadset
 enum OUTPUT 2 phoneReceiver
+enum OUTPUT 3 speaker
+enum OUTPUT 4 usbDac
 enum REPEAT 0 off
 enum REPEAT 1 all
 enum REPEAT 2 one
@@ -81,12 +88,19 @@ enum ROW_KIND 6 info
 enum ROW_FLAG 0 readOnly
 enum ROW_FLAG 1 restart
 enum ROW_FLAG 2 boardOnly
+enum ROW_FLAG 3 confirm
 enum EQ_OUTPUT 0 wired
 enum EQ_OUTPUT 1 bt
 enum BAND_TYPE 0 off
 enum BAND_TYPE 1 peak
 enum BAND_TYPE 2 lowShelf
 enum BAND_TYPE 3 highShelf
+enum BAND_TYPE 4 bandPass
+enum BAND_TYPE 5 lowPass
+enum BAND_TYPE 6 highPass
+enum BAND_TYPE 7 allPass
+enum EQ_MODE 0 parametric
+enum EQ_MODE 1 graphic
 enum VIEW 0 artists
 enum VIEW 1 albums
 enum VIEW 2 songs
@@ -159,6 +173,8 @@ tag HELLO.reply 13 features u64 one
 tag HELLO.reply 14 libRev u32 one
 tag HELLO.reply 15 settingsRev u32 one
 tag HELLO.reply 16 snapRev u32 one
+tag HELLO.reply 17 eqSlot EqSlot list
+tag HELLO.reply 18 bandTypes BAND_TYPE list
 msg PING 0x02 both req
 msg BYE 0x03 dev push
 tag BYE 1 reason BYE_REASON one
@@ -200,6 +216,7 @@ tag STATE 32 snapRev u32 one
 tag STATE 33 lyricsPlain bool one
 tag STATE 34 lyricsCrc u32 one
 tag STATE 35 positionHeld bool one
+tag STATE 36 eqSlot str one
 msg SCHEMA 0x11 dev push
 tag SCHEMA 1 pivot str one
 tag SCHEMA 2 offset u32 one
@@ -220,6 +237,13 @@ tag EQ 4 ints Profile one
 tag EQ 5 offset u32 one
 tag EQ 6 total u32 one
 tag EQ 7 more bool one
+tag EQ 8 slot str one
+tag EQ 9 mode EQ_MODE one
+tag EQ 10 graphicKey str one
+tag EQ 11 graphicName EqName list
+tag EQ 12 gains Graphic one
+tag EQ 13 graphicOffset u32 one
+tag EQ 14 graphicTotal u32 one
 msg QUEUE 0x14 dev push
 tag QUEUE 1 rev u32 one
 tag QUEUE 2 offset u32 one
@@ -262,6 +286,10 @@ msg EQ_SET 0x24 app req
 tag EQ_SET 1 output EQ_OUTPUT one
 tag EQ_SET 2 key str one
 tag EQ_SET 3 ints Profile one
+tag EQ_SET 4 slot str one
+tag EQ_SET 5 mode EQ_MODE one
+tag EQ_SET 6 graphicKey str one
+tag EQ_SET 7 gains Graphic one
 msg PLAY 0x25 app req
 tag PLAY 1 view VIEW one
 tag PLAY 2 parent str one
@@ -332,6 +360,8 @@ tag IMG_BEGIN 8 wrongArtist bool one
 tag IMG_BEGIN 9 source str one
 tag IMG_BEGIN 10 credit str one
 tag IMG_BEGIN 11 origin IMG_ORIGIN one
+tag IMG_BEGIN 12 focusX u16 one
+tag IMG_BEGIN 13 focusY u16 one
 tag IMG_BEGIN.reply 1 offset u32 one
 tag IMG_BEGIN.reply 2 crc u32 one
 msg IMG_DATA 0x32 app push
@@ -361,6 +391,9 @@ tag EQ_PRESET 3 key str one
 tag EQ_PRESET 4 name str one
 tag EQ_PRESET 5 ints Profile one
 tag EQ_PRESET 6 replace bool one
+tag EQ_PRESET 7 slot str one
+tag EQ_PRESET 8 mode EQ_MODE one
+tag EQ_PRESET 9 gains Graphic one
 tag EQ_PRESET.reply 1 key str one
 msg ART_BLOCK 0x38 dev req
 tag ART_BLOCK 1 cmd BLOCK_CMD one
@@ -420,8 +453,15 @@ tag LibRow 2 count u32 one
 tag LibRow 3 first u64 one
 tag LibRow 4 key str one
 tag LibRow 5 mbid str one
+tag LibRow 6 artist str one
 tag ImgEntry 1 name str one
 tag ImgEntry 2 mbid str one
 tag ImgEntry 3 origin IMG_ORIGIN list
 tag LyrLine 1 ms u32 one
 tag LyrLine 2 text str one
+tag EqSlot 1 key str one
+tag EqSlot 2 label str one
+tag Graphic 1 preamp10 i32 one
+tag Graphic 2 band GraphicBand list
+tag GraphicBand 1 grid i32 one
+tag GraphicBand 2 gain10 i32 one

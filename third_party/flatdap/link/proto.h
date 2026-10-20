@@ -41,7 +41,7 @@ inline constexpr Const kConsts[] = {
     {"uuid", "6238ed73-a581-4335-9d8a-df1ecf688118"},
     {"magic", "0x50434446"},
     {"major", "1"},
-    {"minor", "10"},
+    {"minor", "12"},
     {"headerBytes", "6"},
     {"tlvHeaderBytes", "3"},
     {"maxPayload", "16384"},
@@ -106,8 +106,13 @@ inline constexpr Code kFeatures[] = {
     {"artPick", 12},
     {"imgOrigin", 13},
     {"stateClock", 14},
+    {"eqSlots", 15},
+    {"eqGraphic", 16},
+    {"eqPass", 17},
+    {"outputKinds", 18},
+    {"rowConfirm", 19},
 };
-inline constexpr int kFeatureCount = 15;
+inline constexpr int kFeatureCount = 20;
 
 inline constexpr EnumValue kEnums[] = {
     {"SOURCE", 0, "local"},
@@ -115,6 +120,8 @@ inline constexpr EnumValue kEnums[] = {
     {"OUTPUT", 0, "wired"},
     {"OUTPUT", 1, "btHeadset"},
     {"OUTPUT", 2, "phoneReceiver"},
+    {"OUTPUT", 3, "speaker"},
+    {"OUTPUT", 4, "usbDac"},
     {"REPEAT", 0, "off"},
     {"REPEAT", 1, "all"},
     {"REPEAT", 2, "one"},
@@ -133,12 +140,19 @@ inline constexpr EnumValue kEnums[] = {
     {"ROW_FLAG", 0, "readOnly"},
     {"ROW_FLAG", 1, "restart"},
     {"ROW_FLAG", 2, "boardOnly"},
+    {"ROW_FLAG", 3, "confirm"},
     {"EQ_OUTPUT", 0, "wired"},
     {"EQ_OUTPUT", 1, "bt"},
     {"BAND_TYPE", 0, "off"},
     {"BAND_TYPE", 1, "peak"},
     {"BAND_TYPE", 2, "lowShelf"},
     {"BAND_TYPE", 3, "highShelf"},
+    {"BAND_TYPE", 4, "bandPass"},
+    {"BAND_TYPE", 5, "lowPass"},
+    {"BAND_TYPE", 6, "highPass"},
+    {"BAND_TYPE", 7, "allPass"},
+    {"EQ_MODE", 0, "parametric"},
+    {"EQ_MODE", 1, "graphic"},
     {"VIEW", 0, "artists"},
     {"VIEW", 1, "albums"},
     {"VIEW", 2, "songs"},
@@ -190,7 +204,7 @@ inline constexpr EnumValue kEnums[] = {
     {"IMG_ORIGIN", 0, "library"},
     {"IMG_ORIGIN", 1, "phone"},
 };
-inline constexpr int kEnumCount = 79;
+inline constexpr int kEnumCount = 88;
 
 inline constexpr Msg kMsgs[] = {
     {"HELLO", 0x01, "app", "req"},
@@ -254,6 +268,8 @@ inline constexpr Tag kTags[] = {
     {"HELLO.reply", 14, "libRev", "u32", Kind::U32, false},
     {"HELLO.reply", 15, "settingsRev", "u32", Kind::U32, false},
     {"HELLO.reply", 16, "snapRev", "u32", Kind::U32, false},
+    {"HELLO.reply", 17, "eqSlot", "EqSlot", Kind::Rec, true},
+    {"HELLO.reply", 18, "bandTypes", "BAND_TYPE", Kind::Enum, true},
     {"BYE", 1, "reason", "BYE_REASON", Kind::Enum, false},
     {"BYE", 2, "major", "u16", Kind::U16, false},
     {"BYE", 3, "minor", "u16", Kind::U16, false},
@@ -292,6 +308,7 @@ inline constexpr Tag kTags[] = {
     {"STATE", 33, "lyricsPlain", "bool", Kind::Bool, false},
     {"STATE", 34, "lyricsCrc", "u32", Kind::U32, false},
     {"STATE", 35, "positionHeld", "bool", Kind::Bool, false},
+    {"STATE", 36, "eqSlot", "str", Kind::Str, false},
     {"SCHEMA", 1, "pivot", "str", Kind::Str, false},
     {"SCHEMA", 2, "offset", "u32", Kind::U32, false},
     {"SCHEMA", 3, "total", "u32", Kind::U32, false},
@@ -309,6 +326,13 @@ inline constexpr Tag kTags[] = {
     {"EQ", 5, "offset", "u32", Kind::U32, false},
     {"EQ", 6, "total", "u32", Kind::U32, false},
     {"EQ", 7, "more", "bool", Kind::Bool, false},
+    {"EQ", 8, "slot", "str", Kind::Str, false},
+    {"EQ", 9, "mode", "EQ_MODE", Kind::Enum, false},
+    {"EQ", 10, "graphicKey", "str", Kind::Str, false},
+    {"EQ", 11, "graphicName", "EqName", Kind::Rec, true},
+    {"EQ", 12, "gains", "Graphic", Kind::Rec, false},
+    {"EQ", 13, "graphicOffset", "u32", Kind::U32, false},
+    {"EQ", 14, "graphicTotal", "u32", Kind::U32, false},
     {"QUEUE", 1, "rev", "u32", Kind::U32, false},
     {"QUEUE", 2, "offset", "u32", Kind::U32, false},
     {"QUEUE", 3, "total", "u32", Kind::U32, false},
@@ -344,6 +368,10 @@ inline constexpr Tag kTags[] = {
     {"EQ_SET", 1, "output", "EQ_OUTPUT", Kind::Enum, false},
     {"EQ_SET", 2, "key", "str", Kind::Str, false},
     {"EQ_SET", 3, "ints", "Profile", Kind::Rec, false},
+    {"EQ_SET", 4, "slot", "str", Kind::Str, false},
+    {"EQ_SET", 5, "mode", "EQ_MODE", Kind::Enum, false},
+    {"EQ_SET", 6, "graphicKey", "str", Kind::Str, false},
+    {"EQ_SET", 7, "gains", "Graphic", Kind::Rec, false},
     {"PLAY", 1, "view", "VIEW", Kind::Enum, false},
     {"PLAY", 2, "parent", "str", Kind::Str, false},
     {"PLAY", 3, "libRev", "u32", Kind::U32, false},
@@ -402,6 +430,8 @@ inline constexpr Tag kTags[] = {
     {"IMG_BEGIN", 9, "source", "str", Kind::Str, false},
     {"IMG_BEGIN", 10, "credit", "str", Kind::Str, false},
     {"IMG_BEGIN", 11, "origin", "IMG_ORIGIN", Kind::Enum, false},
+    {"IMG_BEGIN", 12, "focusX", "u16", Kind::U16, false},
+    {"IMG_BEGIN", 13, "focusY", "u16", Kind::U16, false},
     {"IMG_BEGIN.reply", 1, "offset", "u32", Kind::U32, false},
     {"IMG_BEGIN.reply", 2, "crc", "u32", Kind::U32, false},
     {"IMG_DATA", 1, "offset", "u32", Kind::U32, false},
@@ -425,6 +455,9 @@ inline constexpr Tag kTags[] = {
     {"EQ_PRESET", 4, "name", "str", Kind::Str, false},
     {"EQ_PRESET", 5, "ints", "Profile", Kind::Rec, false},
     {"EQ_PRESET", 6, "replace", "bool", Kind::Bool, false},
+    {"EQ_PRESET", 7, "slot", "str", Kind::Str, false},
+    {"EQ_PRESET", 8, "mode", "EQ_MODE", Kind::Enum, false},
+    {"EQ_PRESET", 9, "gains", "Graphic", Kind::Rec, false},
     {"EQ_PRESET.reply", 1, "key", "str", Kind::Str, false},
     {"ART_BLOCK", 1, "cmd", "BLOCK_CMD", Kind::Enum, false},
     {"ART_BLOCK", 2, "name", "str", Kind::Str, false},
@@ -480,18 +513,25 @@ inline constexpr Tag kTags[] = {
     {"LibRow", 3, "first", "u64", Kind::U64, false},
     {"LibRow", 4, "key", "str", Kind::Str, false},
     {"LibRow", 5, "mbid", "str", Kind::Str, false},
+    {"LibRow", 6, "artist", "str", Kind::Str, false},
     {"ImgEntry", 1, "name", "str", Kind::Str, false},
     {"ImgEntry", 2, "mbid", "str", Kind::Str, false},
     {"ImgEntry", 3, "origin", "IMG_ORIGIN", Kind::Enum, true},
     {"LyrLine", 1, "ms", "u32", Kind::U32, false},
     {"LyrLine", 2, "text", "str", Kind::Str, false},
+    {"EqSlot", 1, "key", "str", Kind::Str, false},
+    {"EqSlot", 2, "label", "str", Kind::Str, false},
+    {"Graphic", 1, "preamp10", "i32", Kind::I32, false},
+    {"Graphic", 2, "band", "GraphicBand", Kind::Rec, true},
+    {"GraphicBand", 1, "grid", "i32", Kind::I32, false},
+    {"GraphicBand", 2, "gain10", "i32", Kind::I32, false},
 };
-inline constexpr int kTagCount = 252;
+inline constexpr int kTagCount = 278;
 
 inline constexpr const char* uuid = kConsts[0].value;
 inline constexpr int64_t magic = 0x50434446;
 inline constexpr int64_t major = 1;
-inline constexpr int64_t minor = 10;
+inline constexpr int64_t minor = 12;
 inline constexpr int64_t headerBytes = 6;
 inline constexpr int64_t tlvHeaderBytes = 3;
 inline constexpr int64_t maxPayload = 16384;
@@ -553,6 +593,11 @@ inline constexpr int lyricsGet = 11;
 inline constexpr int artPick = 12;
 inline constexpr int imgOrigin = 13;
 inline constexpr int stateClock = 14;
+inline constexpr int eqSlots = 15;
+inline constexpr int eqGraphic = 16;
+inline constexpr int eqPass = 17;
+inline constexpr int outputKinds = 18;
+inline constexpr int rowConfirm = 19;
 }
 
 namespace msg {
@@ -603,6 +648,8 @@ namespace OUTPUT {
 inline constexpr uint8_t wired = 0;
 inline constexpr uint8_t btHeadset = 1;
 inline constexpr uint8_t phoneReceiver = 2;
+inline constexpr uint8_t speaker = 3;
+inline constexpr uint8_t usbDac = 4;
 }
 namespace REPEAT {
 inline constexpr uint8_t off = 0;
@@ -629,6 +676,7 @@ namespace ROW_FLAG {
 inline constexpr uint8_t readOnly = 0;
 inline constexpr uint8_t restart = 1;
 inline constexpr uint8_t boardOnly = 2;
+inline constexpr uint8_t confirm = 3;
 }
 namespace EQ_OUTPUT {
 inline constexpr uint8_t wired = 0;
@@ -639,6 +687,14 @@ inline constexpr uint8_t off = 0;
 inline constexpr uint8_t peak = 1;
 inline constexpr uint8_t lowShelf = 2;
 inline constexpr uint8_t highShelf = 3;
+inline constexpr uint8_t bandPass = 4;
+inline constexpr uint8_t lowPass = 5;
+inline constexpr uint8_t highPass = 6;
+inline constexpr uint8_t allPass = 7;
+}
+namespace EQ_MODE {
+inline constexpr uint8_t parametric = 0;
+inline constexpr uint8_t graphic = 1;
 }
 namespace VIEW {
 inline constexpr uint8_t artists = 0;
@@ -743,6 +799,8 @@ inline constexpr uint8_t features = 13;
 inline constexpr uint8_t libRev = 14;
 inline constexpr uint8_t settingsRev = 15;
 inline constexpr uint8_t snapRev = 16;
+inline constexpr uint8_t eqSlot = 17;
+inline constexpr uint8_t bandTypes = 18;
 }
 namespace BYE {
 inline constexpr uint8_t reason = 1;
@@ -785,6 +843,7 @@ inline constexpr uint8_t snapRev = 32;
 inline constexpr uint8_t lyricsPlain = 33;
 inline constexpr uint8_t lyricsCrc = 34;
 inline constexpr uint8_t positionHeld = 35;
+inline constexpr uint8_t eqSlot = 36;
 }
 namespace SCHEMA {
 inline constexpr uint8_t pivot = 1;
@@ -808,6 +867,13 @@ inline constexpr uint8_t ints = 4;
 inline constexpr uint8_t offset = 5;
 inline constexpr uint8_t total = 6;
 inline constexpr uint8_t more = 7;
+inline constexpr uint8_t slot = 8;
+inline constexpr uint8_t mode = 9;
+inline constexpr uint8_t graphicKey = 10;
+inline constexpr uint8_t graphicName = 11;
+inline constexpr uint8_t gains = 12;
+inline constexpr uint8_t graphicOffset = 13;
+inline constexpr uint8_t graphicTotal = 14;
 }
 namespace QUEUE {
 inline constexpr uint8_t rev = 1;
@@ -861,6 +927,10 @@ namespace EQ_SET {
 inline constexpr uint8_t output = 1;
 inline constexpr uint8_t key = 2;
 inline constexpr uint8_t ints = 3;
+inline constexpr uint8_t slot = 4;
+inline constexpr uint8_t mode = 5;
+inline constexpr uint8_t graphicKey = 6;
+inline constexpr uint8_t gains = 7;
 }
 namespace PLAY {
 inline constexpr uint8_t view = 1;
@@ -947,6 +1017,8 @@ inline constexpr uint8_t wrongArtist = 8;
 inline constexpr uint8_t source = 9;
 inline constexpr uint8_t credit = 10;
 inline constexpr uint8_t origin = 11;
+inline constexpr uint8_t focusX = 12;
+inline constexpr uint8_t focusY = 13;
 }
 namespace IMG_BEGIN_reply {
 inline constexpr uint8_t offset = 1;
@@ -986,6 +1058,9 @@ inline constexpr uint8_t key = 3;
 inline constexpr uint8_t name = 4;
 inline constexpr uint8_t ints = 5;
 inline constexpr uint8_t replace = 6;
+inline constexpr uint8_t slot = 7;
+inline constexpr uint8_t mode = 8;
+inline constexpr uint8_t gains = 9;
 }
 namespace EQ_PRESET_reply {
 inline constexpr uint8_t key = 1;
@@ -1069,6 +1144,7 @@ inline constexpr uint8_t count = 2;
 inline constexpr uint8_t first = 3;
 inline constexpr uint8_t key = 4;
 inline constexpr uint8_t mbid = 5;
+inline constexpr uint8_t artist = 6;
 }
 namespace ImgEntry {
 inline constexpr uint8_t name = 1;
@@ -1078,6 +1154,18 @@ inline constexpr uint8_t origin = 3;
 namespace LyrLine {
 inline constexpr uint8_t ms = 1;
 inline constexpr uint8_t text = 2;
+}
+namespace EqSlot {
+inline constexpr uint8_t key = 1;
+inline constexpr uint8_t label = 2;
+}
+namespace Graphic {
+inline constexpr uint8_t preamp10 = 1;
+inline constexpr uint8_t band = 2;
+}
+namespace GraphicBand {
+inline constexpr uint8_t grid = 1;
+inline constexpr uint8_t gain10 = 2;
 }
 }
 

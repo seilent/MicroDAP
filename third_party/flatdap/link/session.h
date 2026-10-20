@@ -12,12 +12,18 @@ namespace fd {
 constexpr size_t kLinkQueueBytes = 65536;
 constexpr size_t kLinkReadBytes = 65536;
 
+struct LinkEqSlot {
+    std::string key, label;
+};
+
 struct LinkHello {
     std::string board, version;
     uint16_t screen_w = 0, screen_h = 0, backdrop_w = 0, backdrop_h = 0;
     uint32_t idle_ms = (uint32_t)proto::keepaliveIdleMs, busy_ms = (uint32_t)proto::keepaliveBusyMs;
     uint64_t features = 0;
     uint32_t lib_rev = 0, settings_rev = 0, snap_rev = 0;
+    std::vector<LinkEqSlot> eq_slots;
+    std::vector<uint8_t> band_types;
 };
 
 struct LinkCommand {
@@ -66,6 +72,7 @@ public:
     uint16_t ask(uint8_t type, const LinkWriter& body, int64_t now);
     bool asking() const { return ask_.type != 0; }
     bool app_has(uint8_t type) const;
+    bool app_bit(int bit) const;
     bool can_ask(uint8_t type) const;
     bool take_answer(LinkAnswer& out);
     bool reply(const LinkCommand& c, const LinkWriter& body, int64_t now);

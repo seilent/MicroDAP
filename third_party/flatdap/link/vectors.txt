@@ -10,16 +10,18 @@ dec hello 0.body.minor 0
 dec hello 0.body.appVersion 0.1.0
 act hello accept
 vec hello_reply dev
-hex hello_reply 7400010101000104004644435002020001000302000a000404006170383005100032303236313031362e396431323564320602006801070200e0010802008001
-hex hello_reply 090200e0010a0400004000000b0400307500000c0400881300000d0800ff7f0000000000000e0400070000000f04000300000010040004000000
+hex hello_reply bc00010101000104004644435002020001000302000c000404006170383005100032303236313031362e396431323564320602006801070200e0010802008001
+hex hello_reply 090200e0010a0400004000000b0400307500000c0400881300000d0800ffff0000000000000e0400070000000f04000300000010040004000000111a00010a00
+hex hello_reply 6865616470686f6e6573020a004845414450484f4e4553111800010900626c7565746f6f7468020900424c5545544f4f54481201000012010001120100021201
+hex hello_reply 0003
 re hello_reply hello
-dec hello_reply 0.len 116
+dec hello_reply 0.len 188
 dec hello_reply 0.type HELLO
 dec hello_reply 0.flags 0x01
 dec hello_reply 0.seq 1
 dec hello_reply 0.body.magic 1346585670
 dec hello_reply 0.body.major 1
-dec hello_reply 0.body.minor 10
+dec hello_reply 0.body.minor 12
 dec hello_reply 0.body.board ap80
 dec hello_reply 0.body.version 20261016.9d125d2
 dec hello_reply 0.body.screenW 360
@@ -29,10 +31,18 @@ dec hello_reply 0.body.backdropH 480
 dec hello_reply 0.body.maxPayload 16384
 dec hello_reply 0.body.idleMs 30000
 dec hello_reply 0.body.busyMs 5000
-dec hello_reply 0.body.features 32767
+dec hello_reply 0.body.features 65535
 dec hello_reply 0.body.libRev 7
 dec hello_reply 0.body.settingsRev 3
 dec hello_reply 0.body.snapRev 4
+dec hello_reply 0.body.eqSlot[0].key headphones
+dec hello_reply 0.body.eqSlot[0].label HEADPHONES
+dec hello_reply 0.body.eqSlot[1].key bluetooth
+dec hello_reply 0.body.eqSlot[1].label BLUETOOTH
+dec hello_reply 0.body.bandTypes[0] off
+dec hello_reply 0.body.bandTypes[1] peak
+dec hello_reply 0.body.bandTypes[2] lowShelf
+dec hello_reply 0.body.bandTypes[3] highShelf
 act hello_reply accept
 vec ping app
 hex ping 000002040200
@@ -2483,3 +2493,956 @@ dec state_clock 0.body.cardFreeMiB 1000
 dec state_clock 0.body.cardTotalMiB 30000
 dec state_clock 0.body.sentMs 4000103
 act state_clock accept
+vec lib_album_artist dev
+hex lib_album_artist 9b0015000b00010400070000000201000103000008040004000000040400000000000504000200000006010000073400010a004669727374204c6f7665020400
+hex lib_album_artist 0c000000030800c900000000000000040300323031060c0055746164612048696b617275073a00010d0047726561746573742048697473020400100000000308
+hex lib_album_artist 00f501000000000000040300353031060f00766172696f75732061727469737473
+dec lib_album_artist 0.len 155
+dec lib_album_artist 0.type LIB
+dec lib_album_artist 0.flags 0x00
+dec lib_album_artist 0.seq 11
+dec lib_album_artist 0.body.libRev 7
+dec lib_album_artist 0.body.view albums
+dec lib_album_artist 0.body.parent
+dec lib_album_artist 0.body.snapRev 4
+dec lib_album_artist 0.body.offset 0
+dec lib_album_artist 0.body.total 2
+dec lib_album_artist 0.body.more false
+dec lib_album_artist 0.body.row[0].name First Love
+dec lib_album_artist 0.body.row[0].count 12
+dec lib_album_artist 0.body.row[0].first 201
+dec lib_album_artist 0.body.row[0].key 201
+dec lib_album_artist 0.body.row[0].artist Utada Hikaru
+dec lib_album_artist 0.body.row[1].name Greatest Hits
+dec lib_album_artist 0.body.row[1].count 16
+dec lib_album_artist 0.body.row[1].first 501
+dec lib_album_artist 0.body.row[1].key 501
+dec lib_album_artist 0.body.row[1].artist various artists
+act lib_album_artist accept
+vec hello_reply_slots dev
+hex hello_reply_slots 9800010101000104004644435002020001000302000c0004010078050100310a0400004000000d0800ffff070000000000111a00010a006865616470686f6e65
+hex hello_reply_slots 73020a004845414450484f4e4553111800010900626c7565746f6f7468020900424c5545544f4f54481112000104006c696e650208004c494e45204f55541201
+hex hello_reply_slots 000012010001120100021201000312010004120100051201000612010007
+dec hello_reply_slots 0.len 152
+dec hello_reply_slots 0.type HELLO
+dec hello_reply_slots 0.flags 0x01
+dec hello_reply_slots 0.seq 1
+dec hello_reply_slots 0.body.magic 1346585670
+dec hello_reply_slots 0.body.major 1
+dec hello_reply_slots 0.body.minor 12
+dec hello_reply_slots 0.body.board x
+dec hello_reply_slots 0.body.version 1
+dec hello_reply_slots 0.body.maxPayload 16384
+dec hello_reply_slots 0.body.features 524287
+dec hello_reply_slots 0.body.eqSlot[0].key headphones
+dec hello_reply_slots 0.body.eqSlot[0].label HEADPHONES
+dec hello_reply_slots 0.body.eqSlot[1].key bluetooth
+dec hello_reply_slots 0.body.eqSlot[1].label BLUETOOTH
+dec hello_reply_slots 0.body.eqSlot[2].key line
+dec hello_reply_slots 0.body.eqSlot[2].label LINE OUT
+dec hello_reply_slots 0.body.bandTypes[0] off
+dec hello_reply_slots 0.body.bandTypes[1] peak
+dec hello_reply_slots 0.body.bandTypes[2] lowShelf
+dec hello_reply_slots 0.body.bandTypes[3] highShelf
+dec hello_reply_slots 0.body.bandTypes[4] bandPass
+dec hello_reply_slots 0.body.bandTypes[5] lowPass
+dec hello_reply_slots 0.body.bandTypes[6] highPass
+dec hello_reply_slots 0.body.bandTypes[7] allPass
+act hello_reply_slots accept
+vec hello_app_slots app
+hex hello_app_slots 2400010401000104004644435002020001000302000c00040500302e312e3005080000b4060000000000
+dec hello_app_slots 0.len 36
+dec hello_app_slots 0.type HELLO
+dec hello_app_slots 0.flags 0x04
+dec hello_app_slots 0.seq 1
+dec hello_app_slots 0.body.magic 1346585670
+dec hello_app_slots 0.body.major 1
+dec hello_app_slots 0.body.minor 12
+dec hello_app_slots 0.body.appVersion 0.1.0
+dec hello_app_slots 0.body.features 439296
+act hello_app_slots accept
+vec eq_slot dev
+hex eq_slot b900130046000804006c696e65020600637573746f6d030c000103006f66660203004f4646031200010600637573746f6d020600435553544f4d047000010400
+hex eq_slot d3ffffff0220000101000202040006000000030400289a01000404002800000005040046000000022000010100010204002200000003040040420f00040400e7
+hex eq_slot ffffff0504008d0000000220000101000302040032000000030400809698000404000f00000005040047000000050400000000000604000200000007010000
+dec eq_slot 0.len 185
+dec eq_slot 0.type EQ
+dec eq_slot 0.flags 0x00
+dec eq_slot 0.seq 70
+dec eq_slot 0.body.slot line
+dec eq_slot 0.body.key custom
+dec eq_slot 0.body.profile[0].key off
+dec eq_slot 0.body.profile[0].name OFF
+dec eq_slot 0.body.profile[1].key custom
+dec eq_slot 0.body.profile[1].name CUSTOM
+dec eq_slot 0.body.ints.preamp10 -45
+dec eq_slot 0.body.ints.band[0].type lowShelf
+dec eq_slot 0.body.ints.band[0].grid 6
+dec eq_slot 0.body.ints.band[0].milliHz 105000
+dec eq_slot 0.body.ints.band[0].gain10 40
+dec eq_slot 0.body.ints.band[0].q100 70
+dec eq_slot 0.body.ints.band[1].type peak
+dec eq_slot 0.body.ints.band[1].grid 34
+dec eq_slot 0.body.ints.band[1].milliHz 1000000
+dec eq_slot 0.body.ints.band[1].gain10 -25
+dec eq_slot 0.body.ints.band[1].q100 141
+dec eq_slot 0.body.ints.band[2].type highShelf
+dec eq_slot 0.body.ints.band[2].grid 50
+dec eq_slot 0.body.ints.band[2].milliHz 10000000
+dec eq_slot 0.body.ints.band[2].gain10 15
+dec eq_slot 0.body.ints.band[2].q100 71
+dec eq_slot 0.body.offset 0
+dec eq_slot 0.body.total 2
+dec eq_slot 0.body.more false
+act eq_slot accept
+vec eq_set_slot app
+hex eq_set_slot 390024044700040900626c7565746f6f7468032a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff0504008d000000
+dec eq_set_slot 0.len 57
+dec eq_set_slot 0.type EQ_SET
+dec eq_set_slot 0.flags 0x04
+dec eq_set_slot 0.seq 71
+dec eq_set_slot 0.body.slot bluetooth
+dec eq_set_slot 0.body.ints.preamp10 -30
+dec eq_set_slot 0.body.ints.band[0].type peak
+dec eq_set_slot 0.body.ints.band[0].grid 34
+dec eq_set_slot 0.body.ints.band[0].milliHz 1000000
+dec eq_set_slot 0.body.ints.band[0].gain10 -20
+dec eq_set_slot 0.body.ints.band[0].q100 141
+act eq_set_slot accept
+vec eq_set_slot_reply dev
+hex eq_set_slot_reply 000024014700
+re eq_set_slot_reply eq_set_slot
+dec eq_set_slot_reply 0.len 0
+dec eq_set_slot_reply 0.type EQ_SET
+dec eq_set_slot_reply 0.flags 0x01
+dec eq_set_slot_reply 0.seq 71
+act eq_set_slot_reply accept
+vec eq_set_slot_unknown app
+hex eq_set_slot_unknown 0c00240448000403006175780203006f6666
+dec eq_set_slot_unknown 0.len 12
+dec eq_set_slot_unknown 0.type EQ_SET
+dec eq_set_slot_unknown 0.flags 0x04
+dec eq_set_slot_unknown 0.seq 72
+dec eq_set_slot_unknown 0.body.slot aux
+dec eq_set_slot_unknown 0.body.key off
+act eq_set_slot_unknown accept
+vec eq_set_slot_unknown_error dev
+hex eq_set_slot_unknown_error 100024034800010100020209006261642076616c7565
+re eq_set_slot_unknown_error eq_set_slot_unknown
+dec eq_set_slot_unknown_error 0.len 16
+dec eq_set_slot_unknown_error 0.type EQ_SET
+dec eq_set_slot_unknown_error 0.flags 0x03
+dec eq_set_slot_unknown_error 0.seq 72
+dec eq_set_slot_unknown_error 0.body.code 2
+dec eq_set_slot_unknown_error 0.body.text bad value
+act eq_set_slot_unknown_error accept
+vec eq_set_slot_output app
+hex eq_set_slot_output 170024044900010100000203006f6666040a006865616470686f6e6573
+dec eq_set_slot_output 0.len 23
+dec eq_set_slot_output 0.type EQ_SET
+dec eq_set_slot_output 0.flags 0x04
+dec eq_set_slot_output 0.seq 73
+dec eq_set_slot_output 0.body.output wired
+dec eq_set_slot_output 0.body.key off
+dec eq_set_slot_output 0.body.slot headphones
+act eq_set_slot_output accept
+vec eq_set_slot_output_error dev
+hex eq_set_slot_output_error 100024034900010100020209006261642076616c7565
+re eq_set_slot_output_error eq_set_slot_output
+dec eq_set_slot_output_error 0.len 16
+dec eq_set_slot_output_error 0.type EQ_SET
+dec eq_set_slot_output_error 0.flags 0x03
+dec eq_set_slot_output_error 0.seq 73
+dec eq_set_slot_output_error 0.body.code 2
+dec eq_set_slot_output_error 0.body.text bad value
+act eq_set_slot_output_error accept
+vec eq_preset_slot app
+hex eq_preset_slot 1a0037044a0001010000040600484420363530070a006865616470686f6e6573
+dec eq_preset_slot 0.len 26
+dec eq_preset_slot 0.type EQ_PRESET
+dec eq_preset_slot 0.flags 0x04
+dec eq_preset_slot 0.seq 74
+dec eq_preset_slot 0.body.op save
+dec eq_preset_slot 0.body.name HD 650
+dec eq_preset_slot 0.body.slot headphones
+act eq_preset_slot accept
+vec eq_preset_slot_reply dev
+hex eq_preset_slot_reply 1e0037014a00011b002f646174612f666c61746461702f65712f4844203635302e747874
+re eq_preset_slot_reply eq_preset_slot
+dec eq_preset_slot_reply 0.len 30
+dec eq_preset_slot_reply 0.type EQ_PRESET
+dec eq_preset_slot_reply 0.flags 0x01
+dec eq_preset_slot_reply 0.seq 74
+dec eq_preset_slot_reply 0.body.key /data/flatdap/eq/HD 650.txt
+act eq_preset_slot_reply accept
+vec state_eq_slot dev
+hex state_eq_slot 180010004b0001010000020100010c010000240900626c7565746f6f7468
+dec state_eq_slot 0.len 24
+dec state_eq_slot 0.type STATE
+dec state_eq_slot 0.flags 0x00
+dec state_eq_slot 0.seq 75
+dec state_eq_slot 0.body.source local
+dec state_eq_slot 0.body.output btHeadset
+dec state_eq_slot 0.body.playing false
+dec state_eq_slot 0.body.eqSlot bluetooth
+act state_eq_slot accept
+vec eq_pass_bands dev
+hex eq_pass_bands e20013004c00080a006865616470686f6e6573020600637573746f6d030c000103006f66660203004f4646031200010600637573746f6d020600435553544f4d
+hex eq_pass_bands 0493000104000000000002200001010004020400ffffffff03040040420f00040400000000000504008d00000002200001010005020400ffffffff03040080a8
+hex eq_pass_bands 1201040400000000000504004700000002200001010006020400ffffffff030400a8610000040400000000000504004700000002200001010007020400ffffff
+hex eq_pass_bands ff030400c0c62d000404000000000005040064000000050400000000000604000200000007010000
+dec eq_pass_bands 0.len 226
+dec eq_pass_bands 0.type EQ
+dec eq_pass_bands 0.flags 0x00
+dec eq_pass_bands 0.seq 76
+dec eq_pass_bands 0.body.slot headphones
+dec eq_pass_bands 0.body.key custom
+dec eq_pass_bands 0.body.profile[0].key off
+dec eq_pass_bands 0.body.profile[0].name OFF
+dec eq_pass_bands 0.body.profile[1].key custom
+dec eq_pass_bands 0.body.profile[1].name CUSTOM
+dec eq_pass_bands 0.body.ints.preamp10 0
+dec eq_pass_bands 0.body.ints.band[0].type bandPass
+dec eq_pass_bands 0.body.ints.band[0].grid -1
+dec eq_pass_bands 0.body.ints.band[0].milliHz 1000000
+dec eq_pass_bands 0.body.ints.band[0].gain10 0
+dec eq_pass_bands 0.body.ints.band[0].q100 141
+dec eq_pass_bands 0.body.ints.band[1].type lowPass
+dec eq_pass_bands 0.body.ints.band[1].grid -1
+dec eq_pass_bands 0.body.ints.band[1].milliHz 18000000
+dec eq_pass_bands 0.body.ints.band[1].gain10 0
+dec eq_pass_bands 0.body.ints.band[1].q100 71
+dec eq_pass_bands 0.body.ints.band[2].type highPass
+dec eq_pass_bands 0.body.ints.band[2].grid -1
+dec eq_pass_bands 0.body.ints.band[2].milliHz 25000
+dec eq_pass_bands 0.body.ints.band[2].gain10 0
+dec eq_pass_bands 0.body.ints.band[2].q100 71
+dec eq_pass_bands 0.body.ints.band[3].type allPass
+dec eq_pass_bands 0.body.ints.band[3].grid -1
+dec eq_pass_bands 0.body.ints.band[3].milliHz 3000000
+dec eq_pass_bands 0.body.ints.band[3].gain10 0
+dec eq_pass_bands 0.body.ints.band[3].q100 100
+dec eq_pass_bands 0.body.offset 0
+dec eq_pass_bands 0.body.total 2
+dec eq_pass_bands 0.body.more false
+act eq_pass_bands accept
+vec eq_set_pass app
+hex eq_set_pass 3a0024044d00040a006865616470686f6e6573032a000104000000000002200001010005020400ffffffff03040080a812010404000000000005040047000000
+dec eq_set_pass 0.len 58
+dec eq_set_pass 0.type EQ_SET
+dec eq_set_pass 0.flags 0x04
+dec eq_set_pass 0.seq 77
+dec eq_set_pass 0.body.slot headphones
+dec eq_set_pass 0.body.ints.preamp10 0
+dec eq_set_pass 0.body.ints.band[0].type lowPass
+dec eq_set_pass 0.body.ints.band[0].grid -1
+dec eq_set_pass 0.body.ints.band[0].milliHz 18000000
+dec eq_set_pass 0.body.ints.band[0].gain10 0
+dec eq_set_pass 0.body.ints.band[0].q100 71
+act eq_set_pass accept
+vec eq_set_pass_reply dev
+hex eq_set_pass_reply 000024014d00
+re eq_set_pass_reply eq_set_pass
+dec eq_set_pass_reply 0.len 0
+dec eq_set_pass_reply 0.type EQ_SET
+dec eq_set_pass_reply 0.flags 0x01
+dec eq_set_pass_reply 0.seq 77
+act eq_set_pass_reply accept
+vec eq_set_type_unlisted app
+hex eq_set_type_unlisted 3a0024044e00040a006865616470686f6e6573032a000104000000000002200001010004020400ffffffff03040040420f00040400000000000504008d000000
+dec eq_set_type_unlisted 0.len 58
+dec eq_set_type_unlisted 0.type EQ_SET
+dec eq_set_type_unlisted 0.flags 0x04
+dec eq_set_type_unlisted 0.seq 78
+dec eq_set_type_unlisted 0.body.slot headphones
+dec eq_set_type_unlisted 0.body.ints.preamp10 0
+dec eq_set_type_unlisted 0.body.ints.band[0].type bandPass
+dec eq_set_type_unlisted 0.body.ints.band[0].grid -1
+dec eq_set_type_unlisted 0.body.ints.band[0].milliHz 1000000
+dec eq_set_type_unlisted 0.body.ints.band[0].gain10 0
+dec eq_set_type_unlisted 0.body.ints.band[0].q100 141
+act eq_set_type_unlisted accept
+vec eq_set_type_unlisted_error dev
+hex eq_set_type_unlisted_error 100024034e00010100020209006261642076616c7565
+re eq_set_type_unlisted_error eq_set_type_unlisted
+dec eq_set_type_unlisted_error 0.len 16
+dec eq_set_type_unlisted_error 0.type EQ_SET
+dec eq_set_type_unlisted_error 0.flags 0x03
+dec eq_set_type_unlisted_error 0.seq 78
+dec eq_set_type_unlisted_error 0.body.code 2
+dec eq_set_type_unlisted_error 0.body.text bad value
+act eq_set_type_unlisted_error accept
+vec eq_graphic dev
+hex eq_graphic 510113004f0001010000020600637573746f6d030c000103006f66660203004f4646031200010600637573746f6d020600435553544f4d031d00011100617574
+hex eq_graphic 6f65712f4844203630302e747874020600484420363030042a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff050400
+hex eq_graphic 8d000000050400000000000604000300000007010001090100010a0600637573746f6d0cb100010400c0ffffff020e000104000400000002040028000000020e
+hex eq_graphic 000104000a0000000204001e000000020e00010400100000000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ff
+hex eq_graphic ffff020e0001040022000000020400ecffffff020e000104002800000002040000000000020e000104002e0000000204000a000000020e000104003400000002
+hex eq_graphic 04001e000000020e000104003a0000000204003c00000082011300500001010000020600637573746f6d042a00010400e2ffffff022000010100010204002200
+hex eq_graphic 000003040040420f00040400ecffffff0504008d000000050400030000000604000300000007010000090100010a0600637573746f6d0cb100010400c0ffffff
+hex eq_graphic 020e000104000400000002040028000000020e000104000a0000000204001e000000020e00010400100000000204000a000000020e0001040016000000020400
+hex eq_graphic 00000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff020e000104002800000002040000000000020e000104002e0000
+hex eq_graphic 000204000a000000020e00010400340000000204001e000000020e000104003a0000000204003c0000000b0c000103006f66660203004f46460b0e0001040066
+hex eq_graphic 6c6174020400464c41540b2f000121002f646174612f666c61746461702f65712f677261706869632f526f636b2e696e69020400526f636b030100010b120001
+hex eq_graphic 0600637573746f6d020600435553544f4d0d0400000000000e040004000000
+dec eq_graphic 0.len 337
+dec eq_graphic 0.type EQ
+dec eq_graphic 0.flags 0x00
+dec eq_graphic 0.seq 79
+dec eq_graphic 0.body.output wired
+dec eq_graphic 0.body.key custom
+dec eq_graphic 0.body.profile[0].key off
+dec eq_graphic 0.body.profile[0].name OFF
+dec eq_graphic 0.body.profile[1].key custom
+dec eq_graphic 0.body.profile[1].name CUSTOM
+dec eq_graphic 0.body.profile[2].key autoeq/HD 600.txt
+dec eq_graphic 0.body.profile[2].name HD 600
+dec eq_graphic 0.body.ints.preamp10 -30
+dec eq_graphic 0.body.ints.band[0].type peak
+dec eq_graphic 0.body.ints.band[0].grid 34
+dec eq_graphic 0.body.ints.band[0].milliHz 1000000
+dec eq_graphic 0.body.ints.band[0].gain10 -20
+dec eq_graphic 0.body.ints.band[0].q100 141
+dec eq_graphic 0.body.offset 0
+dec eq_graphic 0.body.total 3
+dec eq_graphic 0.body.more true
+dec eq_graphic 0.body.mode graphic
+dec eq_graphic 0.body.graphicKey custom
+dec eq_graphic 0.body.gains.preamp10 -64
+dec eq_graphic 0.body.gains.band[0].grid 4
+dec eq_graphic 0.body.gains.band[0].gain10 40
+dec eq_graphic 0.body.gains.band[1].grid 10
+dec eq_graphic 0.body.gains.band[1].gain10 30
+dec eq_graphic 0.body.gains.band[2].grid 16
+dec eq_graphic 0.body.gains.band[2].gain10 10
+dec eq_graphic 0.body.gains.band[3].grid 22
+dec eq_graphic 0.body.gains.band[3].gain10 0
+dec eq_graphic 0.body.gains.band[4].grid 28
+dec eq_graphic 0.body.gains.band[4].gain10 -10
+dec eq_graphic 0.body.gains.band[5].grid 34
+dec eq_graphic 0.body.gains.band[5].gain10 -20
+dec eq_graphic 0.body.gains.band[6].grid 40
+dec eq_graphic 0.body.gains.band[6].gain10 0
+dec eq_graphic 0.body.gains.band[7].grid 46
+dec eq_graphic 0.body.gains.band[7].gain10 10
+dec eq_graphic 0.body.gains.band[8].grid 52
+dec eq_graphic 0.body.gains.band[8].gain10 30
+dec eq_graphic 0.body.gains.band[9].grid 58
+dec eq_graphic 0.body.gains.band[9].gain10 60
+dec eq_graphic 1.len 386
+dec eq_graphic 1.type EQ
+dec eq_graphic 1.flags 0x00
+dec eq_graphic 1.seq 80
+dec eq_graphic 1.body.output wired
+dec eq_graphic 1.body.key custom
+dec eq_graphic 1.body.ints.preamp10 -30
+dec eq_graphic 1.body.ints.band[0].type peak
+dec eq_graphic 1.body.ints.band[0].grid 34
+dec eq_graphic 1.body.ints.band[0].milliHz 1000000
+dec eq_graphic 1.body.ints.band[0].gain10 -20
+dec eq_graphic 1.body.ints.band[0].q100 141
+dec eq_graphic 1.body.offset 3
+dec eq_graphic 1.body.total 3
+dec eq_graphic 1.body.more false
+dec eq_graphic 1.body.mode graphic
+dec eq_graphic 1.body.graphicKey custom
+dec eq_graphic 1.body.gains.preamp10 -64
+dec eq_graphic 1.body.gains.band[0].grid 4
+dec eq_graphic 1.body.gains.band[0].gain10 40
+dec eq_graphic 1.body.gains.band[1].grid 10
+dec eq_graphic 1.body.gains.band[1].gain10 30
+dec eq_graphic 1.body.gains.band[2].grid 16
+dec eq_graphic 1.body.gains.band[2].gain10 10
+dec eq_graphic 1.body.gains.band[3].grid 22
+dec eq_graphic 1.body.gains.band[3].gain10 0
+dec eq_graphic 1.body.gains.band[4].grid 28
+dec eq_graphic 1.body.gains.band[4].gain10 -10
+dec eq_graphic 1.body.gains.band[5].grid 34
+dec eq_graphic 1.body.gains.band[5].gain10 -20
+dec eq_graphic 1.body.gains.band[6].grid 40
+dec eq_graphic 1.body.gains.band[6].gain10 0
+dec eq_graphic 1.body.gains.band[7].grid 46
+dec eq_graphic 1.body.gains.band[7].gain10 10
+dec eq_graphic 1.body.gains.band[8].grid 52
+dec eq_graphic 1.body.gains.band[8].gain10 30
+dec eq_graphic 1.body.gains.band[9].grid 58
+dec eq_graphic 1.body.gains.band[9].gain10 60
+dec eq_graphic 1.body.graphicName[0].key off
+dec eq_graphic 1.body.graphicName[0].name OFF
+dec eq_graphic 1.body.graphicName[1].key flat
+dec eq_graphic 1.body.graphicName[1].name FLAT
+dec eq_graphic 1.body.graphicName[2].key /data/flatdap/eq/graphic/Rock.ini
+dec eq_graphic 1.body.graphicName[2].name Rock
+dec eq_graphic 1.body.graphicName[2].preset true
+dec eq_graphic 1.body.graphicName[3].key custom
+dec eq_graphic 1.body.graphicName[3].name CUSTOM
+dec eq_graphic 1.body.graphicOffset 0
+dec eq_graphic 1.body.graphicTotal 4
+act eq_graphic accept
+vec eq_graphic_off dev
+hex eq_graphic_off 9f0013005100080a006865616470686f6e65730203006f6666042a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff05
+hex eq_graphic_off 04008d000000050400020000000604000200000007010000090100010a03006f66660b0c000103006f66660203004f46460b0e00010400666c6174020400464c
+hex eq_graphic_off 41540b1200010600637573746f6d020600435553544f4d0d0400000000000e040003000000
+dec eq_graphic_off 0.len 159
+dec eq_graphic_off 0.type EQ
+dec eq_graphic_off 0.flags 0x00
+dec eq_graphic_off 0.seq 81
+dec eq_graphic_off 0.body.slot headphones
+dec eq_graphic_off 0.body.key off
+dec eq_graphic_off 0.body.ints.preamp10 -30
+dec eq_graphic_off 0.body.ints.band[0].type peak
+dec eq_graphic_off 0.body.ints.band[0].grid 34
+dec eq_graphic_off 0.body.ints.band[0].milliHz 1000000
+dec eq_graphic_off 0.body.ints.band[0].gain10 -20
+dec eq_graphic_off 0.body.ints.band[0].q100 141
+dec eq_graphic_off 0.body.offset 2
+dec eq_graphic_off 0.body.total 2
+dec eq_graphic_off 0.body.more false
+dec eq_graphic_off 0.body.mode graphic
+dec eq_graphic_off 0.body.graphicKey off
+dec eq_graphic_off 0.body.graphicName[0].key off
+dec eq_graphic_off 0.body.graphicName[0].name OFF
+dec eq_graphic_off 0.body.graphicName[1].key flat
+dec eq_graphic_off 0.body.graphicName[1].name FLAT
+dec eq_graphic_off 0.body.graphicName[2].key custom
+dec eq_graphic_off 0.body.graphicName[2].name CUSTOM
+dec eq_graphic_off 0.body.graphicOffset 0
+dec eq_graphic_off 0.body.graphicTotal 3
+act eq_graphic_off accept
+vec eq_set_mode app
+hex eq_set_mode 110024045200040a006865616470686f6e657305010001
+dec eq_set_mode 0.len 17
+dec eq_set_mode 0.type EQ_SET
+dec eq_set_mode 0.flags 0x04
+dec eq_set_mode 0.seq 82
+dec eq_set_mode 0.body.slot headphones
+dec eq_set_mode 0.body.mode graphic
+act eq_set_mode accept
+vec eq_set_mode_reply dev
+hex eq_set_mode_reply 000024015200
+re eq_set_mode_reply eq_set_mode
+dec eq_set_mode_reply 0.len 0
+dec eq_set_mode_reply 0.type EQ_SET
+dec eq_set_mode_reply 0.flags 0x01
+dec eq_set_mode_reply 0.seq 82
+act eq_set_mode_reply accept
+vec eq_set_gains app
+hex eq_set_gains be0024045300040a006865616470686f6e65730501000107aa00020e000104000400000002040028000000020e000104000a0000000204001e000000020e0001
+hex eq_set_gains 0400100000000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff
+hex eq_set_gains 020e000104002800000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000020e000104003a000000020400
+hex eq_set_gains 3c000000
+dec eq_set_gains 0.len 190
+dec eq_set_gains 0.type EQ_SET
+dec eq_set_gains 0.flags 0x04
+dec eq_set_gains 0.seq 83
+dec eq_set_gains 0.body.slot headphones
+dec eq_set_gains 0.body.mode graphic
+dec eq_set_gains 0.body.gains.band[0].grid 4
+dec eq_set_gains 0.body.gains.band[0].gain10 40
+dec eq_set_gains 0.body.gains.band[1].grid 10
+dec eq_set_gains 0.body.gains.band[1].gain10 30
+dec eq_set_gains 0.body.gains.band[2].grid 16
+dec eq_set_gains 0.body.gains.band[2].gain10 10
+dec eq_set_gains 0.body.gains.band[3].grid 22
+dec eq_set_gains 0.body.gains.band[3].gain10 0
+dec eq_set_gains 0.body.gains.band[4].grid 28
+dec eq_set_gains 0.body.gains.band[4].gain10 -10
+dec eq_set_gains 0.body.gains.band[5].grid 34
+dec eq_set_gains 0.body.gains.band[5].gain10 -20
+dec eq_set_gains 0.body.gains.band[6].grid 40
+dec eq_set_gains 0.body.gains.band[6].gain10 0
+dec eq_set_gains 0.body.gains.band[7].grid 46
+dec eq_set_gains 0.body.gains.band[7].gain10 10
+dec eq_set_gains 0.body.gains.band[8].grid 52
+dec eq_set_gains 0.body.gains.band[8].gain10 30
+dec eq_set_gains 0.body.gains.band[9].grid 58
+dec eq_set_gains 0.body.gains.band[9].gain10 60
+act eq_set_gains accept
+vec eq_set_gains_reply dev
+hex eq_set_gains_reply 000024015300
+re eq_set_gains_reply eq_set_gains
+dec eq_set_gains_reply 0.len 0
+dec eq_set_gains_reply 0.type EQ_SET
+dec eq_set_gains_reply 0.flags 0x01
+dec eq_set_gains_reply 0.seq 83
+act eq_set_gains_reply accept
+vec eq_set_gains_short app
+hex eq_set_gains_short ad0024045400040a006865616470686f6e657305010001079900020e000104000400000002040028000000020e000104000a0000000204001e000000020e0001
+hex eq_set_gains_short 0400100000000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff
+hex eq_set_gains_short 020e000104002800000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000
+dec eq_set_gains_short 0.len 173
+dec eq_set_gains_short 0.type EQ_SET
+dec eq_set_gains_short 0.flags 0x04
+dec eq_set_gains_short 0.seq 84
+dec eq_set_gains_short 0.body.slot headphones
+dec eq_set_gains_short 0.body.mode graphic
+dec eq_set_gains_short 0.body.gains.band[0].grid 4
+dec eq_set_gains_short 0.body.gains.band[0].gain10 40
+dec eq_set_gains_short 0.body.gains.band[1].grid 10
+dec eq_set_gains_short 0.body.gains.band[1].gain10 30
+dec eq_set_gains_short 0.body.gains.band[2].grid 16
+dec eq_set_gains_short 0.body.gains.band[2].gain10 10
+dec eq_set_gains_short 0.body.gains.band[3].grid 22
+dec eq_set_gains_short 0.body.gains.band[3].gain10 0
+dec eq_set_gains_short 0.body.gains.band[4].grid 28
+dec eq_set_gains_short 0.body.gains.band[4].gain10 -10
+dec eq_set_gains_short 0.body.gains.band[5].grid 34
+dec eq_set_gains_short 0.body.gains.band[5].gain10 -20
+dec eq_set_gains_short 0.body.gains.band[6].grid 40
+dec eq_set_gains_short 0.body.gains.band[6].gain10 0
+dec eq_set_gains_short 0.body.gains.band[7].grid 46
+dec eq_set_gains_short 0.body.gains.band[7].gain10 10
+dec eq_set_gains_short 0.body.gains.band[8].grid 52
+dec eq_set_gains_short 0.body.gains.band[8].gain10 30
+act eq_set_gains_short accept
+vec eq_set_gains_short_error dev
+hex eq_set_gains_short_error 100024035400010100020209006261642076616c7565
+re eq_set_gains_short_error eq_set_gains_short
+dec eq_set_gains_short_error 0.len 16
+dec eq_set_gains_short_error 0.type EQ_SET
+dec eq_set_gains_short_error 0.flags 0x03
+dec eq_set_gains_short_error 0.seq 84
+dec eq_set_gains_short_error 0.body.code 2
+dec eq_set_gains_short_error 0.body.text bad value
+act eq_set_gains_short_error accept
+vec eq_set_graphic_key app
+hex eq_set_graphic_key 180024045500040a006865616470686f6e657305010001060400666c6174
+dec eq_set_graphic_key 0.len 24
+dec eq_set_graphic_key 0.type EQ_SET
+dec eq_set_graphic_key 0.flags 0x04
+dec eq_set_graphic_key 0.seq 85
+dec eq_set_graphic_key 0.body.slot headphones
+dec eq_set_graphic_key 0.body.mode graphic
+dec eq_set_graphic_key 0.body.graphicKey flat
+act eq_set_graphic_key accept
+vec eq_set_graphic_key_reply dev
+hex eq_set_graphic_key_reply 000024015500
+re eq_set_graphic_key_reply eq_set_graphic_key
+dec eq_set_graphic_key_reply 0.len 0
+dec eq_set_graphic_key_reply 0.type EQ_SET
+dec eq_set_graphic_key_reply 0.flags 0x01
+dec eq_set_graphic_key_reply 0.seq 85
+act eq_set_graphic_key_reply accept
+vec eq_preset_graphic_save app
+hex eq_preset_graphic_save c9003704560001010000040400526f636b070a006865616470686f6e65730801000109aa00020e000104000400000002040028000000020e000104000a000000
+hex eq_preset_graphic_save 0204001e000000020e00010400100000000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e00010400
+hex eq_preset_graphic_save 22000000020400ecffffff020e000104002800000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000020e
+hex eq_preset_graphic_save 000104003a0000000204003c000000
+dec eq_preset_graphic_save 0.len 201
+dec eq_preset_graphic_save 0.type EQ_PRESET
+dec eq_preset_graphic_save 0.flags 0x04
+dec eq_preset_graphic_save 0.seq 86
+dec eq_preset_graphic_save 0.body.op save
+dec eq_preset_graphic_save 0.body.name Rock
+dec eq_preset_graphic_save 0.body.slot headphones
+dec eq_preset_graphic_save 0.body.mode graphic
+dec eq_preset_graphic_save 0.body.gains.band[0].grid 4
+dec eq_preset_graphic_save 0.body.gains.band[0].gain10 40
+dec eq_preset_graphic_save 0.body.gains.band[1].grid 10
+dec eq_preset_graphic_save 0.body.gains.band[1].gain10 30
+dec eq_preset_graphic_save 0.body.gains.band[2].grid 16
+dec eq_preset_graphic_save 0.body.gains.band[2].gain10 10
+dec eq_preset_graphic_save 0.body.gains.band[3].grid 22
+dec eq_preset_graphic_save 0.body.gains.band[3].gain10 0
+dec eq_preset_graphic_save 0.body.gains.band[4].grid 28
+dec eq_preset_graphic_save 0.body.gains.band[4].gain10 -10
+dec eq_preset_graphic_save 0.body.gains.band[5].grid 34
+dec eq_preset_graphic_save 0.body.gains.band[5].gain10 -20
+dec eq_preset_graphic_save 0.body.gains.band[6].grid 40
+dec eq_preset_graphic_save 0.body.gains.band[6].gain10 0
+dec eq_preset_graphic_save 0.body.gains.band[7].grid 46
+dec eq_preset_graphic_save 0.body.gains.band[7].gain10 10
+dec eq_preset_graphic_save 0.body.gains.band[8].grid 52
+dec eq_preset_graphic_save 0.body.gains.band[8].gain10 30
+dec eq_preset_graphic_save 0.body.gains.band[9].grid 58
+dec eq_preset_graphic_save 0.body.gains.band[9].gain10 60
+act eq_preset_graphic_save accept
+vec eq_preset_graphic_save_reply dev
+hex eq_preset_graphic_save_reply 2400370156000121002f646174612f666c61746461702f65712f677261706869632f526f636b2e696e69
+re eq_preset_graphic_save_reply eq_preset_graphic_save
+dec eq_preset_graphic_save_reply 0.len 36
+dec eq_preset_graphic_save_reply 0.type EQ_PRESET
+dec eq_preset_graphic_save_reply 0.flags 0x01
+dec eq_preset_graphic_save_reply 0.seq 86
+dec eq_preset_graphic_save_reply 0.body.key /data/flatdap/eq/graphic/Rock.ini
+act eq_preset_graphic_save_reply accept
+vec eq_preset_graphic_flat app
+hex eq_preset_graphic_flat 0f003704570001010001030400666c617408010001
+dec eq_preset_graphic_flat 0.len 15
+dec eq_preset_graphic_flat 0.type EQ_PRESET
+dec eq_preset_graphic_flat 0.flags 0x04
+dec eq_preset_graphic_flat 0.seq 87
+dec eq_preset_graphic_flat 0.body.op remove
+dec eq_preset_graphic_flat 0.body.key flat
+dec eq_preset_graphic_flat 0.body.mode graphic
+act eq_preset_graphic_flat accept
+vec eq_preset_graphic_flat_error dev
+hex eq_preset_graphic_flat_error 1000370357000101000b02090072656164206f6e6c79
+re eq_preset_graphic_flat_error eq_preset_graphic_flat
+dec eq_preset_graphic_flat_error 0.len 16
+dec eq_preset_graphic_flat_error 0.type EQ_PRESET
+dec eq_preset_graphic_flat_error 0.flags 0x03
+dec eq_preset_graphic_flat_error 0.seq 87
+dec eq_preset_graphic_flat_error 0.body.code 11
+dec eq_preset_graphic_flat_error 0.body.text read only
+act eq_preset_graphic_flat_error accept
+vec eq_preset_graphic_mismatch app
+hex eq_preset_graphic_mismatch 26003704580001010001031b002f646174612f666c61746461702f65712f4844203635302e74787408010001
+dec eq_preset_graphic_mismatch 0.len 38
+dec eq_preset_graphic_mismatch 0.type EQ_PRESET
+dec eq_preset_graphic_mismatch 0.flags 0x04
+dec eq_preset_graphic_mismatch 0.seq 88
+dec eq_preset_graphic_mismatch 0.body.op remove
+dec eq_preset_graphic_mismatch 0.body.key /data/flatdap/eq/HD 650.txt
+dec eq_preset_graphic_mismatch 0.body.mode graphic
+act eq_preset_graphic_mismatch accept
+vec eq_preset_graphic_mismatch_error dev
+hex eq_preset_graphic_mismatch_error 1000370358000101000a0209006e6f7420666f756e64
+re eq_preset_graphic_mismatch_error eq_preset_graphic_mismatch
+dec eq_preset_graphic_mismatch_error 0.len 16
+dec eq_preset_graphic_mismatch_error 0.type EQ_PRESET
+dec eq_preset_graphic_mismatch_error 0.flags 0x03
+dec eq_preset_graphic_mismatch_error 0.seq 88
+dec eq_preset_graphic_mismatch_error 0.body.code 10
+dec eq_preset_graphic_mismatch_error 0.body.text not found
+act eq_preset_graphic_mismatch_error accept
+vec eq_set_ints_on_graphic app
+hex eq_set_ints_on_graphic 3a0024045900040a006865616470686f6e6573032a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff0504008d000000
+dec eq_set_ints_on_graphic 0.len 58
+dec eq_set_ints_on_graphic 0.type EQ_SET
+dec eq_set_ints_on_graphic 0.flags 0x04
+dec eq_set_ints_on_graphic 0.seq 89
+dec eq_set_ints_on_graphic 0.body.slot headphones
+dec eq_set_ints_on_graphic 0.body.ints.preamp10 -30
+dec eq_set_ints_on_graphic 0.body.ints.band[0].type peak
+dec eq_set_ints_on_graphic 0.body.ints.band[0].grid 34
+dec eq_set_ints_on_graphic 0.body.ints.band[0].milliHz 1000000
+dec eq_set_ints_on_graphic 0.body.ints.band[0].gain10 -20
+dec eq_set_ints_on_graphic 0.body.ints.band[0].q100 141
+act eq_set_ints_on_graphic accept
+vec eq_set_ints_on_graphic_eq dev
+hex eq_set_ints_on_graphic_eq 3a011300bd00080a006865616470686f6e6573020600637573746f6d030c000103006f66660203004f4646031200010600637573746f6d020600435553544f4d
+hex eq_set_ints_on_graphic_eq 042a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff0504008d00000005040000000000060400020000000701000109
+hex eq_set_ints_on_graphic_eq 0100000a0600637573746f6d0cb100010400c0ffffff020e000104000400000002040028000000020e000104000a0000000204001e000000020e000104001000
+hex eq_set_ints_on_graphic_eq 00000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff020e0001
+hex eq_set_ints_on_graphic_eq 04002800000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000020e000104003a0000000204003c000000
+dec eq_set_ints_on_graphic_eq 0.len 314
+dec eq_set_ints_on_graphic_eq 0.type EQ
+dec eq_set_ints_on_graphic_eq 0.flags 0x00
+dec eq_set_ints_on_graphic_eq 0.seq 189
+dec eq_set_ints_on_graphic_eq 0.body.slot headphones
+dec eq_set_ints_on_graphic_eq 0.body.key custom
+dec eq_set_ints_on_graphic_eq 0.body.profile[0].key off
+dec eq_set_ints_on_graphic_eq 0.body.profile[0].name OFF
+dec eq_set_ints_on_graphic_eq 0.body.profile[1].key custom
+dec eq_set_ints_on_graphic_eq 0.body.profile[1].name CUSTOM
+dec eq_set_ints_on_graphic_eq 0.body.ints.preamp10 -30
+dec eq_set_ints_on_graphic_eq 0.body.ints.band[0].type peak
+dec eq_set_ints_on_graphic_eq 0.body.ints.band[0].grid 34
+dec eq_set_ints_on_graphic_eq 0.body.ints.band[0].milliHz 1000000
+dec eq_set_ints_on_graphic_eq 0.body.ints.band[0].gain10 -20
+dec eq_set_ints_on_graphic_eq 0.body.ints.band[0].q100 141
+dec eq_set_ints_on_graphic_eq 0.body.offset 0
+dec eq_set_ints_on_graphic_eq 0.body.total 2
+dec eq_set_ints_on_graphic_eq 0.body.more true
+dec eq_set_ints_on_graphic_eq 0.body.mode parametric
+dec eq_set_ints_on_graphic_eq 0.body.graphicKey custom
+dec eq_set_ints_on_graphic_eq 0.body.gains.preamp10 -64
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[0].grid 4
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[0].gain10 40
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[1].grid 10
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[1].gain10 30
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[2].grid 16
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[2].gain10 10
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[3].grid 22
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[3].gain10 0
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[4].grid 28
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[4].gain10 -10
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[5].grid 34
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[5].gain10 -20
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[6].grid 40
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[6].gain10 0
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[7].grid 46
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[7].gain10 10
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[8].grid 52
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[8].gain10 30
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[9].grid 58
+dec eq_set_ints_on_graphic_eq 0.body.gains.band[9].gain10 60
+act eq_set_ints_on_graphic_eq accept
+vec eq_set_ints_on_graphic_reply dev
+hex eq_set_ints_on_graphic_reply 000024015900
+re eq_set_ints_on_graphic_reply eq_set_ints_on_graphic
+dec eq_set_ints_on_graphic_reply 0.len 0
+dec eq_set_ints_on_graphic_reply 0.type EQ_SET
+dec eq_set_ints_on_graphic_reply 0.flags 0x01
+dec eq_set_ints_on_graphic_reply 0.seq 89
+act eq_set_ints_on_graphic_reply accept
+vec eq_set_mixed_no_mode app
+hex eq_set_mixed_no_mode e70024045a00040a006865616470686f6e6573032a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff0504008d000000
+hex eq_set_mixed_no_mode 07aa00020e000104000400000002040028000000020e000104000a0000000204001e000000020e00010400100000000204000a000000020e0001040016000000
+hex eq_set_mixed_no_mode 02040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff020e000104002800000002040000000000020e00010400
+hex eq_set_mixed_no_mode 2e0000000204000a000000020e00010400340000000204001e000000020e000104003a0000000204003c000000
+dec eq_set_mixed_no_mode 0.len 231
+dec eq_set_mixed_no_mode 0.type EQ_SET
+dec eq_set_mixed_no_mode 0.flags 0x04
+dec eq_set_mixed_no_mode 0.seq 90
+dec eq_set_mixed_no_mode 0.body.slot headphones
+dec eq_set_mixed_no_mode 0.body.ints.preamp10 -30
+dec eq_set_mixed_no_mode 0.body.ints.band[0].type peak
+dec eq_set_mixed_no_mode 0.body.ints.band[0].grid 34
+dec eq_set_mixed_no_mode 0.body.ints.band[0].milliHz 1000000
+dec eq_set_mixed_no_mode 0.body.ints.band[0].gain10 -20
+dec eq_set_mixed_no_mode 0.body.ints.band[0].q100 141
+dec eq_set_mixed_no_mode 0.body.gains.band[0].grid 4
+dec eq_set_mixed_no_mode 0.body.gains.band[0].gain10 40
+dec eq_set_mixed_no_mode 0.body.gains.band[1].grid 10
+dec eq_set_mixed_no_mode 0.body.gains.band[1].gain10 30
+dec eq_set_mixed_no_mode 0.body.gains.band[2].grid 16
+dec eq_set_mixed_no_mode 0.body.gains.band[2].gain10 10
+dec eq_set_mixed_no_mode 0.body.gains.band[3].grid 22
+dec eq_set_mixed_no_mode 0.body.gains.band[3].gain10 0
+dec eq_set_mixed_no_mode 0.body.gains.band[4].grid 28
+dec eq_set_mixed_no_mode 0.body.gains.band[4].gain10 -10
+dec eq_set_mixed_no_mode 0.body.gains.band[5].grid 34
+dec eq_set_mixed_no_mode 0.body.gains.band[5].gain10 -20
+dec eq_set_mixed_no_mode 0.body.gains.band[6].grid 40
+dec eq_set_mixed_no_mode 0.body.gains.band[6].gain10 0
+dec eq_set_mixed_no_mode 0.body.gains.band[7].grid 46
+dec eq_set_mixed_no_mode 0.body.gains.band[7].gain10 10
+dec eq_set_mixed_no_mode 0.body.gains.band[8].grid 52
+dec eq_set_mixed_no_mode 0.body.gains.band[8].gain10 30
+dec eq_set_mixed_no_mode 0.body.gains.band[9].grid 58
+dec eq_set_mixed_no_mode 0.body.gains.band[9].gain10 60
+act eq_set_mixed_no_mode accept
+vec eq_set_mixed_no_mode_error dev
+hex eq_set_mixed_no_mode_error 100024035a00010100020209006261642076616c7565
+re eq_set_mixed_no_mode_error eq_set_mixed_no_mode
+dec eq_set_mixed_no_mode_error 0.len 16
+dec eq_set_mixed_no_mode_error 0.type EQ_SET
+dec eq_set_mixed_no_mode_error 0.flags 0x03
+dec eq_set_mixed_no_mode_error 0.seq 90
+dec eq_set_mixed_no_mode_error 0.body.code 2
+dec eq_set_mixed_no_mode_error 0.body.text bad value
+act eq_set_mixed_no_mode_error accept
+vec eq_set_gains_keep_parametric app
+hex eq_set_gains_keep_parametric be0024045b00040a006865616470686f6e65730501000007aa00020e000104000400000002040028000000020e000104000a0000000204001e000000020e0001
+hex eq_set_gains_keep_parametric 0400100000000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff
+hex eq_set_gains_keep_parametric 020e000104002800000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000020e000104003a000000020400
+hex eq_set_gains_keep_parametric 3c000000
+dec eq_set_gains_keep_parametric 0.len 190
+dec eq_set_gains_keep_parametric 0.type EQ_SET
+dec eq_set_gains_keep_parametric 0.flags 0x04
+dec eq_set_gains_keep_parametric 0.seq 91
+dec eq_set_gains_keep_parametric 0.body.slot headphones
+dec eq_set_gains_keep_parametric 0.body.mode parametric
+dec eq_set_gains_keep_parametric 0.body.gains.band[0].grid 4
+dec eq_set_gains_keep_parametric 0.body.gains.band[0].gain10 40
+dec eq_set_gains_keep_parametric 0.body.gains.band[1].grid 10
+dec eq_set_gains_keep_parametric 0.body.gains.band[1].gain10 30
+dec eq_set_gains_keep_parametric 0.body.gains.band[2].grid 16
+dec eq_set_gains_keep_parametric 0.body.gains.band[2].gain10 10
+dec eq_set_gains_keep_parametric 0.body.gains.band[3].grid 22
+dec eq_set_gains_keep_parametric 0.body.gains.band[3].gain10 0
+dec eq_set_gains_keep_parametric 0.body.gains.band[4].grid 28
+dec eq_set_gains_keep_parametric 0.body.gains.band[4].gain10 -10
+dec eq_set_gains_keep_parametric 0.body.gains.band[5].grid 34
+dec eq_set_gains_keep_parametric 0.body.gains.band[5].gain10 -20
+dec eq_set_gains_keep_parametric 0.body.gains.band[6].grid 40
+dec eq_set_gains_keep_parametric 0.body.gains.band[6].gain10 0
+dec eq_set_gains_keep_parametric 0.body.gains.band[7].grid 46
+dec eq_set_gains_keep_parametric 0.body.gains.band[7].gain10 10
+dec eq_set_gains_keep_parametric 0.body.gains.band[8].grid 52
+dec eq_set_gains_keep_parametric 0.body.gains.band[8].gain10 30
+dec eq_set_gains_keep_parametric 0.body.gains.band[9].grid 58
+dec eq_set_gains_keep_parametric 0.body.gains.band[9].gain10 60
+act eq_set_gains_keep_parametric accept
+vec eq_set_gains_keep_parametric_eq dev
+hex eq_set_gains_keep_parametric_eq 37011300bf00080a006865616470686f6e65730203006f6666030c000103006f66660203004f4646031200010600637573746f6d020600435553544f4d042a00
+hex eq_set_gains_keep_parametric_eq 010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff0504008d00000005040000000000060400020000000701000109010000
+hex eq_set_gains_keep_parametric_eq 0a0600637573746f6d0cb100010400c0ffffff020e000104000400000002040028000000020e000104000a0000000204001e000000020e000104001000000002
+hex eq_set_gains_keep_parametric_eq 04000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff020e0001040028
+hex eq_set_gains_keep_parametric_eq 00000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000020e000104003a0000000204003c000000
+dec eq_set_gains_keep_parametric_eq 0.len 311
+dec eq_set_gains_keep_parametric_eq 0.type EQ
+dec eq_set_gains_keep_parametric_eq 0.flags 0x00
+dec eq_set_gains_keep_parametric_eq 0.seq 191
+dec eq_set_gains_keep_parametric_eq 0.body.slot headphones
+dec eq_set_gains_keep_parametric_eq 0.body.key off
+dec eq_set_gains_keep_parametric_eq 0.body.profile[0].key off
+dec eq_set_gains_keep_parametric_eq 0.body.profile[0].name OFF
+dec eq_set_gains_keep_parametric_eq 0.body.profile[1].key custom
+dec eq_set_gains_keep_parametric_eq 0.body.profile[1].name CUSTOM
+dec eq_set_gains_keep_parametric_eq 0.body.ints.preamp10 -30
+dec eq_set_gains_keep_parametric_eq 0.body.ints.band[0].type peak
+dec eq_set_gains_keep_parametric_eq 0.body.ints.band[0].grid 34
+dec eq_set_gains_keep_parametric_eq 0.body.ints.band[0].milliHz 1000000
+dec eq_set_gains_keep_parametric_eq 0.body.ints.band[0].gain10 -20
+dec eq_set_gains_keep_parametric_eq 0.body.ints.band[0].q100 141
+dec eq_set_gains_keep_parametric_eq 0.body.offset 0
+dec eq_set_gains_keep_parametric_eq 0.body.total 2
+dec eq_set_gains_keep_parametric_eq 0.body.more true
+dec eq_set_gains_keep_parametric_eq 0.body.mode parametric
+dec eq_set_gains_keep_parametric_eq 0.body.graphicKey custom
+dec eq_set_gains_keep_parametric_eq 0.body.gains.preamp10 -64
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[0].grid 4
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[0].gain10 40
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[1].grid 10
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[1].gain10 30
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[2].grid 16
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[2].gain10 10
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[3].grid 22
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[3].gain10 0
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[4].grid 28
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[4].gain10 -10
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[5].grid 34
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[5].gain10 -20
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[6].grid 40
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[6].gain10 0
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[7].grid 46
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[7].gain10 10
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[8].grid 52
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[8].gain10 30
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[9].grid 58
+dec eq_set_gains_keep_parametric_eq 0.body.gains.band[9].gain10 60
+act eq_set_gains_keep_parametric_eq accept
+vec eq_set_gains_keep_parametric_reply dev
+hex eq_set_gains_keep_parametric_reply 000024015b00
+re eq_set_gains_keep_parametric_reply eq_set_gains_keep_parametric
+dec eq_set_gains_keep_parametric_reply 0.len 0
+dec eq_set_gains_keep_parametric_reply 0.type EQ_SET
+dec eq_set_gains_keep_parametric_reply 0.flags 0x01
+dec eq_set_gains_keep_parametric_reply 0.seq 91
+act eq_set_gains_keep_parametric_reply accept
+vec eq_set_ints_keep_graphic app
+hex eq_set_ints_keep_graphic 3e0024045c00040a006865616470686f6e657305010001032a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff050400
+hex eq_set_ints_keep_graphic 8d000000
+dec eq_set_ints_keep_graphic 0.len 62
+dec eq_set_ints_keep_graphic 0.type EQ_SET
+dec eq_set_ints_keep_graphic 0.flags 0x04
+dec eq_set_ints_keep_graphic 0.seq 92
+dec eq_set_ints_keep_graphic 0.body.slot headphones
+dec eq_set_ints_keep_graphic 0.body.mode graphic
+dec eq_set_ints_keep_graphic 0.body.ints.preamp10 -30
+dec eq_set_ints_keep_graphic 0.body.ints.band[0].type peak
+dec eq_set_ints_keep_graphic 0.body.ints.band[0].grid 34
+dec eq_set_ints_keep_graphic 0.body.ints.band[0].milliHz 1000000
+dec eq_set_ints_keep_graphic 0.body.ints.band[0].gain10 -20
+dec eq_set_ints_keep_graphic 0.body.ints.band[0].q100 141
+act eq_set_ints_keep_graphic accept
+vec eq_set_ints_keep_graphic_eq dev
+hex eq_set_ints_keep_graphic_eq 3a011300c000080a006865616470686f6e6573020600637573746f6d030c000103006f66660203004f4646031200010600637573746f6d020600435553544f4d
+hex eq_set_ints_keep_graphic_eq 042a00010400e2ffffff022000010100010204002200000003040040420f00040400ecffffff0504008d00000005040000000000060400020000000701000109
+hex eq_set_ints_keep_graphic_eq 0100010a0600637573746f6d0cb100010400c0ffffff020e000104000400000002040028000000020e000104000a0000000204001e000000020e000104001000
+hex eq_set_ints_keep_graphic_eq 00000204000a000000020e000104001600000002040000000000020e000104001c000000020400f6ffffff020e0001040022000000020400ecffffff020e0001
+hex eq_set_ints_keep_graphic_eq 04002800000002040000000000020e000104002e0000000204000a000000020e00010400340000000204001e000000020e000104003a0000000204003c000000
+dec eq_set_ints_keep_graphic_eq 0.len 314
+dec eq_set_ints_keep_graphic_eq 0.type EQ
+dec eq_set_ints_keep_graphic_eq 0.flags 0x00
+dec eq_set_ints_keep_graphic_eq 0.seq 192
+dec eq_set_ints_keep_graphic_eq 0.body.slot headphones
+dec eq_set_ints_keep_graphic_eq 0.body.key custom
+dec eq_set_ints_keep_graphic_eq 0.body.profile[0].key off
+dec eq_set_ints_keep_graphic_eq 0.body.profile[0].name OFF
+dec eq_set_ints_keep_graphic_eq 0.body.profile[1].key custom
+dec eq_set_ints_keep_graphic_eq 0.body.profile[1].name CUSTOM
+dec eq_set_ints_keep_graphic_eq 0.body.ints.preamp10 -30
+dec eq_set_ints_keep_graphic_eq 0.body.ints.band[0].type peak
+dec eq_set_ints_keep_graphic_eq 0.body.ints.band[0].grid 34
+dec eq_set_ints_keep_graphic_eq 0.body.ints.band[0].milliHz 1000000
+dec eq_set_ints_keep_graphic_eq 0.body.ints.band[0].gain10 -20
+dec eq_set_ints_keep_graphic_eq 0.body.ints.band[0].q100 141
+dec eq_set_ints_keep_graphic_eq 0.body.offset 0
+dec eq_set_ints_keep_graphic_eq 0.body.total 2
+dec eq_set_ints_keep_graphic_eq 0.body.more true
+dec eq_set_ints_keep_graphic_eq 0.body.mode graphic
+dec eq_set_ints_keep_graphic_eq 0.body.graphicKey custom
+dec eq_set_ints_keep_graphic_eq 0.body.gains.preamp10 -64
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[0].grid 4
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[0].gain10 40
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[1].grid 10
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[1].gain10 30
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[2].grid 16
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[2].gain10 10
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[3].grid 22
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[3].gain10 0
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[4].grid 28
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[4].gain10 -10
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[5].grid 34
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[5].gain10 -20
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[6].grid 40
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[6].gain10 0
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[7].grid 46
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[7].gain10 10
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[8].grid 52
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[8].gain10 30
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[9].grid 58
+dec eq_set_ints_keep_graphic_eq 0.body.gains.band[9].gain10 60
+act eq_set_ints_keep_graphic_eq accept
+vec eq_set_ints_keep_graphic_reply dev
+hex eq_set_ints_keep_graphic_reply 000024015c00
+re eq_set_ints_keep_graphic_reply eq_set_ints_keep_graphic
+dec eq_set_ints_keep_graphic_reply 0.len 0
+dec eq_set_ints_keep_graphic_reply 0.type EQ_SET
+dec eq_set_ints_keep_graphic_reply 0.flags 0x01
+dec eq_set_ints_keep_graphic_reply 0.seq 92
+act eq_set_ints_keep_graphic_reply accept
+vec state_output_speaker dev
+hex state_output_speaker 0c0010005d0001010000020100030c010001
+dec state_output_speaker 0.len 12
+dec state_output_speaker 0.type STATE
+dec state_output_speaker 0.flags 0x00
+dec state_output_speaker 0.seq 93
+dec state_output_speaker 0.body.source local
+dec state_output_speaker 0.body.output speaker
+dec state_output_speaker 0.body.playing true
+act state_output_speaker accept
+vec state_output_usb dev
+hex state_output_usb 0c0010005e0001010000020100040c010001
+dec state_output_usb 0.len 12
+dec state_output_usb 0.type STATE
+dec state_output_usb 0.flags 0x00
+dec state_output_usb 0.seq 94
+dec state_output_usb 0.body.source local
+dec state_output_usb 0.body.output usbDac
+dec state_output_usb 0.body.playing true
+act state_output_usb accept
+vec img_begin_focus app
+hex img_begin_focus 390030045f0001010000020c0055746164612048696b61727504040018000000050400aebb5d910602008001070200e0010b0100010c0200f4010d02004001
+dec img_begin_focus 0.len 57
+dec img_begin_focus 0.type IMG_BEGIN
+dec img_begin_focus 0.flags 0x04
+dec img_begin_focus 0.seq 95
+dec img_begin_focus 0.body.kind artist
+dec img_begin_focus 0.body.name Utada Hikaru
+dec img_begin_focus 0.body.total 24
+dec img_begin_focus 0.body.crc 2438839214
+dec img_begin_focus 0.body.w 384
+dec img_begin_focus 0.body.h 480
+dec img_begin_focus 0.body.origin phone
+dec img_begin_focus 0.body.focusX 500
+dec img_begin_focus 0.body.focusY 320
+act img_begin_focus accept
+vec schema_confirm dev
+hex schema_confirm 6600110060000106006f75747075740204000000000003040001000000040100000539000104006761696e0204004741494e0306006f75747075740401000005
+hex schema_confirm 03006c6f77050400686967680903004c4f57090400484947480a010003060400010000000701000008010001
+dec schema_confirm 0.len 102
+dec schema_confirm 0.type SCHEMA
+dec schema_confirm 0.flags 0x00
+dec schema_confirm 0.seq 96
+dec schema_confirm 0.body.pivot output
+dec schema_confirm 0.body.offset 0
+dec schema_confirm 0.body.total 1
+dec schema_confirm 0.body.more false
+dec schema_confirm 0.body.row[0].key gain
+dec schema_confirm 0.body.row[0].label GAIN
+dec schema_confirm 0.body.row[0].pivot output
+dec schema_confirm 0.body.row[0].kind choice
+dec schema_confirm 0.body.row[0].value[0] low
+dec schema_confirm 0.body.row[0].value[1] high
+dec schema_confirm 0.body.row[0].word[0] LOW
+dec schema_confirm 0.body.row[0].word[1] HIGH
+dec schema_confirm 0.body.row[0].flag[0] confirm
+dec schema_confirm 0.body.rev 1
+dec schema_confirm 0.body.pivotIndex 0
+dec schema_confirm 0.body.pivotCount 1
+act schema_confirm accept
