@@ -959,6 +959,8 @@ uint8_t LinkServer::libGet(Peer &p, const fd::LinkCommand &c, qint64 now)
         if (row.hasFirst)
             w.u64(r::first, uint64_t(row.first));
         w.str(r::key, utf8(row.key));
+        if (!row.artist.isEmpty())
+            w.str(r::artist, utf8(row.artist));
     }, now);
     return ok ? 0 : uint8_t(proto::err::busy);
 }

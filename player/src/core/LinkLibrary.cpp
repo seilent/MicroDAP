@@ -195,8 +195,10 @@ LinkRow LinkView::albumRow(qint64 albumId) const
     QVariantList ids;
     for (const QVariant &t : m_src.library->albumTracks(albumId))
         ids.push_back(t.toMap().value(QStringLiteral("id")));
-    LinkRow out = groupRow(m_src.library->albumInfo(albumId).value(QStringLiteral("title")).toString(), QString(), ids);
+    const QVariantMap info = m_src.library->albumInfo(albumId);
+    LinkRow out = groupRow(info.value(QStringLiteral("title")).toString(), QString(), ids);
     out.key = out.hasFirst ? QString::number(out.first) : QString();
+    out.artist = info.value(QStringLiteral("artist")).toString();
     return out;
 }
 

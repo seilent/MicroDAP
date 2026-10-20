@@ -34,6 +34,7 @@ struct LinkRow
 {
     QString name;
     QString key;
+    QString artist;
     quint32 count = 0;
     qint64 first = 0;
     bool hasFirst = false;

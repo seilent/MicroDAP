@@ -270,6 +270,7 @@ struct Rows
 {
     QStringList names;
     QStringList keys;
+    QStringList artists;
     QList<quint64> counts;
     QList<quint64> firsts;
     quint64 total = 0;
@@ -294,6 +295,8 @@ Rows rowsOf(const std::vector<fd::LinkFrame> &frames, uint8_t type, const char *
                     out.names.push_back(QString::fromStdString(x.s));
                 else if (name == "key")
                     out.keys.push_back(QString::fromStdString(x.s));
+                else if (name == "artist")
+                    out.artists.push_back(QString::fromStdString(x.s));
                 else if (name == "count")
                     out.counts.push_back(x.u);
                 else if (name == "first" || name == "track")
@@ -963,6 +966,8 @@ void LinkTest::libraryViews()
     QCOMPARE(albums.names, QStringList({QStringLiteral("Album One"), QStringLiteral("Single")}));
     QCOMPARE(albums.counts, QList<quint64>({4, 1}));
     QCOMPARE(albums.keys.at(0), QString::number(rig.id(QStringLiteral("One"))));
+    QCOMPARE(albums.artists.size(), 2);
+    QCOMPARE(albums.artists.at(0), QStringLiteral("Artist A"));
     Rows tracks = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::albumTracks, albums.keys.at(0).toStdString())),
                          proto::msg::LIB, "row");
     QCOMPARE(tracks.names, QStringList({QStringLiteral("One"), QStringLiteral("Two"), QStringLiteral("Three"),
@@ -973,9 +978,11 @@ void LinkTest::libraryViews()
     Rows artists = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artists)), proto::msg::LIB, "row");
     QVERIFY(artists.names.contains(QStringLiteral("Artist A")));
     QCOMPARE(artists.names, artists.keys);
+    QVERIFY(artists.artists.isEmpty());
     Rows artistAlbums = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artistAlbums, "Artist A")),
                                proto::msg::LIB, "row");
     QCOMPARE(artistAlbums.names, QStringList({QStringLiteral("Album One")}));
+    QCOMPARE(artistAlbums.artists, QStringList({QStringLiteral("Artist A")}));
     frames = rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::artistAlbums, "Nobody"));
     QCOMPARE(errorCode(frames, proto::msg::LIB_GET), uint64_t(proto::err::staleRev));
     Rows top = rowsOf(rig.ask(proto::msg::LIB_GET, libGet(proto::val::VIEW::folders)), proto::msg::LIB, "row");
