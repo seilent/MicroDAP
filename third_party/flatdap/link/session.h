@@ -47,6 +47,7 @@ struct LinkAnswer {
 class LinkHandler {
 public:
     virtual ~LinkHandler() {}
+    virtual void hello(LinkHello&, uint64_t) {}
     virtual void command(LinkCommand& c, int64_t now) = 0;
 };
 

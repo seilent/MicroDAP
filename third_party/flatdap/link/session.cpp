@@ -354,6 +354,8 @@ void LinkSession::hello(LinkCommand& c, int64_t now)
     if (c.body.u("major", UINT64_MAX) != (uint64_t)proto::major)
         return bye(proto::val::BYE_REASON::version, now);
     app_features_ = c.body.u("features");
+    if (handler_)
+        handler_->hello(hello_, app_features_);
     namespace t = proto::tag::HELLO_reply;
     LinkWriter w;
     w.u32(t::magic, (uint32_t)proto::magic)
