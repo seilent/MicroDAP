@@ -1004,6 +1004,16 @@ void LinkTest::eqOldApp()
     Phone phone;
     const std::vector<fd::LinkFrame> frames = r.connect(phone, 0);
     QCOMPARE(count(frames, proto::msg::EQ), 0);
+    const fd::LinkFrame *reply = find(frames, proto::msg::HELLO, true);
+    QVERIFY(reply);
+    const fd::LinkBody h = body(*reply);
+    namespace f = proto::feature;
+    for (int bit : {f::eq, f::eqPresets, f::eqSlots, f::eqGraphic, f::eqPass})
+        QVERIFY2(!((h.u("features") >> bit) & 1), qPrintable(QString::number(bit)));
+    QVERIFY((h.u("features") >> f::outputKinds) & 1);
+    QVERIFY((h.u("features") >> f::settings) & 1);
+    QVERIFY(h.all("eqSlot").empty());
+    QVERIFY(h.all("bandTypes").empty());
     const fd::LinkFrame *state = find(frames, proto::msg::STATE);
     QVERIFY(state);
     QVERIFY(!body(*state).has("eqSlot"));
@@ -1011,9 +1021,17 @@ void LinkTest::eqOldApp()
     fd::LinkWriter set;
     set.u8(proto::tag::EQ_SET::output, 0).str(proto::tag::EQ_SET::key, "off");
     QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_SET, set), proto::msg::EQ_SET), uint64_t(proto::err::unknown));
-    Phone confirm;
-    std::vector<fd::LinkFrame> schema = r.connect(confirm, 1ull << proto::feature::eqSlots);
-    QCOMPARE(count(schema, proto::msg::EQ), 0);
+    fd::LinkWriter preset;
+    preset.u8(proto::tag::EQ_PRESET::op, proto::val::EQ_PRESET_OP::remove).str(proto::tag::EQ_PRESET::key, "ROCK");
+    QCOMPARE(eqCode(r.ask(phone, proto::msg::EQ_PRESET, preset), proto::msg::EQ_PRESET), uint64_t(proto::err::unknown));
+    QVERIFY(r.eq->devicePreset(QStringLiteral("ROCK"), false));
+    Phone half;
+    std::vector<fd::LinkFrame> partly = r.connect(half, 1ull << proto::feature::eqSlots);
+    QCOMPARE(count(partly, proto::msg::EQ), 0);
+    const fd::LinkFrame *halfReply = find(partly, proto::msg::HELLO, true);
+    QVERIFY(halfReply);
+    QVERIFY(!((body(*halfReply).u("features") >> proto::feature::eq) & 1));
+    QVERIFY(body(*halfReply).all("eqSlot").empty());
 }
 
 void LinkTest::eqSet()

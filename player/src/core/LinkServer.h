@@ -114,6 +114,7 @@ public:
     void bye(uint8_t reason);
     void poll();
     void command(fd::LinkCommand &c, int64_t now) override;
+    void hello(fd::LinkHello &reply, uint64_t appFeatures) override;
 
     Q_INVOKABLE void pairPhoneApp();
     void bind(const QString &device);
@@ -142,6 +143,7 @@ private:
         quint32 schema = 0;
         quint32 settings = 0;
         QHash<QString, QByteArray> eq;
+        quint64 features = 0;
     };
 
     struct Pivot

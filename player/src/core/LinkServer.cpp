@@ -639,7 +639,7 @@ void LinkServer::writeState(fd::LinkWriter &w, const LinkTime &at, const LinkSig
 {
     namespace t = proto::tag::STATE;
     namespace o = proto::val::OUTPUT;
-    const bool kinds = p.s->app_bit(proto::feature::outputKinds);
+    const bool kinds = ((p.features >> proto::feature::outputKinds) & 1) && p.s->app_bit(proto::feature::outputKinds);
     const int output = !kinds && (s.output == o::speaker || s.output == o::usbDac) ? int(o::wired) : s.output;
     w.u8(t::source, uint8_t(s.source)).u8(t::output, uint8_t(output));
     if (eqPeer(p) && !s.eqSlot.isEmpty())
@@ -1218,7 +1218,9 @@ void LinkServer::pushSchema(Peer &p, qint64 now)
 {
     namespace t = proto::tag::SCHEMA;
     const size_t cap = size_t(proto::maxPayload) * proto::pageFillPct / 100;
-    const std::vector<Pivot> &schema = p.s->app_bit(proto::feature::rowConfirm) ? m_schemaConfirm : m_schema;
+    const std::vector<Pivot> &schema = ((p.features >> proto::feature::rowConfirm) & 1) && p.s->app_bit(proto::feature::rowConfirm)
+                                           ? m_schemaConfirm
+                                           : m_schema;
     for (size_t pi = 0; pi < schema.size(); ++pi) {
         const std::vector<fd::LinkWriter> &rows = schema[pi].rows;
         const std::string name = utf8(schema[pi].name);
@@ -1741,7 +1743,22 @@ void LinkServer::setEq(EqControl *eq)
 
 bool LinkServer::eqPeer(const Peer &p) const
 {
-    return m_eq && p.s->app_bit(proto::feature::eqSlots) && p.s->app_bit(proto::feature::eqPass);
+    return m_eq && ((p.features >> proto::feature::eqSlots) & 1) && p.s->app_bit(proto::feature::eqSlots)
+           && p.s->app_bit(proto::feature::eqPass);
+}
+
+void LinkServer::hello(fd::LinkHello &reply, uint64_t appFeatures)
+{
+    namespace f = proto::feature;
+    const bool eq = ((appFeatures >> f::eqSlots) & 1) && ((appFeatures >> f::eqPass) & 1);
+    if (!eq) {
+        reply.features &= ~(1ull << f::eq | 1ull << f::eqPresets | 1ull << f::eqSlots | 1ull << f::eqGraphic
+                            | 1ull << f::eqPass);
+        reply.eq_slots.clear();
+        reply.band_types.clear();
+    }
+    if (m_ticking)
+        m_ticking->features = reply.features;
 }
 
 QString LinkServer::eqSlotOf(const Peer &p, const fd::LinkBody &body, bool &missing) const
