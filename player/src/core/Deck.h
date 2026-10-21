@@ -41,7 +41,7 @@ public:
 
     static bool available();
     static int dsdPcmRateFor(int decodedRate);
-    static constexpr const char *dsdRefused = "dsd128 and up not supported";
+    static constexpr const char *dsdRefused = "dsd256 and up not supported";
     static constexpr const char *dsdAccepted = "microdap-dsd-accepted";
     static constexpr const char *switched = "microdap-deck-switched";
     static constexpr const char *cueMark = "microdap-cue-mark";

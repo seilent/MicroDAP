@@ -21,6 +21,7 @@ constexpr const char *probeStage = "identity name=cueprobe";
 constexpr const char *pcmCaps = "audio/x-raw(ANY)";
 constexpr const char *dsdCaps = "audio/x-raw(ANY);audio/x-dsd";
 constexpr int dsd64DecodedRate = 352800;
+constexpr int dsd128MaxDecodedRate = 768000;
 constexpr int dsd64PcmRate = 88200;
 constexpr int dsdPcmRate = 176400;
 
@@ -521,7 +522,7 @@ GstPadProbeReturn Deck::capsProbe(GstPad *, GstPadProbeInfo *info, gpointer data
     if (!caps || gst_caps_get_size(caps) == 0
         || !gst_structure_get_int(gst_caps_get_structure(caps, 0), "rate", &rate))
         return GST_PAD_PROBE_OK;
-    if (self->m_pw && rate > dsd64DecodedRate) {
+    if (self->m_pw && rate > dsd128MaxDecodedRate) {
         self->m_rate = Rate::Refused;
         GError *err = g_error_new_literal(GST_STREAM_ERROR, GST_STREAM_ERROR_FORMAT, dsdRefused);
         gst_element_post_message(self->m_bin, gst_message_new_error(GST_OBJECT(self->m_bin), err, nullptr));

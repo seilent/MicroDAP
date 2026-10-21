@@ -221,7 +221,7 @@ private slots:
     void dsdRoutes();
     void dsdBoundary();
     void deckMissing();
-    void dsd128Refused();
+    void dsd256Refused();
     void outputLostPauses();
 
 private:
@@ -3704,48 +3704,59 @@ void PlayerTest::deckMissing()
     player->stop();
 }
 
-void PlayerTest::dsd128Refused()
+void PlayerTest::dsd256Refused()
 {
-    QByteArray data;
+    QByteArray fixture;
     {
         QFile file(QStringLiteral(MICRODAP_FIXTURE_FORMATS "/dsd64.dff"));
         QVERIFY(file.open(QIODevice::ReadOnly));
-        data = file.readAll();
+        fixture = file.readAll();
     }
-    const qsizetype fs = data.indexOf("FS  ");
+    const qsizetype fs = fixture.indexOf("FS  ");
     QVERIFY(fs > 0);
-    const quint32 rate = 5644800;
-    for (int i = 0; i < 4; ++i)
-        data[fs + 12 + i] = static_cast<char>((rate >> ((3 - i) * 8)) & 0xff);
-    QueueEntry dsd;
-    dsd.path = m_dir.path() + QStringLiteral("/dsd128.dff");
-    dsd.title = QStringLiteral("DSD128");
-    {
-        QFile file(dsd.path);
-        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
-        QCOMPARE(file.write(data), data.size());
-    }
-    for (const Chain chain : {Chain::Pw, Chain::Ex}) {
-        auto player = exclusivePlayer(QByteArrayLiteral("fakesink sync=true name=microdap-ex"));
-        FakePolicy policy;
-        policy.chain = chain;
-        player->setPolicy(&policy);
-        QSignalSpy started(player.get(), &Player::trackStarted);
-        QSignalSpy notices(player.get(), &Player::notice);
-        if (chain == Chain::Pw)
-            QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dsd128 and up not supported")));
-        player->play({dsd, m_tracks.at(0)}, 0);
-        if (chain == Chain::Pw) {
-            QTRY_COMPARE_WITH_TIMEOUT(notices.count(), 1, playTimeoutMs);
-            QCOMPARE(notices.first().at(0).toString(), QStringLiteral("dsd128 and up not supported"));
-            QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
-            QCOMPARE(startedIndexes(started), QList<int>({1}));
-        } else {
-            QTRY_COMPARE_WITH_TIMEOUT(started.count(), 1, playTimeoutMs);
-            QCOMPARE(startedIndexes(started), QList<int>({0}));
-            QCOMPARE(notices.count(), 0);
+    for (const quint32 rate : {5644800u, 6144000u, 11289600u}) {
+        const bool refused = rate > 6144000u;
+        QByteArray data = fixture;
+        for (int i = 0; i < 4; ++i)
+            data[fs + 12 + i] = static_cast<char>((rate >> ((3 - i) * 8)) & 0xff);
+        QueueEntry dsd;
+        dsd.path = m_dir.path() + QStringLiteral("/dsd%1.dff").arg(rate / 44100);
+        dsd.title = QStringLiteral("DSD");
+        {
+            QFile file(dsd.path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QCOMPARE(file.write(data), data.size());
         }
-        player->stop();
+        for (const Chain chain : {Chain::Pw, Chain::Ex}) {
+            auto player = exclusivePlayer(QByteArrayLiteral("fakesink sync=true name=microdap-ex"));
+            FakePolicy policy;
+            policy.chain = chain;
+            player->setPolicy(&policy);
+            QSignalSpy started(player.get(), &Player::trackStarted);
+            QSignalSpy notices(player.get(), &Player::notice);
+            const bool skip = refused && chain == Chain::Pw;
+            if (skip)
+                QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("dsd256 and up not supported")));
+            player->play({dsd, m_tracks.at(0)}, 0);
+            QTRY_VERIFY_WITH_TIMEOUT(!started.isEmpty(), playTimeoutMs);
+            if (skip) {
+                QCOMPARE(startedIndexes(started), QList<int>({1}));
+                QCOMPARE(notices.count(), 1);
+                QCOMPARE(notices.first().at(0).toString(), QStringLiteral("dsd256 and up not supported"));
+            } else {
+                QCOMPARE(startedIndexes(started).first(), 0);
+                QCOMPARE(notices.count(), 0);
+            }
+            player->stop();
+            if (!refused && chain == Chain::Pw) {
+                QSignalSpy errors(player.get(), &Player::error);
+                player->restore({dsd}, 0, 0);
+                QVERIFY(prerolled(*player));
+                QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 176400);
+                QCOMPARE(errors.count(), 0);
+                player->stop();
+            }
+        }
     }
 }
 
