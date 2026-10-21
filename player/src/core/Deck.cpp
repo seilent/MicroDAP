@@ -46,7 +46,7 @@ GstElement *child(GstElement *bin, const char *name)
 
 }
 
-Deck::Deck(PlayerPort::OutputChain chain, bool dsd)
+Deck::Deck(PlayerPort::OutputChain chain, bool dsd, int pcmRate)
 {
     const bool pw = chain == PlayerPort::OutputChain::Pw;
     QByteArray description = dsd ? dsdJoin : pcmJoin;
@@ -69,6 +69,7 @@ Deck::Deck(PlayerPort::OutputChain chain, bool dsd)
     m_volume = pw ? child(m_bin, "volume") : nullptr;
     m_pw = pw;
     m_dsd = dsd;
+    m_pcmRate = pw ? pcmRate : 0;
     if (dsd) {
         m_dsdRate = child(m_bin, "dsdrate");
         GstPad *sink = gst_element_get_static_pad(child(m_bin, "resample"), "sink");
@@ -529,7 +530,8 @@ GstPadProbeReturn Deck::capsProbe(GstPad *, GstPadProbeInfo *info, gpointer data
         g_error_free(err);
         return GST_PAD_PROBE_OK;
     }
-    GstCaps *filter = gst_caps_new_simple("audio/x-raw", "rate", G_TYPE_INT, dsdPcmRateFor(rate), nullptr);
+    GstCaps *filter = gst_caps_new_simple("audio/x-raw", "rate", G_TYPE_INT,
+                                          self->m_pcmRate > 0 ? self->m_pcmRate : dsdPcmRateFor(rate), nullptr);
     g_object_set(self->m_dsdRate, "caps", filter, nullptr);
     gst_caps_unref(filter);
     self->accept();

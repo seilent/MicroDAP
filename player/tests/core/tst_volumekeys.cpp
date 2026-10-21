@@ -139,6 +139,8 @@ private slots:
     void bluezInputMatched();
     void dacHelpersFailWithoutServer();
     void dacFailuresDroppedWithObject();
+    void sinkRateCache();
+    void sinkRateWithoutServer();
     void routedPulseForwards();
     void routedAlsaWritesPcm();
     void routedDropsPulseLevels();
@@ -899,6 +901,41 @@ void VolumeKeysTest::dacFailuresDroppedWithObject()
     }
     QTest::qWait(100);
     QCOMPARE(calls, 0);
+}
+
+void VolumeKeysTest::sinkRateCache()
+{
+    SinkRate cache;
+    QCOMPARE(cache.rate(), 0);
+    pa_sample_spec spec{PA_SAMPLE_S32LE, 48000, 2};
+    QVERIFY(cache.found(spec));
+    QCOMPARE(cache.rate(), 48000);
+    spec.rate = 44100;
+    QVERIFY(!cache.found(spec));
+    QCOMPARE(cache.rate(), 44100);
+    spec.rate = 96000;
+    cache.changed(spec);
+    QCOMPARE(cache.rate(), 96000);
+    pa_sample_spec invalid{PA_SAMPLE_INVALID, 0, 0};
+    QVERIFY(!cache.found(invalid));
+    cache.changed(invalid);
+    QCOMPARE(cache.rate(), 96000);
+    cache.lost();
+    QCOMPARE(cache.rate(), 0);
+    QVERIFY(!cache.found(invalid));
+    spec.rate = 48000;
+    QVERIFY(cache.found(spec));
+    QCOMPARE(cache.rate(), 48000);
+}
+
+void VolumeKeysTest::sinkRateWithoutServer()
+{
+    qputenv("PULSE_SERVER", QFile::encodeName(QStringLiteral("unix:") + m_dir->filePath(QStringLiteral("none"))));
+    PulseSinkVolume sink;
+    QSignalSpy known(&sink, &PulseSinkVolume::sinkRateKnown);
+    QTest::qWait(100);
+    QCOMPARE(sink.defaultSinkRate(), 0);
+    QCOMPARE(known.count(), 0);
 }
 
 void VolumeKeysTest::routedPulseForwards()

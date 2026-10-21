@@ -356,7 +356,7 @@ bool Player::configure(OutputChain chain, bool dsd)
 {
     const bool exclusive = chain == OutputChain::Ex && m_policy;
     const QString card = exclusive ? m_policy->exclusiveCard() : QString();
-    const int rate = chain == OutputChain::Pw && m_policy ? m_policy->fixedRate() : 0;
+    const int rate = chain == OutputChain::Pw ? pwRate() : 0;
     const QString description = sinkDescription(chain, m_audioSinkEnv, m_exclusiveEnv,
                                                 exclusive ? m_policy->exclusiveSink() : QString(), card);
     if (m_configChain != OutputChain::None && chain == m_configChain && description == m_configSink
@@ -383,11 +383,13 @@ bool Player::configure(OutputChain chain, bool dsd)
     m_configCard = card;
     m_configRate = rate;
     m_configDsd = dsd;
+    if (chain == OutputChain::Pw && m_policy && rate <= 0)
+        qInfo() << "microdap player: sink rate unknown, no rate filter";
     if (chain == OutputChain::Pw)
         filter = pwFilter(rate);
     if (chain == OutputChain::Bp && sink)
         bindBitPerfect(sink);
-    m_deck = std::make_unique<Deck>(chain, dsd);
+    m_deck = std::make_unique<Deck>(chain, dsd, dsd ? rate : 0);
     m_tail = std::make_unique<Tail>(filter, sink);
     m_sink = sink;
     m_filter = filter;
@@ -407,6 +409,14 @@ bool Player::configure(OutputChain chain, bool dsd)
     m_deck->setNext([this] { return nextEntry(); });
     m_deck->setGain([this](const QueueEntry &entry) { return replayGainFactor(entry, m_replayGain.load()); });
     return true;
+}
+
+int Player::pwRate() const
+{
+    if (!m_policy)
+        return 0;
+    const int fixed = m_policy->fixedRate();
+    return fixed > 0 ? fixed : m_policy->sinkRate();
 }
 
 GstElement *Player::audioFilter() const
@@ -596,7 +606,8 @@ void Player::resumeFrom()
     OutputChain wanted = m_policy ? m_policy->chainFor(GST_STATE_PLAYING) : OutputChain::Pw;
     if (wanted == OutputChain::Bp && m_dsd)
         wanted = OutputChain::Pw;
-    if (!m_parked && !m_pending && m_builtChain == wanted) {
+    if (!m_parked && !m_pending && m_builtChain == wanted
+        && (wanted != OutputChain::Pw || pwRate() == m_configRate)) {
         resumeNow();
         return;
     }

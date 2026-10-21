@@ -62,6 +62,7 @@ public:
     virtual void unmuteSink(const QString &name) = 0;
     virtual void bluezInputs(std::function<void(const QList<quint32> &)> done) = 0;
     virtual void moveSinkInput(quint32 index, const QString &sink) = 0;
+    virtual int defaultSinkRate() const = 0;
 };
 
 class DacVolumePort

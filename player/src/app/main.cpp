@@ -519,6 +519,8 @@ int main(int argc, char *argv[])
         QObject::connect(control, &microdap::OutputControl::cardGone, mode, &microdap::OutputMode::onCardGone);
         QObject::connect(control, &microdap::OutputControl::routeLost, &player, &microdap::Player::outputLost);
         QObject::connect(pulseVolume, &microdap::PulseSinkVolume::cardRemoved, control, &microdap::OutputControl::refresh);
+        QObject::connect(pulseVolume, &microdap::PulseSinkVolume::sinkRateKnown, mode,
+                         &microdap::OutputMode::onSinkRateKnown, Qt::QueuedConnection);
         QObject::connect(control, &microdap::OutputControl::sinksRead, mode, &microdap::OutputMode::onSinksRead);
         QObject::connect(&player, &microdap::Player::statusChanged, mode, &microdap::OutputMode::onStatusChanged);
         QObject::connect(&player, &microdap::Player::endOfStream, mode, &microdap::OutputMode::onEndOfStream);

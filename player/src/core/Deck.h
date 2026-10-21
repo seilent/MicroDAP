@@ -34,7 +34,7 @@ public:
     using Next = std::function<Track()>;
     using Gain = std::function<double(const QueueEntry &)>;
 
-    Deck(PlayerPort::OutputChain chain, bool dsd);
+    Deck(PlayerPort::OutputChain chain, bool dsd, int pcmRate = 0);
     ~Deck();
     Deck(const Deck &) = delete;
     Deck &operator=(const Deck &) = delete;
@@ -112,6 +112,7 @@ private:
     GstElement *m_volume = nullptr;
     GstElement *m_cueProbe = nullptr;
     GstElement *m_dsdRate = nullptr;
+    int m_pcmRate = 0;
     bool m_pw = false;
     bool m_dsd = false;
     enum class Rate { Unknown, Accepted, Refused };

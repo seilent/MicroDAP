@@ -103,6 +103,18 @@ OutputMode::OutputMode(const Bounds &bounds, const Ports &ports, QObject *parent
         log(QStringLiteral("bluetooth not ready within the bound"));
         resumeRestore();
     });
+    m_rateTimer.setSingleShot(true);
+    m_rateTimer.setInterval(bounds.sinkRateMs);
+    connect(&m_rateTimer, &QTimer::timeout, this, [this] {
+        if (!m_rateWaiting)
+            return;
+        m_rateWaiting = false;
+        m_rateBound = true;
+        log(QStringLiteral("no sink rate within the bound"));
+        if (m_waiting && !m_r.running && m_acq == Acquire::None)
+            decideWaiting();
+        updateAll();
+    });
     m_rates = rates();
 }
 
@@ -322,12 +334,10 @@ Admit OutputMode::admit(const Player::PendingBuild &build)
             m_park.stop();
         return {false, Player::OutputChain::Ex};
     }
-    if (!effective()) {
-        m_builtRate = fixedRate();
-        return {true, Player::OutputChain::Pw};
-    }
+    if (!effective())
+        return admitNow(build, Player::OutputChain::Pw);
     if (m_level == bitperfect)
-        return {true, bitPerfectChain()};
+        return admitNow(build, bitPerfectChain());
     if (m_state == State::ExHeld) {
         if (build.target == GST_STATE_PLAYING)
             m_park.stop();
@@ -339,7 +349,7 @@ Admit OutputMode::admit(const Player::PendingBuild &build)
         const Reason why = blockReason();
         if (why != Reason::None)
             m_reason = why;
-        return {true, bitPerfectChain()};
+        return admitNow(build, bitPerfectChain());
     }
     if (build.target != GST_STATE_PLAYING) {
         schedulePark();
@@ -406,6 +416,59 @@ int OutputMode::fixedRate() const
         return 0;
     const int rate = m_rate.toInt();
     return rate > 0 && rates().contains(rate) ? rate : 0;
+}
+
+int OutputMode::sinkRate() const
+{
+    return m_ports.dac ? m_ports.dac->defaultSinkRate() : 0;
+}
+
+int OutputMode::pwRate() const
+{
+    const int fixed = fixedRate();
+    return fixed > 0 ? fixed : sinkRate();
+}
+
+bool OutputMode::holdForRate(const Player::PendingBuild &build, Player::OutputChain chain)
+{
+    const bool pw = chain == Player::OutputChain::Pw
+                    || (chain == Player::OutputChain::Bp && Player::isDsd(build.entry.path));
+    if (sinkRate() > 0)
+        m_rateBound = false;
+    if (!pw || m_rateBound || fixedRate() > 0 || !m_ports.dac || sinkRate() > 0)
+        return false;
+    m_waiting = true;
+    m_waitTarget = build.target;
+    if (!m_rateWaiting) {
+        m_rateWaiting = true;
+        m_rateTimer.start();
+        log(QStringLiteral("build waits for the sink rate"));
+    }
+    return true;
+}
+
+Admit OutputMode::admitNow(const Player::PendingBuild &build, Player::OutputChain chain)
+{
+    if (holdForRate(build, chain))
+        return {false, chain};
+    if (chain == Player::OutputChain::Pw) {
+        m_builtRate = pwRate();
+        m_builtFixed = fixedRate();
+    }
+    return {true, chain};
+}
+
+void OutputMode::onSinkRateKnown(int rate)
+{
+    m_rateBound = false;
+    if (!m_rateWaiting)
+        return;
+    m_rateWaiting = false;
+    m_rateTimer.stop();
+    log(QStringLiteral("sink rate %1").arg(rate));
+    if (m_waiting && !m_r.running && m_acq == Acquire::None)
+        decideWaiting();
+    updateAll();
 }
 
 void OutputMode::outputError(int code)
@@ -517,9 +580,9 @@ void OutputMode::setSampleRate(const QString &rate)
 {
     if (rate == m_rate)
         return;
-    const int before = fixedRate();
+    const int before = pwRate();
     m_rate = rate;
-    if (fixedRate() == before || effective() || m_r.running || m_acq != Acquire::None)
+    if (pwRate() == before || effective() || m_r.running || m_acq != Acquire::None)
         return;
     const PlayerPort::PlayState play = m_ports.player->playState();
     if (play == PlayerPort::PlayState::Stopped)
@@ -1112,6 +1175,7 @@ void OutputMode::aboutToQuit()
     m_resolveTimer.stop();
     m_readyTimer.stop();
     m_dacTimer.stop();
+    m_rateTimer.stop();
     if (m_nameOwned) {
         log(QStringLiteral("quit with the name held"));
         if (m_ports.player->playState() != PlayerPort::PlayState::Stopped && !m_ports.player->parked())
@@ -1331,7 +1395,8 @@ void OutputMode::reconcile()
         return;
     }
     const Player::OutputChain chain = routed(chainFor(GST_STATE_PLAYING));
-    if (parked || built != chain || (chain == Player::OutputChain::Pw && fixedRate() != m_builtRate))
+    if (parked || built != chain
+        || (chain == Player::OutputChain::Pw && fixedRate() != m_builtFixed && pwRate() != m_builtRate))
         driveRebuild(position, playing ? GST_STATE_PLAYING : GST_STATE_PAUSED);
 }
 
@@ -1977,8 +2042,10 @@ void OutputMode::driveRebuild(qint64 positionMs, GstState state)
 
 void OutputMode::driveBuild(Player::OutputChain chain)
 {
-    if (chain == Player::OutputChain::Pw)
-        m_builtRate = fixedRate();
+    if (chain == Player::OutputChain::Pw) {
+        m_builtRate = pwRate();
+        m_builtFixed = fixedRate();
+    }
     ++m_driving;
     m_ports.player->buildPending(chain);
     --m_driving;

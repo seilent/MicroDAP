@@ -201,6 +201,32 @@ void EvdevKeys::repeat()
     emit step(m_repeatCode == KEY_VOLUMEUP ? 1 : -1);
 }
 
+int SinkRate::rate() const
+{
+    return m_rate;
+}
+
+bool SinkRate::found(const pa_sample_spec &spec)
+{
+    changed(spec);
+    if (m_rate <= 0 || m_announced)
+        return false;
+    m_announced = true;
+    return true;
+}
+
+void SinkRate::changed(const pa_sample_spec &spec)
+{
+    if (pa_sample_spec_valid(&spec))
+        m_rate = int(spec.rate);
+}
+
+void SinkRate::lost()
+{
+    m_rate = 0;
+    m_announced = false;
+}
+
 PulseSinkVolume::PulseSinkVolume(QObject *parent)
     : SinkVolume(parent)
 {
@@ -390,7 +416,7 @@ void PulseSinkVolume::onEvent(pa_context *context, pa_subscription_event_type_t 
         self->watchSink(index, kind == PA_SUBSCRIPTION_EVENT_NEW);
     if (kind != PA_SUBSCRIPTION_EVENT_CHANGE)
         return;
-    if (!self->m_valid || self->m_validating || index != self->m_sinkIndex || !self->quiet())
+    if (!self->m_valid || self->m_validating || index != self->m_sinkIndex)
         return;
     unref(pa_context_get_sink_info_by_index(context, index, &PulseSinkVolume::onOutsideSink, self));
 }
@@ -431,6 +457,7 @@ void PulseSinkVolume::onValidSink(pa_context *context, const pa_sink_info *info,
         return;
     self->m_sinkIndex = info->index;
     self->m_volume = info->volume;
+    const bool known = self->m_sinkRate.found(info->sample_spec);
     self->m_valid = true;
     const int percent = self->m_pendingPercent;
     const int set = self->m_pendingSet;
@@ -441,6 +468,8 @@ void PulseSinkVolume::onValidSink(pa_context *context, const pa_sink_info *info,
         self->applyLevel(set);
     else if (percent != 0)
         self->apply(percent);
+    if (known)
+        emit self->sinkRateKnown(self->m_sinkRate.rate());
 }
 
 void PulseSinkVolume::onOutsideSink(pa_context *context, const pa_sink_info *info, int eol, void *userdata)
@@ -448,7 +477,10 @@ void PulseSinkVolume::onOutsideSink(pa_context *context, const pa_sink_info *inf
     auto *self = static_cast<PulseSinkVolume *>(userdata);
     if (context != self->m_context || eol != 0 || !info)
         return;
-    if (!self->m_valid || self->m_validating || info->index != self->m_sinkIndex || !self->quiet())
+    if (!self->m_valid || self->m_validating || info->index != self->m_sinkIndex)
+        return;
+    self->m_sinkRate.changed(info->sample_spec);
+    if (!self->quiet())
         return;
     self->m_volume = info->volume;
 }
@@ -492,6 +524,7 @@ void PulseSinkVolume::teardown(bool reconnect)
     failPending();
     m_send.stop();
     m_unmute = false;
+    m_sinkRate.lost();
     m_valid = false;
     m_validating = false;
     m_revalidate = false;
@@ -703,6 +736,11 @@ void PulseSinkVolume::moveSinkInput(quint32 index, const QString &sink)
         return pa_context_move_sink_input_by_name(m_context, index, name.constData(), &PulseSinkVolume::onDacSet,
                                                   this);
     });
+}
+
+int PulseSinkVolume::defaultSinkRate() const
+{
+    return m_sinkRate.rate();
 }
 
 void PulseSinkVolume::onRequestSink(pa_context *context, const pa_sink_info *info, int eol, void *userdata)

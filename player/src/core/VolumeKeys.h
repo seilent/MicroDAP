@@ -101,6 +101,19 @@ private:
     int m_level = -1;
 };
 
+class SinkRate
+{
+public:
+    int rate() const;
+    bool found(const pa_sample_spec &spec);
+    void changed(const pa_sample_spec &spec);
+    void lost();
+
+private:
+    int m_rate = 0;
+    bool m_announced = false;
+};
+
 class PulseSinkVolume : public SinkVolume, public DacSinkPort
 {
     Q_OBJECT
@@ -136,11 +149,13 @@ public:
     void unmuteSink(const QString &name) override;
     void bluezInputs(std::function<void(const QList<quint32> &)> done) override;
     void moveSinkInput(quint32 index, const QString &sink) override;
+    int defaultSinkRate() const override;
 
 signals:
     void sinkAppeared(quint32 index, const QString &name, int card);
     void sinkChanged(quint32 index);
     void cardRemoved(quint32 cardIndex);
+    void sinkRateKnown(int rate);
 
 private:
     struct Request
@@ -201,6 +216,7 @@ private:
     int m_pendingPercent = 0;
     int m_pendingSet = -1;
     int m_cap = 100;
+    SinkRate m_sinkRate;
     bool m_valid = false;
     bool m_validating = false;
     bool m_revalidate = false;

@@ -225,11 +225,14 @@ public:
         record(QStringLiteral("move %1 %2").arg(index).arg(sink));
     }
 
+    int defaultSinkRate() const override { return sinkRate; }
+
     QStringList calls;
     DacCard card;
     QHash<QString, DacCard> sinkCards;
     QList<quint32> inputs;
     double volumeDb = 0.0;
+    int sinkRate = 48000;
     bool muted = false;
     bool setOk = true;
 

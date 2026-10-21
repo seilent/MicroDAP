@@ -121,6 +121,7 @@ OutputMode::Bounds shortBounds()
     b.dacReleaseMs = 250;
     b.pacingMs = 10;
     b.storeDelayMs = 30;
+    b.sinkRateMs = 150;
     return b;
 }
 
@@ -312,6 +313,13 @@ private slots:
     void sleepDuringReleaseBound();
     void statusSuffixOrder();
     void ratesAndFixedRate();
+    void sinkRateForwarded();
+    void sinkRateHolds();
+    void sinkRateBound();
+    void sampleRateAtSinkRate();
+    void sinkRateDriftKeepsChain();
+    void sinkRateHoldHonorsLevel();
+    void sinkRateBoundAfterLoss();
     void exclusiveSinkFormat();
     void bitPerfectSinkFollowsUsb();
     void cardChangedAtAssignments();
@@ -1917,6 +1925,130 @@ void OutputModeTest::ratesAndFixedRate()
     QVERIFY(!rig.mode->rateReadOnly());
     rig.mode->setSampleRate(QStringLiteral("384000"));
     QCOMPARE(rig.mode->fixedRate(), 384000);
+}
+
+void OutputModeTest::sinkRateForwarded()
+{
+    Rig rig;
+    rig.dac.sinkRate = 44100;
+    QCOMPARE(rig.mode->sinkRate(), 44100);
+    rig.dac.sinkRate = 0;
+    QCOMPARE(rig.mode->sinkRate(), 0);
+}
+
+void OutputModeTest::sinkRateHolds()
+{
+    Rig rig;
+    rig.dac.sinkRate = 0;
+    rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    rig.player.play(1);
+    QVERIFY(rig.player.calls.contains(QStringLiteral("hold 1 playing 0")));
+    QCOMPARE(rig.player.chain, Chain::None);
+    rig.dac.sinkRate = 48000;
+    rig.mode->onSinkRateKnown(48000);
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 1 0")));
+    QCOMPARE(rig.player.chain, Chain::Pw);
+    QTest::qWait(250);
+    QCOMPARE(rig.player.buildPendingCalls, 1);
+
+    rig.player.calls.clear();
+    rig.mode->setSampleRate(QStringLiteral("96000"));
+    rig.dac.sinkRate = 0;
+    rig.player.next();
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 2 0")));
+}
+
+void OutputModeTest::sinkRateBound()
+{
+    Rig rig;
+    rig.dac.sinkRate = 0;
+    rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    rig.player.playPaused(1);
+    QVERIFY(rig.player.calls.contains(QStringLiteral("hold 1 paused 0")));
+    QTRY_VERIFY_WITH_TIMEOUT(rig.player.calls.contains(QStringLiteral("built pw paused 1 0")), waitMs);
+    rig.player.calls.clear();
+    rig.player.next();
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 2 0")));
+    rig.mode->onSinkRateKnown(48000);
+    rig.player.calls.clear();
+    rig.player.next();
+    QVERIFY(rig.player.calls.contains(QStringLiteral("hold 3 playing 0")));
+    rig.dac.sinkRate = 48000;
+    rig.mode->onSinkRateKnown(48000);
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 3 0")));
+}
+
+void OutputModeTest::sampleRateAtSinkRate()
+{
+    Rig rig;
+    rig.dac.sinkRate = 48000;
+    rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    rig.player.play(1);
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 1 0")));
+    rig.player.calls.clear();
+    rig.mode->setSampleRate(QStringLiteral("48000"));
+    rig.mode->setSampleRate(QStringLiteral("auto"));
+    QVERIFY(rig.player.calls.isEmpty());
+    rig.mode->setSampleRate(QStringLiteral("96000"));
+    QVERIFY(rig.player.calls.contains(QStringLiteral("rebuild 0 playing")));
+    rig.player.calls.clear();
+    rig.mode->setSampleRate(QStringLiteral("auto"));
+    QVERIFY(rig.player.calls.contains(QStringLiteral("rebuild 0 playing")));
+}
+
+void OutputModeTest::sinkRateDriftKeepsChain()
+{
+    Rig rig;
+    rig.dac.sinkRate = 48000;
+    rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    rig.player.play(1);
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 1 0")));
+    rig.player.calls.clear();
+    rig.dac.sinkRate = 44100;
+    rig.mode->onActiveOutputChanged(QStringLiteral("headphones"), QString());
+    QTest::qWait(100);
+    QVERIFY(rig.player.calls.isEmpty());
+    rig.mode->setSampleRate(QStringLiteral("96000"));
+    QVERIFY(rig.player.calls.contains(QStringLiteral("rebuild 0 playing")));
+}
+
+void OutputModeTest::sinkRateHoldHonorsLevel()
+{
+    for (const bool known : {true, false}) {
+        Rig rig;
+        rig.dac.sinkRate = 0;
+        rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+        rig.player.play(1);
+        QVERIFY(rig.player.calls.contains(QStringLiteral("hold 1 playing 0")));
+        rig.mode->setLevel(QStringLiteral("bitperfect"));
+        rig.mode->onActiveOutputChanged(QStringLiteral("usb"), rig.sink);
+        QCOMPARE(rig.player.chain, Chain::None);
+        if (known) {
+            rig.dac.sinkRate = 48000;
+            rig.mode->onSinkRateKnown(48000);
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(rig.player.calls.contains(QStringLiteral("built bp playing 1 0")), waitMs);
+        QVERIFY(!rig.player.calls.contains(QStringLiteral("built pw playing 1 0")));
+        QCOMPARE(rig.player.chain, Chain::Bp);
+    }
+}
+
+void OutputModeTest::sinkRateBoundAfterLoss()
+{
+    Rig rig;
+    rig.dac.sinkRate = 0;
+    rig.mode->onActiveOutputChanged(QStringLiteral("speaker"), QString());
+    rig.player.playPaused(1);
+    QTRY_VERIFY_WITH_TIMEOUT(rig.player.calls.contains(QStringLiteral("built pw paused 1 0")), waitMs);
+    rig.dac.sinkRate = 48000;
+    rig.player.calls.clear();
+    rig.player.next();
+    QVERIFY(rig.player.calls.contains(QStringLiteral("built pw playing 2 0")));
+    rig.dac.sinkRate = 0;
+    rig.player.calls.clear();
+    rig.player.next();
+    QVERIFY(rig.player.calls.contains(QStringLiteral("hold 3 playing 0")));
+    QTRY_VERIFY_WITH_TIMEOUT(rig.player.calls.contains(QStringLiteral("built pw playing 3 0")), waitMs);
 }
 
 void OutputModeTest::exclusiveSinkFormat()

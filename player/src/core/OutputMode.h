@@ -47,6 +47,7 @@ public:
         int sleepReleaseMs = 1000;
         int dacReleaseMs = 500;
         int dacQuitMs = 500;
+        int sinkRateMs = 1000;
         double minRangeDb = 40.0;
         double volumeToleranceDb = 0.05;
         DeviceReservation::Bounds reservation;
@@ -102,6 +103,7 @@ public:
     Player::OutputChain bitPerfectChain() const;
     Player::OutputChain routed(Player::OutputChain chain) const;
     int fixedRate() const override;
+    int sinkRate() const override;
     void outputError(int code) override;
 
     bool levelSet() const override;
@@ -122,6 +124,7 @@ public slots:
     void onVolumePressed();
     void onSinkAppeared(quint32 index, const QString &name, int card);
     void onSinkChanged(quint32 index);
+    void onSinkRateKnown(int rate);
     void onCardRemoved(quint32 cardIndex);
     void onBluezConnectedChanged();
     void onBluezReadyChanged();
@@ -230,6 +233,9 @@ private:
     void drivePark(qint64 positionMs);
     void driveRebuild(qint64 positionMs, GstState state);
     void driveBuild(Player::OutputChain chain);
+    int pwRate() const;
+    bool holdForRate(const Player::PendingBuild &build, Player::OutputChain chain);
+    Admit admitNow(const Player::PendingBuild &build, Player::OutputChain chain);
     void log(const QString &text) const;
 
     Bounds m_bounds;
@@ -271,6 +277,9 @@ private:
     bool m_quitting = false;
     bool m_reconcile = false;
     int m_builtRate = 0;
+    int m_builtFixed = 0;
+    bool m_rateWaiting = false;
+    bool m_rateBound = false;
     bool m_routeAlsa = false;
     QString m_routeCard;
     QString m_routeSink;
@@ -300,6 +309,7 @@ private:
     QTimer m_resolveTimer;
     QTimer m_readyTimer;
     QTimer m_dacTimer;
+    QTimer m_rateTimer;
 };
 
 }

@@ -183,6 +183,7 @@ private:
     static void setStreamProperties(GstElement *element, const QString &text);
 
     bool configure(OutputChain chain, bool dsd);
+    int pwRate() const;
     GstElement *pwFilter(int rate);
     void bindBitPerfect(GstElement *sink);
     void build(int index, const PendingBuild &pending, OutputChain chain, bool guard);
@@ -305,6 +306,7 @@ public:
     virtual QString exclusiveCard() const = 0;
     virtual QString bitPerfectSink() const = 0;
     virtual int fixedRate() const = 0;
+    virtual int sinkRate() const = 0;
     virtual void outputError(int code) = 0;
 };
 

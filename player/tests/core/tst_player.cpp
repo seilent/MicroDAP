@@ -178,6 +178,10 @@ private slots:
     void chainWithoutPolicy();
     void chainRoundTrip();
     void rateTail();
+    void sinkRateTail();
+    void sinkRateUnknown();
+    void fixedRateOverSink();
+    void sinkRateResume();
     void bitPerfectProperties();
     void pendingLatestWins();
     void pendingQueueEdits();
@@ -313,12 +317,14 @@ public:
     QString exclusiveCard() const override { return card; }
     QString bitPerfectSink() const override { return bitPerfect; }
     int fixedRate() const override { return rate; }
+    int sinkRate() const override { return sink; }
     void outputError(int code) override { errors.append(code); }
 
     Chain want = Chain::Pw;
     Chain chain = Chain::Pw;
     bool now = true;
     int rate = 0;
+    int sink = 0;
     QString card = QStringLiteral("B");
     QString bitPerfect;
     QList<Player::PendingBuild> admitted;
@@ -2174,6 +2180,136 @@ void PlayerTest::rateTail()
     player.stop();
 }
 
+void PlayerTest::sinkRateTail()
+{
+    const QString a = m_dir.path() + QStringLiteral("/sink-a.flac");
+    const QString b = m_dir.path() + QStringLiteral("/sink-b.flac");
+    QVERIFY(encodeSine(a, 2, 44100));
+    QVERIFY(encodeSine(b, 2, 96000));
+    auto player = withEnv("MICRODAP_AUDIO_SINK", QByteArrayLiteral("fakesink name=microdap-rate sync=false"));
+    FakePolicy policy;
+    policy.sink = 48000;
+    player->setPolicy(&policy);
+    QSignalSpy started(player.get(), &Player::trackStarted);
+    QSignalSpy eos(player.get(), &Player::endOfStream);
+    QSignalSpy errors(player.get(), &Player::error);
+    QList<int> sinkRates;
+    connect(player.get(), &Player::trackStarted, this, [&sinkRates, &player] {
+        sinkRates.append(player->sinkFormat().value(QStringLiteral("rate")).toInt());
+    });
+
+    player->restore({sineEntry(a, 1, 2), sineEntry(b, 2, 2)}, 0, 0);
+    QVERIFY(prerolled(*player));
+    GstElement *filter = builtFilter(*player);
+    QVERIFY(filter);
+    QVERIFY(factories(filter, true).contains(QStringLiteral("audioresample")));
+    GstElement *sinkBin = player->audioSink();
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(sinkBin), "microdap-rate");
+    QVERIFY(sink);
+    std::unique_ptr<GstElement, void (*)(GstElement *)> sinkRef(sink, [](GstElement *e) { gst_object_unref(e); });
+    std::mutex lock;
+    QList<int> capsRates;
+    struct Watch
+    {
+        std::mutex *lock;
+        QList<int> *rates;
+    } watch{&lock, &capsRates};
+    GstPad *sinkPad = gst_element_get_static_pad(sink, "sink");
+    const gulong probe = gst_pad_add_probe(
+        sinkPad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+        [](GstPad *, GstPadProbeInfo *info, gpointer data) {
+            GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+            if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
+                GstCaps *c = nullptr;
+                gst_event_parse_caps(event, &c);
+                gint rate = 0;
+                gst_structure_get_int(gst_caps_get_structure(c, 0), "rate", &rate);
+                auto *w = static_cast<Watch *>(data);
+                std::lock_guard guard(*w->lock);
+                w->rates->append(rate);
+            }
+            return GST_PAD_PROBE_OK;
+        },
+        &watch, nullptr);
+    QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 48000);
+    QCOMPARE(player->sourceFormat().value(QStringLiteral("rate")).toInt(), 44100);
+
+    player->playPause();
+    QTRY_COMPARE_WITH_TIMEOUT(eos.count(), 1, playTimeoutMs);
+    QCOMPARE(startedIndexes(started), QList<int>({0, 1}));
+    QCOMPARE(errors.count(), 0);
+    QCOMPARE(sinkRates, QList<int>({48000, 48000}));
+    QCOMPARE(player->audioSink(), sinkBin);
+    player->stop();
+    gst_pad_remove_probe(sinkPad, probe);
+    gst_object_unref(sinkPad);
+    std::lock_guard guard(lock);
+    QCOMPARE(capsRates, QList<int>());
+}
+
+void PlayerTest::sinkRateUnknown()
+{
+    Player player;
+    FakePolicy policy;
+    player.setPolicy(&policy);
+    player.restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(player));
+    QVERIFY(!builtFilter(player));
+    const int source = player.sourceFormat().value(QStringLiteral("rate")).toInt();
+    QVERIFY(source > 0);
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), source);
+    player.stop();
+}
+
+void PlayerTest::fixedRateOverSink()
+{
+    Player player;
+    FakePolicy policy;
+    policy.rate = 96000;
+    policy.sink = 48000;
+    player.setPolicy(&policy);
+    player.restore(m_tracks, 0, 0);
+    QVERIFY(prerolled(player));
+    QVERIFY(builtFilter(player));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), 96000);
+
+    policy.rate = 0;
+    player.rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(player));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), 48000);
+
+    policy.sink = 44100;
+    player.rebuildAt(0, GST_STATE_PAUSED);
+    QVERIFY(prerolled(player));
+    QCOMPARE(player.sinkFormat().value(QStringLiteral("rate")).toInt(), 44100);
+    player.stop();
+}
+
+void PlayerTest::sinkRateResume()
+{
+    auto player = syncPlayer();
+    FakePolicy policy;
+    policy.sink = 48000;
+    player->setPolicy(&policy);
+    player->restore({m_long}, 0, 0);
+    QVERIFY(prerolled(*player));
+    QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 48000);
+    QCOMPARE(policy.admitted.size(), 1);
+
+    policy.sink = 44100;
+    player->resumeFrom();
+    QCOMPARE(policy.admitted.size(), 2);
+    QCOMPARE(player->status(), Player::Playing);
+    QTRY_COMPARE_WITH_TIMEOUT(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 44100, playTimeoutMs);
+
+    player->playPause();
+    QTRY_COMPARE_WITH_TIMEOUT(player->status(), Player::Paused, playTimeoutMs);
+    player->resumeFrom();
+    QCOMPARE(policy.admitted.size(), 2);
+    QCOMPARE(player->status(), Player::Playing);
+    player->stop();
+}
+
 void PlayerTest::bitPerfectProperties()
 {
     const QString usb = QStringLiteral("alsa_output.usb-FIIO_KA17-00.analog-stereo");
@@ -3636,6 +3772,7 @@ void PlayerTest::dsdRoutes()
             auto player = exclusivePlayer();
             FakePolicy policy;
             policy.chain = asked;
+            policy.sink = 48000;
             player->setPolicy(&policy);
             QueueEntry entry;
             entry.path = QStringLiteral(MICRODAP_FIXTURE_FORMATS "/") + QLatin1String(file);
@@ -3645,7 +3782,7 @@ void PlayerTest::dsdRoutes()
             QCOMPARE(player->builtChain(), built);
             QVERIFY(player->dsd());
             QCOMPARE(player->sourceFormat().value(QStringLiteral("format")).toString(), QStringLiteral("DSDU8"));
-            QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 88200);
+            QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), built == Chain::Pw ? 48000 : 88200);
             player->stop();
             QVERIFY(!player->dsd());
         }
@@ -3731,6 +3868,7 @@ void PlayerTest::dsd256Refused()
             auto player = exclusivePlayer(QByteArrayLiteral("fakesink sync=true name=microdap-ex"));
             FakePolicy policy;
             policy.chain = chain;
+            policy.sink = 48000;
             player->setPolicy(&policy);
             QSignalSpy started(player.get(), &Player::trackStarted);
             QSignalSpy notices(player.get(), &Player::notice);
@@ -3751,6 +3889,10 @@ void PlayerTest::dsd256Refused()
             if (!refused && chain == Chain::Pw) {
                 QSignalSpy errors(player.get(), &Player::error);
                 player->restore({dsd}, 0, 0);
+                QVERIFY(prerolled(*player));
+                QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 48000);
+                policy.sink = 0;
+                player->rebuildAt(0, GST_STATE_PAUSED);
                 QVERIFY(prerolled(*player));
                 QCOMPARE(player->sinkFormat().value(QStringLiteral("rate")).toInt(), 176400);
                 QCOMPARE(errors.count(), 0);
