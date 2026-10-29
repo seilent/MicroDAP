@@ -9,6 +9,7 @@ Item {
     property bool animated: !root.screenOff
     property string title: ""
     property string lead: ""
+    property bool keepLead: false
     property var items: []
     property int focusIndex: 0
     property int mark: -1
@@ -28,7 +29,7 @@ Item {
     readonly property real pitch: Ui.px(Ui.settingsPitch)
     readonly property real edge: Ui.px(Ui.edge)
     readonly property real titleHeight: titleText.visible ? titleText.implicitHeight : 0
-    readonly property real leadHeight: root.lead === "" ? 0 : root.pitch
+    readonly property real leadHeight: root.lead === "" && !root.keepLead ? 0 : root.pitch
     readonly property int shownRows: root.items.length === 0 ? 0
         : Math.max(1, Math.min(root.items.length,
                                Math.floor((root.height - 2 * root.edge - root.titleHeight - root.leadHeight) / root.pitch)))

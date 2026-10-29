@@ -226,6 +226,9 @@ TestCase {
         overlay.width = 640
         overlay.height = 960
         sheet.screenOff = false
+        sheet.title = ""
+        sheet.lead = ""
+        sheet.keepLead = false
         sheet.close()
         sheet.complete()
         dialog.screenOff = false
@@ -599,6 +602,33 @@ TestCase {
         compare(sheet.visible, false)
         sheet.screenOff = false
         compare(sheet.visible, true)
+    }
+
+    function test_sheet_keeps_lead_line() {
+        sheet.title = "sleep timer"
+        sheet.open()
+        sheet.complete()
+        const bare = sheet.panel.height
+        fuzzyCompare(bare, 2 * sheet.edge + sheet.titleHeight + 4 * sheet.pitch, 1e-6)
+        sheet.keepLead = true
+        compare(sheet.leadHeight, sheet.pitch)
+        compare(sheet.leadItem.visible, false)
+        compare(sheet.shownRows, 4)
+        fuzzyCompare(sheet.panel.height, bare + sheet.pitch, 1e-6)
+        fuzzyCompare(sheet.window.y, sheet.edge + sheet.titleHeight + sheet.pitch, 1e-6)
+        const top = sheet.panel.y
+        sheet.lead = "29 min left"
+        compare(sheet.leadItem.visible, true)
+        fuzzyCompare(sheet.panel.y, top, 1e-6)
+        verify(sheet.handleAction("down", false))
+        sheet.lead = ""
+        compare(sheet.leadItem.visible, false)
+        compare(sheet.leadHeight, sheet.pitch)
+        fuzzyCompare(sheet.panel.y, top, 1e-6)
+        sheet.keepLead = false
+        compare(sheet.leadHeight, 0)
+        fuzzyCompare(sheet.panel.height, bare, 1e-6)
+        fuzzyCompare(sheet.window.y, sheet.edge + sheet.titleHeight, 1e-6)
     }
 
     function test_dialog_tokens() {
