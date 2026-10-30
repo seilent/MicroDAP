@@ -71,6 +71,7 @@ PressScale {
         y: root.secondary !== "" ? Ui.px(Ui.rowTextInset) : (root.height - primaryText.height) / 2
         width: trailingText.visible ? trailingText.x - Ui.px(Ui.gutter) - primaryText.x : root.width - Ui.px(Ui.hubEdge) - primaryText.x
         text: root.primary
+        textFormat: Text.PlainText
         color: root.primaryColor
         font: Ui.font(root.primaryRole)
         clip: true
@@ -92,6 +93,7 @@ PressScale {
         anchors.bottomMargin: Ui.px(Ui.rowTextInset)
         width: root.width - Ui.px(Ui.hubEdge) - secondaryText.x
         text: root.secondary
+        textFormat: Text.PlainText
         color: Ui.white(root.secondaryRole.alpha)
         font: Ui.font(root.secondaryRole)
         clip: true

@@ -267,6 +267,15 @@ TestCase {
         compare(row.secondaryRole.caps, Font.MixedCase)
     }
 
+    function test_row_plain_text() {
+        row.primary = "<b>A</b>"
+        row.secondary = "<i>B</i>"
+        compare(row.primaryItem.textFormat, Text.PlainText)
+        compare(row.secondaryItem.textFormat, Text.PlainText)
+        row.primary = "Title"
+        row.secondary = "Artist"
+    }
+
     function test_tile_geometry() {
         compare(tile.width, Ui.px(Ui.tileS))
         compare(tile.width, 142)
