@@ -9,6 +9,7 @@ Item {
     property string title: ""
     property var items: []
     property int focusIndex: 0
+    property bool pressed: false
     property real barIndex: 0
     readonly property bool animating: openAnim.running || closeAnim.running
     readonly property int duration: Motion.dialog
@@ -86,7 +87,7 @@ Item {
             Repeater {
                 model: root.items
 
-                delegate: Item {
+                delegate: PressScale {
                     id: row
 
                     required property int index
@@ -95,6 +96,8 @@ Item {
                     readonly property string touchKind: root.shown ? "item" : ""
                     readonly property int touchIndex: row.index
 
+                    pressed: row.isFocused && root.pressed
+                    animated: !root.screenOff
                     width: list.width
                     height: root.pitch
 
@@ -192,6 +195,7 @@ Item {
     }
 
     function close() {
+        root.pressed = false
         openAnim.stop()
         closeAnim.stop()
         root.shown = false

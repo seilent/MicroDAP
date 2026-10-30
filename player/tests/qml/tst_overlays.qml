@@ -755,6 +755,22 @@ TestCase {
         compare(dialog.shown, false)
     }
 
+    function test_dialog_press_scale() {
+        dialog.open()
+        dialog.complete()
+        verify(dialog.handleAction("down", false))
+        dialog.pressed = true
+        const focused = tc.rowAt(dialog.list, dialog.focusIndex)
+        tryCompare(focused, "scale", Motion.pressScale, 1000)
+        for (let i = 0; i < dialog.items.length; i++) {
+            if (i !== dialog.focusIndex)
+                compare(tc.rowAt(dialog.list, i).scale, 1)
+        }
+        dialog.close()
+        compare(dialog.pressed, false)
+        tryCompare(focused, "scale", 1, 1000)
+    }
+
     function test_dialog_screenoff() {
         dialog.open()
         compare(dialog.animating, true)
