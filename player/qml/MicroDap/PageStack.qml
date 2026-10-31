@@ -24,6 +24,7 @@ Item {
         property Item content: null
         property bool entering: true
         property bool revealed: true
+        property bool gone: false
         property bool flying: false
         property string kind: "turnstile"
         property string pushKind: "turnstile"
@@ -48,10 +49,11 @@ Item {
         anchors.fill: holder.parent
         angle: holder.fromAngle + (holder.toAngle - holder.fromAngle)
             * (holder.entering ? Motion.expOut6(holder.progress) : Motion.expIn6(holder.progress))
-        opacity: holder.still ? (holder.revealed ? 1 : 0)
+        opacity: holder.gone ? 0
+            : holder.still ? (holder.revealed ? 1 : 0)
             : holder.fade ? (holder.splitFade ? 1 : holder.backdropFade)
-            : holder.entering ? Math.min(1, holder.elapsed / Motion.turnstileInFade)
-            : (holder.elapsed < Motion.turnstileOutHold ? 1 : 0)
+            : holder.entering ? (!holder.revealed ? 0 : Motion.turnstileInFade < Motion.frame ? 1 : Math.min(1, holder.elapsed / Motion.turnstileInFade))
+            : (holder.elapsed < Motion.turnstileOutHold || Motion.turnstileOut - Motion.turnstileOutHold < Motion.frame ? 1 : 0)
 
         Binding {
             target: holder.header
@@ -119,6 +121,7 @@ Item {
             from.kind = fromHome ? "home" : kind
             from.entering = false
             from.revealed = true
+            from.gone = false
             from.flying = pop && !fade
             from.fromAngle = 0
             from.toAngle = fade || fromHome ? 0 : (pop ? Motion.turnstileInAngle : Motion.turnstileOutAngle)
@@ -128,6 +131,7 @@ Item {
             to.kind = toHome ? "home" : kind
             to.entering = true
             to.revealed = false
+            to.gone = false
             to.flying = false
             to.fromAngle = fade || toHome ? 0 : (pop ? Motion.turnstileOutAngle : Motion.turnstileInAngle)
             to.toAngle = 0
@@ -142,7 +146,7 @@ Item {
 
         function showIncoming() {
             if (d.outgoing)
-                d.outgoing.visible = false
+                d.outgoing.gone = true
             if (d.incoming)
                 d.incoming.revealed = true
             d.phase = "enter"

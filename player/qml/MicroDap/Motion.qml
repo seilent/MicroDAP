@@ -72,6 +72,7 @@ QtObject {
     readonly property int turnstileOutHold: 240
     readonly property int turnstileIn: 350
     readonly property int turnstileInFade: 10
+    readonly property int frame: 17
     readonly property real turnstileOutAngle: 50
     readonly property real turnstileInAngle: -80
     readonly property int headerOut: 250

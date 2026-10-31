@@ -148,14 +148,32 @@ TestCase {
             verify(a.parent.angle >= 0)
         }
         tryCompare(stack, "phase", "enter", 2000)
-        compare(a.parent.visible, false)
-        tryVerify(function() { return b.parent.opacity > 0 }, 1000)
+        compare(a.parent.visible, true)
+        compare(a.parent.opacity, 0)
+        compare(b.parent.opacity, 1)
         tryCompare(stack, "phase", "idle", 2000)
         compare(stack.inputLocked, false)
         compare(b.parent.opacity, 1)
         fuzzyCompare(b.parent.angle, 0, 1e-6)
         compare(a.parent.visible, false)
         compare(stack.currentItem, b)
+    }
+
+    function test_turnstile_legs_are_opaque() {
+        const a = stack.push(page, { label: "a" })
+        const b = stack.push(page, { label: "b" })
+        verify(Motion.turnstileInFade < Motion.frame)
+        compare(a.parent.opacity, 1)
+        wait(Motion.turnstileOut - 20)
+        if (stack.phase === "exit")
+            compare(a.parent.opacity, 1)
+        tryCompare(stack, "phase", "enter", 2000)
+        compare(b.parent.opacity, 1)
+        compare(a.parent.opacity, 0)
+        compare(a.parent.visible, true)
+        tryCompare(stack, "phase", "idle", 2000)
+        compare(a.parent.visible, false)
+        compare(a.parent.gone, true)
     }
 
     function test_completeAll_push() {
