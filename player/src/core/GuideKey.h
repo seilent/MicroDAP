@@ -40,7 +40,6 @@ signals:
     void playPause();
     void next();
     void previous();
-    void switchPrompt();
     void buzz(const QList<int> &pattern);
 
 private:

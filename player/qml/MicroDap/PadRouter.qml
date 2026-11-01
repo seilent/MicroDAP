@@ -7,6 +7,7 @@ Item {
     property PageStack stack: null
     property QtObject pad: null
     property QtObject guide: null
+    property QtObject arbiter: null
     property Item modal: null
     property Item saver: null
     property bool screenOff: false
@@ -63,6 +64,8 @@ Item {
         }
         if (!router.rotating || router.guide === null || typeof router.guide.take !== "function" || !router.guide.take())
             return false
+        if (router.arbiter !== null && typeof router.arbiter.consume === "function")
+            router.arbiter.consume("guide")
         router.chordHeld[raw] = true
         router.rotate(raw)
         return true

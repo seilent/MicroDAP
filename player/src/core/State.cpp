@@ -370,7 +370,17 @@ bool State::saveNow()
 
 bool State::saveExit()
 {
-    return save(true);
+    return save(exitHandoff());
+}
+
+void State::setExitHandoff(std::function<bool()> provider)
+{
+    m_exitHandoff = std::move(provider);
+}
+
+bool State::exitHandoff() const
+{
+    return !m_exitHandoff || m_exitHandoff();
 }
 
 void State::quit(bool handoff)
@@ -618,7 +628,7 @@ void State::onSignal()
     const ssize_t count = ::read(m_fds[1], &byte, 1);
     (void)count;
     m_notifier->setEnabled(false);
-    quit();
+    quit(exitHandoff());
 }
 
 }

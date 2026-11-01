@@ -14,6 +14,8 @@
 #include <QTimer>
 #include <QVariantList>
 
+#include <functional>
+
 class QSocketNotifier;
 
 namespace microdap {
@@ -52,6 +54,7 @@ public:
     bool flushQueue();
     void writeQueueLater();
     void quit(bool handoff = true);
+    void setExitHandoff(std::function<bool()> provider);
     bool load();
     void setRestore(RestorePort *restore);
     void setResume(const QString &mode);
@@ -69,6 +72,7 @@ public:
     static QJsonArray savedStack(const QString &path);
 
 private:
+    bool exitHandoff() const;
     void onSignal();
     void onStatusChanged();
     void onPositionChanged();
@@ -84,6 +88,7 @@ private:
     Player *m_player;
     RestorePort *m_restore = nullptr;
     QString m_resume = QStringLiteral("position");
+    std::function<bool()> m_exitHandoff;
     QString m_path;
     QString m_queuePath;
     QTimer m_timer;

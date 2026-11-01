@@ -45,6 +45,7 @@ public:
     QString holder() const;
     QString name() const;
     void acquire();
+    Q_INVOKABLE void consume(const QString &key);
     QStringList devices() const;
     QStringList targets() const;
     bool hasTargets() const;

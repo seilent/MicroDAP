@@ -241,6 +241,22 @@ void Intercept::acquire()
     });
 }
 
+void Intercept::consume(const QString &key)
+{
+    if (!holding())
+        return;
+    QDBusMessage call = QDBusMessage::createMethodCall(arbiterService(), arbiterPath(), arbiterInterface(),
+                                                       QStringLiteral("Consume"));
+    call << key;
+    auto *watcher = new QDBusPendingCallWatcher(m_session.asyncCall(call), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [key](QDBusPendingCallWatcher *finished) {
+        finished->deleteLater();
+        const QDBusMessage reply = finished->reply();
+        if (reply.type() == QDBusMessage::ErrorMessage)
+            qInfo() << "microdap intercept: Consume" << key << "failed" << reply.errorMessage();
+    });
+}
+
 void Intercept::release()
 {
     if (!m_session.isConnected())

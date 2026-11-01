@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QList>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QtTest>
@@ -76,6 +77,24 @@ QString holder()
     return qvariant_cast<QDBusVariant>(reply.arguments().value(0)).variant().toString();
 }
 
+QStringList consumedKeys()
+{
+    const QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                             arbiterControl(), QStringLiteral("Consumed"));
+    const QDBusMessage reply = QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+    if (reply.type() == QDBusMessage::ErrorMessage)
+        return {};
+    return qdbus_cast<QStringList>(reply.arguments().value(0));
+}
+
+QDBusMessage arbiterTell(const QString &method, const QList<QVariant> &arguments = {})
+{
+    QDBusMessage call = QDBusMessage::createMethodCall(Intercept::arbiterService(), Intercept::arbiterPath(),
+                                                       arbiterControl(), method);
+    call.setArguments(arguments);
+    return QDBusConnection::sessionBus().call(call, QDBus::Block, busTimeoutMs);
+}
+
 PadSource::Action actionAt(const QSignalSpy &spy, int i)
 {
     return spy.at(i).at(0).value<PadSource::Action>();
@@ -108,6 +127,9 @@ private slots:
     void otherHolderOnTop();
     void arbiterRestart();
     void rumble();
+    void consumeFromHolder();
+    void consumeIgnoredWhenNotHolding();
+    void consumeAccessDeniedLogged();
     void hideReleases();
     void quickToggle();
     void targetsComeAndGo();
@@ -542,6 +564,44 @@ void DbusPadTest::rumble()
     QTRY_COMPARE_WITH_TIMEOUT(rumbles(devicePath(0)), expected, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(rumbles(devicePath(1)), expected, busTimeoutMs);
     QTRY_COMPARE_WITH_TIMEOUT(rumbles(devicePath(2)), expected, busTimeoutMs);
+}
+
+void DbusPadTest::consumeFromHolder()
+{
+    QVERIFY(m_pad->holding());
+    m_pad->intercept()->consume(QStringLiteral("guide"));
+    m_pad->intercept()->consume(QStringLiteral("guide"));
+    QTRY_COMPARE_WITH_TIMEOUT(consumedKeys(), QStringList({QStringLiteral("guide"), QStringLiteral("guide")}),
+                              busTimeoutMs);
+}
+
+void DbusPadTest::consumeIgnoredWhenNotHolding()
+{
+    QVERIFY(m_pad->holding());
+    auto restore = qScopeGuard([this] {
+        m_pad->setShown(true);
+        QTest::qWaitFor([this] { return m_pad->holding(); }, busTimeoutMs);
+    });
+    m_pad->setShown(false);
+    QTRY_VERIFY_WITH_TIMEOUT(!m_pad->holding(), busTimeoutMs);
+    const QStringList before = consumedKeys();
+    m_pad->intercept()->consume(QStringLiteral("guide"));
+    QTest::qWait(quietMs);
+    QCOMPARE(consumedKeys(), before);
+}
+
+void DbusPadTest::consumeAccessDeniedLogged()
+{
+    QVERIFY(m_pad->holding());
+    auto allow = qScopeGuard([] { arbiterTell(QStringLiteral("RefuseConsume"), {false}); });
+    QCOMPARE(arbiterTell(QStringLiteral("RefuseConsume"), {true}).type(), QDBusMessage::ReplyMessage);
+    const QStringList before = consumedKeys();
+    QTest::ignoreMessage(QtInfoMsg, QRegularExpression(
+                                       QStringLiteral("microdap intercept: Consume \"guide\" failed .*")));
+    m_pad->intercept()->consume(QStringLiteral("guide"));
+    QTest::qWait(quietMs * 4);
+    QCOMPARE(consumedKeys(), before);
+    QVERIFY(m_pad->holding());
 }
 
 void DbusPadTest::hideReleases()

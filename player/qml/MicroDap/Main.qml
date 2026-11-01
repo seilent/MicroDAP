@@ -1204,6 +1204,7 @@ Window {
             saver: saver
             pad: typeof Pad === "undefined" ? null : Pad
             guide: typeof Guide === "undefined" ? null : Guide
+            arbiter: typeof Arbiter === "undefined" ? null : Arbiter
             screenOff: root.off
             sweeping: root.sweeping
             onNowPlaying: root.openNowPlaying()
@@ -1239,7 +1240,6 @@ Window {
             id: powerMenu
 
             anchors.fill: parent
-            sessions: root.power !== null && root.power.sessions !== undefined ? root.power.sessions : []
             screenOff: root.off
             onVerb: (word) => {
                 if (root.power !== null && typeof root.power.runVerb === "function")
@@ -1248,12 +1248,6 @@ Window {
                     console.info("microdap: power menu " + word)
             }
             onGameMode: root.showSwitchPrompt()
-            onSwitchTo: (session) => {
-                if (root.power !== null && typeof root.power.switchTo === "function")
-                    root.power.switchTo(session)
-                else
-                    console.info("microdap: power menu switch to " + session)
-            }
         }
 
         OverlayLayer {
@@ -1608,9 +1602,7 @@ Window {
 
     Component {
         id: powerShotComponent
-        PowerShot {
-            fixture: root.shotState
-        }
+        PowerShot {}
     }
 
     Component {

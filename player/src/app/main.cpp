@@ -350,6 +350,8 @@ int main(int argc, char *argv[])
     state.load();
     microdap::Mpris mpris(&player, QDBusConnection::sessionBus());
     microdap::PowerBridge power(&player, QDBusConnection::sessionBus());
+    if (!overlayMode)
+        state.setExitHandoff([&power] { return power.switching() && power.switchHandoff(); });
     QObject::connect(&power, &microdap::PowerBridge::switchingChanged, eqControl.get(),
                      [&power, eq = eqControl.get()] {
                          if (power.switching())
@@ -461,8 +463,6 @@ int main(int argc, char *argv[])
         QObject::connect(guide.get(), &microdap::GuideKey::playPause, &player, &microdap::Player::playPause);
         QObject::connect(guide.get(), &microdap::GuideKey::next, &player, &microdap::Player::next);
         QObject::connect(guide.get(), &microdap::GuideKey::previous, &player, &microdap::Player::previous);
-        QObject::connect(guide.get(), &microdap::GuideKey::switchPrompt, &power,
-                         &microdap::PowerBridge::requestSwitchPrompt);
         QObject::connect(guide.get(), &microdap::GuideKey::buzz, pad->intercept(), &microdap::Intercept::rumble);
         volumeKeys = std::make_unique<microdap::VolumeKeys>(new microdap::EvdevKeys, routedVolume, &settings);
         QObject::connect(volumeKeys.get(), &microdap::VolumeKeys::levelChanged, &power, &microdap::PowerBridge::setVolume);
@@ -584,6 +584,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("Pins"), &pins);
     engine.rootContext()->setContextProperty(QStringLiteral("Player"), &player);
     engine.rootContext()->setContextProperty(QStringLiteral("Pad"), pad.get());
+    engine.rootContext()->setContextProperty(QStringLiteral("Arbiter"), pad->intercept());
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("Accent"), &accent);
     engine.rootContext()->setContextProperty(QStringLiteral("PowerBridge"), &power);

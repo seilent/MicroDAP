@@ -106,7 +106,6 @@ PowerBridge::PowerBridge(Player *player, const QDBusConnection &bus, QObject *pa
     , m_bus(bus)
     , m_powerd(powerdBus())
     , m_adaptor(new PowerBridgeAdaptor(this))
-    , m_sessions(readSessions(sessionsDir(), QStringLiteral("microdap")))
     , m_imageVersion(readKey(osReleasePath(), QStringLiteral("IMAGE_VERSION")))
 {
     m_switchTimer.setSingleShot(true);
@@ -266,42 +265,6 @@ bool PowerBridge::validSession(const QString &name)
 {
     static const QRegularExpression re(QStringLiteral("^[a-z0-9][a-z0-9-]*$"));
     return re.match(name).hasMatch();
-}
-
-QString PowerBridge::sessionsDir()
-{
-    return qEnvironmentVariable("MICRODAP_SESSIONS_DIR", QStringLiteral("/usr/lib/microos/sessions.d"));
-}
-
-QVariantList PowerBridge::readSessions(const QString &dir, const QString &current)
-{
-    QVariantList out;
-    const QFileInfoList entries = QDir(dir).entryInfoList({QStringLiteral("*.conf")}, QDir::Files, QDir::Name);
-    for (const QFileInfo &entry : entries) {
-        const QString name = entry.completeBaseName();
-        if (name == current || !validSession(name))
-            continue;
-        QFile file(entry.absoluteFilePath());
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-            continue;
-        QString label = name;
-        bool listed = false;
-        while (!file.atEnd()) {
-            const QString line = QString::fromUtf8(file.readLine()).trimmed();
-            const qsizetype eq = line.indexOf(QLatin1Char('='));
-            if (eq <= 0)
-                continue;
-            const QString key = line.left(eq);
-            const QString value = line.mid(eq + 1).trimmed();
-            if (key == QLatin1StringView("LABEL") && !value.isEmpty())
-                label = value;
-            else if (key == QLatin1StringView("DEFAULT"))
-                listed = value == QLatin1StringView("yes");
-        }
-        if (listed)
-            out.append(QVariantMap{{QStringLiteral("name"), name}, {QStringLiteral("label"), label}});
-    }
-    return out;
 }
 
 QString PowerBridge::backlightDir()
@@ -495,9 +458,9 @@ bool PowerBridge::switching() const
     return m_switching;
 }
 
-QVariantList PowerBridge::sessions() const
+bool PowerBridge::switchHandoff() const
 {
-    return m_sessions;
+    return m_switchHandoff;
 }
 
 QString PowerBridge::holdMode() const
@@ -951,7 +914,7 @@ bool PowerBridge::runVerb(const QString &verb)
             qInfo() << "microdap power: switch already running";
             return false;
         }
-        startSwitch(QStringLiteral("steam"));
+        startSwitch(QStringLiteral("steam"), false);
         return true;
     }
     if (verb == QLatin1StringView("screen-off")) {
@@ -997,7 +960,6 @@ void PowerBridge::keepInBackground()
         qInfo() << "microdap power: switch already running";
         return;
     }
-    m_switchTarget = QStringLiteral("steam");
     if (!m_state) {
         failSwitch(SwitchFailure::BeforeStart, QStringLiteral("no state to hand off"));
         return;
@@ -1010,7 +972,7 @@ void PowerBridge::keepInBackground()
         failSwitch(SwitchFailure::BeforeStart, QStringLiteral("cannot write the keep marker"));
         return;
     }
-    startSwitch(QStringLiteral("steam"));
+    startSwitch(QStringLiteral("steam"), true);
 }
 
 void PowerBridge::closeAndSwitch()
@@ -1032,13 +994,14 @@ bool PowerBridge::switchTo(const QString &session)
     if (m_state)
         m_state->save(false);
     Keep::clear();
-    startSwitch(session);
+    startSwitch(session, false);
     return true;
 }
 
-void PowerBridge::startSwitch(const QString &session)
+void PowerBridge::startSwitch(const QString &session, bool handoff)
 {
     m_switchTarget = session;
+    m_switchHandoff = handoff;
     m_switching = true;
     emit switchingChanged();
     if (!m_outputMode) {
@@ -1110,6 +1073,7 @@ void PowerBridge::failSwitch(SwitchFailure kind, const QString &reason)
     const bool rebuild = m_switchReleased && m_switchPlayer && m_switchPlay != PlayerPort::PlayState::Stopped
                          && (kind == SwitchFailure::ExitCode || kind == SwitchFailure::StartError);
     m_switching = false;
+    m_switchHandoff = false;
     m_awaitReady = false;
     m_switchReleased = false;
     m_readyTimer.stop();

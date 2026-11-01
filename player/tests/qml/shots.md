@@ -62,11 +62,9 @@
 | settings | `about` | `--size 640x960` and `960x640` | About open: IMAGE, SYSTEM UPDATE UP TO DATE, focus on SYSTEM UPDATE | 2026-10-16 |
 | settings | `about-available` | `--size 640x960` and `960x640` | SYSTEM UPDATE `TESTING-0628A41 AVAILABLE` clear of the title | 2026-10-16 |
 | settings | `about-missing` | `--size 640x960` and `960x640` | no IMAGE row, SYSTEM UPDATE NOT CHECKED under ABOUT | 2026-10-16 |
-| power | browse | `--size 640x960` and `960x640` | SCREEN OFF, GAME MODE, MICROEMU, SUSPEND, POWER OFF, focus bar on SCREEN OFF in both | 2026-10-16 |
+| power | browse | `--size 640x960` and `960x640` | SCREEN OFF, GAME MODE, SUSPEND, POWER OFF, focus bar on SCREEN OFF in both | 2026-10-16 |
 | prompt | browse | `--size 640x960` and `960x640` | focus bar and the full white on KEEP IN BACKGROUND, CLOSE PLAYER dim | 2026-10-16 |
 | overlays | browse | `--size 640x960` and `960x640` | dialog and sheet focus bars on their first item | 2026-10-16 |
-| power | `power-none` | `--size 640x960` and `960x640` | SCREEN OFF, SUSPEND, POWER OFF | 2026-10-16 |
-| power | `power-long` | `--size 640x960` and `960x640` | a long label runs past the right edge at 640x960 (dialog items do not clip) | 2026-10-16 |
 | settings | browse, `pivot-library`, `pivot-display`, `pivot-power`, `pivot-system` | `--size 640x960` and `960x640` | pivot strip in the hub form, no label rows, every pivot's last row | pending |
 | settings | browse | `--overlay --size 640x960` and `960x640` | `system` with CLOSE PLAYER, no ORIENTATION rows in `display` | pending |
 | overlays | browse | `--size 960x640` | the sheet cell shorter than the sheet: panel pinned at the cell top, REMOVE shown with its focus bar | pending |

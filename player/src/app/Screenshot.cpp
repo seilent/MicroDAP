@@ -232,8 +232,6 @@ const QStringList &states()
         QStringLiteral("about"),
         QStringLiteral("about-available"),
         QStringLiteral("about-missing"),
-        QStringLiteral("power-none"),
-        QStringLiteral("power-long"),
         QStringLiteral("tracknum"),
         QStringLiteral("seek"),
         QStringLiteral("quickplay-off"),

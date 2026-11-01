@@ -241,7 +241,8 @@ private slots:
     void overlayHoldsNothing();
     void idleSuspend();
     void sleepTimer();
-    void sessionsAndSwitchTo();
+    void switchTo();
+    void stopSaveFollowsSwitch();
     void imageAndUpdate();
     void updateCheckAgain();
 
@@ -628,6 +629,38 @@ void PowerTest::closeAndSwitch()
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, PowerBridge::switchTimeoutMs() + busTimeoutMs);
     QVERIFY(!m_bridge->switching());
     QVERIFY(!QFile::exists(m_keepFile));
+}
+
+void PowerTest::stopSaveFollowsSwitch()
+{
+    QFile::remove(m_log);
+    QFile::remove(m_stateFile);
+    QVERIFY(writeStub(QStringLiteral("systemctl")));
+    auto handoff = [this] { return m_bridge->switching() && m_bridge->switchHandoff(); };
+    m_state->setExitHandoff(handoff);
+    auto clear = qScopeGuard([this] { m_state->setExitHandoff({}); });
+
+    QVERIFY(m_state->saveExit());
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
+
+    QSignalSpy failed(m_bridge.get(), &PowerBridge::switchFailed);
+    m_bridge->keepInBackground();
+    QVERIFY(m_bridge->switching());
+    QVERIFY(m_bridge->switchHandoff());
+    QVERIFY(m_state->saveExit());
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), true);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, PowerBridge::switchTimeoutMs() + busTimeoutMs);
+    QVERIFY(!m_bridge->switching());
+    QVERIFY(m_state->saveExit());
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
+
+    m_bridge->closeAndSwitch();
+    QVERIFY(m_bridge->switching());
+    QVERIFY(!m_bridge->switchHandoff());
+    QVERIFY(m_state->saveExit());
+    QCOMPARE(savedState(QStringLiteral("handoff")).toBool(), false);
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 2, PowerBridge::switchTimeoutMs() + busTimeoutMs);
+    QVERIFY(!m_bridge->switching());
 }
 
 void PowerTest::switchFails()
@@ -1644,29 +1677,8 @@ void PowerTest::sleepTimer()
     QDBusConnection::disconnectFromBus(QStringLiteral("power-sleep"));
 }
 
-void PowerTest::sessionsAndSwitchTo()
+void PowerTest::switchTo()
 {
-    const QString dir = m_dir.path() + QStringLiteral("/sessions.d");
-    QVERIFY(writeFile(dir + QStringLiteral("/steam.conf"), QStringLiteral("LABEL=Steam\nDEFAULT=yes\n")));
-    QVERIFY(writeFile(dir + QStringLiteral("/microdap.conf"), QStringLiteral("LABEL=MicroDAP\nDEFAULT=yes\n")));
-    QVERIFY(writeFile(dir + QStringLiteral("/microemu.conf"), QStringLiteral("LABEL=MicroEMU\nSTOP=unit\nDEFAULT=yes\n")));
-    QVERIFY(writeFile(dir + QStringLiteral("/recovery.conf"), QStringLiteral("LABEL=Recovery\n")));
-    QVERIFY(writeFile(dir + QStringLiteral("/Bad Name.conf"), QStringLiteral("DEFAULT=yes\n")));
-    const QVariantList sessions = PowerBridge::readSessions(dir, QStringLiteral("microdap"));
-    QCOMPARE(sessions.size(), 2);
-    QCOMPARE(sessions.at(0).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("microemu"));
-    QCOMPARE(sessions.at(0).toMap().value(QStringLiteral("label")).toString(), QStringLiteral("MicroEMU"));
-    QCOMPARE(sessions.at(1).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("steam"));
-    QVERIFY(PowerBridge::readSessions(m_emptyDir, QStringLiteral("microdap")).isEmpty());
-    qputenv("MICRODAP_SESSIONS_DIR", dir.toUtf8());
-    QDBusConnection other = QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("power-sessions"));
-    {
-        PowerBridge bridge(nullptr, other);
-        QCOMPARE(bridge.sessions(), sessions);
-    }
-    QDBusConnection::disconnectFromBus(QStringLiteral("power-sessions"));
-    qunsetenv("MICRODAP_SESSIONS_DIR");
-
     QFile::remove(m_log);
     QVERIFY(writeStub(QStringLiteral("systemctl")));
     QVERIFY(Keep::write());

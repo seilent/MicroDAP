@@ -145,7 +145,6 @@ void GuideTest::tap()
 {
     GuideKey guide;
     QSignalSpy play(&guide, &GuideKey::playPause);
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
     QSignalSpy buzz(&guide, &GuideKey::buzz);
     press();
     QTest::qWait(50);
@@ -153,7 +152,6 @@ void GuideTest::tap()
     QTRY_COMPARE_WITH_TIMEOUT(play.count(), 1, waitMs);
     QTest::qWait(GuideKey::holdMs);
     QCOMPARE(play.count(), 1);
-    QCOMPARE(prompt.count(), 0);
     QCOMPARE(buzz.count(), 0);
 }
 
@@ -186,26 +184,20 @@ void GuideTest::hold()
 {
     GuideKey guide;
     QSignalSpy play(&guide, &GuideKey::playPause);
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
     QSignalSpy buzz(&guide, &GuideKey::buzz);
     press();
-    QTest::qWait(GuideKey::holdMs - 200);
-    QCOMPARE(prompt.count(), 0);
-    QTRY_COMPARE_WITH_TIMEOUT(prompt.count(), 1, waitMs);
-    QCOMPARE(buzz.count(), 1);
-    QCOMPARE(buzz.at(0).at(0).value<QList<int>>(), QList<int>{GuideKey::buzzMs});
+    QTest::qWait(GuideKey::holdMs + settleMs);
     QVERIFY(!guide.take());
     release();
     QTest::qWait(settleMs);
-    QCOMPARE(prompt.count(), 1);
     QCOMPARE(play.count(), 0);
+    QCOMPARE(buzz.count(), 0);
 }
 
 void GuideTest::chordDropsHold()
 {
     GuideKey guide;
     QSignalSpy play(&guide, &GuideKey::playPause);
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
     QSignalSpy buzz(&guide, &GuideKey::buzz);
     press();
     QTest::qWait(settleMs);
@@ -213,7 +205,6 @@ void GuideTest::chordDropsHold()
     QTest::qWait(GuideKey::holdMs + settleMs);
     release();
     QTest::qWait(settleMs);
-    QCOMPARE(prompt.count(), 0);
     QCOMPARE(play.count(), 0);
     QCOMPARE(buzz.count(), 0);
 }
@@ -222,13 +213,11 @@ void GuideTest::longTap()
 {
     GuideKey guide;
     QSignalSpy play(&guide, &GuideKey::playPause);
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
     const qint64 now = GuideKey::nowMs();
     press(now - 700);
     release(now);
     QTRY_COMPARE_WITH_TIMEOUT(play.count(), 1, settleMs);
     QTest::qWait(GuideKey::holdMs);
-    QCOMPARE(prompt.count(), 0);
     QCOMPARE(play.count(), 1);
 }
 
@@ -248,19 +237,21 @@ void GuideTest::pressDuringGrace()
 void GuideTest::staleTime()
 {
     GuideKey guide;
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
+    QSignalSpy play(&guide, &GuideKey::playPause);
     send(KEY_F13, 1, 1);
-    QTest::qWait(GuideKey::holdMs - 200);
-    QCOMPARE(prompt.count(), 0);
-    QTRY_COMPARE_WITH_TIMEOUT(prompt.count(), 1, waitMs);
+    QTest::qWait(settleMs);
+    QVERIFY(guide.take());
+    QTest::qWait(GuideKey::holdMs);
+    QVERIFY(!guide.take());
     release();
+    QTest::qWait(settleMs);
+    QCOMPARE(play.count(), 0);
 }
 
 void GuideTest::otherKeysIgnored()
 {
     GuideKey guide;
     QSignalSpy play(&guide, &GuideKey::playPause);
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
     send(KEY_F14, 1, GuideKey::nowMs());
     send(KEY_F14, 0, GuideKey::nowMs());
     send(KEY_F15, 1, GuideKey::nowMs());
@@ -268,7 +259,6 @@ void GuideTest::otherKeysIgnored()
     send(KEY_F15, 0, GuideKey::nowMs());
     QTest::qWait(settleMs);
     QCOMPARE(play.count(), 0);
-    QCOMPARE(prompt.count(), 0);
 }
 
 void GuideTest::pocketTap()
@@ -312,7 +302,6 @@ void GuideTest::pocketHold()
     guide.setScreenOff(true);
     QSignalSpy play(&guide, &GuideKey::playPause);
     QSignalSpy previous(&guide, &GuideKey::previous);
-    QSignalSpy prompt(&guide, &GuideKey::switchPrompt);
     QSignalSpy buzz(&guide, &GuideKey::buzz);
     press();
     QTest::qWait(GuideKey::pocketHoldMs - 200);
@@ -323,7 +312,6 @@ void GuideTest::pocketHold()
     release();
     QTest::qWait(GuideKey::doubleMs + settleMs);
     QCOMPARE(previous.count(), 1);
-    QCOMPARE(prompt.count(), 0);
     QCOMPARE(play.count(), 0);
 }
 

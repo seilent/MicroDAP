@@ -562,7 +562,7 @@ foreach(shot IN ITEMS settings:pivot-library settings:pivot-display settings:piv
         settings:accent-edit settings:saver-sheet settings:sample-rate-edit settings:touch settings:touch-edit
         settings:boot settings:boot-edit settings:boot-missing settings:about settings:about-available
         settings:about-missing settings:play-through settings:play-through-sheet settings:resume-sheet
-        power:power-none power:power-long nowplaying:seek components:tracknum album:art-collapse album:art-dock
+        nowplaying:seek components:tracknum album:art-collapse album:art-dock
         album:art-docked nowplaying:clock-24h nowplaying:clock-12h nowplaying:percent nowplaying:percent-low
         home:quickplay-off keyboard:browse keyboard:kb-empty keyboard:kb-long
         keyboard:kb-petal keyboard:kb-petal-corner keyboard:kb-shift keyboard:kb-symbols keyboard:kb-discard

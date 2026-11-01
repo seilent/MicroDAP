@@ -42,6 +42,16 @@ TestCase {
     }
 
     QtObject {
+        id: fakeArbiter
+
+        property var consumed: []
+
+        function consume(key) {
+            fakeArbiter.consumed = fakeArbiter.consumed.concat([key])
+        }
+    }
+
+    QtObject {
         id: fakeOutputs
 
         property bool internal: true
@@ -240,6 +250,7 @@ TestCase {
         main.rotateMotion = false
         main.router.pad = fakePad
         main.router.guide = null
+        main.router.arbiter = null
         main.router.chordHeld = ({})
         fakeGuide.give = true
         fakeGuide.takes = 0
@@ -431,9 +442,12 @@ TestCase {
 
     function test_chord_rotates_once() {
         main.router.guide = fakeGuide
+        main.router.arbiter = fakeArbiter
+        fakeArbiter.consumed = []
         const page = main.pageStack.push(listPage, {})
         tc.push("up")
         compare(fakeGuide.takes, 1)
+        compare(fakeArbiter.consumed, ["guide"])
         compare(rotateSpy.count, 1)
         compare(rotateSpy.signalArguments[0][0], "up")
         compare(routedSpy.count, 0)
@@ -474,9 +488,11 @@ TestCase {
         if (Ui.landscapeTurn !== 1)
             skip("portrait at L 1")
         main.router.guide = fakeGuide
+        fakeArbiter.consumed = []
         fakeGuide.give = false
         tc.push("right")
         compare(fakeGuide.takes, 1)
+        compare(fakeArbiter.consumed, [])
         compare(rotateSpy.count, 0)
         compare(routedSpy.count, 1)
         compare(tc.lastRouted(), "down")
@@ -521,7 +537,17 @@ TestCase {
         tc.push("right")
         compare(rotateSpy.count, 0)
         compare(routedSpy.count, 1)
+        compare(fakeArbiter.consumed, [])
         fakePad.released(fakePad.code("right"))
+    }
+
+    function test_no_chord_consume_without_arbiter() {
+        main.router.guide = fakeGuide
+        fakeArbiter.consumed = []
+        tc.push("up")
+        compare(rotateSpy.count, 1)
+        compare(fakeArbiter.consumed, [])
+        fakePad.released(fakePad.code("up"))
     }
 
     function test_no_chord_screen_off() {

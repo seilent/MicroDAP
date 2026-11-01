@@ -3,13 +3,19 @@
 #include "Settings.h"
 #include "State.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <cstdio>
 
 #include <gst/gst.h>
 
@@ -75,6 +81,24 @@ private:
     Settings *m_settings;
 };
 
+int stopChild(int argc, char *argv[])
+{
+    gst_init(nullptr, nullptr);
+    QCoreApplication app(argc, argv);
+    const QString path = qEnvironmentVariable("MICRODAP_STATE_CHILD_PATH");
+    const QString mode = qEnvironmentVariable("MICRODAP_STATE_CHILD_HANDOFF");
+    Player player;
+    State state(&player, path);
+    if (mode == QLatin1StringView("true"))
+        state.setExitHandoff([] { return true; });
+    else if (mode == QLatin1StringView("false"))
+        state.setExitHandoff([] { return false; });
+    state.installSignalHandlers();
+    std::fputs("ready\n", stdout);
+    std::fflush(stdout);
+    return app.exec();
+}
+
 }
 
 class StateTest : public QObject
@@ -90,9 +114,13 @@ private slots:
     void restorePendingSkipsPauseSave();
     void emptyOrderKeepsListOrder();
     void resumeModes();
+    void exitHandoffDefaultsTrue();
+    void exitHandoffFromProvider();
+    void sigtermSavesWithProvider();
 
 private:
     qint64 savePlaying(const QString &path, bool handoff);
+    bool stopChildHandoff(const QString &mode, const QString &path, bool *handoff);
 
     QTemporaryDir m_dir;
     QList<QueueEntry> m_entries;
@@ -369,5 +397,91 @@ void StateTest::resumeModes()
     QCOMPARE(player.queue()->currentIndex(), 1);
 }
 
-QTEST_GUILESS_MAIN(StateTest)
+void StateTest::exitHandoffDefaultsTrue()
+{
+    const QString path = m_dir.path() + QStringLiteral("/exit-default/state.json");
+    Player player;
+    State state(&player, path);
+    QVERIFY(state.saveExit());
+    QJsonObject object;
+    QVERIFY(State::read(path, object));
+    QCOMPARE(object.value(QStringLiteral("handoff")).toBool(), true);
+}
+
+void StateTest::exitHandoffFromProvider()
+{
+    const QString path = m_dir.path() + QStringLiteral("/exit-provider/state.json");
+    for (const bool handoff : {false, true}) {
+        Player player;
+        State state(&player, path);
+        state.setExitHandoff([handoff] { return handoff; });
+        QVERIFY(state.saveExit());
+        QJsonObject object;
+        QVERIFY(State::read(path, object));
+        QCOMPARE(object.value(QStringLiteral("handoff")).toBool(), handoff);
+    }
+}
+
+bool StateTest::stopChildHandoff(const QString &mode, const QString &path, bool *handoff)
+{
+    QProcess child;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("MICRODAP_STATE_CHILD"), QStringLiteral("1"));
+    env.insert(QStringLiteral("MICRODAP_STATE_CHILD_PATH"), path);
+    env.insert(QStringLiteral("MICRODAP_STATE_CHILD_HANDOFF"), mode);
+    child.setProcessEnvironment(env);
+    child.start(QCoreApplication::applicationFilePath(), {});
+    if (!child.waitForStarted(playTimeoutMs))
+        return false;
+    auto stop = qScopeGuard([&child] {
+        if (child.state() == QProcess::NotRunning)
+            return;
+        child.kill();
+        child.waitForFinished(playTimeoutMs);
+    });
+    QByteArray out;
+    if (!QTest::qWaitFor(
+            [&child, &out] {
+                out += child.readAllStandardOutput();
+                return out.contains("ready");
+            },
+            playTimeoutMs))
+        return false;
+    child.terminate();
+    if (!child.waitForFinished(playTimeoutMs))
+        return false;
+    QJsonObject object;
+    if (!State::read(path, object) || !object.contains(QStringLiteral("handoff")))
+        return false;
+    *handoff = object.value(QStringLiteral("handoff")).toBool();
+    return true;
+}
+
+void StateTest::sigtermSavesWithProvider()
+{
+    struct Case
+    {
+        const char *mode;
+        bool handoff;
+    };
+    const Case cases[] = {{"true", true}, {"false", false}, {"unset", true}};
+    for (const Case &c : cases) {
+        const QString mode = QString::fromLatin1(c.mode);
+        const QString path = m_dir.path() + QStringLiteral("/sigterm-") + mode + QStringLiteral("/state.json");
+        bool handoff = false;
+        QVERIFY(stopChildHandoff(mode, path, &handoff));
+        QCOMPARE(handoff, c.handoff);
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    if (qEnvironmentVariableIntValue("MICRODAP_STATE_CHILD") == 1)
+        return stopChild(argc, argv);
+    QCoreApplication app(argc, argv);
+    StateTest test;
+    QTEST_SET_MAIN_SOURCE_PATH
+    return QTest::qExec(&test, argc, argv);
+}
+
 #include "tst_state.moc"

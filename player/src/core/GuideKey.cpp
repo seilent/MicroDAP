@@ -273,9 +273,7 @@ void GuideKey::onHoldTimer()
         qInfo() << "microdap guide: chord, hold dropped";
         return;
     }
-    qInfo() << "microdap guide: hold, switch prompt";
-    emit buzz({buzzMs});
-    emit switchPrompt();
+    qInfo() << "microdap guide: hold, ignored";
 }
 
 void GuideKey::resolveTap()

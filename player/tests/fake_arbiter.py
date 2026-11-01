@@ -25,6 +25,10 @@ class InvalidArgs(dbus.DBusException):
     _dbus_error_name = 'org.freedesktop.DBus.Error.InvalidArgs'
 
 
+class AccessDenied(dbus.DBusException):
+    _dbus_error_name = 'org.freedesktop.DBus.Error.AccessDenied'
+
+
 class Arbiter(dbus.service.Object):
     def __init__(self, bus, loop):
         super().__init__(bus, PATH)
@@ -32,8 +36,10 @@ class Arbiter(dbus.service.Object):
         self.loop = loop
         self.stack = []
         self.calls = []
+        self.consumed = []
         self.changes = 0
         self.refuse_release = False
+        self.refuse_consume = False
         self.watches = {}
 
     def holder(self):
@@ -79,6 +85,13 @@ class Arbiter(dbus.service.Object):
             self.drop(sender)
         self.changed(before)
 
+    @dbus.service.method(INTERFACE, in_signature='s', out_signature='', sender_keyword='sender')
+    def Consume(self, key, sender=None):
+        self.calls.append(f'Consume {key} {sender}')
+        if self.refuse_consume or sender != self.holder():
+            raise AccessDenied('Consume is for the holder')
+        self.consumed.append(key)
+
     @dbus.service.method(PROPERTIES, in_signature='ss', out_signature='v')
     def Get(self, interface, name):
         if interface != INTERFACE or name != 'Holder':
@@ -108,12 +121,20 @@ class Arbiter(dbus.service.Object):
         return dbus.UInt32(self.changes)
 
     @dbus.service.method(CONTROL, in_signature='', out_signature='as')
+    def Consumed(self):
+        return dbus.Array([dbus.String(k) for k in self.consumed], signature='s')
+
+    @dbus.service.method(CONTROL, in_signature='', out_signature='as')
     def Stack(self):
         return dbus.Array([dbus.String(n) for n in self.stack], signature='s')
 
     @dbus.service.method(CONTROL, in_signature='b', out_signature='')
     def RefuseRelease(self, refuse):
         self.refuse_release = bool(refuse)
+
+    @dbus.service.method(CONTROL, in_signature='b', out_signature='')
+    def RefuseConsume(self, refuse):
+        self.refuse_consume = bool(refuse)
 
     @dbus.service.method(CONTROL, in_signature='', out_signature='')
     def Quit(self):

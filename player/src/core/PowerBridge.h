@@ -62,7 +62,6 @@ class PowerBridge : public QObject, protected QDBusContext
     Q_PROPERTY(bool screenOff READ screenOff WRITE setScreenOff NOTIFY screenOffChanged)
     Q_PROPERTY(int volume READ volume NOTIFY volumeChanged)
     Q_PROPERTY(bool switching READ switching NOTIFY switchingChanged)
-    Q_PROPERTY(QVariantList sessions READ sessions CONSTANT)
     Q_PROPERTY(QString holdMode READ holdMode NOTIFY holdModeChanged)
     Q_PROPERTY(QString imageVersion READ imageVersion CONSTANT)
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY updateChanged)
@@ -91,8 +90,6 @@ public:
     static QStringList verbs();
     static QStringList switchCommand(const QString &session);
     static bool validSession(const QString &name);
-    static QString sessionsDir();
-    static QVariantList readSessions(const QString &dir, const QString &current);
     static QString backlightDir();
     static QString wifiMarker();
     static QString nmcliPath();
@@ -127,7 +124,7 @@ public:
     QString playbackStatus() const;
     bool overlayShown() const;
     bool switching() const;
-    QVariantList sessions() const;
+    bool switchHandoff() const;
     QString holdMode() const;
     QString imageVersion() const;
     QString updateStatus() const;
@@ -179,7 +176,7 @@ private:
     enum class SwitchFailure { BeforeStart, ExitCode, StartError, Timeout };
 
     bool rejectWithoutOverlay(const char *member);
-    void startSwitch(const QString &session);
+    void startSwitch(const QString &session, bool handoff);
     void onSwitchReady();
     void runSwitch();
     void failSwitch(SwitchFailure kind, const QString &reason);
@@ -237,9 +234,9 @@ private:
     QString m_updateChecked;
     QFileSystemWatcher m_updateWatch;
     QString m_heldMode;
-    QVariantList m_sessions;
     bool m_holds = false;
     bool m_switching = false;
+    bool m_switchHandoff = false;
     bool m_awaitReady = false;
     bool m_switchReleased = false;
     bool m_switchWasParked = false;

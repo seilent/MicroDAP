@@ -67,14 +67,13 @@ TestCase {
 
         width: 640
         height: 960
-        sessions: [{ name: "microemu", label: "MicroEMU" }, { name: "steam", label: "Steam" }]
     }
 
     SignalSpy {
-        id: switchSpy
+        id: gameSpy
 
         target: powerMenu
-        signalName: "switchTo"
+        signalName: "gameMode"
     }
 
     SwitchPrompt {
@@ -251,7 +250,7 @@ TestCase {
         pages.push(rowPage, {})
         routedSpy.clear()
         verbSpy.clear()
-        switchSpy.clear()
+        gameSpy.clear()
         keepSpy.clear()
         closeSpy.clear()
     }
@@ -1077,19 +1076,23 @@ TestCase {
         compare(d.shown, true)
     }
 
+    function test_touch_power_items() {
+        compare(powerMenu.items, ["screen off", "game mode", "suspend", "power off"])
+        compare(powerMenu.entries.map((e) => e.word), ["screen-off", "game-mode", "suspend", "poweroff"])
+    }
+
     function test_touch_power_item_runs_verb() {
         tc.openDialog(powerMenu)
-        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 3))
+        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 2))
         compare(verbSpy.count, 1)
         compare(verbSpy.signalArguments[0][0], "suspend")
         compare(powerMenu.shown, false)
     }
 
-    function test_touch_power_session_item_switches() {
+    function test_touch_power_game_mode_item() {
         tc.openDialog(powerMenu)
-        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 2))
-        compare(switchSpy.count, 1)
-        compare(switchSpy.signalArguments[0][0], "microemu")
+        tc.tapAt(powerMenu, powerMenu.width / 2, tc.itemY(powerMenu, 1))
+        compare(gameSpy.count, 1)
         compare(verbSpy.count, 0)
         compare(powerMenu.shown, false)
     }
