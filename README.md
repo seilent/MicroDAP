@@ -18,8 +18,8 @@ the `microdap` RPM; settings live in MicroSET (`microdap.*` and the device keys)
 | Path | From |
 |---|---|
 | `/usr/bin/microdap-player`, `/usr/libexec/microdap/` | `player/`, `data/libexec/` |
-| `/usr/lib/microos/sessions.d/microdap.conf` | MicroOS session `microdap` (`STOP=unit`, `DEFAULT=yes`) |
-| `/usr/lib/microos/hotkeys.d/microdap.conf`, `steam.conf.d/50-microdap.conf`, `microemu.conf.d/50-microdap.conf` | hotkeyd rows: power tap `ToggleScreen`, power hold `ShowPowerMenu`, Guide tap `ToggleOverlay` in Steam, Guide hold switches to MicroDAP |
+| `/usr/lib/microos/sessions.d/microdap.conf` | MicroOS session `microdap` (`LABEL=Micro DAP`, `STOP=unit`, `DEFAULT=yes`) |
+| `/usr/lib/microos/hotkeys.d/microdap.conf`, `steam.conf.d/50-microdap.conf` | hotkeyd rows: power tap `ToggleScreen`, power hold `ShowPowerMenu`, Guide tap `ToggleOverlay` in Steam |
 | `/usr/share/microset/schema.d/50-microdap.json` | `microdap.*` keys |
 | `/usr/share/wayland-sessions/microdap.desktop`, `/usr/share/gamescope-session-plus/sessions.d/microdap` | the gamescope session |
 | `/usr/lib/systemd/user/` | `microdap-overlay` (in Steam), `microdap-bt`, `microdap-fiio-reset`, session drop ins |

@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup EXIT
 
 session="${data}/microos/sessions.d/microdap.conf"
-[[ "$(cat "${session}")" == $'LABEL=MicroDAP\nDESKTOP=microdap.desktop\nUNIT=gamescope-session-plus@microdap.service\nSTOP=unit\nDEFAULT=yes' ]] \
+[[ "$(cat "${session}")" == $'LABEL=Micro DAP\nDESKTOP=microdap.desktop\nUNIT=gamescope-session-plus@microdap.service\nSTOP=unit\nDEFAULT=yes' ]] \
     || fail "sessions.d/microdap.conf content"
 
 client="${data}/gamescope-session-plus/sessions.d/microdap"
@@ -33,13 +33,11 @@ grep -qxF 'Exec=gamescope-session-plus microdap' "${desktop}" || fail "desktop E
 
 player='net.seilent.MicroDap.Player /net/seilent/MicroDap/Player net.seilent.MicroDap.Player'
 [[ "$(cat "${data}/microos/hotkeys.d/microdap.conf")" == "guide tap none
-guide hold none
 power tap call ${player} ToggleScreen
 power hold call ${player} ShowPowerMenu" ]] || fail "hotkeys.d/microdap.conf content"
-[[ "$(cat "${data}/microos/hotkeys.d/steam.conf.d/50-microdap.conf")" == "guide tap call ${player} ToggleOverlay
-guide hold switch microdap confirm-in-game" ]] || fail "steam.conf.d/50-microdap.conf content"
-[[ "$(cat "${data}/microos/hotkeys.d/microemu.conf.d/50-microdap.conf")" == "guide hold switch microdap confirm-in-game" ]] \
-    || fail "microemu.conf.d/50-microdap.conf content"
+[[ "$(cat "${data}/microos/hotkeys.d/steam.conf.d/50-microdap.conf")" == "guide tap call ${player} ToggleOverlay" ]] \
+    || fail "steam.conf.d/50-microdap.conf content"
+[[ ! -e "${data}/microos/hotkeys.d/microemu.conf.d/50-microdap.conf" ]] || fail "microemu.conf.d/50-microdap.conf still present"
 
 while IFS= read -r -d '' table; do
     n=0
@@ -120,7 +118,7 @@ for f in \
 done
 for f in \
     usr/lib/microos/sessions.d/microdap.conf usr/lib/microos/hotkeys.d/microdap.conf \
-    usr/lib/microos/hotkeys.d/steam.conf.d/50-microdap.conf usr/lib/microos/hotkeys.d/microemu.conf.d/50-microdap.conf \
+    usr/lib/microos/hotkeys.d/steam.conf.d/50-microdap.conf \
     usr/lib/systemd/user/microdap-overlay.service usr/lib/systemd/user/microdap-bt.service \
     usr/lib/systemd/user/microdap-fiio-reset.service \
     usr/lib/systemd/user/gamescope-session-plus@microdap.service.d/05-microdap-fiio.conf \
